@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pos-erp-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview-web"],
+      "port": 5173
+    }
+  ]
+}

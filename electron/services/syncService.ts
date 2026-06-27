@@ -1,0 +1,283 @@
+import { getDb } from '../database'
+import Store from 'electron-store'
+import fs from 'fs'
+import path from 'path'
+import { app } from 'electron'
+import { CloudApi } from './cloudApi'
+
+const store = new Store()
+const BATCH_SIZE = 50
+const MAX_ATTEMPTS = 5
+
+export class SyncService {
+  private timer: ReturnType<typeof setInterval> | null = null
+  private running = false
+
+  start() {
+    this.timer = setInterval(() => this.runOnce(), 30_000)
+    this.runOnce()
+  }
+
+  stop() {
+    if (this.timer) clearInterval(this.timer)
+  }
+
+  private getCloudApi(): CloudApi | null {
+    const settings = store.get('app_settings') as Record<string, unknown> | undefined
+    const baseUrl = String(settings?.cloud_api_url || '').trim()
+    const apiKey = String(settings?.cloud_api_key || '').trim()
+    if (!baseUrl || !apiKey) return null
+    return new CloudApi({ baseUrl, apiKey })
+  }
+
+  async runOnce(): Promise<void> {
+    if (this.running) return
+    this.running = true
+
+    try {
+      const cloud = this.getCloudApi()
+      if (!cloud) return
+      if (!await this.checkOnline(cloud)) return
+
+      await this.processBatch(cloud)
+      await this.pullChanges(cloud)
+    } catch (err) {
+      console.error('[SyncService]', err)
+    } finally {
+      this.running = false
+    }
+  }
+
+  private async processBatch(cloud: CloudApi): Promise<void> {
+    const db = getDb()
+    const items = db.prepare(`
+      SELECT * FROM sync_queue
+      WHERE status = 'pending' AND attempts < ?
+      ORDER BY created_at ASC
+      LIMIT ?
+    `).all(MAX_ATTEMPTS, BATCH_SIZE) as SyncItem[]
+
+    if (items.length === 0) return
+
+    const ids = items.map(item => item.id)
+    db.prepare(`UPDATE sync_queue SET status='processing' WHERE id IN (${ids.map(() => '?').join(',')})`)
+      .run(...ids)
+
+    for (const item of items) {
+      await this.syncItem(cloud, item, db)
+    }
+  }
+
+  private async uploadOfflineImage(cloud: CloudApi, localUrl: string): Promise<string | null> {
+    try {
+      const fileName = localUrl.replace('app-img://', '')
+      const filePath = path.join(app.getPath('userData'), 'uploads', fileName)
+      if (!fs.existsSync(filePath)) {
+        console.warn(`[SyncService] Offline image file not found: ${filePath}`)
+        return null
+      }
+
+      const extension = path.extname(filePath).toLowerCase()
+      const contentTypes: Record<string, string> = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.gif': 'image/gif',
+        '.webp': 'image/webp',
+      }
+      const contentType = contentTypes[extension]
+      if (!contentType) return null
+      return await cloud.uploadImage(filePath, fileName, contentType)
+    } catch (err) {
+      console.error('[SyncService] Image upload failed:', err)
+      return null
+    }
+  }
+
+  private async syncItem(
+    cloud: CloudApi,
+    item: SyncItem,
+    db: ReturnType<typeof getDb>
+  ): Promise<void> {
+    try {
+      const payload = JSON.parse(item.payload) as Record<string, unknown>
+
+      if (
+        item.table_name === 'products'
+        && typeof payload.image_url === 'string'
+        && payload.image_url.startsWith('app-img://')
+      ) {
+        const publicUrl = await this.uploadOfflineImage(cloud, payload.image_url)
+        if (publicUrl) {
+          payload.image_url = publicUrl
+          db.prepare("UPDATE products SET image_url = ?, updated_at = datetime('now') WHERE id = ?")
+            .run(publicUrl, item.record_id)
+        }
+      }
+
+      await cloud.push({
+        table: item.table_name,
+        operation: item.operation,
+        recordId: item.record_id,
+        record: normalizeForCloud(payload),
+      })
+
+      db.prepare(`UPDATE sync_queue SET status='synced', synced_at=datetime('now') WHERE id=?`)
+        .run(item.id)
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err)
+      const attempts = item.attempts + 1
+      const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending'
+      db.prepare(`UPDATE sync_queue SET status=?, attempts=?, last_error=? WHERE id=?`)
+        .run(status, attempts, message, item.id)
+    }
+  }
+
+  private async pullChanges(cloud: CloudApi): Promise<void> {
+    const db = getDb()
+    const lastPull = store.get('last_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
+    const newPullTime = new Date().toISOString()
+    const globalTables = [
+      'branches',
+      'warehouses',
+      'roles',
+      'users',
+      'categories',
+      'suppliers',
+      'products',
+      'stocks',
+      'customers',
+      'deliveries',
+      'installments',
+      'stock_transfers',
+      'customer_orders',
+      'customer_order_items',
+    ]
+
+    for (const table of globalTables) {
+      try {
+        const data = await cloud.changes(table, lastPull)
+        if (data.length === 0) continue
+
+        const pendingIds = (db.prepare(`
+          SELECT record_id FROM sync_queue
+          WHERE table_name = ? AND status IN ('pending', 'processing')
+        `).all(table) as { record_id: string }[]).map(row => row.record_id)
+
+        db.transaction(() => {
+          for (const row of data) {
+            if (pendingIds.includes(String(row.id))) continue
+            this.insertFiltered(db, table, row)
+          }
+        })()
+      } catch (err) {
+        console.error(`[SyncService] Failed to pull table ${table}:`, err)
+      }
+    }
+
+    try {
+      const invoices = await cloud.changes('invoices', lastPull)
+      if (invoices.length > 0) {
+        const pendingIds = (db.prepare(`
+          SELECT record_id FROM sync_queue
+          WHERE table_name = 'invoices' AND status IN ('pending', 'processing')
+        `).all() as { record_id: string }[]).map(row => row.record_id)
+        const pulledInvoiceIds: string[] = []
+
+        db.transaction(() => {
+          for (const invoice of invoices) {
+            if (pendingIds.includes(String(invoice.id))) continue
+            pulledInvoiceIds.push(String(invoice.id))
+            this.insertFiltered(db, 'invoices', invoice)
+          }
+        })()
+
+        for (let index = 0; index < pulledInvoiceIds.length; index += 50) {
+          const ids = pulledInvoiceIds.slice(index, index + 50)
+          const [items, payments] = await Promise.all([
+            cloud.related('invoice_items', 'invoice_id', ids),
+            cloud.related('payments', 'invoice_id', ids),
+          ])
+          db.transaction(() => {
+            for (const item of items) this.insertFiltered(db, 'invoice_items', item)
+            for (const payment of payments) this.insertFiltered(db, 'payments', payment)
+          })()
+        }
+      }
+    } catch (err) {
+      console.error('[SyncService] Failed to pull invoices:', err)
+    }
+
+    try {
+      const installments = await cloud.changes('installments', lastPull)
+      const installmentIds = installments.map(row => String(row.id))
+      for (let index = 0; index < installmentIds.length; index += 50) {
+        const payments = await cloud.related(
+          'installment_payments',
+          'installment_id',
+          installmentIds.slice(index, index + 50)
+        )
+        db.transaction(() => {
+          for (const payment of payments) {
+            this.insertFiltered(db, 'installment_payments', payment)
+          }
+        })()
+      }
+    } catch (err) {
+      console.error('[SyncService] Failed to pull installment payments:', err)
+    }
+
+    store.set('last_pull_timestamp', newPullTime)
+  }
+
+  private insertFiltered(
+    db: ReturnType<typeof getDb>,
+    table: string,
+    row: Record<string, unknown>
+  ): void {
+    const validColumns = new Set(
+      (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(column => column.name)
+    )
+    const localRow: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(row)) {
+      if (!validColumns.has(key)) continue
+      if (typeof value === 'boolean') localRow[key] = value ? 1 : 0
+      else if (value !== null && typeof value === 'object') localRow[key] = JSON.stringify(value)
+      else localRow[key] = value
+    }
+
+    const keys = Object.keys(localRow)
+    if (keys.length === 0) return
+    db.prepare(
+      `INSERT OR REPLACE INTO ${table} (${keys.join(',')})
+       VALUES (${keys.map(() => '?').join(',')})`
+    ).run(...keys.map(key => localRow[key]))
+  }
+
+  private async checkOnline(cloud: CloudApi): Promise<boolean> {
+    try {
+      await cloud.health()
+      return true
+    } catch {
+      return false
+    }
+  }
+}
+
+function normalizeForCloud(payload: Record<string, unknown>): Record<string, unknown> {
+  const localOnlyFields = ['synced_at', 'items', 'reason', 'payment', 'password']
+  const result = { ...payload }
+  for (const field of localOnlyFields) delete result[field]
+  return result
+}
+
+interface SyncItem {
+  id: string
+  table_name: string
+  record_id: string
+  operation: string
+  payload: string
+  attempts: number
+  last_error?: string
+  status: string
+}

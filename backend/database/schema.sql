@@ -1,0 +1,34 @@
+-- POS ERP PostgreSQL schema for a self-hosted VPS.
+-- Run from the repository root:
+--   psql "$DATABASE_URL" -f backend/database/schema.sql
+
+-- Load the base PostgreSQL table definitions, then disable legacy row security.
+\ir base-schema.inc
+
+ALTER TABLE products
+  ADD COLUMN IF NOT EXISTS branch_id TEXT REFERENCES branches(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS idx_products_branch ON products(branch_id);
+
+DROP TRIGGER IF EXISTS trg_stock_transfers_upd ON stock_transfers;
+CREATE TRIGGER trg_stock_transfers_upd
+  BEFORE UPDATE ON stock_transfers
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+ALTER TABLE branches DISABLE ROW LEVEL SECURITY;
+ALTER TABLE warehouses DISABLE ROW LEVEL SECURITY;
+ALTER TABLE roles DISABLE ROW LEVEL SECURITY;
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE categories DISABLE ROW LEVEL SECURITY;
+ALTER TABLE suppliers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE products DISABLE ROW LEVEL SECURITY;
+ALTER TABLE stocks DISABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_transfers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE customers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices DISABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE payments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE installments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE installment_payments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE deliveries DISABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs DISABLE ROW LEVEL SECURITY;
