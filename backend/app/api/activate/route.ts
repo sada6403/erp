@@ -169,7 +169,12 @@ export async function POST(req: NextRequest) {
       brand_logo_url: dev.brand_logo_url ?? null,
     })
   } catch (err) {
-    console.error('[activate POST]', err)
-    return NextResponse.json({ error: (err as Error).message }, { status: 500 })
+    const e = err as Error
+    console.error('[activate POST] MSG:', e.message)
+    console.error('[activate POST] STACK:', e.stack)
+    return NextResponse.json({
+      error: e.message,
+      _stack: e.stack?.split('\n').slice(0, 8),
+    }, { status: 500 })
   }
 }
