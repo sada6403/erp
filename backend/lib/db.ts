@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise'
+import { format as sqlFormat } from 'mysql2'
 
 // ─── Convert PostgreSQL $1,$2 placeholders → MySQL ? ─────────────────────────
 function convertSql(sql: string): string {
@@ -6,6 +7,14 @@ function convertSql(sql: string): string {
     .replace(/\$\d+/g, '?')           // $1 $2 → ?
     .replace(/::\w+(\[\])?/g, '')      // ::int ::text ::timestamptz → remove
     .replace(/ILIKE/gi, 'LIKE')        // ILIKE → LIKE (MySQL case-insensitive by default)
+}
+
+// Pre-format SQL with values using mysql2 escaping so we never pass a values
+// array into pool.query() — this fully bypasses the prepared-statement cache
+// (PrepareStatementCache.set) that throws "Use `delete()` to clear values".
+function fmt(sql: string, values?: unknown[]): string {
+  const converted = convertSql(sql)
+  return values && values.length > 0 ? sqlFormat(converted, values) : converted
 }
 
 // ─── pg-style query result type ───────────────────────────────────────────────
@@ -54,14 +63,14 @@ if (process.env.NODE_ENV !== 'production') global._posErpPool = poolInstance
 function wrapPool(instance: mysql.Pool): typeof pool {
   return {
     query: async <T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>> => {
-      const [rows] = await instance.query(convertSql(sql), values ?? [])
+      const [rows] = await instance.query(fmt(sql, values))
       return { rows: rows as T[] }
     },
     connect: async (): Promise<QueryClient> => {
       const conn = await instance.getConnection()
       return {
         query: async <T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>> => {
-          const [rows] = await conn.query(convertSql(sql), values ?? [])
+          const [rows] = await conn.query(fmt(sql, values))
           return { rows: rows as T[] }
         },
         release: () => conn.release(),
@@ -78,7 +87,7 @@ export async function withTransaction<T>(fn: (client: QueryClient) => Promise<T>
   const conn = await poolInstance.getConnection()
   const client: QueryClient = {
     query: async <T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>> => {
-      const [rows] = await conn.query(convertSql(sql), values ?? [])
+      const [rows] = await conn.query(fmt(sql, values))
       return { rows: rows as T[] }
     },
     release: () => conn.release(),
