@@ -71,7 +71,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Stock Transfers', icon: Warehouse, perm: 'inventory', module: 'stock_transfers',
     items: [
-      { to: '/admin/inventory',       label: 'Stock Transfers', perm: 'inventory' },
+      { to: '/admin/stock-transfers',  label: 'Stock Transfers', perm: 'inventory' },
       { to: '/admin/stock-requests',  label: 'Stock Requests',  perm: 'inventory' },
     ]
   },

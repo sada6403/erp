@@ -54,14 +54,14 @@ if (process.env.NODE_ENV !== 'production') global._posErpPool = poolInstance
 function wrapPool(instance: mysql.Pool): typeof pool {
   return {
     query: async <T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>> => {
-      const [rows] = await instance.execute(convertSql(sql), values ?? [])
+      const [rows] = await instance.query(convertSql(sql), values ?? [])
       return { rows: rows as T[] }
     },
     connect: async (): Promise<QueryClient> => {
       const conn = await instance.getConnection()
       return {
         query: async <T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>> => {
-          const [rows] = await conn.execute(convertSql(sql), values ?? [])
+          const [rows] = await conn.query(convertSql(sql), values ?? [])
           return { rows: rows as T[] }
         },
         release: () => conn.release(),
@@ -78,7 +78,7 @@ export async function withTransaction<T>(fn: (client: QueryClient) => Promise<T>
   const conn = await poolInstance.getConnection()
   const client: QueryClient = {
     query: async <T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>> => {
-      const [rows] = await conn.execute(convertSql(sql), values ?? [])
+      const [rows] = await conn.query(convertSql(sql), values ?? [])
       return { rows: rows as T[] }
     },
     release: () => conn.release(),
@@ -89,7 +89,7 @@ export async function withTransaction<T>(fn: (client: QueryClient) => Promise<T>
     await conn.commit()
     return result
   } catch (err) {
-    await conn.rollback()
+    try { await conn.rollback() } catch { /* ignore rollback error */ }
     throw err
   } finally {
     conn.release()

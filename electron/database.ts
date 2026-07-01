@@ -647,6 +647,18 @@ function runMigrations(): void {
   if (!hasColumn('stock_count_sessions', 'updated_at')) {
     db.exec(`ALTER TABLE stock_count_sessions ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))`)
   }
+  if (!hasColumn('stock_transfers', 'reject_reason')) {
+    db.exec(`ALTER TABLE stock_transfers ADD COLUMN reject_reason TEXT`)
+  }
+  if (!hasColumn('stock_transfers', 'rejected_by')) {
+    db.exec(`ALTER TABLE stock_transfers ADD COLUMN rejected_by TEXT`)
+  }
+  if (!hasColumn('stock_transfers', 'discrepancy_note')) {
+    db.exec(`ALTER TABLE stock_transfers ADD COLUMN discrepancy_note TEXT`)
+  }
+  if (!hasColumn('stock_transfers', 'discrepancy_by')) {
+    db.exec(`ALTER TABLE stock_transfers ADD COLUMN discrepancy_by TEXT`)
+  }
 }
 
 function seedDefaultData() {

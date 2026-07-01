@@ -1,11 +1,18 @@
 import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
-import { ShoppingBag, TrendingUp, AlertCircle, Package, CreditCard, Truck, RefreshCw, Building2, ShieldCheck, Warehouse, Wifi } from 'lucide-react'
+import { ShoppingBag, TrendingUp, AlertCircle, Package, CreditCard, Truck, RefreshCw, Building2, ShieldCheck, Warehouse, Wifi, ArrowRightLeft, Check, X } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import StatCard from '@/components/shared/StatCard'
+import { useAuthStore } from '@/store/authStore'
+import toast from 'react-hot-toast'
 
 interface RevenueData { today: { revenue: number; invoices: number }; month: { revenue: number; invoices: number }; outstanding: { total: number } }
 interface SalesData { date: string; total_revenue: number; total_invoices: number }
+interface PendingTransfer {
+  id: string; transfer_number: string; product_name: string; sku: string
+  from_branch_name: string; to_branch_name: string; quantity: number
+  initiated_by_name: string; initiated_at: string
+}
 
 function useBrandColor() {
   const [color, setColor] = useState('#2563eb')
@@ -22,12 +29,48 @@ function useBrandColor() {
 }
 
 export default function AdminDashboard() {
-  const [revenue, setRevenue]         = useState<RevenueData | null>(null)
-  const [salesData, setSalesData]     = useState<SalesData[]>([])
-  const [topProducts, setTopProducts] = useState<Record<string,unknown>[]>([])
-  const [lowStock, setLowStock]       = useState<Record<string,unknown>[]>([])
-  const [loading, setLoading]         = useState(true)
-  const brandColor                    = useBrandColor()
+  const { user } = useAuthStore()
+  const u = user as unknown as Record<string, unknown>
+  const perms = ((u?.role as Record<string, unknown>)?.permissions ?? u?.permissions ?? {}) as Record<string, unknown>
+  const isAdmin    = Boolean(perms.all)
+  const myBranchId = String(u?.branch_id ?? '')
+
+  const [revenue, setRevenue]             = useState<RevenueData | null>(null)
+  const [salesData, setSalesData]         = useState<SalesData[]>([])
+  const [topProducts, setTopProducts]     = useState<Record<string,unknown>[]>([])
+  const [lowStock, setLowStock]           = useState<Record<string,unknown>[]>([])
+  const [loading, setLoading]             = useState(true)
+  const [pendingTx, setPendingTx]         = useState<PendingTransfer[]>([])
+  const [rejectId, setRejectId]           = useState<string | null>(null)
+  const [rejectReason, setRejectReason]   = useState('')
+  const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const brandColor                        = useBrandColor()
+
+  const loadTransfers = async () => {
+    const res = await window.api.stocks.listTransfers({ status: 'pending_approval' })
+    if (res.success) {
+      const all = res.data as (PendingTransfer & { from_branch_id: string })[]
+      const mine = isAdmin ? all : all.filter(t => t.from_branch_id === myBranchId)
+      setPendingTx(mine)
+    }
+  }
+
+  const handleAccept = async (id: string) => {
+    setActionLoading(id)
+    const res = await window.api.stocks.updateTransfer(id, 'received', {})
+    if (res.success) { toast.success('Stock transferred — inventory updated'); loadTransfers() }
+    else toast.error(res.error || 'Failed')
+    setActionLoading(null)
+  }
+
+  const handleReject = async () => {
+    if (!rejectId || !rejectReason.trim()) { toast.error('Reason required'); return }
+    setActionLoading(rejectId)
+    const res = await window.api.stocks.updateTransfer(rejectId, 'rejected', { reject_reason: rejectReason })
+    if (res.success) { toast.success('Transfer rejected'); setRejectId(null); setRejectReason(''); loadTransfers() }
+    else toast.error(res.error || 'Failed')
+    setActionLoading(null)
+  }
 
   const load = async () => {
     setLoading(true)
@@ -43,6 +86,7 @@ export default function AdminDashboard() {
       if (top.success)  setTopProducts(top.data as Record<string,unknown>[])
       if (low.success)  setLowStock(low.data as Record<string,unknown>[])
     } finally { setLoading(false) }
+    loadTransfers()
   }
 
   useEffect(() => { load() }, [])
@@ -183,6 +227,93 @@ export default function AdminDashboard() {
             </div>
           </div>
         </div>
+
+        {/* ── Pending Transfer Requests ─────────────────────────────────────── */}
+        {(pendingTx.length > 0 || isAdmin) && (
+          <div className="card">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-sm flex items-center gap-2" style={{ color: 'var(--text-1)' }}>
+                <ArrowRightLeft size={15} className="text-orange-400" />
+                Pending Stock Transfer Requests
+                {pendingTx.length > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-orange-500/20 text-orange-400">{pendingTx.length}</span>
+                )}
+              </h3>
+              <button onClick={loadTransfers} className="btn-ghost btn-sm p-1.5" title="Refresh">
+                <RefreshCw size={13} />
+              </button>
+            </div>
+
+            {pendingTx.length === 0 && (
+              <p className="text-sm" style={{ color: 'var(--text-3)' }}>No pending transfer requests.</p>
+            )}
+
+            <div className="space-y-3">
+              {pendingTx.map(t => (
+                <div key={t.id} className="rounded-xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
+                  <div className="flex items-start gap-3">
+                    <div className="w-9 h-9 rounded-lg bg-orange-500/15 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <ArrowRightLeft size={15} className="text-orange-400" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>{t.product_name}</p>
+                      <p className="text-xs font-mono" style={{ color: 'var(--text-3)' }}>{t.sku}</p>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className="text-xs px-2 py-0.5 rounded font-medium" style={{ background: 'var(--bg-card)', color: 'var(--text-2)' }}>
+                          {t.from_branch_name}
+                        </span>
+                        <ArrowRightLeft size={10} style={{ color: 'var(--text-3)' }} />
+                        <span className="text-xs px-2 py-0.5 rounded font-medium" style={{ background: 'var(--bg-card)', color: 'var(--text-2)' }}>
+                          {t.to_branch_name}
+                        </span>
+                        <span className="text-xs font-bold text-orange-400">× {t.quantity} units</span>
+                      </div>
+                      <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                        Requested by <strong style={{ color: 'var(--text-2)' }}>{t.initiated_by_name || '—'}</strong>
+                        {' · '}{new Date(t.initiated_at).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}
+                      </p>
+                    </div>
+                    <div className="flex gap-1.5 flex-shrink-0">
+                      <button
+                        onClick={() => handleAccept(t.id)}
+                        disabled={actionLoading === t.id}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-green-600 hover:bg-green-500 text-white disabled:opacity-50 transition-colors"
+                      >
+                        <Check size={12} />
+                        {actionLoading === t.id ? '…' : 'Accept'}
+                      </button>
+                      <button
+                        onClick={() => { setRejectId(t.id); setRejectReason('') }}
+                        disabled={actionLoading === t.id}
+                        className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-500 text-white disabled:opacity-50 transition-colors"
+                      >
+                        <X size={12} /> Reject
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Inline reject reason */}
+                  {rejectId === t.id && (
+                    <div className="mt-3 pt-3 border-t flex gap-2" style={{ borderColor: 'var(--border)' }}>
+                      <input
+                        className="input flex-1 text-xs"
+                        placeholder="Rejection reason (required)"
+                        value={rejectReason}
+                        onChange={e => setRejectReason(e.target.value)}
+                        autoFocus
+                        onKeyDown={e => { if (e.key === 'Enter') handleReject(); if (e.key === 'Escape') setRejectId(null) }}
+                      />
+                      <button onClick={handleReject} className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-500 text-white" disabled={!rejectReason.trim()}>
+                        Confirm Reject
+                      </button>
+                      <button onClick={() => setRejectId(null)} className="btn-secondary text-xs px-3">Cancel</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )

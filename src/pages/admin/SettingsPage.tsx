@@ -186,6 +186,7 @@ export default function SettingsPage() {
   const [clearConfirmText, setClearConfirmText] = useState('')
   const [clearing, setClearing] = useState(false)
   const { logout } = useAuthStore()
+  const navigate = useNavigate()
 
   useEffect(() => {
     Promise.all([
@@ -245,7 +246,7 @@ export default function SettingsPage() {
         actions={<button onClick={save} disabled={saving} className="btn-primary btn-sm gap-1.5"><Save size={14} />{saving ? 'Saving...' : 'Save Settings'}</button>}
       />
 
-      <div className="flex border-b px-6 pt-4 gap-2 flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex flex-wrap border-b px-6 pt-4 gap-1 flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
         <TabButton active={tab === 'general'} onClick={() => setTab('general')} icon={Building2} label="General" />
         <TabButton active={tab === 'branding'} onClick={() => setTab('branding')} icon={ImageIcon} label="Branding" />
         <TabButton active={tab === 'security'} onClick={() => setTab('security')} icon={Shield} label="Security" />
@@ -259,7 +260,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
-        {tab === 'general' && <GeneralSettings form={form} f={f} />}
+        {tab === 'general' && <GeneralSettings form={form} f={f} setForm={setForm} />}
         {tab === 'branding' && <BrandingSettings form={form} f={f} />}
         {tab === 'security' && <SecuritySettings form={form} f={f} check={check} />}
         {tab === 'sync' && <SyncSettings form={form} f={f} check={check} isActivated={isActivated} />}
@@ -367,7 +368,7 @@ function TabButton({ active, onClick, icon: Icon, label, labelClass }: { active:
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-sm font-semibold border border-b-0 transition-colors ${
+      className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg text-sm font-semibold border border-b-0 transition-colors shrink-0 whitespace-nowrap ${
         active ? 'bg-[var(--bg-card)] text-blue-500' : 'bg-transparent hover:bg-[var(--bg-soft)]'
       } ${labelClass || ''}`}
       style={{ borderColor: active ? 'var(--border)' : 'transparent', color: active ? undefined : 'var(--text-3)' }}
@@ -378,7 +379,7 @@ function TabButton({ active, onClick, icon: Icon, label, labelClass }: { active:
   )
 }
 
-function GeneralSettings({ form, f }: { form: Record<string, any>; f: (k: string) => (e: any) => void }) {
+function GeneralSettings({ form, f, setForm }: { form: Record<string, any>; f: (k: string) => (e: any) => void; setForm: React.Dispatch<React.SetStateAction<any>> }) {
   return (
     <div className="space-y-6 max-w-3xl">
       <Section title="Company Information">
@@ -414,7 +415,7 @@ function GeneralSettings({ form, f }: { form: Record<string, any>; f: (k: string
             value={form.theme}
             onChange={e => {
               const theme = e.target.value
-              setForm(p => ({ ...p, theme }))
+              setForm((p: Record<string, any>) => ({ ...p, theme }))
               applySystemTheme({ ...form, theme })
             }}
             className="input max-w-xs"

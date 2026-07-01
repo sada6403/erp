@@ -29,6 +29,7 @@ import RolesPage from '@/pages/admin/RolesPage'
 import ReturnsPage from '@/pages/admin/ReturnsPage'
 import CashRegisterPage from '@/pages/admin/CashRegisterPage'
 import StockRequestsPage from '@/pages/admin/StockRequestsPage'
+import StockTransfersPage from '@/pages/admin/StockTransfersPage'
 import BatchesPage from '@/pages/admin/BatchesPage'
 import BackupPage from '@/pages/admin/BackupPage'
 import SecurityPage from '@/pages/admin/SecurityPage'
@@ -124,6 +125,7 @@ export default function App() {
         <Route path="/admin/returns" element={<ReturnsPage />} />
         <Route path="/admin/cash-register" element={<CashRegisterPage />} />
         <Route path="/admin/stock-requests" element={<StockRequestsPage />} />
+        <Route path="/admin/stock-transfers" element={<StockTransfersPage />} />
         <Route path="/admin/backup"         element={<RequireSuperAdmin><BackupPage /></RequireSuperAdmin>} />
         <Route path="/admin/security"       element={<SecurityPage />} />
         <Route path="/admin/system-health"  element={<RequireSuperAdmin><SystemHealthPage /></RequireSuperAdmin>} />

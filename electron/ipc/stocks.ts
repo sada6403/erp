@@ -170,14 +170,23 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const db = getDb()
       let sql = `
         SELECT st.*, p.name as product_name, p.sku,
-               fb.name as from_branch_name, tb.name as to_branch_name
+               fb.name as from_branch_name, tb.name as to_branch_name,
+               iu.name as initiated_by_name, au.name as approved_by_name,
+               ru.name as received_by_name
         FROM stock_transfers st
         LEFT JOIN products p ON p.id = st.product_id
         LEFT JOIN branches fb ON fb.id = st.from_branch_id
         LEFT JOIN branches tb ON tb.id = st.to_branch_id
+        LEFT JOIN users iu ON iu.id = st.initiated_by
+        LEFT JOIN users au ON au.id = st.approved_by
+        LEFT JOIN users ru ON ru.id = st.received_by
         WHERE 1=1`
       const params: unknown[] = []
       if (filters.status) { sql += ' AND st.status=?'; params.push(filters.status) }
+      if (filters.branch_id) {
+        sql += ' AND (st.from_branch_id = ? OR st.to_branch_id = ?)'
+        params.push(filters.branch_id, filters.branch_id)
+      }
       sql += ' ORDER BY st.initiated_at DESC LIMIT 200'
       const rows = db.prepare(sql).all(...params)
       return { success: true, data: rows }
@@ -236,9 +245,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (!transfer) throw new Error('Transfer not found')
 
       const transitions: Record<string, string[]> = {
-        pending:            ['approved', 'rejected', 'cancelled'],
-        pending_approval:   ['approved', 'rejected', 'cancelled'],
-        approved:           ['ready_for_dispatch', 'dispatched', 'cancelled'],
+        pending:            ['approved', 'rejected', 'cancelled', 'received'],
+        pending_approval:   ['approved', 'rejected', 'cancelled', 'received'],
+        approved:           ['ready_for_dispatch', 'dispatched', 'cancelled', 'received'],
         ready_for_dispatch: ['dispatched', 'cancelled'],
         dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy'],
         in_transit:         ['received', 'partially_received', 'discrepancy'],
@@ -297,6 +306,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         patch.missing_quantity     = Number(transfer.quantity) - received - damaged
         patch.actual_delivery_at   = now
         patch.received_by          = user?.id || null
+        patch.approved_by          = patch.approved_by ?? user?.id ?? null
         if (payload.damaged_quantity !== undefined) patch.damaged_quantity = damaged
       }
       if (status === 'discrepancy') {
@@ -326,6 +336,28 @@ export function registerStockHandlers(ipcMain: IpcMain) {
             movement_type: 'TRANSFER',
             reference_transfer_id: id,
             notes: `Transfer dispatched: ${transfer.transfer_number || id}`,
+            created_by: (user?.id as string) || null,
+          }))
+        }
+
+        // Direct accept (pending → received): deduct source AND credit destination in one step
+        const isDirectAccept = status === 'received' &&
+          ['pending', 'pending_approval', 'approved'].includes(String(transfer.status))
+        if (isDirectAccept) {
+          const qty = Number(transfer.quantity)
+          const changed = db.prepare(`
+            UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
+            WHERE product_id=? AND branch_id=? AND quantity>=?`)
+            .run(qty, transfer.product_id, transfer.from_branch_id, qty)
+          if (!changed.changes) throw new Error('Insufficient source stock for direct accept')
+          movementRecords.push(insertStockMovement(db, {
+            product_id: String(transfer.product_id),
+            from_branch_id: String(transfer.from_branch_id),
+            to_branch_id: String(transfer.to_branch_id),
+            quantity: qty,
+            movement_type: 'TRANSFER',
+            reference_transfer_id: id,
+            notes: `Direct accept: ${transfer.transfer_number || id}`,
             created_by: (user?.id as string) || null,
           }))
         }

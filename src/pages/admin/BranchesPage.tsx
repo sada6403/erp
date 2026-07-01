@@ -109,7 +109,7 @@ export default function BranchesPage() {
               </div>
 
               <div className="flex items-center gap-2 mb-1">
-                <h3 className="font-bold text-white">{b.name as string}</h3>
+                <h3 className="font-bold" style={{ color: 'var(--text-1)' }}>{b.name as string}</h3>
                 {b.code
                   ? <span className="px-1.5 py-0.5 bg-brand-600/20 text-brand-300 text-xs font-mono rounded">{String(b.code)}</span>
                   : null}
@@ -117,8 +117,8 @@ export default function BranchesPage() {
                   <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 text-xs rounded">Head Office</span>
                 )}
               </div>
-              <p className="text-xs text-slate-400">{b.address as string || 'No address'}</p>
-              <p className="text-xs text-slate-500 mt-1">
+              <p className="text-xs" style={{ color: 'var(--text-3)' }}>{b.address as string || 'No address'}</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                 {`${String(b.phone ?? '')}${b.email ? ` · ${String(b.email)}` : ''}`}
               </p>
             </div>
