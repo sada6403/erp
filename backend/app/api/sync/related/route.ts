@@ -1,20 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAuthorized } from '@/lib/auth'
-import { rows } from '@/lib/db'
+import { resolveCompany, AccountStatusError } from '@/lib/auth'
 import { assertRelatedKey, assertTable, quoteIdentifier } from '@/lib/sync'
 
 export const runtime = 'nodejs'
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  let company
+  try {
+    company = await resolveCompany(request)
+  } catch (err) {
+    if (err instanceof AccountStatusError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 403 })
+    }
+    throw err
+  }
+  if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   try {
     const body = await request.json() as {
-      table?: unknown
-      foreignKey?: unknown
-      ids?: unknown
+      table?: unknown; foreignKey?: unknown; ids?: unknown
     }
     assertTable(body.table)
     assertRelatedKey(body.table, body.foreignKey)
@@ -23,10 +29,12 @@ export async function POST(request: NextRequest) {
     }
     if (body.ids.length === 0) return NextResponse.json({ data: [] })
 
-    const data = await rows<Record<string, unknown>>(
+    // MySQL: WHERE col IN (?,?,?)
+    const placeholders = body.ids.map(() => '?').join(',')
+    const { rows: data } = await company.tp.query(
       `SELECT * FROM ${quoteIdentifier(body.table)}
-        WHERE ${quoteIdentifier(body.foreignKey)} = ANY($1::text[])`,
-      [body.ids]
+       WHERE ${quoteIdentifier(body.foreignKey as string)} IN (${placeholders})`,
+      body.ids
     )
     return NextResponse.json({ data })
   } catch (error) {

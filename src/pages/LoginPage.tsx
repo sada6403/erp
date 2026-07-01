@@ -1,23 +1,28 @@
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
-import { ShoppingBag, Cpu, Lock, Mail, Hash, GitBranch, ArrowRight, X } from 'lucide-react'
+import { useSyncStatus } from '@/hooks/useSyncStatus'
+import {
+  ShoppingBag, Lock, Mail, GitBranch, ArrowRight, X, Delete,
+  WifiOff, RefreshCw, Shield, CheckCircle, AlertTriangle,
+  Building2, Eye, EyeOff, Zap,
+} from 'lucide-react'
 import toast from 'react-hot-toast'
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function getPerms(u: unknown): Record<string, unknown> {
   const user = u as Record<string, unknown>
   return (user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>
     || user?.permissions as Record<string, unknown>
     || {}
 }
-
 function redirectByRole(perms: Record<string, unknown>) {
-  // Admin-level roles go to dashboard; cashier/warehouse/delivery go to POS or their default
   if (perms.all || perms.reports || perms.employees || perms.inventory) return '/admin'
   return '/pos'
 }
 
 const TERMINAL_BRANCH_KEY = 'pos_terminal_branch'
+const RECENT_USERS_KEY    = 'pos_recent_login_users'
 
 function getStoredBranch(): { id: string; name: string; code: string } | null {
   try { return JSON.parse(localStorage.getItem(TERMINAL_BRANCH_KEY) || 'null') } catch { return null }
@@ -27,301 +32,826 @@ function setStoredBranch(b: { id: string; name: string; code: string } | null) {
   else localStorage.removeItem(TERMINAL_BRANCH_KEY)
 }
 
+function saveRecentUser(u: { id: string; name: string; roleName: string }) {
+  const list = (() => { try { return JSON.parse(localStorage.getItem(RECENT_USERS_KEY) || '[]') } catch { return [] } })()
+  const filtered = list.filter((x: { id: string }) => x.id !== u.id)
+  localStorage.setItem(RECENT_USERS_KEY, JSON.stringify([u, ...filtered].slice(0, 4)))
+}
+
+const PAD_KEYS = ['1','2','3','4','5','6','7','8','9','C','0','⌫']
+
+// ── Clock ─────────────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const t = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const date = now.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+  const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+  return (
+    <span className="font-mono text-xs tabular-nums" style={{ color: '#94a3b8' }}>
+      {date} &nbsp;|&nbsp; <span style={{ color: '#e2e8f0' }}>{time}</span>
+    </span>
+  )
+}
+
+// ── Status Bar ────────────────────────────────────────────────────────────────
+function StatusBar({ online, pending, lastSync, licenseOk, version }: {
+  online: boolean; pending: number; lastSync?: string; licenseOk: boolean; version: string
+}) {
+  const fmtSync = () => {
+    if (!lastSync) return 'Never'
+    const diff = Math.floor((Date.now() - new Date(lastSync).getTime()) / 1000)
+    if (diff < 10) return 'Just now'
+    if (diff < 60) return `${diff}s ago`
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+    return `${Math.floor(diff / 3600)}h ago`
+  }
+  return (
+    <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-1.5"
+      style={{ background: 'rgba(10,12,20,0.95)', borderBottom: '1px solid rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)' }}>
+      <div className="flex items-center gap-1.5 px-2 py-0.5 rounded"
+        style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.25)' }}>
+        <Zap size={9} style={{ color: '#818cf8' }} />
+        <span className="text-xs font-bold" style={{ color: '#818cf8' }}>v{version}</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <LiveClock />
+        <div className="w-px h-3" style={{ background: '#1e293b' }} />
+        <div className="flex items-center gap-1">
+          {online
+            ? <><div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /><span className="text-xs text-emerald-400">Online</span></>
+            : <><div className="w-1.5 h-1.5 rounded-full bg-red-400" /><span className="text-xs text-red-400">Offline</span></>}
+        </div>
+        <div className="w-px h-3" style={{ background: '#1e293b' }} />
+        <div className="flex items-center gap-1">
+          {pending > 0
+            ? <><RefreshCw size={9} className="text-yellow-400" style={{ animation: 'spin 1.5s linear infinite' }} /><span className="text-xs text-yellow-400">{pending} pending</span></>
+            : <><CheckCircle size={9} className="text-emerald-400" /><span className="text-xs" style={{ color: '#64748b' }}>Sync: {fmtSync()}</span></>}
+        </div>
+        <div className="w-px h-3" style={{ background: '#1e293b' }} />
+        <div className="flex items-center gap-1">
+          {licenseOk
+            ? <><Shield size={9} className="text-emerald-400" /><span className="text-xs text-emerald-400">Active</span></>
+            : <><AlertTriangle size={9} className="text-red-400" /><span className="text-xs text-red-400">Invalid</span></>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Login Page ───────────────────────────────────────────────────────────
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { login, pinLogin, user } = useAuthStore()
-  const [mode, setMode] = useState<'email' | 'pin'>('pin')
-  const [email, setEmail]       = useState('')
-  const [password, setPassword] = useState('')
-  const [pin, setPin]           = useState('')
-  const [loading, setLoading]   = useState(false)
-  const [appBranchName, setAppBranchName] = useState('Main Branch')
+  const { pinLogin, user, init } = useAuthStore()
+  const { status: syncStatus } = useSyncStatus()
 
-  // Terminal branch state — persisted in localStorage
-  const [terminalBranch, setTerminalBranch] = useState<{ id: string; name: string; code: string } | null>(getStoredBranch)
+  const [mode, setMode]                 = useState<'email' | 'pin'>('pin')
+  const [email, setEmail]               = useState('')
+  const [password, setPassword]         = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [pin, setPin]                   = useState('')
+  const [showPin, setShowPin]           = useState(false)
+  const [loading, setLoading]           = useState(false)
+  const [loginState, setLoginState]     = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+
+  // 2FA
+  const [requires2FA, setRequires2FA] = useState(false)
+  const [tempToken, setTempToken]     = useState('')
+  const [otpCode, setOtpCode]         = useState('')
+
+  // Force password change
+  const [requiresPwChange, setRequiresPwChange] = useState(false)
+  const [newPassword,      setNewPassword]       = useState('')
+  const [confirmPassword,  setConfirmPassword]   = useState('')
+  const [showNewPw,        setShowNewPw]         = useState(false)
+
+  // Forgot password
+  const [forgotStep,    setForgotStep]    = useState<'off' | 'email' | 'otp' | 'done'>('off')
+  const [forgotEmail,   setForgotEmail]   = useState('')
+  const [forgotOtp,     setForgotOtp]     = useState('')
+  const [forgotNewPw,   setForgotNewPw]   = useState('')
+  const [forgotConfirm, setForgotConfirm] = useState('')
+  const [forgotLoading, setForgotLoading] = useState(false)
+  const [forgotNoSmtp,  setForgotNoSmtp]  = useState(false)
+
+  // Branding + settings
+  const [branding,  setBranding]  = useState<Record<string, unknown>>({})
+  const [licenseOk, setLicenseOk] = useState(true)
+  const [deviceId,  setDeviceId]  = useState('POS-001')
+  const [version]                  = useState('2.0.1')
+
+  // Branch — never pre-populate; always verify DB first so deleted branches can't bypass
+  const [terminalBranch, setTerminalBranch]   = useState<{ id: string; name: string; code: string } | null>(null)
   const [showBranchInput, setShowBranchInput] = useState(false)
   const [branchCode, setBranchCode]           = useState('')
   const [branchSearching, setBranchSearching] = useState(false)
+  const [branchList, setBranchList]           = useState<{ id: string; name: string; code: string; branch_pin: string }[]>([])
+  const [showBranchList, setShowBranchList]   = useState(false)
+
+  // PIN animation states
+  const [pinShake, setPinShake]     = useState(false)
+  const [pinSuccess, setPinSuccess] = useState(false)
+
+  // Account locked
+  const [isAccountLocked, setIsAccountLocked] = useState(false)
+  const [syncUnlocking,   setSyncUnlocking]   = useState(false)
+
   const branchCodeRef = useRef<HTMLInputElement>(null)
-  const emailRef = useRef<HTMLInputElement>(null)
+  const emailRef      = useRef<HTMLInputElement>(null)
 
-  // Force dark mode on login page regardless of user theme setting
-  useEffect(() => {
-    const wasDark = document.documentElement.classList.contains('dark')
-    document.documentElement.classList.add('dark')
-    return () => { if (!wasDark) document.documentElement.classList.remove('dark') }
-  }, [])
+  const brandName = String(branding.company_name   || 'Enterprise POS')
+  const brandLogo = String(branding.login_logo_url || branding.company_logo_url || '')
 
+  // ── Effects ──
   useEffect(() => {
+    if (!window.api) return
     window.api.settings.get().then((res: { success: boolean; data?: unknown }) => {
-      if (res.success && res.data) {
-        const s = res.data as Record<string, unknown>
-        if (s.branch_name) setAppBranchName(s.branch_name as string)
-      }
+      if (res.success && res.data) setBranding(res.data as Record<string, unknown>)
     })
+    window.api.license?.status?.().then((r: { active?: boolean }) => {
+      setLicenseOk(r?.active !== false)
+    }).catch(() => {})
+    window.api.app?.getDeviceInfo?.().then((r: { deviceId?: string }) => {
+      if (r?.deviceId) setDeviceId(r.deviceId.slice(0, 12).toUpperCase())
+    }).catch(() => {})
   }, [])
 
+  // Verify stored branch on startup — only restore if still exists in DB
   useEffect(() => {
-    if (user) {
-      navigate(redirectByRole(getPerms(user)), { replace: true })
+    const stored = getStoredBranch()
+    if (stored?.code && window.api) {
+      window.api.admin.branches.findByCode(stored.code).then((res: { success: boolean; data?: unknown }) => {
+        if (res.success && res.data) setTerminalBranch(stored)
+        else setStoredBranch(null)
+      }).catch(() => {})
     }
-  }, [user, navigate])
+  }, [])
 
-  useEffect(() => {
-    if (mode === 'email') emailRef.current?.focus()
-  }, [mode])
+  useEffect(() => { if (user) navigate(redirectByRole(getPerms(user)), { replace: true }) }, [user, navigate])
+  useEffect(() => { if (mode === 'email') emailRef.current?.focus() }, [mode])
+  useEffect(() => { if (showBranchInput) setTimeout(() => branchCodeRef.current?.focus(), 50) }, [showBranchInput])
 
-  useEffect(() => {
-    if (showBranchInput) setTimeout(() => branchCodeRef.current?.focus(), 50)
-  }, [showBranchInput])
-
+  // ── Handlers ──
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    setLoading(true)
+    setLoading(true); setLoginState('loading')
     try {
-      const result = await login(email, password)
-      if (result.success) {
-        const perms = getPerms(useAuthStore.getState().user)
-        navigate(redirectByRole(perms), { replace: true })
-      } else {
-        toast.error(result.error || 'Login failed')
+      const result = await window.api.auth.login({ email, password }) as {
+        success: boolean; data?: Record<string, unknown>
+        requiresTwoFactor?: boolean; requiresPasswordChange?: boolean
+        tempToken?: string; error?: string
       }
-    } finally {
-      setLoading(false)
-    }
+      if (result.requiresTwoFactor && result.tempToken) {
+        setTempToken(result.tempToken); setRequires2FA(true); setOtpCode(''); setLoginState('idle'); return
+      }
+      if (result.requiresPasswordChange && result.tempToken) {
+        setTempToken(result.tempToken); setRequiresPwChange(true); setLoginState('idle')
+        toast('You must set a new password before continuing.', { icon: '🔐' }); return
+      }
+      if (result.success && result.data) {
+        await init()
+        const u = useAuthStore.getState().user as Record<string, unknown> | null
+        const perms = getPerms(u)
+        if (!(perms.all || perms.reports || perms.employees || perms.settings || perms.branches)) {
+          await window.api.auth.logout()
+          setLoginState('error'); setMode('pin')
+          toast.error('Email login is for admin accounts only. Use your PIN.')
+          setTimeout(() => setLoginState('idle'), 2000); return
+        }
+        setLoginState('success')
+        if (u) saveRecentUser({ id: String(u.id), name: String(u.name), roleName: String((u.role as Record<string,unknown>)?.name || 'Admin') })
+        setTimeout(() => navigate(redirectByRole(perms), { replace: true }), 400)
+      } else {
+        setLoginState('error')
+        const errMsg = result.error || 'Login failed'
+        toast.error(errMsg)
+        if (errMsg.toLowerCase().includes('locked')) setIsAccountLocked(true)
+        setTimeout(() => setLoginState('idle'), 1500)
+      }
+    } finally { setLoading(false) }
+  }
+
+  const handleSyncUnlock = async () => {
+    setSyncUnlocking(true)
+    try {
+      await (window as unknown as { api: { sync: { trigger: () => Promise<void> } } }).api.sync.trigger()
+      setIsAccountLocked(false); setLoginState('idle')
+      toast.success('Sync complete — try logging in now.')
+    } catch { toast.error('Sync failed. Check your connection.') }
+    finally { setSyncUnlocking(false) }
+  }
+
+  const handleForcePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (newPassword.length < 8) { toast.error('Password must be at least 8 characters'); return }
+    if (newPassword !== confirmPassword) { toast.error('Passwords do not match'); return }
+    setLoading(true); setLoginState('loading')
+    try {
+      const result = await window.api.auth.completeForcePasswordChange({ tempToken, newPassword }) as {
+        success: boolean; data?: Record<string, unknown>; error?: string
+      }
+      if (result.success && result.data) {
+        setLoginState('success'); await init()
+        const u = useAuthStore.getState().user as Record<string, unknown> | null
+        toast.success('Password changed!'); setTimeout(() => navigate(redirectByRole(getPerms(u)), { replace: true }), 400)
+      } else {
+        setLoginState('error'); toast.error(result.error || 'Failed to change password')
+        setTimeout(() => setLoginState('idle'), 1500)
+      }
+    } finally { setLoading(false) }
+  }
+
+  const handleOtpSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (otpCode.length !== 6) { toast.error('Enter 6-digit code'); return }
+    setLoading(true); setLoginState('loading')
+    try {
+      const result = await window.api.auth.twoFa.verifyLogin({ tempToken, otp: otpCode }) as {
+        success: boolean; data?: Record<string, unknown>; error?: string
+      }
+      if (result.success && result.data) {
+        setLoginState('success'); await init()
+        navigate(redirectByRole(getPerms(result.data.user)), { replace: true })
+      } else {
+        setLoginState('error'); toast.error(result.error || 'Invalid code')
+        setOtpCode(''); setTimeout(() => setLoginState('idle'), 1500)
+      }
+    } finally { setLoading(false) }
   }
 
   const confirmBranchCode = async () => {
     if (!branchCode.trim()) return
     setBranchSearching(true)
     try {
+      if (!window.api) { toast.error('Not running in Electron'); return }
       const res = await window.api.admin.branches.findByCode(branchCode.trim())
       if (res.success && res.data) {
         const b = res.data as { id: string; name: string; code: string }
         const branch = { id: b.id, name: b.name, code: b.code || branchCode.toUpperCase() }
-        setTerminalBranch(branch)
-        setStoredBranch(branch)
-        setShowBranchInput(false)
-        setBranchCode('')
-        toast.success(`Terminal set to ${branch.name}`)
-      } else {
-        toast.error('Branch code not found')
-      }
-    } finally {
-      setBranchSearching(false)
-    }
+        setTerminalBranch(branch); setStoredBranch(branch)
+        setShowBranchInput(false); setBranchCode('')
+        toast.success(`Branch → ${branch.name}`)
+      } else { toast.error('Branch not found. Check the code or PIN.') }
+    } finally { setBranchSearching(false) }
   }
 
   const clearBranch = () => {
-    setTerminalBranch(null)
-    setStoredBranch(null)
-    setPin('')
-    toast.success('Branch cleared — searching all branches for PIN')
+    setTerminalBranch(null); setStoredBranch(null); setPin('')
+    toast.success('Branch cleared')
+  }
+
+  const loadBranchList = async () => {
+    if (!window.api) return
+    const res = await window.api.admin.branches.list()
+    if (res.success && res.data) {
+      const active = (res.data as { id: string; name: string; code: string; branch_pin: string; is_active: number }[])
+        .filter(b => b.is_active)
+      setBranchList(active)
+      setShowBranchList(true)
+    }
+  }
+
+  const pickBranchFromList = (b: { id: string; name: string; code: string; branch_pin: string }) => {
+    const branch = { id: b.id, name: b.name, code: b.code || b.name.toUpperCase().replace(/\s+/g, '') }
+    setTerminalBranch(branch); setStoredBranch(branch)
+    setShowBranchList(false); setShowBranchInput(false); setBranchCode('')
+    toast.success(`Branch → ${branch.name}`)
+  }
+
+  const handleForgotRequest = async (e: React.FormEvent) => {
+    e.preventDefault(); setForgotLoading(true)
+    try {
+      const res = await (window as unknown as { api: { auth: { forgotPassword: (e: string) => Promise<{ success: boolean; sent?: boolean; noSmtp?: boolean }> } } }).api.auth.forgotPassword(forgotEmail)
+      if (res.success) { setForgotNoSmtp(Boolean(res.noSmtp) || !res.sent); setForgotStep('otp') }
+      else toast.error('Something went wrong. Try again.')
+    } catch { toast.error('Request failed') }
+    finally { setForgotLoading(false) }
+  }
+
+  const handleForgotReset = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (forgotNewPw.length < 8) { toast.error('Password must be at least 8 characters'); return }
+    if (forgotNewPw !== forgotConfirm) { toast.error('Passwords do not match'); return }
+    setForgotLoading(true)
+    try {
+      const res = await (window as unknown as { api: { auth: { resetWithOtp: (e: string, o: string, p: string) => Promise<{ success: boolean; error?: string }> } } }).api.auth.resetWithOtp(forgotEmail, forgotOtp, forgotNewPw)
+      if (res.success) setForgotStep('done')
+      else toast.error(res.error || 'Reset failed')
+    } catch { toast.error('Reset failed') }
+    finally { setForgotLoading(false) }
+  }
+
+  const resetForgot = () => {
+    setForgotStep('off'); setForgotEmail(''); setForgotOtp('')
+    setForgotNewPw(''); setForgotConfirm(''); setForgotNoSmtp(false)
   }
 
   const submitPin = async (p: string) => {
-    if (p.length < 4 || loading) return
-    setLoading(true)
-    const result = await pinLogin(p, terminalBranch?.id)
+    if (p.length < 1 || loading || !terminalBranch) return
+    setLoading(true); setLoginState('loading')
+    const result = await pinLogin(p, terminalBranch.id)
     setLoading(false)
     if (result.success) {
-      const perms = getPerms(useAuthStore.getState().user)
-      navigate(redirectByRole(perms), { replace: true })
-    } else { toast.error('Invalid PIN'); setPin('') }
+      setLoginState('success'); setPinSuccess(true)
+      const u = useAuthStore.getState().user as Record<string, unknown> | null
+      if (u) saveRecentUser({ id: String(u.id), name: String(u.name), roleName: String((u.role as Record<string,unknown>)?.name || 'Staff') })
+      setTimeout(() => navigate(redirectByRole(getPerms(useAuthStore.getState().user)), { replace: true }), 600)
+    } else {
+      setLoginState('error'); setPinShake(true)
+      setTimeout(() => { setPinShake(false); setLoginState('idle') }, 600)
+      toast.error('Invalid PIN'); setPin('')
+    }
   }
 
   const handlePinKey = (digit: string) => {
-    if (loading) return
+    if (loading || loginState === 'success' || !terminalBranch) return
     if (digit === 'C') { setPin(''); return }
     if (pin.length >= 6) return
-    setPin(p => p + digit)
+    setPin(prev => prev + digit)
   }
 
-  // Keyboard support for PIN mode
   useEffect(() => {
-    if (mode !== 'pin' || showBranchInput) return
+    if (mode !== 'pin' || showBranchInput || !terminalBranch) return
     const handler = (e: KeyboardEvent) => {
-      if (e.key >= '0' && e.key <= '9') { handlePinKey(e.key) }
-      else if (e.key === 'Backspace') { setPin(p => p.slice(0, -1)) }
-      else if (e.key === 'Enter') { setPin(p => { submitPin(p); return p }) }
-      else if (e.key === 'Escape') { setPin('') }
+      if (e.key >= '0' && e.key <= '9') handlePinKey(e.key)
+      else if (e.key === 'Backspace') setPin(p => p.slice(0, -1))
+      else if (e.key === 'Enter') submitPin(pin)
+      else if (e.key === 'Escape') setPin('')
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, loading, pin, showBranchInput, terminalBranch])
+  }, [mode, loading, pin, showBranchInput, terminalBranch, loginState])
 
+  // ── Styles ──
+  const pinDotStyle = (i: number) => {
+    if (pinSuccess && i < pin.length) return { background: '#10b981', border: '2px solid #10b981' }
+    if (loginState === 'error' && i < pin.length) return { background: '#ef4444', border: '2px solid #ef4444' }
+    if (i < pin.length) return { background: '#4f46e5', border: '2px solid #6366f1', boxShadow: '0 0 0 3px rgba(99,102,241,0.25)' }
+    return { background: '#0f1623', border: '2px solid #1e2d45' }
+  }
+
+  const padStyle = (d: string): React.CSSProperties => {
+    if (d === 'C')  return { background: 'rgba(239,68,68,0.1)',  color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }
+    if (d === '⌫') return { background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)' }
+    return { background: '#111827', color: '#f1f5f9', border: '1px solid #1e293b' }
+  }
+
+  const loginBtnStyle = (): React.CSSProperties => {
+    if (loginState === 'success') return { background: '#059669' }
+    if (loginState === 'error')   return { background: '#dc2626' }
+    if (pin.length < 1 && mode === 'pin') return { background: '#0d1117', color: '#334155', border: '1px solid #1e293b', cursor: 'not-allowed' }
+    return { background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }
+  }
+  const loginBtnLabel = () => {
+    if (loginState === 'loading') return <><RefreshCw size={13} className="inline mr-1.5 animate-spin" />Signing in…</>
+    if (loginState === 'success') return <><CheckCircle size={13} className="inline mr-1.5" />Access Granted</>
+    if (loginState === 'error')   return <><AlertTriangle size={13} className="inline mr-1.5" />Invalid Credentials</>
+    return <><Lock size={13} className="inline mr-1.5" />Login</>
+  }
+
+  // ── Render ──
   return (
-    <div className="min-h-screen bg-surface-900 flex">
-      {/* Left panel */}
-      <div className="hidden lg:flex flex-col justify-between w-1/2 bg-gradient-to-br from-brand-900 via-brand-800 to-surface-900 p-12">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-brand-500 rounded-xl flex items-center justify-center">
-            <ShoppingBag size={22} className="text-white" />
-          </div>
-          <span className="text-xl font-bold text-white">Enterprise POS ERP</span>
-        </div>
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: '#080c14' }}>
 
-        <div>
-          <h1 className="text-4xl font-bold text-white leading-tight mb-4">
-            Multi-Branch<br />Offline-First POS
-          </h1>
-          <p className="text-brand-200 text-lg mb-8">
-            Built for large furniture & electronics enterprises. Works without internet, syncs when online.
-          </p>
-          <div className="grid grid-cols-2 gap-4">
-            {['Offline First', 'Multi Branch', 'Real-time Sync', 'Thermal Print'].map(f => (
-              <div key={f} className="flex items-center gap-2 text-brand-300">
-                <div className="w-1.5 h-1.5 bg-brand-400 rounded-full" />
-                <span className="text-sm">{f}</span>
-              </div>
-            ))}
-          </div>
+      <StatusBar
+        online={syncStatus.online} pending={syncStatus.pending}
+        lastSync={syncStatus.last_sync} licenseOk={licenseOk} version={version}
+      />
 
-          {/* Login guide */}
-          <div className="mt-8 bg-white/5 rounded-xl p-5 space-y-3 border border-white/10">
-            <p className="text-xs font-semibold text-brand-300 uppercase tracking-wider">Branch Login Guide</p>
-            <div className="space-y-2 text-sm text-brand-200">
-              <p><span className="font-semibold text-white">Step 1:</span> Set terminal branch via branch code (e.g. MAIN)</p>
-              <p><span className="font-semibold text-white">Step 2 — Staff:</span> Enter your 4–6 digit PIN</p>
-              <p><span className="font-semibold text-white">Managers / Super Admin:</span> Use Email tab</p>
-              <p><span className="font-semibold text-white">Setup:</span> Admin → Branches → Add Branch → set code</p>
+      <div className="flex-1 flex items-center justify-center" style={{ paddingTop: '32px' }}>
+        <div className="w-full max-w-[330px] px-4 space-y-3">
+
+          {/* ── Company header ── */}
+          <div className="flex items-center gap-3 pb-3" style={{ borderBottom: '1px solid #0f1623' }}>
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0"
+              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
+              {brandLogo
+                ? <img src={brandLogo} alt="" className="w-full h-full object-cover" />
+                : <ShoppingBag size={17} className="text-white" />}
             </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 text-brand-400 text-sm">
-          <Cpu size={14} />
-          <span>Powered by Electron + React + SQLite + Next.js</span>
-        </div>
-      </div>
-
-      {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-8">
-        <div className="w-full max-w-md">
-          <div className="lg:hidden flex items-center gap-3 mb-8 justify-center">
-            <div className="w-10 h-10 bg-brand-500 rounded-xl flex items-center justify-center">
-              <ShoppingBag size={22} className="text-white" />
+            <div className="flex-1 min-w-0">
+              <div className="font-bold text-white text-sm truncate">{brandName}</div>
+              <div className="flex items-center gap-1 mt-0.5">
+                <Building2 size={9} style={{ color: '#475569' }} />
+                <span className="text-xs truncate" style={{ color: '#475569' }}>
+                  {terminalBranch ? terminalBranch.name : 'No branch selected'}
+                </span>
+              </div>
             </div>
-            <span className="text-xl font-bold">Enterprise POS ERP</span>
+            {licenseOk
+              ? <div className="flex items-center gap-1 text-xs text-emerald-400 flex-shrink-0">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> Active
+                </div>
+              : <span className="text-xs text-red-400 flex-shrink-0">Inactive</span>
+            }
           </div>
 
-          {/* App branch badge */}
-          <div className="flex items-center gap-2 mb-5 px-3 py-2 bg-brand-600/10 border border-brand-600/20 rounded-lg w-fit">
-            <GitBranch size={13} className="text-brand-400" />
-            <span className="text-xs font-medium text-brand-300">{appBranchName}</span>
-          </div>
+          {/* ═══════════ PIN MODE ═══════════ */}
+          {mode === 'pin' && !requires2FA && !requiresPwChange && (
+            <div className="space-y-3">
 
-          <h2 className="text-2xl font-bold mb-1">Sign in</h2>
-          <p className="text-slate-400 mb-6 text-sm">Staff: use PIN · Managers: use Email</p>
-
-          {/* Mode toggle */}
-          <div className="flex bg-surface-800 rounded-lg p-1 mb-6">
-            <button onClick={() => setMode('pin')} className={`flex-1 py-2 rounded-md text-sm font-medium transition-all ${mode==='pin' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}>
-              <Hash size={14} className="inline mr-2" />Staff PIN
-            </button>
-            <button onClick={() => setMode('email')} className={`flex-1 py-2 rounded-md text-sm font-medium transition-all ${mode==='email' ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}>
-              <Mail size={14} className="inline mr-2" />Admin Email
-            </button>
-          </div>
-
-          {mode === 'pin' ? (
-            <div>
-              {/* Terminal branch selector */}
-              <div className="mb-5">
-                {showBranchInput ? (
-                  <div className="flex gap-2">
-                    <input
-                      ref={branchCodeRef}
-                      value={branchCode}
-                      onChange={e => setBranchCode(e.target.value.toUpperCase())}
-                      onKeyDown={e => { if (e.key === 'Enter') confirmBranchCode(); if (e.key === 'Escape') setShowBranchInput(false) }}
-                      className="input flex-1 font-mono uppercase text-sm"
-                      placeholder="Branch code (e.g. MAIN)"
-                      maxLength={10}
-                    />
-                    <button onClick={confirmBranchCode} disabled={branchSearching || !branchCode.trim()}
-                      className="btn-primary px-3 gap-1">
-                      {branchSearching ? '...' : <ArrowRight size={15} />}
-                    </button>
-                    <button onClick={() => { setShowBranchInput(false); setBranchCode('') }} className="btn-ghost px-2">
-                      <X size={15} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center justify-between px-3 py-2 bg-surface-800 rounded-lg border border-slate-700">
-                    <div className="flex items-center gap-2">
-                      <GitBranch size={13} className={terminalBranch ? 'text-brand-400' : 'text-slate-500'} />
-                      {terminalBranch ? (
-                        <span className="text-sm text-white">
-                          <span className="font-mono text-brand-300 mr-1">[{terminalBranch.code}]</span>
-                          {terminalBranch.name}
-                        </span>
-                      ) : (
-                        <span className="text-sm text-slate-500">No branch set — all users can login</span>
-                      )}
-                    </div>
-                    <div className="flex gap-1">
-                      <button onClick={() => setShowBranchInput(true)}
-                        className="text-xs text-brand-400 hover:text-brand-300 px-2 py-0.5">
-                        {terminalBranch ? 'Change' : 'Set Branch'}
-                      </button>
-                      {terminalBranch && (
-                        <button onClick={clearBranch} className="text-xs text-slate-500 hover:text-red-400 px-1">
-                          <X size={12} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* PIN display */}
-              <div className="flex justify-center gap-3 mb-6">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div key={i} className={`w-10 h-10 rounded-lg border-2 flex items-center justify-center text-xl font-bold transition-all ${i < pin.length ? 'border-brand-500 bg-brand-900/30 text-white' : 'border-slate-600'}`}>
-                    {i < pin.length ? '●' : ''}
-                  </div>
-                ))}
-              </div>
-              {/* Numpad */}
-              <div className="grid grid-cols-3 gap-3">
-                {['1','2','3','4','5','6','7','8','9','C','0','⌫'].map(d => (
-                  <button key={d} type="button"
-                    disabled={loading}
-                    onClick={() => d==='⌫' ? setPin(p=>p.slice(0,-1)) : handlePinKey(d)}
-                    className={`h-14 rounded-xl text-lg font-semibold transition-all active:scale-95 ${d==='C' ? 'bg-red-900/40 text-red-400 hover:bg-red-800/40' : 'bg-surface-700 hover:bg-surface-600 text-white'} disabled:opacity-50`}>
-                    {loading && d==='0' ? '...' : d}
+              {/* Branch selector */}
+              {showBranchInput ? (
+                <div className="flex gap-2">
+                  <input
+                    ref={branchCodeRef}
+                    value={branchCode}
+                    onChange={e => setBranchCode(e.target.value.toUpperCase())}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') confirmBranchCode()
+                      if (e.key === 'Escape') { setShowBranchInput(false); setBranchCode('') }
+                    }}
+                    className="flex-1 px-3 py-2.5 rounded-xl text-sm font-mono text-white outline-none"
+                    style={{ background: '#0d1117', border: '1px solid #1e293b' }}
+                    placeholder="Branch code or PIN (e.g. MAIN, 1001)"
+                    maxLength={10}
+                  />
+                  <button onClick={confirmBranchCode} disabled={branchSearching || !branchCode.trim()}
+                    className="px-3.5 py-2.5 rounded-xl text-white font-bold disabled:opacity-40 flex-shrink-0"
+                    style={{ background: 'linear-gradient(135deg, #4f46e5, #6d28d9)' }}>
+                    {branchSearching ? <RefreshCw size={14} className="animate-spin" /> : <ArrowRight size={14} />}
                   </button>
-                ))}
+                  <button onClick={() => { setShowBranchInput(false); setBranchCode('') }}
+                    className="px-3 py-2.5 rounded-xl flex-shrink-0"
+                    style={{ background: '#0d1117', color: '#475569', border: '1px solid #1e293b' }}>
+                    <X size={13} />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between px-3 py-2 rounded-xl"
+                  style={{ background: '#0d1117', border: `1px solid ${terminalBranch ? 'rgba(99,102,241,0.3)' : 'rgba(239,68,68,0.25)'}` }}>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <GitBranch size={12} style={{ color: terminalBranch ? '#818cf8' : '#ef4444', flexShrink: 0 }} />
+                    {terminalBranch ? (
+                      <span className="text-sm text-white truncate">
+                        <span className="font-mono text-xs font-bold mr-1.5 px-1.5 py-0.5 rounded"
+                          style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8' }}>{terminalBranch.code}</span>
+                        {terminalBranch.name}
+                      </span>
+                    ) : (
+                      <span className="text-sm font-medium" style={{ color: '#ef4444' }}>No branch — set before login</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 ml-2 flex-shrink-0">
+                    <button onClick={() => setShowBranchInput(true)}
+                      className="text-xs font-semibold px-2 py-1 rounded-lg"
+                      style={{
+                        background: terminalBranch ? 'rgba(99,102,241,0.12)' : 'rgba(239,68,68,0.12)',
+                        color:      terminalBranch ? '#818cf8' : '#f87171',
+                        border:     `1px solid ${terminalBranch ? 'rgba(99,102,241,0.2)' : 'rgba(239,68,68,0.25)'}`,
+                      }}>
+                      {terminalBranch ? 'Change' : 'Set Branch'}
+                    </button>
+                    {terminalBranch && (
+                      <button onClick={clearBranch} className="p-1 rounded" style={{ color: '#334155' }}>
+                        <X size={11} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Branch list dropdown */}
+              {showBranchList && (
+                <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.3)', background: '#0a0e18' }}>
+                  <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #0f1623' }}>
+                    <span className="text-xs font-semibold" style={{ color: '#818cf8' }}>Select Branch</span>
+                    <button onClick={() => setShowBranchList(false)} style={{ color: '#334155' }}>
+                      <X size={13} />
+                    </button>
+                  </div>
+                  <div className="max-h-36 overflow-y-auto">
+                    {branchList.length === 0 ? (
+                      <p className="text-xs text-center py-4" style={{ color: '#475569' }}>No active branches found</p>
+                    ) : branchList.map(b => (
+                      <button key={b.id} onClick={() => pickBranchFromList(b)}
+                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-indigo-600/10"
+                        style={{ borderBottom: '1px solid #0f1623' }}>
+                        <GitBranch size={11} style={{ color: '#4f46e5', flexShrink: 0 }} />
+                        <span className="text-sm text-white truncate flex-1">{b.name}</span>
+                        {b.code && (
+                          <span className="text-xs font-mono px-1.5 py-0.5 rounded flex-shrink-0"
+                            style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{b.code}</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* PIN section — only when branch is selected */}
+              {terminalBranch ? (
+                <div className="space-y-2.5">
+                  {/* PIN dots */}
+                  <div className={`flex justify-center gap-2 ${pinShake ? 'lp-shake' : ''}`}>
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <div key={i}
+                        className="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-200"
+                        style={pinDotStyle(i)}>
+                        {i < pin.length && (
+                          showPin
+                            ? <span className="text-white font-bold text-sm">{pin[i]}</span>
+                            : <div className="w-2.5 h-2.5 rounded-full bg-white" />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Numpad */}
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {PAD_KEYS.map(d => (
+                      <button key={d} type="button"
+                        disabled={loading || loginState === 'success'}
+                        onClick={() => d === '⌫' ? setPin(p => p.slice(0, -1)) : handlePinKey(d)}
+                        className="h-12 rounded-xl text-lg font-bold transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center select-none"
+                        style={padStyle(d)}>
+                        {d === '⌫' ? <Delete size={17} /> : d}
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Login button + show PIN toggle */}
+                  <div className="flex gap-2">
+                    <button onClick={() => submitPin(pin)}
+                      disabled={loading || pin.length < 1 || loginState === 'success'}
+                      className="flex-1 py-2.5 rounded-xl text-white font-bold text-sm transition-all flex items-center justify-center"
+                      style={loginBtnStyle()}>
+                      {loginBtnLabel()}
+                    </button>
+                    <button onClick={() => setShowPin(p => !p)}
+                      className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 self-center"
+                      style={{ background: '#0d1117', border: '1px solid #1e293b', color: '#475569' }}>
+                      {showPin ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-4 rounded-xl"
+                  style={{ background: 'rgba(99,102,241,0.05)', border: '1px dashed rgba(99,102,241,0.2)' }}>
+                  <GitBranch size={18} className="mx-auto mb-1.5" style={{ color: '#4f46e5' }} />
+                  <p className="text-xs font-semibold" style={{ color: '#818cf8' }}>Select your branch first</p>
+                  <p className="text-xs mt-0.5 mb-2.5" style={{ color: '#475569' }}>
+                    Enter your branch code or PIN above
+                  </p>
+                  <button
+                    onClick={loadBranchList}
+                    className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                    style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}>
+                    Browse all branches
+                  </button>
+                </div>
+              )}
+
+              {/* Offline notice */}
+              {!syncStatus.online && (
+                <div className="rounded-lg px-3 py-2 flex items-center gap-2"
+                  style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)' }}>
+                  <WifiOff size={11} className="text-yellow-400 flex-shrink-0" />
+                  <p className="text-xs text-yellow-400">Offline — transactions save locally</p>
+                </div>
+              )}
+
+              {/* Admin link */}
+              <div className="flex items-center justify-between pt-0.5">
+                <span className="text-xs font-mono" style={{ color: '#0f172a' }}>v{version} · {deviceId}</span>
+                <button onClick={() => { setMode('email'); setLoginState('idle') }}
+                  className="flex items-center gap-1 text-xs" style={{ color: '#1e3a5f' }}>
+                  <Mail size={10} /> Admin
+                </button>
               </div>
-              <button onClick={() => submitPin(pin)} disabled={loading || pin.length < 4}
-                className={`btn-primary w-full mt-4 gap-2 transition-opacity ${pin.length < 4 ? 'opacity-30' : ''}`}>
-                <Lock size={15} />{loading ? 'Signing in...' : 'Login'}
-              </button>
-              <p className="text-center text-xs text-slate-600 mt-3">
-                {pin.length >= 4 ? 'Press Login or Enter to confirm' : 'Enter 4–6 digit PIN · Keyboard works too'}
-              </p>
             </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Email</label>
-                <input ref={emailRef} type="email" value={email} onChange={e=>setEmail(e.target.value)}
-                  className="input" placeholder="admin@pos.local" required />
+          )}
+
+          {/* ═══════════ EMAIL MODE ═══════════ */}
+          {mode === 'email' && forgotStep === 'off' && !requires2FA && !requiresPwChange && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: '#818cf8' }}>
+                  <Mail size={13} /> Admin Login
+                </div>
+                <button onClick={() => { setMode('pin'); setPin(''); setLoginState('idle'); resetForgot() }}
+                  className="text-xs" style={{ color: '#475569' }}>
+                  ← Staff PIN
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
-                <input type="password" value={password} onChange={e=>setPassword(e.target.value)}
-                  className="input" placeholder="••••••••" required />
+
+              <form onSubmit={handleSubmit} className="space-y-2.5">
+                <div className="relative">
+                  <Mail size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
+                  <input ref={emailRef} type="email" value={email} onChange={e => setEmail(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: '#0d1117', border: '1px solid #1e293b' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                    onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
+                    placeholder="Email address" required />
+                </div>
+                <div className="relative">
+                  <Lock size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
+                  <input type={showPassword ? 'text' : 'password'} value={password}
+                    onChange={e => { setPassword(e.target.value); setIsAccountLocked(false) }}
+                    className="w-full pl-10 pr-10 py-2.5 rounded-xl text-sm text-white outline-none"
+                    style={{ background: '#0d1117', border: '1px solid #1e293b' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                    onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
+                    placeholder="Password" required />
+                  <button type="button" onClick={() => setShowPassword(p => !p)}
+                    className="absolute right-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }}>
+                    {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
+                  </button>
+                </div>
+
+                <button type="submit" disabled={loading || loginState === 'success'}
+                  className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
+                  style={loginState === 'success' ? { background: '#059669' } : loginState === 'error' ? { background: '#dc2626' } : { background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
+                  {loginBtnLabel()}
+                </button>
+
+                {isAccountLocked && (
+                  <button type="button" onClick={handleSyncUnlock} disabled={syncUnlocking}
+                    className="w-full py-2 rounded-xl text-sm font-semibold flex items-center justify-center gap-2"
+                    style={{ background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)', color: '#fbbf24' }}>
+                    <RefreshCw size={13} className={syncUnlocking ? 'animate-spin' : ''} />
+                    {syncUnlocking ? 'Syncing…' : 'Sync from Cloud to Unlock'}
+                  </button>
+                )}
+
+                <div className="flex justify-end">
+                  <button type="button" onClick={() => { setForgotEmail(email); setForgotStep('email') }}
+                    className="text-xs font-medium" style={{ color: '#6366f1' }}>
+                    Forgot Password?
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ═══════════ FORGOT PASSWORD ═══════════ */}
+          {mode === 'email' && forgotStep !== 'off' && !requires2FA && !requiresPwChange && (
+            <div className="space-y-3">
+              {forgotStep === 'done' && (
+                <div className="text-center space-y-3 py-4">
+                  <CheckCircle size={32} className="mx-auto text-emerald-400" />
+                  <p className="font-bold text-white">Password Reset!</p>
+                  <button onClick={resetForgot} className="w-full py-2.5 rounded-xl text-white font-bold text-sm"
+                    style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
+                    Back to Login
+                  </button>
+                </div>
+              )}
+
+              {forgotStep === 'email' && (
+                <form onSubmit={handleForgotRequest} className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={resetForgot} className="text-xs" style={{ color: '#475569' }}>←</button>
+                    <p className="text-sm font-bold text-white">Reset Password</p>
+                  </div>
+                  {forgotNoSmtp && (
+                    <div className="rounded-lg p-2.5 text-xs"
+                      style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.2)', color: '#d97706' }}>
+                      <strong>Email not configured.</strong> Ask your administrator for the reset code.
+                    </div>
+                  )}
+                  <div className="relative">
+                    <Mail size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
+                    <input type="email" value={forgotEmail} required autoFocus onChange={e => setForgotEmail(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none"
+                      style={{ background: '#0d1117', border: '1px solid #1e293b' }}
+                      onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                      onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
+                      placeholder="Your email address" />
+                  </div>
+                  <button type="submit" disabled={forgotLoading || !forgotEmail.trim()}
+                    className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
+                    style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', opacity: !forgotEmail.trim() ? 0.5 : 1 }}>
+                    {forgotLoading ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Sending…</> : 'Send Reset Code'}
+                  </button>
+                </form>
+              )}
+
+              {forgotStep === 'otp' && (
+                <form onSubmit={handleForgotReset} className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <button type="button" onClick={() => setForgotStep('email')} className="text-xs" style={{ color: '#475569' }}>←</button>
+                    <p className="text-sm font-bold text-white">{forgotNoSmtp ? 'Enter Reset Code' : 'Check Your Email'}</p>
+                  </div>
+                  <input type="text" inputMode="numeric" maxLength={6} value={forgotOtp} required autoFocus
+                    onChange={e => setForgotOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full px-4 py-2.5 rounded-xl text-center text-xl font-mono tracking-[0.4em] text-white outline-none border"
+                    style={{ background: '#0d1117', borderColor: '#1e293b' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                    onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
+                    placeholder="000000" />
+                  <div className="relative">
+                    <Lock size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
+                    <input type={showNewPw ? 'text' : 'password'} value={forgotNewPw} required
+                      onChange={e => setForgotNewPw(e.target.value)}
+                      className="w-full pl-10 pr-10 py-2.5 rounded-xl text-sm text-white outline-none"
+                      style={{ background: '#0d1117', border: '1px solid #1e293b' }}
+                      onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                      onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
+                      placeholder="New password (min 8 chars)" />
+                    <button type="button" onClick={() => setShowNewPw(p => !p)}
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }}>
+                      {showNewPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <Lock size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
+                    <input type={showNewPw ? 'text' : 'password'} value={forgotConfirm} required
+                      onChange={e => setForgotConfirm(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none"
+                      style={{ background: '#0d1117', border: `1px solid ${forgotConfirm && forgotNewPw !== forgotConfirm ? '#ef4444' : '#1e293b'}` }}
+                      placeholder="Confirm password" />
+                  </div>
+                  <button type="submit"
+                    disabled={forgotLoading || forgotOtp.length < 4 || forgotNewPw.length < 8 || forgotNewPw !== forgotConfirm}
+                    className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
+                    style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', opacity: (forgotOtp.length < 4 || forgotNewPw.length < 8 || forgotNewPw !== forgotConfirm) ? 0.5 : 1 }}>
+                    {forgotLoading
+                      ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Resetting…</>
+                      : <><CheckCircle size={13} className="mr-1.5" />Reset Password</>}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+
+          {/* ═══════════ 2FA ═══════════ */}
+          {requires2FA && (
+            <form onSubmit={handleOtpSubmit} className="space-y-3">
+              <div className="text-center py-2">
+                <div className="w-12 h-12 mx-auto rounded-2xl flex items-center justify-center mb-2"
+                  style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}>
+                  <Lock size={22} style={{ color: '#818cf8' }} />
+                </div>
+                <p className="font-bold text-white text-sm">Two-Factor Auth</p>
+                <p className="text-xs mt-0.5" style={{ color: '#475569' }}>Enter the 6-digit code from your authenticator app</p>
               </div>
-              <button type="submit" disabled={loading} className="btn-primary w-full btn-lg mt-2">
-                <Lock size={16} />
-                {loading ? 'Signing in...' : 'Sign In'}
+              <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={6}
+                value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                className="w-full px-4 py-3 rounded-xl text-center text-2xl font-mono tracking-[0.5em] text-white outline-none border"
+                style={{ background: '#0d1117', borderColor: '#1e293b' }}
+                onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
+                placeholder="000000" autoFocus />
+              <button type="submit" disabled={loading || otpCode.length !== 6}
+                className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
+                style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', opacity: otpCode.length !== 6 ? 0.45 : 1 }}>
+                {loading ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Verifying…</> : <><CheckCircle size={13} className="mr-1.5" />Verify Code</>}
               </button>
-              <p className="text-center text-xs text-slate-600">Default: admin@pos.local / admin123</p>
+              <button type="button" onClick={() => { setRequires2FA(false); setOtpCode('') }}
+                className="w-full text-center text-xs py-1" style={{ color: '#334155' }}>
+                ← Back to login
+              </button>
             </form>
           )}
+
+          {/* ═══════════ FORCE PASSWORD CHANGE ═══════════ */}
+          {requiresPwChange && (
+            <form onSubmit={handleForcePasswordChange} className="space-y-3">
+              <div className="text-center py-2">
+                <div className="w-12 h-12 mx-auto rounded-2xl flex items-center justify-center mb-2"
+                  style={{ background: 'rgba(234,179,8,0.12)', border: '1px solid rgba(234,179,8,0.3)' }}>
+                  <Lock size={22} style={{ color: '#fbbf24' }} />
+                </div>
+                <p className="font-bold text-white text-sm">Set New Password</p>
+                <p className="text-xs mt-0.5" style={{ color: '#94a3b8' }}>Required before you can continue</p>
+              </div>
+              <div className="relative">
+                <Lock size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
+                <input type={showNewPw ? 'text' : 'password'} value={newPassword}
+                  onChange={e => setNewPassword(e.target.value)}
+                  className="w-full pl-10 pr-10 py-2.5 rounded-xl text-sm text-white outline-none"
+                  style={{ background: '#0d1117', border: '1px solid #1e293b' }}
+                  onFocus={e => { e.currentTarget.style.borderColor = '#fbbf24' }}
+                  onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
+                  placeholder="New password (min 8 chars)" autoFocus required />
+                <button type="button" onClick={() => setShowNewPw(p => !p)}
+                  className="absolute right-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }}>
+                  {showNewPw ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <div className="relative">
+                <Lock size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
+                <input type={showNewPw ? 'text' : 'password'} value={confirmPassword}
+                  onChange={e => setConfirmPassword(e.target.value)}
+                  className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none"
+                  style={{ background: '#0d1117', border: `1px solid ${confirmPassword && newPassword !== confirmPassword ? '#ef4444' : '#1e293b'}` }}
+                  placeholder="Confirm new password" required />
+              </div>
+              <button type="submit" disabled={loading || newPassword.length < 8 || newPassword !== confirmPassword}
+                className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
+                style={{ background: newPassword.length >= 8 && newPassword === confirmPassword ? 'linear-gradient(135deg, #d97706, #b45309)' : '#0d1117', opacity: newPassword.length < 8 || newPassword !== confirmPassword ? 0.5 : 1 }}>
+                {loading
+                  ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Saving…</>
+                  : <><CheckCircle size={13} className="mr-1.5" />Set Password &amp; Login</>}
+              </button>
+            </form>
+          )}
+
         </div>
       </div>
     </div>

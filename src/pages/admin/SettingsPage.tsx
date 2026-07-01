@@ -1,13 +1,17 @@
 import { useState, useEffect } from 'react'
 import type React from 'react'
+import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
 import {
-  Save, Building2, Barcode, ReceiptText, Printer, QrCode,
-  Image as ImageIcon, Type, Ruler, Eye
+  Save, Building2, Barcode, ReceiptText, Printer,
+  Image as ImageIcon, Ruler, Eye, Shield, Cloud, RefreshCw,
+  Mail, MessageSquare, Phone, AlertTriangle, X
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { applySystemTheme } from '@/lib/systemTheme'
+import { useAuthStore } from '@/store/authStore'
 
-type Tab = 'general' | 'barcode' | 'invoice'
+type Tab = 'general' | 'branding' | 'security' | 'sync' | 'barcode' | 'invoice' | 'communications' | 'loyalty' | 's3' | 'danger'
 type InvoiceDesignId = 'dot' | 'thermal' | 'a4'
 
 const INVOICE_DESIGNS: { id: InvoiceDesignId; label: string; paper: string; description: string }[] = [
@@ -59,6 +63,68 @@ export default function SettingsPage() {
     cloud_api_url: '',
     cloud_api_key: '',
     theme: 'dark',
+    email_enabled: false,
+    smtp_host: '',
+    smtp_port: 587,
+    smtp_encryption: 'TLS',
+    smtp_username: '',
+    smtp_password: '',
+    smtp_from_email: '',
+    smtp_from_name: '',
+    smtp_reply_to: '',
+    sms_enabled: false,
+    sms_provider_name: '',
+    sms_api_base_url: '',
+    sms_api_key: '',
+    sms_api_secret: '',
+    sms_sender_id: '',
+    sms_http_method: 'POST',
+    sms_content_type: 'application/json',
+    sms_custom_headers: '',
+    sms_body_template: '{"mobile":"{phone}","message":"{message}","otp":"{otp}"}',
+    whatsapp_enabled: false,
+    whatsapp_provider: 'meta',
+    whatsapp_phone_number_id: '',
+    whatsapp_access_token: '',
+    whatsapp_twilio_sid: '',
+    whatsapp_twilio_token: '',
+    whatsapp_from_number: '',
+    company_logo_url: '',
+    login_logo_url: '',
+    pos_bill_logo_url: '',
+    invoice_logo_url: '',
+    favicon_url: '',
+    footer_text: '',
+    db_type: 'PostgreSQL',
+    db_host: '',
+    db_port: 5432,
+    db_name: '',
+    db_username: '',
+    db_password: '',
+    db_ssl_enabled: true,
+    db_region: '',
+    session_timeout_minutes: 30,
+    password_min_length: 8,
+    password_require_uppercase: true,
+    password_require_number: true,
+    password_require_symbol: false,
+    two_factor_enabled: false,
+    ip_restrictions: '',
+    offline_sync_enabled: true,
+    sync_interval_minutes: 5,
+    failed_sync_retry_minutes: 10,
+    backup_schedule: 'daily',
+    backup_destination: 'local',
+    backup_retention: 10,
+
+    // S3 Storage
+    s3_enabled: false,
+    s3_bucket: '',
+    s3_region: 'us-east-1',
+    s3_access_key: '',
+    s3_secret_key: '',
+    s3_endpoint: '',
+    s3_cdn_url: '',
 
     barcode_template_name: 'Default Product Label',
     barcode_format: 'EAN13',
@@ -93,7 +159,6 @@ export default function SettingsPage() {
 
     invoice_template_name: 'Default Retail Invoice',
     invoice_paper_type: '80mm',
-    invoice_logo_url: '',
     invoice_header_message: 'Welcome to our store',
     invoice_footer_message: 'Thank you for shopping with us!',
     invoice_terms: 'Goods once sold will not be taken back or exchanged.',
@@ -116,10 +181,19 @@ export default function SettingsPage() {
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [isActivated, setIsActivated] = useState(false)
+  const [showClearAll, setShowClearAll] = useState(false)
+  const [clearConfirmText, setClearConfirmText] = useState('')
+  const [clearing, setClearing] = useState(false)
+  const { logout } = useAuthStore()
 
   useEffect(() => {
-    window.api.settings.get().then((res: any) => {
+    Promise.all([
+      window.api.settings.get(),
+      window.api.app.isActivated(),
+    ]).then(([res, activated]: [any, boolean]) => {
       if (res.success && res.data) setForm(f => ({ ...f, ...(res.data as object) }))
+      setIsActivated(Boolean(activated))
       setLoading(false)
     })
   }, [])
@@ -128,7 +202,10 @@ export default function SettingsPage() {
     setSaving(true)
     const res = await window.api.settings.update(form)
     setSaving(false)
-    if (res.success) toast.success('Settings saved')
+    if (res.success) {
+      applySystemTheme(form)
+      toast.success('Settings saved')
+    }
     else toast.error(String(res.error || 'Settings save failed'))
   }
 
@@ -137,6 +214,26 @@ export default function SettingsPage() {
 
   const check = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.checked }))
+
+  const handleClearAllData = async () => {
+    if (clearConfirmText !== 'DELETE ALL') return
+    setClearing(true)
+    try {
+      const res = await window.api.admin.clearAllData() as { success: boolean; error?: string }
+      if (res.success) {
+        toast.success('All data cleared. Starting setup wizard...')
+        setShowClearAll(false)
+        setClearConfirmText('')
+        setTimeout(async () => { await logout(); navigate('/setup', { replace: true }) }, 1200)
+      } else {
+        toast.error(res.error || 'Failed to clear data')
+      }
+    } catch (err) {
+      toast.error('Failed: ' + String(err))
+    } finally {
+      setClearing(false)
+    }
+  }
 
   if (loading) return <div className="flex items-center justify-center h-full text-slate-500">Loading...</div>
 
@@ -150,30 +247,133 @@ export default function SettingsPage() {
 
       <div className="flex border-b px-6 pt-4 gap-2 flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
         <TabButton active={tab === 'general'} onClick={() => setTab('general')} icon={Building2} label="General" />
+        <TabButton active={tab === 'branding'} onClick={() => setTab('branding')} icon={ImageIcon} label="Branding" />
+        <TabButton active={tab === 'security'} onClick={() => setTab('security')} icon={Shield} label="Security" />
+        <TabButton active={tab === 'sync'} onClick={() => setTab('sync')} icon={Cloud} label="Cloud Sync" />
         <TabButton active={tab === 'barcode'} onClick={() => setTab('barcode')} icon={Barcode} label="Barcode Labels" />
         <TabButton active={tab === 'invoice'} onClick={() => setTab('invoice')} icon={ReceiptText} label="Invoice Layout" />
+        <TabButton active={tab === 'communications'} onClick={() => setTab('communications')} icon={Mail} label="Communications" />
+        <TabButton active={tab === 'loyalty'} onClick={() => setTab('loyalty')} icon={Phone} label="Loyalty" />
+        <TabButton active={tab === 's3'} onClick={() => setTab('s3')} icon={Cloud} label="S3 Storage" />
+        <TabButton active={tab === 'danger'} onClick={() => setTab('danger')} icon={AlertTriangle} label="Danger Zone" labelClass="text-red-400" />
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
         {tab === 'general' && <GeneralSettings form={form} f={f} />}
+        {tab === 'branding' && <BrandingSettings form={form} f={f} />}
+        {tab === 'security' && <SecuritySettings form={form} f={f} check={check} />}
+        {tab === 'sync' && <SyncSettings form={form} f={f} check={check} isActivated={isActivated} />}
         {tab === 'barcode' && <BarcodeDesigner form={form} setForm={setForm} f={f} check={check} />}
         {tab === 'invoice' && <InvoiceDesigner form={form} f={f} check={check} />}
+        {tab === 'communications' && <CommunicationsSettings form={form} f={f} check={check} />}
+        {tab === 'loyalty'        && <LoyaltySettings />}
+        {tab === 's3'             && <S3Settings form={form} f={f} check={check} />}
+        {tab === 'danger' && (
+          <div className="max-w-xl space-y-4">
+            <div className="rounded-xl p-5" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+              {/* Header */}
+              <div className="flex items-center gap-3 mb-5 pb-4" style={{ borderBottom: '1px solid var(--border)' }}>
+                <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)' }}>
+                  <AlertTriangle size={20} className="text-red-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base" style={{ color: 'var(--text-1)' }}>Clear All Data</h3>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Permanently wipe all data and reset to factory state</p>
+                </div>
+              </div>
+
+              {/* Two columns: delete / keep */}
+              <div className="grid grid-cols-2 gap-3 mb-5">
+                <div className="rounded-lg p-3 space-y-1.5" style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2 text-red-400">Will be deleted</p>
+                  {['All Products','All Invoices','All Transactions','All Customers','All Payments','All Stock Records','Purchase Orders','All Expenses','Branches','Categories & Suppliers','All Users & Roles','Sync Queue'].map(item => (
+                    <div key={item} className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-2)' }}>
+                      <X size={10} className="text-red-500 flex-shrink-0" /> {item}
+                    </div>
+                  ))}
+                </div>
+                <div className="rounded-lg p-3 space-y-1.5" style={{ background: 'rgba(34,197,94,0.07)', border: '1px solid rgba(34,197,94,0.15)' }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2 text-green-400">Will be kept</p>
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-2)' }}>
+                    <span className="text-green-400 flex-shrink-0">✓</span> Settings & Configuration
+                  </div>
+                  <div className="mt-3 rounded p-2 text-xs" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                    <p className="text-blue-400 font-semibold mb-1">After clearing:</p>
+                    <p style={{ color: 'var(--text-2)' }}>You will be redirected to the <span className="text-blue-300 font-semibold">Setup Wizard</span> to create a new admin account with custom credentials.</p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => { setShowClearAll(true); setClearConfirmText('') }}
+                className="px-5 py-2.5 rounded-lg text-sm font-semibold transition-colors"
+                style={{ background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)', color: '#f87171' }}
+                onMouseEnter={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.2)')}
+                onMouseLeave={e => (e.currentTarget.style.background = 'rgba(239,68,68,0.12)')}
+              >
+                Clear All Data...
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Clear All Data Confirmation Modal */}
+      {showClearAll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
+          <div className="card w-full max-w-md" style={{ border: '2px solid #dc2626' }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={20} className="text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-lg text-red-400">Confirm Clear All Data</h3>
+                <p className="text-xs text-slate-400">This cannot be undone</p>
+              </div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+                Type <span className="text-red-400 font-mono">DELETE ALL</span> to confirm
+              </label>
+              <input
+                value={clearConfirmText}
+                onChange={e => setClearConfirmText(e.target.value)}
+                className="input font-mono"
+                placeholder="DELETE ALL"
+                autoFocus
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setShowClearAll(false); setClearConfirmText('') }} className="btn-secondary btn-sm">Cancel</button>
+              <button
+                onClick={handleClearAllData}
+                disabled={clearing || clearConfirmText !== 'DELETE ALL'}
+                className="btn-sm px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-40"
+                style={{ background: 'linear-gradient(135deg,#dc2626,#991b1b)' }}>
+                {clearing ? 'Clearing...' : 'Clear All Data'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-function TabButton({ active, onClick, icon: Icon, label }: { active: boolean; onClick: () => void; icon: typeof Save; label: string }) {
+function TabButton({ active, onClick, icon: Icon, label, labelClass }: { active: boolean; onClick: () => void; icon: typeof Save; label: string; labelClass?: string }) {
   return (
     <button
       onClick={onClick}
       className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-sm font-semibold border border-b-0 transition-colors ${
         active ? 'bg-[var(--bg-card)] text-blue-500' : 'bg-transparent hover:bg-[var(--bg-soft)]'
-      }`}
+      } ${labelClass || ''}`}
       style={{ borderColor: active ? 'var(--border)' : 'transparent', color: active ? undefined : 'var(--text-3)' }}
     >
       <Icon size={15} />
-      {label}
+      <span className={labelClass}>{label}</span>
     </button>
   )
 }
@@ -208,6 +408,23 @@ function GeneralSettings({ form, f }: { form: Record<string, any>; f: (k: string
         </div>
       </Section>
 
+      <Section title="Theme Mode">
+        <Field label="System Theme">
+          <select
+            value={form.theme}
+            onChange={e => {
+              const theme = e.target.value
+              setForm(p => ({ ...p, theme }))
+              applySystemTheme({ ...form, theme })
+            }}
+            className="input max-w-xs"
+          >
+            <option value="dark">Dark Theme</option>
+            <option value="light">Light Theme</option>
+          </select>
+        </Field>
+      </Section>
+
       <Section title="Thermal Receipt Defaults">
         <Field label="Header Text"><input value={form.receipt_header} onChange={f('receipt_header')} className="input" /></Field>
         <Field label="Footer Text"><textarea value={form.receipt_footer} onChange={f('receipt_footer')} className="input h-16 resize-none" /></Field>
@@ -221,7 +438,189 @@ function GeneralSettings({ form, f }: { form: Record<string, any>; f: (k: string
 
       <Section title="Self-Hosted Cloud Sync">
         <Field label="Cloud API URL"><input value={form.cloud_api_url} onChange={f('cloud_api_url')} className="input font-mono text-sm" placeholder="https://api.example.com" /></Field>
-        <Field label="Cloud API Key"><input type="password" value={form.cloud_api_key} onChange={f('cloud_api_key')} className="input font-mono text-sm" /></Field>
+        <p className="text-xs" style={{ color: 'var(--text-3)' }}>API key is managed by your platform administrator. Contact them to get your API key and paste it during POS device setup.</p>
+      </Section>
+    </div>
+  )
+}
+
+function LogoUploadField({
+  label, value, onChange,
+}: {
+  label: string
+  value: string
+  onChange: (url: string) => void
+}) {
+  const [uploading, setUploading] = useState(false)
+
+  const handleUpload = async () => {
+    setUploading(true)
+    try {
+      const res = await window.api.products.selectAndUploadImage() as { success: boolean; data?: string; error?: string }
+      if (res.success && res.data) {
+        onChange(res.data)
+        toast.success('Logo uploaded')
+      } else if (res.error && res.error !== 'Cancelled') {
+        toast.error(res.error)
+      }
+    } finally { setUploading(false) }
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="label">{label}</label>
+      <div className="flex gap-2 items-center">
+        {/* Preview */}
+        <div className="w-12 h-12 rounded-xl flex-shrink-0 flex items-center justify-center overflow-hidden"
+          style={{ background: 'var(--bg-soft)', border: '1px solid var(--border)' }}>
+          {value
+            ? <img src={value} alt="logo" className="w-full h-full object-contain" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            : <ImageIcon size={18} style={{ color: 'var(--text-3)' }} />}
+        </div>
+        {/* URL input */}
+        <input
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className="input flex-1 text-xs font-mono"
+          placeholder="https://... or click Upload to pick a file"
+        />
+        {/* Upload button */}
+        <button
+          type="button"
+          onClick={handleUpload}
+          disabled={uploading}
+          className="btn-secondary btn-sm gap-1.5 flex-shrink-0 whitespace-nowrap"
+        >
+          <ImageIcon size={13} />
+          {uploading ? 'Uploading…' : 'Upload'}
+        </button>
+        {/* Clear */}
+        {value && (
+          <button type="button" onClick={() => onChange('')}
+            className="btn-ghost btn-sm text-red-400 flex-shrink-0 px-2">✕</button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function BrandingSettings({ form, f }: { form: Record<string, any>; f: (k: string) => (e: any) => void }) {
+  const setField = (key: string) => (url: string) => {
+    f(key)({ target: { value: url, type: 'text' } } as any)
+  }
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <Section title="Brand Assets">
+        <div className="rounded-lg px-4 py-3 text-sm mb-2"
+          style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#818cf8' }}>
+          Upload a logo file from your computer, or paste a URL (https://...).
+          Uploaded files are stored locally and sync to cloud automatically.
+        </div>
+        <LogoUploadField label="Company Logo"     value={form.company_logo_url}   onChange={setField('company_logo_url')} />
+        <LogoUploadField label="Login Page Logo"  value={form.login_logo_url}     onChange={setField('login_logo_url')} />
+        <LogoUploadField label="POS Bill Logo"    value={form.pos_bill_logo_url}  onChange={setField('pos_bill_logo_url')} />
+        <LogoUploadField label="Invoice Logo"     value={form.invoice_logo_url}   onChange={setField('invoice_logo_url')} />
+        <Field label="Favicon URL">
+          <input value={form.favicon_url} onChange={f('favicon_url')} className="input" placeholder="https://..." />
+        </Field>
+      </Section>
+      <Section title="Company Footer">
+        <Field label="Footer Text">
+          <textarea value={form.footer_text} onChange={f('footer_text')} className="input h-20 resize-none" />
+        </Field>
+      </Section>
+    </div>
+  )
+}
+
+
+function SecuritySettings({ form, f, check }: { form: Record<string, any>; f: (k: string) => (e: any) => void; check: (k: string) => (e: any) => void }) {
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <Section title="Authentication Policy">
+        <Check label="Enable Two-Factor Authentication" checked={Boolean(form.two_factor_enabled)} onChange={check('two_factor_enabled')} />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Session Timeout (minutes)"><input type="number" value={form.session_timeout_minutes} onChange={f('session_timeout_minutes')} className="input" min="5" /></Field>
+          <Field label="Minimum Password Length"><input type="number" value={form.password_min_length} onChange={f('password_min_length')} className="input" min="6" /></Field>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <Check label="Uppercase Required" checked={Boolean(form.password_require_uppercase)} onChange={check('password_require_uppercase')} />
+          <Check label="Number Required" checked={Boolean(form.password_require_number)} onChange={check('password_require_number')} />
+          <Check label="Symbol Required" checked={Boolean(form.password_require_symbol)} onChange={check('password_require_symbol')} />
+        </div>
+      </Section>
+      <Section title="IP Restrictions">
+        <Field label="Allowed IPs / CIDR">
+          <textarea value={form.ip_restrictions} onChange={f('ip_restrictions')} className="input h-24 resize-none font-mono text-sm" placeholder="192.168.1.0/24&#10;203.0.113.10" />
+        </Field>
+      </Section>
+    </div>
+  )
+}
+
+function SyncSettings({ form, f, check, isActivated }: { form: Record<string, any>; f: (k: string) => (e: any) => void; check: (k: string) => (e: any) => void; isActivated: boolean }) {
+  const navigate = useNavigate()
+
+  const handleReactivate = async () => {
+    if (!confirm('This will clear the current activation and show the activation screen. Continue?')) return
+    await window.api.app.deactivate()
+    navigate('/activate')
+  }
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <Section title="Cloud Sync">
+        <p className="text-xs -mt-1 mb-2" style={{ color: 'var(--text-3)' }}>
+          This POS connects to the cloud backend to sync sales, stock, and customer data in real time.
+        </p>
+
+        {isActivated && form.cloud_api_url && (
+          <div className="rounded-lg border px-4 py-3 mb-3 flex items-start gap-3" style={{ borderColor: 'var(--brand-primary)', background: 'color-mix(in srgb, var(--brand-primary) 8%, transparent)' }}>
+            <Shield size={14} className="mt-0.5 flex-shrink-0" style={{ color: 'var(--brand-primary)' }} />
+            <div className="text-xs" style={{ color: 'var(--text-2)' }}>
+              <strong>Device is activated.</strong> The server URL is locked by your platform administrator.
+              Use <em>Re-activate Device</em> below to connect to a different server.
+            </div>
+          </div>
+        )}
+
+        <Check label="Enable Offline Sync" checked={Boolean(form.offline_sync_enabled)} onChange={check('offline_sync_enabled')} />
+        <div className="grid grid-cols-2 gap-3 mt-2">
+          <Field label="Cloud API URL">
+            <input
+              value={form.cloud_api_url}
+              onChange={f('cloud_api_url')}
+              className="input font-mono text-sm"
+              placeholder="https://api.example.com"
+              readOnly={isActivated && Boolean(form.cloud_api_url)}
+              style={isActivated && form.cloud_api_url ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
+            />
+          </Field>
+          <Field label="Sync Interval (minutes)">
+            <input type="number" value={form.sync_interval_minutes} onChange={f('sync_interval_minutes')} className="input" min="1" />
+          </Field>
+          <Field label="Failed Retry (minutes)">
+            <input type="number" value={form.failed_sync_retry_minutes} onChange={f('failed_sync_retry_minutes')} className="input" min="1" />
+          </Field>
+        </div>
+        <div className="mt-3 rounded-lg border px-4 py-3 text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-3)', background: 'var(--bg-soft)' }}>
+          <strong style={{ color: 'var(--text-2)' }}>API Key</strong> — managed by your platform administrator.
+          {!isActivated && <> To activate this POS device, complete the activation flow from the login screen.</>}
+        </div>
+        <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
+          <button
+            type="button"
+            onClick={handleReactivate}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-yellow-500/10 text-yellow-400 hover:bg-yellow-500/20 transition-colors border border-yellow-500/30"
+          >
+            <RefreshCw size={14} />
+            Re-activate Device
+          </button>
+          <p className="text-xs mt-1.5" style={{ color: 'var(--text-3)' }}>
+            Use this to connect to a different server or if activation shows "pending" in the admin portal.
+          </p>
+        </div>
       </Section>
     </div>
   )
@@ -586,5 +985,457 @@ function Check({ label, checked, onChange }: { label: string; checked: boolean; 
       <input type="checkbox" checked={checked} onChange={onChange} className="w-4 h-4 accent-blue-600" />
       <span className="text-sm">{label}</span>
     </label>
+  )
+}
+
+// ── Loyalty Settings Tab ──────────────────────────────────────────────────────
+
+function LoyaltySettings() {
+  const [cfg, setCfg] = useState({
+    enabled: 0, earn_points: 1, earn_per_amount: 100,
+    redeem_points: 100, redeem_value: 10, min_redeem: 100, expiry_days: 0,
+  })
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    window.api.loyalty.config.get().then((r: { success: boolean; data?: Record<string, number> }) => {
+      if (r.success && r.data) setCfg(r.data as typeof cfg)
+    })
+  }, [])
+
+  const save = async () => {
+    setSaving(true)
+    const res = await window.api.loyalty.config.save(cfg) as { success: boolean; error?: string }
+    setSaving(false)
+    if (res.success) toast.success('Loyalty settings saved')
+    else toast.error(res.error || 'Save failed')
+  }
+
+  return (
+    <div className="space-y-6 max-w-xl">
+      <Section title="Loyalty Points Program">
+        <p className="text-xs -mt-1 mb-3" style={{ color: 'var(--text-3)' }}>
+          Customers earn points on every purchase and can redeem them for discounts at POS.
+        </p>
+        <label className="flex items-center gap-2 mb-4 cursor-pointer">
+          <input type="checkbox" checked={Boolean(cfg.enabled)} onChange={e => setCfg(c => ({ ...c, enabled: e.target.checked ? 1 : 0 }))} className="w-4 h-4 accent-yellow-500" />
+          <span className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Enable Loyalty Program ⭐</span>
+        </label>
+
+        <div className="space-y-4" style={{ opacity: cfg.enabled ? 1 : 0.5, pointerEvents: cfg.enabled ? 'auto' : 'none' }}>
+          <Section title="Earn Rate">
+            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-2)' }}>
+              <span>Customer earns</span>
+              <input type="number" min={1} value={cfg.earn_points} onChange={e => setCfg(c => ({ ...c, earn_points: parseInt(e.target.value) || 1 }))} className="input w-20 py-1 text-center" />
+              <span>point(s) for every</span>
+              <input type="number" min={1} value={cfg.earn_per_amount} onChange={e => setCfg(c => ({ ...c, earn_per_amount: parseFloat(e.target.value) || 100 }))} className="input w-24 py-1 text-center" />
+              <span>Rs. spent</span>
+            </div>
+          </Section>
+
+          <Section title="Redemption Rate">
+            <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-2)' }}>
+              <input type="number" min={1} value={cfg.redeem_points} onChange={e => setCfg(c => ({ ...c, redeem_points: parseInt(e.target.value) || 100 }))} className="input w-24 py-1 text-center" />
+              <span>points =</span>
+              <span style={{ color: 'var(--text-3)' }}>Rs.</span>
+              <input type="number" min={0.1} step={0.5} value={cfg.redeem_value} onChange={e => setCfg(c => ({ ...c, redeem_value: parseFloat(e.target.value) || 10 }))} className="input w-24 py-1 text-center" />
+              <span>discount</span>
+            </div>
+          </Section>
+
+          <Section title="Redemption Rules">
+            <Field label="Minimum points to redeem">
+              <input type="number" min={0} value={cfg.min_redeem} onChange={e => setCfg(c => ({ ...c, min_redeem: parseInt(e.target.value) || 0 }))} className="input w-32" />
+            </Field>
+            <Field label="Points expiry (days, 0 = never expire)">
+              <input type="number" min={0} value={cfg.expiry_days} onChange={e => setCfg(c => ({ ...c, expiry_days: parseInt(e.target.value) || 0 }))} className="input w-32" />
+            </Field>
+          </Section>
+
+          <div className="rounded-xl p-4 border" style={{ background: 'color-mix(in srgb, #f59e0b 8%, transparent)', borderColor: 'color-mix(in srgb, #f59e0b 30%, transparent)' }}>
+            <p className="text-sm font-semibold text-yellow-500 mb-1">Preview</p>
+            <p className="text-xs" style={{ color: 'var(--text-2)' }}>
+              A purchase of Rs. 1,000 earns <strong>{Math.floor(1000 / cfg.earn_per_amount * cfg.earn_points)} points</strong>.
+              {' '}{cfg.redeem_points} points can be redeemed for Rs. {cfg.redeem_value} discount.
+            </p>
+          </div>
+        </div>
+
+        <button onClick={save} disabled={saving} className="btn-primary mt-4 gap-1.5">
+          <Save size={14} />{saving ? 'Saving…' : 'Save Loyalty Settings'}
+        </button>
+      </Section>
+    </div>
+  )
+}
+
+// ── Communications Tab ────────────────────────────────────────────────────────
+
+function CommunicationsSettings({ form, f, check }: {
+  form: Record<string, unknown>
+  f: (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void
+  check: (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => void
+}) {
+  const [testEmail, setTestEmail]   = useState('')
+  const [testSms, setTestSms]       = useState('')
+  const [testWa, setTestWa]         = useState('')
+  const [testing, setTesting]       = useState<Record<string, boolean>>({})
+
+  const runTest = async (key: string, fn: () => Promise<{ success: boolean; error?: string }>) => {
+    setTesting(t => ({ ...t, [key]: true }))
+    try {
+      const res = await fn()
+      if (res.success) toast.success(`${key} test sent!`)
+      else toast.error(res.error || `${key} test failed`)
+    } finally {
+      setTesting(t => ({ ...t, [key]: false }))
+    }
+  }
+
+  return (
+    <div className="space-y-8 max-w-3xl">
+
+      {/* ── Email / SMTP ───────────────────────────────────────────────────── */}
+      <Section title="Email (SMTP)">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>Send invoices, payment reminders, and low-stock alerts by email.</p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={Boolean(form.email_enabled)} onChange={check('email_enabled')} className="w-4 h-4 accent-blue-600" />
+            <span className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Enable Email</span>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="SMTP Host">
+            <input value={String(form.smtp_host || '')} onChange={f('smtp_host')} className="input font-mono text-sm" placeholder="smtp.gmail.com" disabled={!form.email_enabled} />
+          </Field>
+          <Field label="Port">
+            <input type="number" value={Number(form.smtp_port || 587)} onChange={f('smtp_port')} className="input" placeholder="587" disabled={!form.email_enabled} />
+          </Field>
+        </div>
+        <Field label="Encryption">
+          <select value={String(form.smtp_encryption || 'TLS')} onChange={f('smtp_encryption')} className="input max-w-xs" disabled={!form.email_enabled}>
+            <option value="TLS">STARTTLS (port 587)</option>
+            <option value="SSL">SSL/TLS (port 465)</option>
+            <option value="NONE">None (port 25)</option>
+          </select>
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Username / Email">
+            <input value={String(form.smtp_username || '')} onChange={f('smtp_username')} className="input" placeholder="you@gmail.com" disabled={!form.email_enabled} />
+          </Field>
+          <Field label="Password / App Password">
+            <input type="password" value={String(form.smtp_password || '')} onChange={f('smtp_password')} className="input" placeholder="••••••••" disabled={!form.email_enabled} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="From Name">
+            <input value={String(form.smtp_from_name || '')} onChange={f('smtp_from_name')} className="input" placeholder="Nature Plantation" disabled={!form.email_enabled} />
+          </Field>
+          <Field label="From Email">
+            <input value={String(form.smtp_from_email || '')} onChange={f('smtp_from_email')} className="input" placeholder="noreply@company.lk" disabled={!form.email_enabled} />
+          </Field>
+        </div>
+        <Field label="Reply-To Email (optional)">
+          <input value={String(form.smtp_reply_to || '')} onChange={f('smtp_reply_to')} className="input max-w-sm" placeholder="info@company.lk" disabled={!form.email_enabled} />
+        </Field>
+
+        {/* Test email */}
+        <div className="flex items-center gap-2 mt-2">
+          <Mail size={13} style={{ color: 'var(--text-3)' }} />
+          <input
+            value={testEmail}
+            onChange={e => setTestEmail(e.target.value)}
+            className="input flex-1 max-w-xs py-1.5 text-sm"
+            placeholder="test@example.com"
+          />
+          <button
+            disabled={!testEmail || testing.email || !form.email_enabled}
+            onClick={() => runTest('Email', () => window.api.comm.email.test(testEmail))}
+            className="btn-secondary btn-sm"
+          >
+            {testing.email ? 'Sending…' : 'Send Test Email'}
+          </button>
+        </div>
+      </Section>
+
+      {/* ── SMS Gateway ────────────────────────────────────────────────────── */}
+      <Section title="SMS Gateway">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>Send installment reminders and low-stock alerts via SMS. Works with any HTTP-based gateway (MSG91, TextLocal, Twilio, etc.)</p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={Boolean(form.sms_enabled)} onChange={check('sms_enabled')} className="w-4 h-4 accent-blue-600" />
+            <span className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Enable SMS</span>
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Provider Name">
+            <input value={String(form.sms_provider_name || '')} onChange={f('sms_provider_name')} className="input" placeholder="MSG91 / Twilio / TextLocal" disabled={!form.sms_enabled} />
+          </Field>
+          <Field label="Sender ID / From">
+            <input value={String(form.sms_sender_id || '')} onChange={f('sms_sender_id')} className="input" placeholder="POSAPP" disabled={!form.sms_enabled} />
+          </Field>
+        </div>
+        <Field label="API Base URL">
+          <input value={String(form.sms_api_base_url || '')} onChange={f('sms_api_base_url')} className="input font-mono text-sm" placeholder="https://api.msg91.com/api/v5/flow/" disabled={!form.sms_enabled} />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="API Key">
+            <input value={String(form.sms_api_key || '')} onChange={f('sms_api_key')} className="input font-mono text-sm" placeholder="your-api-key" disabled={!form.sms_enabled} />
+          </Field>
+          <Field label="API Secret (optional)">
+            <input type="password" value={String(form.sms_api_secret || '')} onChange={f('sms_api_secret')} className="input" placeholder="••••••••" disabled={!form.sms_enabled} />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="HTTP Method">
+            <select value={String(form.sms_http_method || 'POST')} onChange={f('sms_http_method')} className="input" disabled={!form.sms_enabled}>
+              <option value="POST">POST</option>
+              <option value="GET">GET</option>
+            </select>
+          </Field>
+          <Field label="Content-Type">
+            <select value={String(form.sms_content_type || 'application/json')} onChange={f('sms_content_type')} className="input" disabled={!form.sms_enabled}>
+              <option value="application/json">JSON</option>
+              <option value="application/x-www-form-urlencoded">Form URL Encoded</option>
+            </select>
+          </Field>
+        </div>
+        <Field label="Request Body Template">
+          <p className="text-xs mb-1" style={{ color: 'var(--text-3)' }}>Use: <code className="bg-slate-700 px-1 rounded text-xs">&#123;phone&#125;</code>, <code className="bg-slate-700 px-1 rounded text-xs">&#123;message&#125;</code>, <code className="bg-slate-700 px-1 rounded text-xs">&#123;api_key&#125;</code>, <code className="bg-slate-700 px-1 rounded text-xs">&#123;sender_id&#125;</code></p>
+          <textarea
+            value={String(form.sms_body_template || '{"mobile":"{phone}","message":"{message}"}')}
+            onChange={f('sms_body_template')}
+            className="input font-mono text-xs h-20 resize-none"
+            disabled={!form.sms_enabled}
+          />
+        </Field>
+        <Field label="Custom Headers (one per line, Key: Value)">
+          <textarea
+            value={String(form.sms_custom_headers || '')}
+            onChange={f('sms_custom_headers')}
+            className="input font-mono text-xs h-16 resize-none"
+            placeholder={'authkey: your-key\nX-Custom: value'}
+            disabled={!form.sms_enabled}
+          />
+        </Field>
+
+        {/* Test SMS */}
+        <div className="flex items-center gap-2 mt-2">
+          <MessageSquare size={13} style={{ color: 'var(--text-3)' }} />
+          <input
+            value={testSms}
+            onChange={e => setTestSms(e.target.value)}
+            className="input flex-1 max-w-xs py-1.5 text-sm"
+            placeholder="+94771234567"
+          />
+          <button
+            disabled={!testSms || testing.sms || !form.sms_enabled}
+            onClick={() => runTest('SMS', () => window.api.comm.sms.test(testSms))}
+            className="btn-secondary btn-sm"
+          >
+            {testing.sms ? 'Sending…' : 'Send Test SMS'}
+          </button>
+        </div>
+      </Section>
+
+      {/* ── WhatsApp ───────────────────────────────────────────────────────── */}
+      <Section title="WhatsApp API">
+        <div className="flex items-center justify-between mb-3">
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>Send receipts and reminders via WhatsApp Business. Supports Meta Cloud API and Twilio.</p>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={Boolean(form.whatsapp_enabled)} onChange={check('whatsapp_enabled')} className="w-4 h-4 accent-blue-600" />
+            <span className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Enable WhatsApp</span>
+          </label>
+        </div>
+
+        <Field label="Provider">
+          <select value={String(form.whatsapp_provider || 'meta')} onChange={f('whatsapp_provider')} className="input max-w-xs" disabled={!form.whatsapp_enabled}>
+            <option value="meta">Meta Cloud API (WhatsApp Business)</option>
+            <option value="twilio">Twilio WhatsApp</option>
+          </select>
+        </Field>
+
+        {(form.whatsapp_provider === 'meta' || !form.whatsapp_provider) && (
+          <>
+            <Field label="Phone Number ID">
+              <input value={String(form.whatsapp_phone_number_id || '')} onChange={f('whatsapp_phone_number_id')} className="input font-mono text-sm" placeholder="1234567890" disabled={!form.whatsapp_enabled} />
+            </Field>
+            <Field label="Access Token">
+              <input type="password" value={String(form.whatsapp_access_token || '')} onChange={f('whatsapp_access_token')} className="input font-mono text-sm" placeholder="EAAxxxxx…" disabled={!form.whatsapp_enabled} />
+            </Field>
+          </>
+        )}
+
+        {form.whatsapp_provider === 'twilio' && (
+          <>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Account SID">
+                <input value={String(form.whatsapp_twilio_sid || '')} onChange={f('whatsapp_twilio_sid')} className="input font-mono text-sm" placeholder="ACxxxxxxxxxx" disabled={!form.whatsapp_enabled} />
+              </Field>
+              <Field label="Auth Token">
+                <input type="password" value={String(form.whatsapp_twilio_token || '')} onChange={f('whatsapp_twilio_token')} className="input" placeholder="••••••••" disabled={!form.whatsapp_enabled} />
+              </Field>
+            </div>
+            <Field label="From Number (WhatsApp)">
+              <input value={String(form.whatsapp_from_number || '')} onChange={f('whatsapp_from_number')} className="input" placeholder="+14155238886" disabled={!form.whatsapp_enabled} />
+            </Field>
+          </>
+        )}
+
+        {/* Test WhatsApp */}
+        <div className="flex items-center gap-2 mt-2">
+          <Phone size={13} style={{ color: 'var(--text-3)' }} />
+          <input
+            value={testWa}
+            onChange={e => setTestWa(e.target.value)}
+            className="input flex-1 max-w-xs py-1.5 text-sm"
+            placeholder="+94771234567"
+          />
+          <button
+            disabled={!testWa || testing.whatsapp || !form.whatsapp_enabled}
+            onClick={() => runTest('WhatsApp', () => window.api.comm.whatsapp.test(testWa))}
+            className="btn-secondary btn-sm"
+          >
+            {testing.whatsapp ? 'Sending…' : 'Send Test Message'}
+          </button>
+        </div>
+      </Section>
+
+      {/* ── Reminder Schedule ──────────────────────────────────────────────── */}
+      <Section title="Auto Reminders">
+        <p className="text-xs mb-3" style={{ color: 'var(--text-3)' }}>
+          The system automatically sends reminders every day at startup. Enable Email or SMS above to activate.
+        </p>
+        <div className="rounded-xl border divide-y" style={{ borderColor: 'var(--border)' }}>
+          {[
+            { label: 'Overdue installment notice', desc: 'Sent daily to customers whose payment is past due', icon: '🔴' },
+            { label: 'Due today reminder', desc: 'Sent on the day payment is due', icon: '🟡' },
+            { label: 'Due in 3 days reminder', desc: 'Early warning 3 days before due date', icon: '🟢' },
+            { label: 'Low stock alert', desc: 'Daily email/SMS to company email when items are below min level', icon: '📦' },
+          ].map(item => (
+            <div key={item.label} className="flex items-center gap-3 px-4 py-3">
+              <span className="text-base">{item.icon}</span>
+              <div>
+                <p className="text-sm font-medium" style={{ color: 'var(--text-1)' }}>{item.label}</p>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>{item.desc}</p>
+              </div>
+              <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-medium"
+                style={{ background: 'color-mix(in srgb, var(--brand-primary) 12%, transparent)', color: 'var(--brand-primary)' }}>
+                Auto
+              </span>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex gap-2 mt-3">
+          <button
+            onClick={() => {
+              window.api.comm.sendLowStockAlert().then((r: { success: boolean; count?: number; error?: string }) => {
+                if (r.success) toast.success(r.count ? `Low stock alert sent for ${r.count} items` : 'No low stock items found')
+                else toast.error(r.error || 'Failed to send alert')
+              })
+            }}
+            className="btn-secondary btn-sm"
+          >
+            📦 Send Low Stock Alert Now
+          </button>
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+// ── S3 Storage Tab ────────────────────────────────────────────────────────────
+
+function S3Settings({ form, f, check }: {
+  form: Record<string, unknown>
+  f: (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => void
+  check: (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => void
+}) {
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+
+  const save = async () => {
+    setSaving(true)
+    const s3Fields = {
+      s3_enabled: form.s3_enabled,
+      s3_bucket:  form.s3_bucket,
+      s3_region:  form.s3_region,
+      s3_access_key: form.s3_access_key,
+      s3_secret_key: form.s3_secret_key,
+      s3_endpoint: form.s3_endpoint,
+      s3_cdn_url:  form.s3_cdn_url,
+    }
+    const res = await window.api.settings.update(s3Fields) as { success: boolean; error?: string }
+    setSaving(false)
+    if (res.success) toast.success('S3 settings saved')
+    else toast.error(res.error || 'Save failed')
+  }
+
+  const testConnection = async () => {
+    setTesting(true)
+    const res = await window.api.settings.s3Test() as { success: boolean; error?: string }
+    setTesting(false)
+    if (res.success) toast.success('S3 connection successful!')
+    else toast.error(res.error || 'Connection failed')
+  }
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <Section title="AWS S3 / S3-Compatible Storage">
+        <div className="flex items-center gap-3 mb-4">
+          <input type="checkbox" id="s3_enabled" checked={Boolean(form.s3_enabled)} onChange={check('s3_enabled')} className="w-4 h-4" />
+          <label htmlFor="s3_enabled" className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>
+            Enable S3 Storage
+          </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">S3 Bucket *</label>
+            <input value={String(form.s3_bucket || '')} onChange={f('s3_bucket')} className="input" placeholder="my-pos-bucket" />
+          </div>
+          <div>
+            <label className="label">Region *</label>
+            <input value={String(form.s3_region || '')} onChange={f('s3_region')} className="input" placeholder="us-east-1" />
+          </div>
+          <div>
+            <label className="label">Access Key ID *</label>
+            <input value={String(form.s3_access_key || '')} onChange={f('s3_access_key')} className="input" placeholder="AKIAIOSFODNN7EXAMPLE" />
+          </div>
+          <div>
+            <label className="label">Secret Access Key *</label>
+            <input type="password" value={String(form.s3_secret_key || '')} onChange={f('s3_secret_key')} className="input" placeholder="••••••••" />
+          </div>
+          <div className="col-span-2">
+            <label className="label">Custom Endpoint (optional — for MinIO / Wasabi / BackBlaze B2)</label>
+            <input value={String(form.s3_endpoint || '')} onChange={f('s3_endpoint')} className="input" placeholder="https://s3.wasabisys.com" />
+            <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>Leave blank to use AWS S3</p>
+          </div>
+          <div className="col-span-2">
+            <label className="label">CDN URL (optional — prefix for uploaded file URLs)</label>
+            <input value={String(form.s3_cdn_url || '')} onChange={f('s3_cdn_url')} className="input" placeholder="https://cdn.yourdomain.com" />
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-4">
+          <button onClick={save} disabled={saving} className="btn-primary gap-1.5">
+            <Save size={14} />{saving ? 'Saving…' : 'Save S3 Settings'}
+          </button>
+          <button onClick={testConnection} disabled={testing || !form.s3_bucket} className="btn-secondary gap-1.5">
+            {testing ? <RefreshCw size={14} className="animate-spin" /> : <Cloud size={14} />}
+            {testing ? 'Testing…' : 'Test Connection'}
+          </button>
+        </div>
+
+        <div className="mt-4 p-3 rounded-lg border text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+          <strong style={{ color: 'var(--text-2)' }}>How it works:</strong> When S3 is enabled, product images will be uploaded
+          to your S3 bucket instead of local storage. Existing local images remain accessible via the{' '}
+          <code className="font-mono text-[10px]">app-img://</code> protocol.
+        </div>
+      </Section>
+    </div>
   )
 }

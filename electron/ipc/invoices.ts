@@ -3,6 +3,7 @@ import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
+import { insertStockMovement } from '../services/stockMovement'
 
 const store = new Store()
 
@@ -75,6 +76,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const billType: BillType = payload.bill_type || 'RETAIL'
       const id = crypto.randomUUID()
       const invoiceNumber = getNextBillNumber(branchId, billType)
+      const movementRecords: Record<string, unknown>[] = []
 
       // --- Credit bill validation ---
       if (billType === 'CREDIT') {
@@ -159,10 +161,23 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
           // QUOTATION: do NOT deduct stock. RETAIL and CREDIT: deduct immediately.
           if (billType !== 'QUOTATION') {
-            db.prepare(`
+            const changed = db.prepare(`
               UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now')
-              WHERE product_id = ? AND branch_id = ?
-            `).run(item.quantity, item.product_id, branchId)
+              WHERE product_id = ? AND branch_id = ? AND quantity >= ?
+            `).run(item.quantity, item.product_id, branchId, item.quantity)
+            if (!changed.changes) {
+              throw new Error(`Insufficient branch stock for product ${item.product_id}`)
+            }
+            movementRecords.push(insertStockMovement(db, {
+              product_id: item.product_id,
+              from_branch_id: branchId,
+              to_branch_id: null,
+              quantity: item.quantity,
+              movement_type: 'SALE',
+              reference_order_id: id,
+              notes: `${billType} bill ${invoiceNumber}`,
+              created_by: (user?.id as string) || null,
+            }))
           }
         }
 
@@ -232,6 +247,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         paid_amount: payload.paid_amount || 0, due_amount: payload.due_amount || 0,
         notes: payload.notes || null,
       })
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
 
       return { success: true, data: { id, invoice_number: invoiceNumber, bill_type: billType } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
@@ -251,18 +269,31 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
       const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(id) as
         { product_id: string; quantity: number }[]
+      const movementRecords: Record<string, unknown>[] = []
 
       const convert = db.transaction(() => {
+        const newNumber = getNextBillNumber(invoice.branch_id as string, 'RETAIL')
+
         // Deduct stock for each item
         for (const item of items) {
-          db.prepare(`
+          const changed = db.prepare(`
             UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now')
-            WHERE product_id = ? AND branch_id = ?
-          `).run(item.quantity, item.product_id, invoice.branch_id)
+            WHERE product_id = ? AND branch_id = ? AND quantity >= ?
+          `).run(item.quantity, item.product_id, invoice.branch_id, item.quantity)
+          if (!changed.changes) {
+            throw new Error(`Insufficient branch stock for product ${item.product_id}`)
+          }
+          movementRecords.push(insertStockMovement(db, {
+            product_id: item.product_id,
+            from_branch_id: invoice.branch_id as string,
+            to_branch_id: null,
+            quantity: item.quantity,
+            movement_type: 'SALE',
+            reference_order_id: id,
+            notes: `Quotation converted to ${newNumber}`,
+            created_by: (user?.id as string) || null,
+          }))
         }
-
-        // Generate new RETAIL bill number
-        const newNumber = getNextBillNumber(invoice.branch_id as string, 'RETAIL')
 
         db.prepare(`
           UPDATE invoices SET bill_type='RETAIL', status='completed',
@@ -281,6 +312,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
       const newNumber = convert()
       await enqueuSync('invoices', id, 'UPDATE', { id, bill_type: 'RETAIL', status: 'completed', invoice_number: newNumber })
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
       return { success: true, data: { invoice_number: newNumber } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -440,6 +474,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const invoice = db.prepare('SELECT * FROM invoices WHERE id=?').get(id) as Record<string, unknown>
       if (!invoice) return { success: false, error: 'Invoice not found' }
       if (invoice.locked_at) return { success: false, error: 'Invoice is locked for day-end. Contact admin.' }
+      const movementRecords: Record<string, unknown>[] = []
 
       const cancel = db.transaction(() => {
         // Restore stock for RETAIL and CREDIT bills (not QUOTATION — stock was never deducted)
@@ -451,6 +486,16 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
               UPDATE stocks SET quantity = quantity + ?, updated_at=datetime('now')
               WHERE product_id=? AND branch_id=?
             `).run(item.quantity, item.product_id, invoice.branch_id)
+            movementRecords.push(insertStockMovement(db, {
+              product_id: item.product_id,
+              from_branch_id: null,
+              to_branch_id: invoice.branch_id as string,
+              quantity: item.quantity,
+              movement_type: 'ADJUSTMENT',
+              reference_order_id: id,
+              notes: `Invoice cancelled: ${reason || 'No reason provided'}`,
+              created_by: (user?.id as string) || null,
+            }))
           }
         }
 
@@ -481,6 +526,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
       cancel()
       await enqueuSync('invoices', id, 'UPDATE', { id, status: 'cancelled' })
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })

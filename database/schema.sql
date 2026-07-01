@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS branches (
   address     TEXT,
   phone       TEXT,
   email       TEXT,
+  code        TEXT,
+  branch_pin  TEXT,
   is_active   INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
@@ -125,6 +127,27 @@ CREATE TABLE IF NOT EXISTS stocks (
 
 CREATE INDEX IF NOT EXISTS idx_stocks_product ON stocks(product_id);
 CREATE INDEX IF NOT EXISTS idx_stocks_branch  ON stocks(branch_id);
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id                   TEXT PRIMARY KEY,
+  product_id            TEXT NOT NULL REFERENCES products(id),
+  from_branch_id        TEXT REFERENCES branches(id),
+  to_branch_id          TEXT REFERENCES branches(id),
+  quantity              INTEGER NOT NULL,
+  movement_type         TEXT NOT NULL CHECK (movement_type IN ('SALE','TRANSFER','ADJUSTMENT','RECEIVE')),
+  reference_order_id    TEXT,
+  reference_transfer_id TEXT REFERENCES stock_transfers(id),
+  notes                 TEXT,
+  created_by            TEXT REFERENCES users(id),
+  created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at             TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_from_branch ON stock_movements(from_branch_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_to_branch ON stock_movements(to_branch_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_type ON stock_movements(movement_type);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_created_at ON stock_movements(created_at);
 
 -- ─── STOCK TRANSFERS ───────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS stock_transfers (
@@ -315,15 +338,30 @@ CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id);
 -- ─── INSTALLMENTS ──────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS installments (
   id           TEXT PRIMARY KEY,
+  contract_number TEXT UNIQUE,
   invoice_id   TEXT NOT NULL REFERENCES invoices(id),
   customer_id  TEXT NOT NULL REFERENCES customers(id),
+  branch_id    TEXT REFERENCES branches(id),
+  customer_phone TEXT,
+  cash_price   REAL NOT NULL DEFAULT 0,
+  down_payment REAL NOT NULL DEFAULT 0,
+  financed_amount REAL NOT NULL DEFAULT 0,
+  interest_type TEXT NOT NULL DEFAULT 'flat',
+  interest_rate REAL NOT NULL DEFAULT 0,
+  interest_amount REAL NOT NULL DEFAULT 0,
   total_amount REAL NOT NULL,
   paid_amount  REAL NOT NULL DEFAULT 0,
   due_amount   REAL NOT NULL,
+  penalty_amount REAL NOT NULL DEFAULT 0,
+  grace_period_days INTEGER NOT NULL DEFAULT 0,
+  late_fee     REAL NOT NULL DEFAULT 0,
+  monthly_amount REAL NOT NULL DEFAULT 0,
   installment_count INTEGER NOT NULL,
+  remaining_installments INTEGER NOT NULL DEFAULT 0,
   frequency    TEXT NOT NULL DEFAULT 'monthly', -- weekly|monthly
   start_date   TEXT NOT NULL,
   next_due_date TEXT,
+  last_paid_date TEXT,
   status       TEXT NOT NULL DEFAULT 'active', -- active|completed|overdue|defaulted
   notes        TEXT,
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -335,12 +373,76 @@ CREATE TABLE IF NOT EXISTS installment_payments (
   id              TEXT PRIMARY KEY,
   installment_id  TEXT NOT NULL REFERENCES installments(id),
   amount          REAL NOT NULL,
+  method          TEXT NOT NULL DEFAULT 'cash',
+  receipt_number  TEXT,
+  reference       TEXT,
+  receipt_image_url TEXT,
+  status          TEXT NOT NULL DEFAULT 'approved',
   paid_at         TEXT NOT NULL DEFAULT (datetime('now')),
   received_by     TEXT REFERENCES users(id),
+  verified_by     TEXT REFERENCES users(id),
+  verified_at     TEXT,
+  rejected_reason TEXT,
+  branch_id       TEXT REFERENCES branches(id),
   notes           TEXT,
   updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS installment_plans (
+  id                 TEXT PRIMARY KEY,
+  name               TEXT NOT NULL,
+  months             INTEGER NOT NULL,
+  interest_type      TEXT NOT NULL DEFAULT 'flat',
+  interest_rate      REAL NOT NULL DEFAULT 0,
+  min_down_payment_pct REAL NOT NULL DEFAULT 0,
+  late_fee           REAL NOT NULL DEFAULT 0,
+  grace_period_days  INTEGER NOT NULL DEFAULT 0,
+  is_promotion       INTEGER NOT NULL DEFAULT 0,
+  is_active          INTEGER NOT NULL DEFAULT 1,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at          TEXT
+);
+
+CREATE TABLE IF NOT EXISTS installment_schedule (
+  id              TEXT PRIMARY KEY,
+  installment_id  TEXT NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
+  installment_no  INTEGER NOT NULL,
+  due_date        TEXT NOT NULL,
+  principal       REAL NOT NULL DEFAULT 0,
+  interest        REAL NOT NULL DEFAULT 0,
+  penalty         REAL NOT NULL DEFAULT 0,
+  total_due       REAL NOT NULL DEFAULT 0,
+  paid_amount     REAL NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  paid_at         TEXT,
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at       TEXT,
+  UNIQUE(installment_id, installment_no)
+);
+
+CREATE TABLE IF NOT EXISTS installment_reminders (
+  id              TEXT PRIMARY KEY,
+  installment_id  TEXT NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
+  schedule_id     TEXT REFERENCES installment_schedule(id),
+  channel         TEXT NOT NULL,
+  reminder_type   TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  message         TEXT,
+  scheduled_at    TEXT NOT NULL,
+  sent_at         TEXT,
+  error           TEXT,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_installments_contract ON installments(contract_number);
+CREATE INDEX IF NOT EXISTS idx_installments_branch ON installments(branch_id);
+CREATE INDEX IF NOT EXISTS idx_installments_next_due ON installments(next_due_date);
+CREATE INDEX IF NOT EXISTS idx_installment_payments_status ON installment_payments(status);
+CREATE INDEX IF NOT EXISTS idx_installment_schedule_account ON installment_schedule(installment_id);
+CREATE INDEX IF NOT EXISTS idx_installment_schedule_due ON installment_schedule(due_date, status);
 
 -- ─── DELIVERIES ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS deliveries (
@@ -399,7 +501,7 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_date   ON audit_logs(created_at);
 
 -- ─── SEED DEFAULT ROLES ────────────────────────────────────────────────────
 INSERT OR IGNORE INTO roles (id, name, permissions) VALUES
-  ('3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d',   'Super Admin',     '{"all":true}'),
+  ('3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d',   'Company Admin',   '{"all":true}'),
   ('4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e',   'Branch Manager',  '{"pos":true,"inventory":true,"reports":true,"customers":true,"employees":true}'),
   ('5c8d0e1f-3a4b-6c5d-0e1f-3a4b5c8d0e1f',   'Cashier',         '{"pos":true,"customers":true}'),
   ('6d9e1f2a-4b5c-7d6e-1f2a-4b5c6d9e1f2a',   'Warehouse Staff', '{"inventory":true,"transfers":true}'),

@@ -1,33 +1,21 @@
 import { randomUUID } from 'crypto'
-import type { PoolClient } from 'pg'
+import type { QueryClient } from './db'
 
 export const ALLOWED_TABLES = new Set([
-  'branches',
-  'warehouses',
-  'roles',
-  'users',
-  'categories',
-  'suppliers',
-  'products',
-  'stocks',
-  'stock_transfers',
-  'customers',
-  'invoices',
-  'invoice_items',
-  'payments',
-  'installments',
-  'installment_payments',
-  'deliveries',
-  'audit_logs',
-  'customer_orders',
-  'customer_order_items',
+  'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers',
+  'products', 'stocks', 'stock_movements', 'stock_transfers', 'customers',
+  'invoices', 'invoice_items', 'payments', 'installments', 'installment_payments',
+  'installment_plans', 'installment_schedule', 'installment_reminders',
+  'deliveries', 'audit_logs', 'customer_orders', 'customer_order_items',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
-  invoice_items: new Set(['invoice_id']),
-  payments: new Set(['invoice_id']),
-  installment_payments: new Set(['installment_id']),
-  customer_order_items: new Set(['order_id']),
+  invoice_items:          new Set(['invoice_id']),
+  payments:               new Set(['invoice_id']),
+  installment_payments:   new Set(['installment_id']),
+  installment_schedule:   new Set(['installment_id']),
+  installment_reminders:  new Set(['installment_id']),
+  customer_order_items:   new Set(['order_id']),
 }
 
 export function assertTable(table: unknown): asserts table is string {
@@ -42,18 +30,18 @@ export function assertRelatedKey(table: string, key: unknown): asserts key is st
   }
 }
 
+// MySQL uses backticks for identifier quoting
 export function quoteIdentifier(value: string): string {
-  return `"${value.replace(/"/g, '""')}"`
+  return `\`${value.replace(/`/g, '``')}\``
 }
 
-async function getColumns(client: PoolClient, table: string): Promise<Set<string>> {
-  const result = await client.query<{ column_name: string }>(
-    `SELECT column_name
-       FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = $1`,
+async function getColumns(client: QueryClient, table: string): Promise<Set<string>> {
+  const result = await client.query<{ COLUMN_NAME: string }>(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
     [table]
   )
-  return new Set(result.rows.map(row => row.column_name))
+  return new Set(result.rows.map(row => row.COLUMN_NAME))
 }
 
 function normalizeValue(value: unknown): unknown {
@@ -62,7 +50,7 @@ function normalizeValue(value: unknown): unknown {
 }
 
 export async function applySyncOperation(
-  client: PoolClient,
+  client: QueryClient,
   input: {
     table: string
     operation: string
@@ -80,11 +68,10 @@ export async function applySyncOperation(
   )
 
   if (input.table === 'stocks' && !record.id) {
+    // MySQL NULL-safe equals: <=>
     const existing = await client.query<{ id: string }>(
       `SELECT id FROM stocks
-        WHERE product_id = $1
-          AND branch_id = $2
-          AND warehouse_id IS NOT DISTINCT FROM $3
+        WHERE product_id = ? AND branch_id = ? AND warehouse_id <=> ?
         LIMIT 1`,
       [record.product_id, record.branch_id, record.warehouse_id ?? null]
     )
@@ -94,7 +81,7 @@ export async function applySyncOperation(
 
   if (operation === 'DELETE') {
     await client.query(
-      `DELETE FROM ${quoteIdentifier(input.table)} WHERE id = $1`,
+      `DELETE FROM ${quoteIdentifier(input.table)} WHERE id = ?`,
       [input.recordId]
     )
     return
@@ -107,15 +94,17 @@ export async function applySyncOperation(
   if (operation === 'INSERT') {
     const values = keys.map(key => record[key])
     const updateKeys = keys.filter(key => key !== 'id' && key !== 'created_at')
+
+    // MySQL: ON DUPLICATE KEY UPDATE col = VALUES(col)
     const updateSql = updateKeys.length
-      ? updateKeys.map(key => `${quoteIdentifier(key)} = EXCLUDED.${quoteIdentifier(key)}`).join(', ')
-      : 'id = EXCLUDED.id'
+      ? updateKeys.map(key => `${quoteIdentifier(key)} = VALUES(${quoteIdentifier(key)})`).join(', ')
+      : `id = VALUES(id)`
 
     await client.query(
       `INSERT INTO ${quoteIdentifier(input.table)}
-        (${keys.map(quoteIdentifier).join(', ')})
-       VALUES (${keys.map((_, index) => `$${index + 1}`).join(', ')})
-       ON CONFLICT (id) DO UPDATE SET ${updateSql}`,
+         (${keys.map(quoteIdentifier).join(', ')})
+       VALUES (${keys.map(() => '?').join(', ')})
+       ON DUPLICATE KEY UPDATE ${updateSql}`,
       values
     )
     return
@@ -128,8 +117,8 @@ export async function applySyncOperation(
     const targetId = String(record.id || input.recordId)
     await client.query(
       `UPDATE ${quoteIdentifier(input.table)}
-          SET ${updateKeys.map((key, index) => `${quoteIdentifier(key)} = $${index + 1}`).join(', ')}
-        WHERE id = $${updateKeys.length + 1}`,
+          SET ${updateKeys.map(key => `${quoteIdentifier(key)} = ?`).join(', ')}
+        WHERE id = ?`,
       [...values, targetId]
     )
     return

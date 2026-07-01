@@ -6,6 +6,11 @@ export default {
   theme: {
     extend: {
       colors: {
+        // blue-600/700 mapped to CSS variables so brand color works app-wide
+        blue: {
+          600: 'var(--brand-primary, #2563eb)',
+          700: 'var(--brand-primary-hover, #1d4ed8)',
+        },
         brand: {
           50:  '#eef2ff',
           100: '#e0e7ff',

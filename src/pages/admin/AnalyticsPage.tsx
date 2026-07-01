@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import PageHeader from '@/components/shared/PageHeader'
 import StatCard from '@/components/shared/StatCard'
-import { TrendingUp, ShoppingBag, Users, Package } from 'lucide-react'
+import { TrendingUp, ShoppingBag, Users, Package, FileSpreadsheet, FileText } from 'lucide-react'
+import toast from 'react-hot-toast'
 
-const COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6']
 
 export default function AnalyticsPage() {
   const [salesData, setSalesData]         = useState<Record<string,unknown>[]>([])
@@ -31,14 +31,73 @@ export default function AnalyticsPage() {
 
   const rev = revenue as Record<string, Record<string, number>> | null
 
+  const exportExcel = async () => {
+    const filename = `analytics-report-${dateFrom}-to-${dateTo}`
+    const res = await window.api.reports.exportExcel({
+      filename,
+      sheets: [
+        {
+          name: 'Daily Revenue',
+          rows: salesData.map(r => ({
+            Date: r.date,
+            'Total Revenue': r.total_revenue,
+            'Invoice Count': r.invoice_count,
+          })),
+        },
+        {
+          name: 'Top Products',
+          rows: topProducts.map(r => ({
+            Product: r.name,
+            'Units Sold': r.total_quantity,
+            'Revenue': r.total_revenue,
+          })),
+        },
+        {
+          name: 'Branch Performance',
+          rows: branchPerf.map(r => ({
+            Branch: r.branch_name,
+            'Total Revenue': r.total_revenue,
+            'Invoices': r.total_invoices,
+            'Avg Invoice': r.avg_invoice_value,
+          })),
+        },
+      ],
+    }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
+    if (res.success) {
+      toast.success('Excel report saved!')
+      if (res.filePath) window.api.reports.openFile(res.filePath)
+    } else if (!res.cancelled) {
+      toast.error(res.error || 'Export failed')
+    }
+  }
+
+  const exportPdf = async () => {
+    const filename = `analytics-report-${dateFrom}-to-${dateTo}`
+    const res = await window.api.reports.exportPdf({ filename }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
+    if (res.success) {
+      toast.success('PDF report saved!')
+      if (res.filePath) window.api.reports.openFile(res.filePath)
+    } else if (!res.cancelled) {
+      toast.error(res.error || 'Export failed')
+    }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader title="Analytics" subtitle="Sales performance & insights"
         actions={
-          <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center flex-wrap">
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input py-1.5 text-sm" />
             <span className="text-slate-500 text-sm">to</span>
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input py-1.5 text-sm" />
+            <div className="flex gap-1 ml-1">
+              <button onClick={exportExcel} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-green-600 hover:bg-green-700 transition-colors" title="Export to Excel">
+                <FileSpreadsheet size={13} />Excel
+              </button>
+              <button onClick={exportPdf} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white bg-red-600 hover:bg-red-700 transition-colors" title="Export to PDF">
+                <FileText size={13} />PDF
+              </button>
+            </div>
           </div>
         }
       />

@@ -62,8 +62,10 @@ export default function POSPage() {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
       if (e.key.length !== 1) return          // skip arrows, F-keys, ESC, etc.
       if (e.ctrlKey || e.metaKey || e.altKey) return
-      // Redirect: focus search and seed it with the pressed character
-      setSearchQuery(e.key)
+      // Prevent browser from double-inserting the character into the newly focused input
+      e.preventDefault()
+      // Append (not replace) so fast typing outside the input doesn't drop earlier chars
+      setSearchQuery(prev => prev + e.key)
       searchRef.current?.focus()
     }
     window.addEventListener('keydown', captureKey)
@@ -275,9 +277,9 @@ export default function POSPage() {
   return (
     <div className="pos-shell absolute inset-0 flex flex-col overflow-hidden">
       {/* Toolbar */}
-      <div className="pos-toolbar flex items-center gap-3 px-4 py-3">
+      <div className="pos-toolbar flex items-center gap-2 px-3 py-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         {/* Bill type selector */}
-        <div className="pos-segment flex items-center gap-1 p-1 rounded-lg border">
+        <div className="pos-segment flex items-center gap-1 p-1 rounded-lg border shrink-0">
           {BILL_TYPES.map(bt => (
             <button
               key={bt.value}
@@ -294,23 +296,23 @@ export default function POSPage() {
           ))}
         </div>
 
-        <div className="pos-chip hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-lg border">
-          <FileText size={14} />
-          <span className="text-xs font-mono">{invoiceNumber || 'Generating...'}</span>
+        <div className="pos-chip hidden 2xl:flex items-center gap-1.5 px-3 py-1.5 rounded-lg border shrink-0">
+          <FileText size={13} />
+          <span className="text-xs font-mono whitespace-nowrap">{invoiceNumber || 'Generating...'}</span>
         </div>
 
         {/* Customer button */}
         <button
           onClick={() => setShowCustomer(true)}
           title="Select customer (F2)"
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors border ${
+          className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors border ${
             cart.billType === 'CREDIT' && !cart.customer
               ? 'bg-rose-950/50 border-rose-700 text-rose-200 hover:bg-rose-900/70'
               : 'pos-chip hover:bg-[var(--pos-hover)]'
           }`}
         >
           <User size={14} className={cart.billType === 'CREDIT' ? 'text-rose-400' : 'text-blue-400'} />
-          <span className="max-w-40 truncate">
+          <span className="max-w-32 truncate whitespace-nowrap">
             {cart.customer?.name || (cart.billType === 'CREDIT' ? 'Select Customer' : 'Walk-in')}
           </span>
           <kbd className="kbd text-[9px]">F2</kbd>
@@ -325,27 +327,27 @@ export default function POSPage() {
 
         {cart.billType === 'CREDIT' && cart.customer && <CreditInfoBadge customerId={cart.customer.id} />}
 
-        <div className="flex-1" />
+        <div className="flex-1 min-w-0" />
 
-        <div className="hidden lg:flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}>
+        <div className="hidden 2xl:flex items-center gap-1.5 text-xs shrink-0" style={{ color: 'var(--text-3)' }}>
           <Star size={13} className="text-amber-400" />
-          <span>Fast sale mode</span>
+          <span className="whitespace-nowrap">Fast sale</span>
         </div>
 
-        <button onClick={() => setShowHeld(true)} className="btn-ghost btn-sm gap-1.5" title="View held invoices">
+        <button onClick={() => setShowHeld(true)} className="btn-ghost btn-sm gap-1.5 shrink-0 whitespace-nowrap" title="View held invoices">
           <Pause size={13} /> Held
         </button>
-        <button onClick={newInvoice} className="btn-ghost btn-sm gap-1.5" title="New invoice (F1)">
+        <button onClick={newInvoice} className="btn-ghost btn-sm gap-1.5 shrink-0" title="New invoice (F1)">
           <Plus size={13} /> <kbd className="kbd">F1</kbd>
         </button>
-        <button onClick={holdInvoice} className="btn-secondary btn-sm gap-1.5" title="Hold invoice (F3)">
+        <button onClick={holdInvoice} className="btn-secondary btn-sm gap-1.5 shrink-0 whitespace-nowrap" title="Hold invoice (F3)">
           <Pause size={13} /> Hold <kbd className="kbd">F3</kbd>
         </button>
         <button
           onClick={openPayment}
           disabled={cart.items.length === 0}
           title={`${meta.action} (F12)`}
-          className={`btn-sm gap-1.5 font-semibold disabled:opacity-40 ${
+          className={`shrink-0 whitespace-nowrap btn-sm gap-1.5 font-semibold disabled:opacity-40 ${
             cart.billType === 'RETAIL' ? 'btn-primary' :
             cart.billType === 'QUOTATION' ? 'bg-amber-600 hover:bg-amber-500 text-white rounded-lg px-4' :
             'bg-rose-600 hover:bg-rose-500 text-white rounded-lg px-4'
@@ -353,7 +355,7 @@ export default function POSPage() {
         >
           <CreditCard size={13} />
           {meta.action}
-          <kbd className="kbd ml-1">F12</kbd>
+          <kbd className="kbd ml-1 hidden xl:inline">F12</kbd>
         </button>
       </div>
 

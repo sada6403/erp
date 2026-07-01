@@ -119,6 +119,26 @@ CREATE TABLE IF NOT EXISTS stocks (
 CREATE INDEX IF NOT EXISTS idx_stocks_product ON stocks(product_id);
 CREATE INDEX IF NOT EXISTS idx_stocks_branch  ON stocks(branch_id);
 
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id                   TEXT PRIMARY KEY,
+  product_id            TEXT NOT NULL REFERENCES products(id),
+  from_branch_id        TEXT REFERENCES branches(id),
+  to_branch_id          TEXT REFERENCES branches(id),
+  quantity              INTEGER NOT NULL,
+  movement_type         TEXT NOT NULL CHECK (movement_type IN ('SALE','TRANSFER','ADJUSTMENT','RECEIVE')),
+  reference_order_id    TEXT,
+  reference_transfer_id TEXT,
+  notes                 TEXT,
+  created_by            TEXT REFERENCES users(id),
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_from_branch ON stock_movements(from_branch_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_to_branch ON stock_movements(to_branch_id);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_type ON stock_movements(movement_type);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_created_at ON stock_movements(created_at);
+
 -- ─── STOCK TRANSFERS ────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS stock_transfers (
   id                TEXT PRIMARY KEY,
@@ -224,15 +244,30 @@ CREATE INDEX IF NOT EXISTS idx_payments_invoice ON payments(invoice_id);
 -- ─── INSTALLMENTS ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS installments (
   id                TEXT PRIMARY KEY,
+  contract_number   TEXT UNIQUE,
   invoice_id        TEXT NOT NULL REFERENCES invoices(id),
   customer_id       TEXT NOT NULL REFERENCES customers(id),
+  branch_id         TEXT REFERENCES branches(id),
+  customer_phone    TEXT,
+  cash_price        NUMERIC(14,2) NOT NULL DEFAULT 0,
+  down_payment      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  financed_amount   NUMERIC(14,2) NOT NULL DEFAULT 0,
+  interest_type     TEXT NOT NULL DEFAULT 'flat',
+  interest_rate     NUMERIC(7,2) NOT NULL DEFAULT 0,
+  interest_amount   NUMERIC(14,2) NOT NULL DEFAULT 0,
   total_amount      NUMERIC(14,2) NOT NULL,
   paid_amount       NUMERIC(14,2) NOT NULL DEFAULT 0,
   due_amount        NUMERIC(14,2) NOT NULL,
+  penalty_amount    NUMERIC(14,2) NOT NULL DEFAULT 0,
+  grace_period_days INTEGER NOT NULL DEFAULT 0,
+  late_fee          NUMERIC(14,2) NOT NULL DEFAULT 0,
+  monthly_amount    NUMERIC(14,2) NOT NULL DEFAULT 0,
   installment_count INTEGER NOT NULL,
+  remaining_installments INTEGER NOT NULL DEFAULT 0,
   frequency         TEXT NOT NULL DEFAULT 'monthly' CHECK (frequency IN ('weekly','monthly')),
   start_date        TEXT NOT NULL,
   next_due_date     TEXT,
+  last_paid_date    TEXT,
   status            TEXT NOT NULL DEFAULT 'active'
                     CHECK (status IN ('active','completed','overdue','defaulted')),
   notes             TEXT,
@@ -246,12 +281,68 @@ CREATE TABLE IF NOT EXISTS installment_payments (
   id             TEXT PRIMARY KEY,
   installment_id TEXT NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
   amount         NUMERIC(14,2) NOT NULL,
+  method         TEXT NOT NULL DEFAULT 'cash',
+  receipt_number TEXT,
+  reference      TEXT,
+  receipt_image_url TEXT,
+  status         TEXT NOT NULL DEFAULT 'approved',
   paid_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   received_by    TEXT REFERENCES users(id),
+  verified_by    TEXT REFERENCES users(id),
+  verified_at    TIMESTAMPTZ,
+  rejected_reason TEXT,
+  branch_id      TEXT REFERENCES branches(id),
   notes          TEXT,
   updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_installment_pmts ON installment_payments(installment_id);
+CREATE INDEX IF NOT EXISTS idx_installment_pmts_status ON installment_payments(status);
+
+CREATE TABLE IF NOT EXISTS installment_plans (
+  id                 TEXT PRIMARY KEY,
+  name               TEXT NOT NULL,
+  months             INTEGER NOT NULL,
+  interest_type      TEXT NOT NULL DEFAULT 'flat',
+  interest_rate      NUMERIC(7,2) NOT NULL DEFAULT 0,
+  min_down_payment_pct NUMERIC(7,2) NOT NULL DEFAULT 0,
+  late_fee           NUMERIC(14,2) NOT NULL DEFAULT 0,
+  grace_period_days  INTEGER NOT NULL DEFAULT 0,
+  is_promotion       BOOLEAN NOT NULL DEFAULT false,
+  is_active          BOOLEAN NOT NULL DEFAULT true,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS installment_schedule (
+  id              TEXT PRIMARY KEY,
+  installment_id  TEXT NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
+  installment_no  INTEGER NOT NULL,
+  due_date        TEXT NOT NULL,
+  principal       NUMERIC(14,2) NOT NULL DEFAULT 0,
+  interest        NUMERIC(14,2) NOT NULL DEFAULT 0,
+  penalty         NUMERIC(14,2) NOT NULL DEFAULT 0,
+  total_due       NUMERIC(14,2) NOT NULL DEFAULT 0,
+  paid_amount     NUMERIC(14,2) NOT NULL DEFAULT 0,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  paid_at         TIMESTAMPTZ,
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE(installment_id, installment_no)
+);
+CREATE INDEX IF NOT EXISTS idx_installment_schedule_account ON installment_schedule(installment_id);
+
+CREATE TABLE IF NOT EXISTS installment_reminders (
+  id              TEXT PRIMARY KEY,
+  installment_id  TEXT NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
+  schedule_id     TEXT REFERENCES installment_schedule(id),
+  channel         TEXT NOT NULL,
+  reminder_type   TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending',
+  message         TEXT,
+  scheduled_at    TIMESTAMPTZ NOT NULL,
+  sent_at         TIMESTAMPTZ,
+  error           TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 -- ─── DELIVERIES ─────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS deliveries (
@@ -352,6 +443,8 @@ DROP TRIGGER IF EXISTS trg_invoice_items_upd    ON invoice_items;
 DROP TRIGGER IF EXISTS trg_payments_upd         ON payments;
 DROP TRIGGER IF EXISTS trg_installments_upd     ON installments;
 DROP TRIGGER IF EXISTS trg_installment_pmts_upd ON installment_payments;
+DROP TRIGGER IF EXISTS trg_installment_plans_upd ON installment_plans;
+DROP TRIGGER IF EXISTS trg_installment_schedule_upd ON installment_schedule;
 DROP TRIGGER IF EXISTS trg_deliveries_upd       ON deliveries;
 DROP TRIGGER IF EXISTS trg_audit_logs_upd       ON audit_logs;
 
@@ -369,6 +462,8 @@ CREATE TRIGGER trg_invoice_items_upd    BEFORE UPDATE ON invoice_items    FOR EA
 CREATE TRIGGER trg_payments_upd         BEFORE UPDATE ON payments         FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER trg_installments_upd     BEFORE UPDATE ON installments     FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER trg_installment_pmts_upd BEFORE UPDATE ON installment_payments FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_installment_plans_upd BEFORE UPDATE ON installment_plans FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+CREATE TRIGGER trg_installment_schedule_upd BEFORE UPDATE ON installment_schedule FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER trg_deliveries_upd       BEFORE UPDATE ON deliveries       FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 CREATE TRIGGER trg_audit_logs_upd       BEFORE UPDATE ON audit_logs       FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
@@ -384,6 +479,7 @@ ALTER TABLE categories        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE suppliers         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stocks            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE stock_movements   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE stock_transfers   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customers         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE invoices          ENABLE ROW LEVEL SECURITY;
@@ -391,6 +487,9 @@ ALTER TABLE invoice_items     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payments          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE installments      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE installment_payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE installment_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE installment_schedule ENABLE ROW LEVEL SECURITY;
+ALTER TABLE installment_reminders ENABLE ROW LEVEL SECURITY;
 ALTER TABLE deliveries        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE customer_orders   ENABLE ROW LEVEL SECURITY;
@@ -404,6 +503,7 @@ DROP POLICY IF EXISTS anon_all ON categories;
 DROP POLICY IF EXISTS anon_all ON suppliers;
 DROP POLICY IF EXISTS anon_all ON products;
 DROP POLICY IF EXISTS anon_all ON stocks;
+DROP POLICY IF EXISTS anon_all ON stock_movements;
 DROP POLICY IF EXISTS anon_all ON stock_transfers;
 DROP POLICY IF EXISTS anon_all ON customers;
 DROP POLICY IF EXISTS anon_all ON invoices;
@@ -411,6 +511,9 @@ DROP POLICY IF EXISTS anon_all ON invoice_items;
 DROP POLICY IF EXISTS anon_all ON payments;
 DROP POLICY IF EXISTS anon_all ON installments;
 DROP POLICY IF EXISTS anon_all ON installment_payments;
+DROP POLICY IF EXISTS anon_all ON installment_plans;
+DROP POLICY IF EXISTS anon_all ON installment_schedule;
+DROP POLICY IF EXISTS anon_all ON installment_reminders;
 DROP POLICY IF EXISTS anon_all ON deliveries;
 DROP POLICY IF EXISTS anon_all ON audit_logs;
 DROP POLICY IF EXISTS anon_all ON customer_orders;
@@ -424,6 +527,7 @@ CREATE POLICY anon_all ON categories        FOR ALL TO PUBLIC USING (true) WITH 
 CREATE POLICY anon_all ON suppliers         FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON products          FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON stocks            FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
+CREATE POLICY anon_all ON stock_movements   FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON stock_transfers   FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON customers         FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON invoices          FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
@@ -431,6 +535,9 @@ CREATE POLICY anon_all ON invoice_items     FOR ALL TO PUBLIC USING (true) WITH 
 CREATE POLICY anon_all ON payments          FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON installments      FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON installment_payments FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
+CREATE POLICY anon_all ON installment_plans FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
+CREATE POLICY anon_all ON installment_schedule FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
+CREATE POLICY anon_all ON installment_reminders FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON deliveries        FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON audit_logs        FOR ALL TO PUBLIC USING (true) WITH CHECK (true);
 CREATE POLICY anon_all ON customer_orders   FOR ALL TO PUBLIC USING (true) WITH CHECK (true);

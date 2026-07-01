@@ -12,6 +12,7 @@ const MAX_ATTEMPTS = 5
 export class SyncService {
   private timer: ReturnType<typeof setInterval> | null = null
   private running = false
+  private colCache = new Map<string, Set<string>>()
 
   start() {
     this.timer = setInterval(() => this.runOnce(), 30_000)
@@ -137,44 +138,48 @@ export class SyncService {
     const db = getDb()
     const lastPull = store.get('last_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
     const newPullTime = new Date().toISOString()
+
     const globalTables = [
-      'branches',
-      'warehouses',
-      'roles',
-      'users',
-      'categories',
-      'suppliers',
-      'products',
-      'stocks',
-      'customers',
-      'deliveries',
-      'installments',
-      'stock_transfers',
-      'customer_orders',
-      'customer_order_items',
+      'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers',
+      'products', 'stocks', 'stock_movements', 'customers', 'deliveries',
+      'installments', 'installment_plans', 'installment_schedule',
+      'installment_reminders', 'stock_transfers', 'customer_orders', 'customer_order_items',
     ]
 
-    for (const table of globalTables) {
-      try {
-        const data = await cloud.changes(table, lastPull)
-        if (data.length === 0) continue
+    // Pull all global tables in parallel (18 HTTP requests → concurrent)
+    const results = await Promise.allSettled(
+      globalTables.map(table => cloud.changes(table, lastPull).then(data => ({ table, data })))
+    )
 
-        const pendingIds = (db.prepare(`
-          SELECT record_id FROM sync_queue
-          WHERE table_name = ? AND status IN ('pending', 'processing')
-        `).all(table) as { record_id: string }[]).map(row => row.record_id)
+    let pulledInstallmentIds: string[] = []
 
-        db.transaction(() => {
-          for (const row of data) {
-            if (pendingIds.includes(String(row.id))) continue
-            this.insertFiltered(db, table, row)
-          }
-        })()
-      } catch (err) {
-        console.error(`[SyncService] Failed to pull table ${table}:`, err)
+    for (const result of results) {
+      if (result.status === 'rejected') {
+        console.error('[SyncService] Failed to pull table:', result.reason)
+        continue
       }
+      const { table, data } = result.value
+      if (data.length === 0) continue
+
+      // Capture installment IDs now — reuse below, no duplicate fetch
+      if (table === 'installments') {
+        pulledInstallmentIds = data.map(row => String(row.id))
+      }
+
+      const pendingIds = (db.prepare(`
+        SELECT record_id FROM sync_queue
+        WHERE table_name = ? AND status IN ('pending', 'processing')
+      `).all(table) as { record_id: string }[]).map(row => row.record_id)
+
+      db.transaction(() => {
+        for (const row of data) {
+          if (pendingIds.includes(String(row.id))) continue
+          this.insertFiltered(db, table, row)
+        }
+      })()
     }
 
+    // Pull invoices + child records
     try {
       const invoices = await cloud.changes('invoices', lastPull)
       if (invoices.length > 0) {
@@ -208,26 +213,33 @@ export class SyncService {
       console.error('[SyncService] Failed to pull invoices:', err)
     }
 
-    try {
-      const installments = await cloud.changes('installments', lastPull)
-      const installmentIds = installments.map(row => String(row.id))
-      for (let index = 0; index < installmentIds.length; index += 50) {
-        const payments = await cloud.related(
-          'installment_payments',
-          'installment_id',
-          installmentIds.slice(index, index + 50)
-        )
-        db.transaction(() => {
-          for (const payment of payments) {
-            this.insertFiltered(db, 'installment_payments', payment)
-          }
-        })()
+    // Pull installment_payments using IDs already fetched above — no duplicate API call
+    if (pulledInstallmentIds.length > 0) {
+      try {
+        for (let index = 0; index < pulledInstallmentIds.length; index += 50) {
+          const payments = await cloud.related(
+            'installment_payments', 'installment_id',
+            pulledInstallmentIds.slice(index, index + 50)
+          )
+          db.transaction(() => {
+            for (const payment of payments) this.insertFiltered(db, 'installment_payments', payment)
+          })()
+        }
+      } catch (err) {
+        console.error('[SyncService] Failed to pull installment payments:', err)
       }
-    } catch (err) {
-      console.error('[SyncService] Failed to pull installment payments:', err)
     }
 
     store.set('last_pull_timestamp', newPullTime)
+  }
+
+  private getColumns(db: ReturnType<typeof getDb>, table: string): Set<string> {
+    if (this.colCache.has(table)) return this.colCache.get(table)!
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name)
+    )
+    this.colCache.set(table, cols)
+    return cols
   }
 
   private insertFiltered(
@@ -235,9 +247,7 @@ export class SyncService {
     table: string,
     row: Record<string, unknown>
   ): void {
-    const validColumns = new Set(
-      (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(column => column.name)
-    )
+    const validColumns = this.getColumns(db, table)
     const localRow: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(row)) {
       if (!validColumns.has(key)) continue
@@ -248,6 +258,24 @@ export class SyncService {
 
     const keys = Object.keys(localRow)
     if (keys.length === 0) return
+
+    // Users table: preserve local-only fields (pin, 2FA) and clear lockout on cloud update.
+    // Cloud schema has no login_attempts/locked_until/pin/two_factor_* columns, so a plain
+    // INSERT OR REPLACE would wipe them. Use upsert instead.
+    if (table === 'users') {
+      const cloudUpdateCols = keys.filter(k =>
+        ['name','email','phone','password_hash','pin_hash','role_id',
+         'branch_id','is_active','last_login_at','updated_at'].includes(k)
+      )
+      db.prepare(
+        `INSERT INTO users (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})
+         ON CONFLICT(id) DO UPDATE SET
+           ${cloudUpdateCols.map(k => `${k}=excluded.${k}`).join(',')},
+           login_attempts=0, locked_until=NULL`
+      ).run(...keys.map(k => localRow[k]))
+      return
+    }
+
     db.prepare(
       `INSERT OR REPLACE INTO ${table} (${keys.join(',')})
        VALUES (${keys.map(() => '?').join(',')})`

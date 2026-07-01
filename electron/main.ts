@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, shell, protocol, net } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import { pathToFileURL } from 'url'
 import { initDatabase } from './database'
@@ -16,6 +17,17 @@ import { registerOrderHandlers } from './ipc/orders'
 import { registerPurchaseHandlers } from './ipc/purchases'
 import { registerReturnHandlers } from './ipc/returns'
 import { registerCashRegisterHandlers } from './ipc/cashRegister'
+import { registerActivationHandlers } from './ipc/activation'
+import { registerNotificationHandlers } from './ipc/notifications'
+import { registerReportHandlers } from './ipc/reports'
+import { registerCommunicationHandlers, startReminderScheduler } from './ipc/communications'
+import { registerLoyaltyHandlers } from './ipc/loyalty'
+import { registerBatchHandlers } from './ipc/batches'
+import { registerBackupHandlers } from './ipc/backup'
+import { registerMonitorHandlers } from './ipc/monitor'
+import { registerLicenseHandlers } from './ipc/license'
+import { startAutoBackup, stopAutoBackup } from './services/backupService'
+import { startLicenseChecks, stopLicenseChecks } from './services/licenseService'
 import { SyncService } from './services/syncService'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -111,8 +123,46 @@ async function bootstrap() {
   registerPurchaseHandlers(ipcMain)
   registerReturnHandlers()
   registerCashRegisterHandlers()
+  registerActivationHandlers()
+  registerNotificationHandlers()
+  registerReportHandlers()
+  registerCommunicationHandlers()
+  startReminderScheduler()
+  registerLoyaltyHandlers()
+  registerBatchHandlers()
+  registerBackupHandlers()
+  registerMonitorHandlers()
+  registerLicenseHandlers(ipcMain)
+  startAutoBackup()
+  startLicenseChecks()
 
   createWindow()
+
+  // Auto-updater (production only)
+  if (!isDev) {
+    autoUpdater.autoDownload = false
+    autoUpdater.autoInstallOnAppQuit = true
+
+    autoUpdater.on('update-available', (info) => {
+      mainWindow?.webContents.send('update:available', info)
+    })
+    autoUpdater.on('download-progress', (progress) => {
+      mainWindow?.webContents.send('update:progress', progress)
+    })
+    autoUpdater.on('update-downloaded', (info) => {
+      mainWindow?.webContents.send('update:downloaded', info)
+    })
+    autoUpdater.on('error', (err) => {
+      mainWindow?.webContents.send('update:error', err.message)
+    })
+
+    ipcMain.handle('update:check',    () => autoUpdater.checkForUpdates())
+    ipcMain.handle('update:download', () => autoUpdater.downloadUpdate())
+    ipcMain.handle('update:install',  () => { autoUpdater.quitAndInstall(false, true) })
+
+    // Check after 8s so the app fully loads first
+    setTimeout(() => { autoUpdater.checkForUpdates().catch(() => {}) }, 8000)
+  }
 
   // Start background sync service
   syncService = new SyncService()
@@ -132,5 +182,7 @@ bootstrap().catch((err) => {
 
 app.on('window-all-closed', () => {
   syncService?.stop()
+  stopAutoBackup()
+  stopLicenseChecks()
   if (process.platform !== 'darwin') app.quit()
 })

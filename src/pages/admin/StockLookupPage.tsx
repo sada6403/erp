@@ -3,6 +3,7 @@ import { ArrowRightLeft, Search } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/store/authStore'
 
 export default function StockLookupPage() {
   const [products, setProducts] = useState<Record<string, unknown>[]>([])
@@ -59,21 +60,63 @@ export default function StockLookupPage() {
 }
 
 function QuickTransfer({ product, source, onClose, onDone }: any) {
+  const { user } = useAuthStore()
+  const myBranchId = (user as any)?.branch_id ?? ''
   const [branches, setBranches] = useState<any[]>([])
-  const [to, setTo] = useState('')
+  const [to, setTo] = useState(myBranchId)   // default to current user's branch
   const [qty, setQty] = useState(1)
-  useEffect(() => { window.api.admin.branches.list().then((r: any) => r.success && setBranches(r.data)) }, [])
+
+  useEffect(() => {
+    window.api.admin.branches.list().then((r: any) => {
+      if (r.success) setBranches(r.data)
+    })
+  }, [])
+
   const save = async () => {
-    const res = await window.api.stocks.transfer({ product_id: product.id, from_branch_id: source.branch_id, to_branch_id: to, quantity: qty })
+    if (!to) { toast.error('Please select a destination branch'); return }
+    if (to === source.branch_id) { toast.error('Source and destination must be different'); return }
+    const res = await window.api.stocks.transfer({
+      product_id: product.id,
+      from_branch_id: source.branch_id,
+      to_branch_id: to,
+      quantity: qty,
+    })
     if (res.success) { toast.success(`Transfer request ${res.data.transfer_number} created`); onDone() }
     else toast.error(res.error)
   }
-  return <Modal title="Create Transfer Request" onClose={onClose}
-    footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button><button className="btn-primary" onClick={save}>Create Request</button></>}>
-    <div className="space-y-4"><div><label className="text-xs text-slate-400">From</label><p>{source.branch_name}</p></div>
-      <div><label className="text-xs text-slate-400">Destination branch</label><select className="input mt-1" value={to} onChange={e => setTo(e.target.value)}>
-        <option value="">Select branch</option>{branches.filter(b => b.id !== source.branch_id).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
-      <div><label className="text-xs text-slate-400">Quantity</label><input className="input mt-1" type="number" min={1} max={Number(source.available_quantity)} value={qty} onChange={e => setQty(Number(e.target.value))} /></div>
-    </div>
-  </Modal>
+
+  return (
+    <Modal title="Create Transfer Request" onClose={onClose}
+      footer={
+        <><button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-primary" onClick={save}>Create Request</button></>
+      }>
+      <div className="space-y-4">
+        <div>
+          <label className="text-xs text-slate-400">From</label>
+          <p className="font-medium mt-0.5">{source.branch_name}</p>
+        </div>
+        <div>
+          <label className="text-xs text-slate-400">Destination branch</label>
+          <select className="input mt-1" value={to} onChange={e => setTo(e.target.value)}>
+            <option value="">Select branch</option>
+            {branches
+              .filter(b => b.id !== source.branch_id)
+              .map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.name}{b.id === myBranchId ? ' (your branch)' : ''}
+                </option>
+              ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-slate-400">Quantity</label>
+          <input className="input mt-1" type="number" min={1}
+            max={Number(source.available_quantity)} value={qty}
+            onChange={e => setQty(Number(e.target.value))} />
+          <p className="text-xs text-slate-500 mt-1">{source.available_quantity} available at {source.branch_name}</p>
+        </div>
+      </div>
+    </Modal>
+  )
 }

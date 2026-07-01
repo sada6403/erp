@@ -62,7 +62,7 @@ const TOP_PRODUCTS = [
 ]
 
 const USERS = [
-  { id:'u1', name:'System Admin', email:'admin@pos.local', role_name:'Super Admin', branch_name:'All Branches', is_active:1, pin:'1234', last_login_at: new Date().toISOString() },
+  { id:'u1', name:'System Admin', email:'admin@pos.local', role_name:'Company Admin', branch_name:'All Branches', is_active:1, pin:'1234', last_login_at: new Date().toISOString() },
   { id:'u2', name:'Nimal Kumara', email:'nimal@enterprise.lk', role_name:'Branch Manager', branch_name:'Colombo Main Branch', is_active:1, pin:'2222', last_login_at: new Date(Date.now()-3600000).toISOString() },
   { id:'u3', name:'Chamari Perera', email:'chamari@enterprise.lk', role_name:'Cashier', branch_name:'Colombo Main Branch', is_active:1, pin:'3333', last_login_at: new Date(Date.now()-7200000).toISOString() },
   { id:'u4', name:'Suresh Bandara', email:'suresh@enterprise.lk', role_name:'Cashier', branch_name:'Kandy Branch', is_active:1, pin:'4444', last_login_at: new Date(Date.now()-86400000).toISOString() },
@@ -71,7 +71,7 @@ const USERS = [
 ]
 
 const ROLES = [
-  { id:'role-super-admin', name:'Super Admin', permissions:'{"all":true}' },
+  { id:'role-super-admin', name:'Company Admin', permissions:'{"all":true}' },
   { id:'role-branch-mgr', name:'Branch Manager', permissions:'{"pos":true,"inventory":true,"reports":true}' },
   { id:'role-cashier', name:'Cashier', permissions:'{"pos":true}' },
   { id:'role-warehouse', name:'Warehouse Staff', permissions:'{"inventory":true}' },
@@ -134,10 +134,10 @@ const ok = (data: unknown) => ({ success: true as const, data, error: undefined 
 
 export const mockApi = {
   auth: {
-    login: async (_p: unknown) => { await delay(); return ok({ user: { id:'u1', name:'System Admin', email:'admin@pos.local', role:{ name:'Super Admin', permissions:{ all:true } }, branch:{ id:'branch-main', name:'Colombo Main Branch' } }, token:'mock-token' }) },
+    login: async (_p: unknown) => { await delay(); return ok({ user: { id:'u1', name:'System Admin', email:'admin@pos.local', role:{ name:'Company Admin', permissions:{ all:true } }, branch:{ id:'branch-main', name:'Colombo Main Branch' } }, token:'mock-token' }) },
     logout: async () => { await delay(); return ok(null) },
-    whoami: async () => ok({ id:'u1', name:'System Admin', email:'admin@pos.local', role:{ name:'Super Admin', permissions:{ all:true } }, branch:{ id:'branch-main', name:'Colombo Main Branch' } }),
-    pinLogin: async (_p: unknown) => ok({ user: { id:'u1', name:'System Admin', email:'admin@pos.local', role:{ name:'Super Admin', permissions:{ all:true } }, branch:{ id:'branch-main', name:'Colombo Main Branch' } }, token:'mock-token' }),
+    whoami: async () => ok({ id:'u1', name:'System Admin', email:'admin@pos.local', role:{ name:'Company Admin', permissions:{ all:true } }, branch:{ id:'branch-main', name:'Colombo Main Branch' } }),
+    pinLogin: async (_p: unknown) => ok({ user: { id:'u1', name:'System Admin', email:'admin@pos.local', role:{ name:'Company Admin', permissions:{ all:true } }, branch:{ id:'branch-main', name:'Colombo Main Branch' } }, token:'mock-token' }),
   },
   products: {
     list: async (f?: Record<string,unknown>) => { await delay(); let p = PRODUCTS; if (f?.category_id) p=p.filter(x=>x.category_id===f.category_id); return ok(p) },

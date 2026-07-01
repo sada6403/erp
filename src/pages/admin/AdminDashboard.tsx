@@ -7,12 +7,27 @@ import StatCard from '@/components/shared/StatCard'
 interface RevenueData { today: { revenue: number; invoices: number }; month: { revenue: number; invoices: number }; outstanding: { total: number } }
 interface SalesData { date: string; total_revenue: number; total_invoices: number }
 
+function useBrandColor() {
+  const [color, setColor] = useState('#2563eb')
+  useEffect(() => {
+    const update = () => {
+      const c = getComputedStyle(document.documentElement).getPropertyValue('--brand-primary').trim()
+      if (c) setColor(c)
+    }
+    update()
+    window.addEventListener('themechange', update)
+    return () => window.removeEventListener('themechange', update)
+  }, [])
+  return color
+}
+
 export default function AdminDashboard() {
   const [revenue, setRevenue]         = useState<RevenueData | null>(null)
   const [salesData, setSalesData]     = useState<SalesData[]>([])
   const [topProducts, setTopProducts] = useState<Record<string,unknown>[]>([])
   const [lowStock, setLowStock]       = useState<Record<string,unknown>[]>([])
   const [loading, setLoading]         = useState(true)
+  const brandColor                    = useBrandColor()
 
   const load = async () => {
     setLoading(true)
@@ -47,7 +62,7 @@ export default function AdminDashboard() {
         {/* Stats */}
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
           <StatCard label="Today's Revenue" value={`Rs.${(revenue?.today?.revenue || 0).toLocaleString()}`} sub={`${revenue?.today?.invoices || 0} invoices`} icon={TrendingUp} color="green" />
-          <StatCard label="Monthly Revenue" value={`Rs.${(revenue?.month?.revenue || 0).toLocaleString()}`} sub={`${revenue?.month?.invoices || 0} invoices`} icon={ShoppingBag} color="blue" />
+          <StatCard label="Monthly Revenue" value={`Rs.${(revenue?.month?.revenue || 0).toLocaleString()}`} sub={`${revenue?.month?.invoices || 0} invoices`} icon={ShoppingBag} color="brand" />
           <StatCard label="Outstanding Due" value={`Rs.${(revenue?.outstanding?.total || 0).toLocaleString()}`} sub="Unpaid balances" icon={CreditCard} color="yellow" />
           <StatCard label="Low Stock Alerts" value={lowStock.length} sub="Items need restocking" icon={AlertCircle} color="red" />
         </div>
@@ -59,11 +74,11 @@ export default function AdminDashboard() {
                 <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Enterprise Control Center</h3>
                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Branch operations, approvals, stock health, and cashier activity</p>
               </div>
-              <span className="badge-blue">Head Office View</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white" style={{ background: 'var(--brand-primary)' }}>Head Office View</span>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {[
-                { label: 'Branch Monitor', value: 'Active', icon: Building2, color: 'text-blue-400' },
+                { label: 'Branch Monitor', value: 'Active', icon: Building2, color: '' },
                 { label: 'Transfer Approvals', value: lowStock.length ? `${Math.min(lowStock.length, 9)} attention` : 'Clear', icon: Warehouse, color: 'text-amber-400' },
                 { label: 'Role Controls', value: 'RBAC Ready', icon: ShieldCheck, color: 'text-emerald-400' },
                 { label: 'Sync Readiness', value: 'Local-first', icon: Wifi, color: 'text-cyan-400' },
@@ -71,7 +86,7 @@ export default function AdminDashboard() {
                 const Icon = item.icon
                 return (
                   <div key={item.label} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
-                    <Icon size={17} className={item.color} />
+                    <Icon size={17} className={item.color} style={!item.color ? { color: 'var(--brand-primary)' } : undefined} />
                     <p className="text-xs mt-3" style={{ color: 'var(--text-3)' }}>{item.label}</p>
                     <p className="text-sm font-semibold mt-1" style={{ color: 'var(--text-1)' }}>{item.value}</p>
                   </div>
@@ -82,12 +97,12 @@ export default function AdminDashboard() {
 
           <div className="card">
             <h3 className="font-semibold text-sm mb-4 flex items-center gap-2" style={{ color: 'var(--text-1)' }}>
-              <Truck size={15} className="text-blue-400" /> Branch Workflow
+              <Truck size={15} style={{ color: 'var(--brand-primary)' }} /> Branch Workflow
             </h3>
             <div className="space-y-3">
               {['Stock requests', 'Manager approvals', 'Warehouse receiving', 'Cashier billing'].map((step, i) => (
                 <div key={step} className="flex items-center gap-3">
-                  <span className="w-6 h-6 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center text-xs font-bold">{i + 1}</span>
+                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: 'var(--brand-primary)', opacity: 0.85 }}>{i + 1}</span>
                   <span className="text-sm" style={{ color: 'var(--text-2)' }}>{step}</span>
                 </div>
               ))}
@@ -105,7 +120,7 @@ export default function AdminDashboard() {
                 <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
                 <YAxis stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
                 <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} formatter={(v) => [`Rs.${Number(v).toLocaleString()}`, 'Revenue']} />
-                <Line type="monotone" dataKey="total_revenue" stroke="#6366f1" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="total_revenue" stroke={brandColor} strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -118,7 +133,7 @@ export default function AdminDashboard() {
                 <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
                 <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
                 <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} />
-                <Bar dataKey="total_invoices" fill="#6366f1" radius={[4,4,0,0]} />
+                <Bar dataKey="total_invoices" fill={brandColor} radius={[4,4,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

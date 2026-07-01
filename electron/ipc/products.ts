@@ -7,6 +7,8 @@ import path from 'path'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
 import { CloudApi } from '../services/cloudApi'
+import { uploadFile as s3UploadFile } from '../services/s3Service'
+import type { S3Config } from '../services/s3Service'
 
 const store = new Store()
 
@@ -28,6 +30,97 @@ function csvCell(value: unknown): string {
   return text
 }
 
+function normHeader(v: unknown): string {
+  return String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+}
+
+function cleanText(v: unknown): string {
+  return String(v ?? '').replace(/\s+/g, ' ').trim()
+}
+
+function parseNumber(v: unknown): number {
+  const n = parseFloat(String(v ?? '').replace(/,/g, '').trim())
+  return Number.isFinite(n) ? n : 0
+}
+
+function parseInteger(v: unknown): number {
+  const n = parseInt(String(v ?? '').replace(/,/g, '').trim(), 10)
+  return Number.isFinite(n) ? Math.max(0, n) : 0
+}
+
+function getColumn(row: Record<string, unknown>, ...aliases: string[]): string {
+  const keys = Object.keys(row)
+  for (const alias of aliases) {
+    const found = keys.find(k => normHeader(k) === normHeader(alias))
+    if (found) return cleanText(row[found])
+  }
+  return ''
+}
+
+function hasColumn(db: ReturnType<typeof getDb>, table: string, column: string): boolean {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]
+  return cols.some(c => c.name === column)
+}
+
+function isWooCommerceExport(rows: Record<string, unknown>[]): boolean {
+  if (!rows.length) return false
+  const headers = Object.keys(rows[0]).map(normHeader)
+  return (
+    headers.includes('type') &&
+    headers.includes('regularprice') &&
+    headers.includes('categories') &&
+    headers.includes('instock?')
+  )
+}
+
+function splitCategoryPaths(value: string): string[][] {
+  return value
+    .split(',')
+    .map(path => path.split('>').map(cleanText).filter(Boolean))
+    .filter(path => path.length > 0)
+}
+
+async function ensureCategoryPath(
+  db: ReturnType<typeof getDb>,
+  pathParts: string[],
+  syncOps: { table: string; id: string; operation: 'INSERT' | 'UPDATE'; data: Record<string, unknown> }[]
+): Promise<string | null> {
+  let parentId: string | null = null
+  let categoryId: string | null = null
+
+  for (const part of pathParts) {
+    const existing = db.prepare(`
+      SELECT id FROM categories
+      WHERE lower(name) = lower(?) AND COALESCE(parent_id, '') = COALESCE(?, '')
+      LIMIT 1
+    `).get(part, parentId) as { id: string } | undefined
+
+    if (existing) {
+      categoryId = existing.id
+    } else {
+      categoryId = crypto.randomUUID()
+      db.prepare(`
+        INSERT INTO categories (id, parent_id, name, sort_order, is_active)
+        VALUES (?, ?, ?, 0, 1)
+      `).run(categoryId, parentId, part)
+      syncOps.push({
+        table: 'categories',
+        id: categoryId,
+        operation: 'INSERT',
+        data: { id: categoryId, parent_id: parentId, name: part, sort_order: 0, is_active: 1 },
+      })
+    }
+
+    parentId = categoryId
+  }
+
+  return categoryId
+}
+
+function firstImage(value: string): string | null {
+  return cleanText(value.split(',')[0]) || null
+}
+
 export function registerProductHandlers(ipcMain: IpcMain) {
   ipcMain.handle('products:list', (_e, filters: { category_id?: string; is_active?: boolean } = {}) => {
     try {
@@ -36,15 +129,26 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const superAdmin = isSuperAdmin(authUser)
       const branchId = authUser?.branch_id as string | undefined
 
+      // Super admin / no-branch users: sum stock across ALL branches
+      // Branch users: stock for their specific branch only
+      const stockJoin = (superAdmin || !branchId)
+        ? `LEFT JOIN (
+             SELECT product_id, SUM(quantity) AS quantity
+             FROM stocks GROUP BY product_id
+           ) s ON s.product_id = p.id`
+        : `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
+
       let sql = `
         SELECT p.*, c.name as category_name,
                COALESCE(s.quantity, 0) as stock
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
-        LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?
+        ${stockJoin}
         WHERE 1=1
       `
-      const params: unknown[] = [branchId || null]
+      const params: unknown[] = []
+      // Branch-scoped users pass branchId as first param for the stock JOIN
+      if (!superAdmin && branchId) params.push(branchId)
 
       // Branch users see only their branch products + global (NULL branch) products
       if (!superAdmin && branchId) {
@@ -67,14 +171,18 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const branchId = authUser?.branch_id as string | undefined
 
       const q = `%${query}%`
+      const stockJoin = (superAdmin || !branchId)
+        ? `LEFT JOIN (SELECT product_id, SUM(quantity) AS quantity FROM stocks GROUP BY product_id) s ON s.product_id = p.id`
+        : `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
+
       let sql = `
         SELECT p.*, COALESCE(s.quantity, 0) as stock
         FROM products p
-        LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?
+        ${stockJoin}
         WHERE p.is_active = 1
           AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)
       `
-      const params: unknown[] = [branchId || null, q, q, q]
+      const params: unknown[] = (!superAdmin && branchId) ? [branchId, q, q, q] : [q, q, q]
 
       sql += ' ORDER BY p.name LIMIT 50'
       return { success: true, data: db.prepare(sql).all(...params) }
@@ -85,15 +193,22 @@ export function registerProductHandlers(ipcMain: IpcMain) {
     try {
       const db = getDb()
       const authUser = getAuthUser()
+      const superAdmin = isSuperAdmin(authUser)
       const branchId = authUser?.branch_id as string | undefined
-      const row = db.prepare(`
+
+      const stockJoin = (superAdmin || !branchId)
+        ? `LEFT JOIN (SELECT product_id, SUM(quantity) AS quantity FROM stocks GROUP BY product_id) s ON s.product_id = p.id`
+        : `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
+
+      const sql = `
         SELECT p.*, COALESCE(s.quantity, 0) as stock
         FROM products p
-        LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?
+        ${stockJoin}
         WHERE p.sku = ? OR p.barcode = ?
         LIMIT 1
-      `).get(branchId || null, sku, sku)
-      return { success: true, data: row || null }
+      `
+      const params: unknown[] = (!superAdmin && branchId) ? [branchId, sku, sku] : [sku, sku]
+      return { success: true, data: db.prepare(sql).get(...params) || null }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
@@ -146,6 +261,46 @@ export function registerProductHandlers(ipcMain: IpcMain) {
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
+  ipcMain.handle('products:permanentDelete', async (_e, id: string, reason: string) => {
+    try {
+      const db = getDb()
+      const caller = getAuthUser()
+
+      // Permissions may be at caller.permissions OR caller.role.permissions
+      const rolePerms = (caller?.role as Record<string, unknown>)?.permissions as Record<string, unknown> || {}
+      const directPerms = (caller?.permissions as Record<string, unknown>) || {}
+      const perms = Object.keys(rolePerms).length ? rolePerms : directPerms
+      if (!perms.all) return { success: false, error: 'Only Company Admin can permanently delete products' }
+
+      const product = db.prepare(`SELECT id, name, sku, barcode FROM products WHERE id = ?`).get(id) as Record<string, unknown> | undefined
+      if (!product) return { success: false, error: 'Product not found' }
+
+      // Check if product has invoice_items — protect financial history
+      const hasInvoiceItems = db.prepare(`SELECT COUNT(*) as cnt FROM invoice_items WHERE product_id = ?`).get(id) as { cnt: number }
+      if (hasInvoiceItems.cnt > 0) {
+        return { success: false, error: `Cannot permanently delete — this product appears in ${hasInvoiceItems.cnt} invoice(s). Use deactivate instead to preserve financial history.` }
+      }
+
+      // Audit log before deletion
+      db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, old_values) VALUES (?,?,?,?,?,?,?)`)
+        .run(
+          crypto.randomUUID(),
+          caller?.id || null,
+          (caller?.branch_id || (caller?.branch as Record<string,unknown>)?.id) || null,
+          'PRODUCT_PERMANENT_DELETE',
+          'products',
+          id,
+          JSON.stringify({ name: product.name, sku: product.sku, barcode: product.barcode, reason })
+        )
+
+      // Remove related stock records then product
+      db.prepare(`DELETE FROM stocks WHERE product_id = ?`).run(id)
+      db.prepare(`DELETE FROM products WHERE id = ?`).run(id)
+
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
   ipcMain.handle('products:selectAndUploadImage', async (_e) => {
     try {
       const result = await dialog.showOpenDialog({
@@ -173,31 +328,53 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       const localUrl = `app-img://${fileName}`
 
-      // Try uploading to the self-hosted Next.js API if configured and online
-      const settings = store.get('app_settings') as Record<string, unknown> | undefined
-      const url = String(settings?.cloud_api_url || '').trim()
-      const key = String(settings?.cloud_api_key || '').trim()
+      const contentTypes: Record<string, string> = {
+        '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
+      }
+      const contentType = contentTypes[ext.toLowerCase()] ?? 'image/octet-stream'
 
-      if (url && key) {
+      const settings = store.get('app_settings') as Record<string, unknown> | undefined
+
+      // 1. Try S3 upload first (if configured)
+      const s3Enabled = store.get('s3_enabled')
+      if (s3Enabled) {
         try {
-          const contentTypes: Record<string, string> = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp',
+          const s3Config: S3Config = {
+            bucket:    String(store.get('s3_bucket')     || ''),
+            region:    String(store.get('s3_region')     || 'us-east-1'),
+            accessKey: String(store.get('s3_access_key') || ''),
+            secretKey: String(store.get('s3_secret_key') || ''),
+            endpoint:  store.get('s3_endpoint')  ? String(store.get('s3_endpoint'))  : undefined,
+            cdnUrl:    store.get('s3_cdn_url')   ? String(store.get('s3_cdn_url'))   : undefined,
           }
-          const contentType = contentTypes[ext.toLowerCase()]
-          if (contentType) {
-            const publicUrl = await new CloudApi({ baseUrl: url, apiKey: key })
-              .uploadImage(destPath, fileName, contentType)
-            return { success: true, data: publicUrl }
+          if (s3Config.bucket && s3Config.accessKey && s3Config.secretKey) {
+            const s3Key = `images/${fileName}`
+            const s3Result = await s3UploadFile(destPath, s3Key, s3Config, contentType)
+            if (s3Result.success && s3Result.url) {
+              return { success: true, data: s3Result.url }
+            }
+            console.error('[ImageUpload] S3 upload failed:', s3Result.error)
           }
         } catch (err) {
-          console.error('[ImageUpload] Cloud upload failed, using local fallback:', err)
+          console.error('[ImageUpload] S3 upload error:', err)
         }
       }
 
+      // 2. Try Cloud API (self-hosted Next.js) upload
+      const cloudUrl = String(settings?.cloud_api_url || '').trim()
+      const cloudKey = String(settings?.cloud_api_key || '').trim()
+      if (cloudUrl && cloudKey) {
+        try {
+          const publicUrl = await new CloudApi({ baseUrl: cloudUrl, apiKey: cloudKey })
+            .uploadImage(destPath, fileName, contentType)
+          return { success: true, data: publicUrl }
+        } catch (err) {
+          console.error('[ImageUpload] Cloud API upload failed, using local fallback:', err)
+        }
+      }
+
+      // 3. Fall back to local app-img:// URL
       return { success: true, data: localUrl }
     } catch (err: unknown) {
       return { success: false, error: (err as Error).message }
@@ -220,6 +397,177 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, unknown>[]
 
       if (rows.length === 0) return { success: false, error: 'No data found in file' }
+
+      if (isWooCommerceExport(rows)) {
+        const importUser = store.get('auth_user') as Record<string, unknown> | undefined
+        const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
+        const stockBranchId = importUser?.branch_id as string || 'b1111111-1111-4111-8111-111111111111'
+        const productHasBrand = hasColumn(db, 'products', 'brand')
+        const productHasWeight = hasColumn(db, 'products', 'weight')
+        const productHasProductType = hasColumn(db, 'products', 'product_type')
+        const productHasNotForSale = hasColumn(db, 'products', 'not_for_sale')
+        const syncOps: { table: string; id: string; operation: 'INSERT' | 'UPDATE'; data: Record<string, unknown> }[] = []
+        const sups = db.prepare('SELECT id, name FROM suppliers').all() as { id: string; name: string }[]
+        const supMap = new Map(sups.map(s => [s.name.toLowerCase(), s.id]))
+        const wooById = new Map<string, Record<string, unknown>>()
+        const wooBySku = new Map<string, Record<string, unknown>>()
+
+        for (const row of rows) {
+          const id = getColumn(row, 'ID')
+          const sku = getColumn(row, 'SKU')
+          if (id) wooById.set(id, row)
+          if (sku) wooBySku.set(sku, row)
+        }
+
+        const resolveWooParent = (row: Record<string, unknown>): Record<string, unknown> | undefined => {
+          const parent = getColumn(row, 'Parent')
+          if (!parent) return undefined
+          const idMatch = parent.match(/^id:(\d+)$/)
+          if (idMatch) return wooById.get(idMatch[1])
+          return wooBySku.get(parent)
+        }
+
+        let imported = 0
+        let created = 0
+        let updated = 0
+        let skipped = 0
+        let deactivatedDuplicates = 0
+        const errors: string[] = []
+
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i]
+          try {
+            const parent = resolveWooParent(row)
+            const inherited = parent || row
+            const sku = getColumn(row, 'SKU')
+            const name = getColumn(row, 'Name') || sku
+            if (!name || !sku) { skipped++; continue }
+
+            const wooType = getColumn(row, 'Type').toLowerCase()
+            const categoryValue = getColumn(row, 'Categories') || getColumn(inherited, 'Categories')
+            const categoryPaths = splitCategoryPaths(categoryValue)
+            const categoryId = categoryPaths.length ? await ensureCategoryPath(db, categoryPaths[0], syncOps) : null
+            const supplierName = getColumn(row, 'Supplier', 'Vendor')
+            const supplierId = supplierName ? (supMap.get(supplierName.toLowerCase()) || null) : null
+            const brand = getColumn(inherited, 'Brands', 'Brand') || null
+            const description = getColumn(row, 'Description') || getColumn(row, 'Short description') || null
+            const imageUrl = firstImage(getColumn(row, 'Images') || getColumn(inherited, 'Images'))
+            const sellingPrice = parseNumber(getColumn(row, 'Regular price', 'Sale price'))
+            const stockQty = parseInteger(getColumn(row, 'Stock'))
+            const barcode = getColumn(row, 'GTIN, UPC, EAN, or ISBN') || null
+            const weight = parseNumber(getColumn(row, 'Weight (kg)', 'Weight'))
+            const minStock = parseInteger(getColumn(row, 'Low stock amount')) || 5
+
+            const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(sku) as { id: string } | undefined
+            const sameName = !existing
+              ? db.prepare('SELECT id, sku FROM products WHERE lower(name) = lower(?) AND is_active = 1 ORDER BY updated_at DESC LIMIT 1').get(name) as { id: string; sku: string } | undefined
+              : undefined
+            const target = existing || sameName
+
+            if (sameName && sameName.sku !== sku) {
+              const skuConflict = db.prepare('SELECT id FROM products WHERE sku = ? AND id <> ?').get(sku, sameName.id) as { id: string } | undefined
+              if (skuConflict) {
+                errors.push(`Row ${i + 2}: SKU ${sku} already exists on another product`)
+                skipped++
+                continue
+              }
+            }
+
+            const productId = target ? target.id : crypto.randomUUID()
+            const payload = {
+              id: productId,
+              branch_id: importBranchId,
+              name,
+              sku,
+              barcode,
+              category_id: categoryId,
+              supplier_id: supplierId,
+              unit: 'pcs',
+              cost_price: 0,
+              selling_price: sellingPrice,
+              tax_rate: 0,
+              min_stock_level: minStock,
+              description,
+              image_url: imageUrl,
+              brand,
+              weight,
+              product_type: wooType === 'variation' ? 'variation' : 'single',
+              not_for_sale: wooType === 'variable' ? 1 : 0,
+            }
+
+            if (target) {
+              const updateFields = [
+                'name=@name',
+                'sku=@sku',
+                'barcode=@barcode',
+                'category_id=@category_id',
+                'supplier_id=@supplier_id',
+                'unit=@unit',
+                'cost_price=@cost_price',
+                'selling_price=@selling_price',
+                'tax_rate=@tax_rate',
+                'min_stock_level=@min_stock_level',
+                'description=@description',
+                'image_url=@image_url',
+                'is_active=1',
+              ]
+              if (productHasBrand) updateFields.push('brand=@brand')
+              if (productHasWeight) updateFields.push('weight=@weight')
+              if (productHasProductType) updateFields.push('product_type=@product_type')
+              if (productHasNotForSale) updateFields.push('not_for_sale=@not_for_sale')
+              db.prepare(`UPDATE products SET ${updateFields.join(', ')}, updated_at=datetime('now') WHERE id=@id`).run(payload)
+              syncOps.push({ table: 'products', id: productId, operation: 'UPDATE', data: payload })
+              updated++
+            } else {
+              db.prepare(`INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
+                image_url, unit, cost_price, selling_price, tax_rate, min_stock_level)
+                VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
+                @image_url, @unit, @cost_price, @selling_price, @tax_rate, @min_stock_level)`).run(payload)
+              if (productHasBrand && brand) db.prepare('UPDATE products SET brand=? WHERE id=?').run(brand, productId)
+              if (productHasWeight) db.prepare('UPDATE products SET weight=? WHERE id=?').run(weight, productId)
+              if (productHasProductType) db.prepare('UPDATE products SET product_type=? WHERE id=?').run(payload.product_type, productId)
+              if (productHasNotForSale) db.prepare('UPDATE products SET not_for_sale=? WHERE id=?').run(payload.not_for_sale, productId)
+              syncOps.push({ table: 'products', id: productId, operation: 'INSERT', data: { ...payload, is_active: true } })
+              created++
+            }
+
+            const duplicates = db.prepare(`
+              SELECT id FROM products
+              WHERE id <> ? AND lower(name) = lower(?) AND is_active = 1
+            `).all(productId, name) as { id: string }[]
+            for (const dup of duplicates) {
+              db.prepare("UPDATE products SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(dup.id)
+              syncOps.push({ table: 'products', id: dup.id, operation: 'UPDATE', data: { id: dup.id, is_active: 0 } })
+              deactivatedDuplicates++
+            }
+
+            const existingStock = db.prepare(`
+              SELECT id FROM stocks
+              WHERE product_id=? AND branch_id=? AND warehouse_id IS NULL
+            `).get(productId, stockBranchId) as { id: string } | undefined
+            if (existingStock) {
+              db.prepare('UPDATE stocks SET quantity=?, updated_at=datetime("now") WHERE id=?').run(stockQty, existingStock.id)
+            } else {
+              db.prepare('INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,?,?)')
+                .run(crypto.randomUUID(), productId, stockBranchId, null, stockQty)
+            }
+
+            imported++
+          } catch (rowErr) {
+            errors.push(`Row ${i + 2}: ${(rowErr as Error).message}`)
+            skipped++
+          }
+        }
+
+        for (const op of syncOps) {
+          await enqueuSync(op.table, op.id, op.operation, op.data)
+        }
+
+        return {
+          success: true,
+          data: { imported, created, updated, skipped, deactivatedDuplicates, errors, mode: 'woocommerce' }
+        }
+      }
 
       // Flexible column mapping (case-insensitive, trim)
       const norm = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')

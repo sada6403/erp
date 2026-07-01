@@ -1,10 +1,94 @@
 import type { IpcMain } from 'electron'
+import { app } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
+import fs from 'fs'
+import path from 'path'
 import { enqueuSync } from '../services/syncQueue'
+import Store from 'electron-store'
+
+const store = new Store()
+
+function authUser(): Record<string, unknown> {
+  return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+}
+
+function defaultBranchId() {
+  return 'b1111111-1111-4111-8111-111111111111'
+}
+
+function addMonths(date: string, months: number): string {
+  const d = new Date(`${date}T00:00:00`)
+  d.setMonth(d.getMonth() + months)
+  return d.toISOString().slice(0, 10)
+}
+
+function money(value: number): number {
+  return Math.round((Number(value) || 0) * 100) / 100
+}
+
+function calculateInstallment(input: Record<string, unknown>) {
+  const cashPrice = Number(input.cash_price || input.product_cash_price || 0)
+  const downPayment = Number(input.down_payment || 0)
+  const months = Number(input.months || input.installment_count || 12)
+  const interestType = String(input.interest_type || 'flat')
+  const interestRate = Number(input.interest_rate || 0)
+  const financedAmount = Math.max(0, cashPrice - downPayment)
+  let interestAmount = 0
+  let monthlyAmount = months > 0 ? financedAmount / months : financedAmount
+
+  if (interestType === 'no_interest' || interestRate <= 0) {
+    interestAmount = 0
+    monthlyAmount = months > 0 ? financedAmount / months : financedAmount
+  } else if (interestType === 'reducing') {
+    const r = interestRate / 100 / 12
+    monthlyAmount = r > 0
+      ? financedAmount * r * Math.pow(1 + r, months) / (Math.pow(1 + r, months) - 1)
+      : financedAmount / months
+    interestAmount = (monthlyAmount * months) - financedAmount
+  } else {
+    interestAmount = financedAmount * interestRate / 100
+    monthlyAmount = (financedAmount + interestAmount) / months
+  }
+
+  const totalPayable = financedAmount + interestAmount
+  return {
+    cash_price: money(cashPrice),
+    down_payment: money(downPayment),
+    financed_amount: money(financedAmount),
+    interest_type: interestType,
+    interest_rate: interestRate,
+    interest_amount: money(interestAmount),
+    total_payable: money(totalPayable),
+    monthly_amount: money(monthlyAmount),
+    months,
+  }
+}
+
+function nextInstallmentNumber(branchId: string) {
+  const db = getDb()
+  const year = new Date().getFullYear()
+  const branch = db.prepare('SELECT code, name FROM branches WHERE id=?').get(branchId) as { code?: string; name?: string } | undefined
+  const code = String(branch?.code || branch?.name?.slice(0, 4) || 'MAIN').toUpperCase().replace(/\s+/g, '')
+  const count = db.prepare(`
+    SELECT COUNT(*) AS count FROM installments
+    WHERE branch_id = ? AND substr(created_at, 1, 4) = ?
+  `).get(branchId, String(year)) as { count: number }
+  return `${code}-INS-${year}-${String(Number(count?.count || 0) + 1).padStart(4, '0')}`
+}
 
 export function registerAdminHandlers(ipcMain: IpcMain) {
+  // Runtime migration — add branch_pin column if missing (handles cases where Electron wasn't restarted)
+  try {
+    const _db = getDb()
+    const cols = _db.prepare('PRAGMA table_info(branches)').all() as { name: string }[]
+    if (!cols.some(c => c.name === 'branch_pin')) {
+      _db.exec('ALTER TABLE branches ADD COLUMN branch_pin TEXT')
+      console.log('[DB] Runtime migration: added branches.branch_pin')
+    }
+  } catch { /* db not ready yet — main initDatabase() will handle it */ }
+
   // Branches
   ipcMain.handle('admin:branches:list', () => {
     try { return { success: true, data: getDb().prepare('SELECT * FROM branches ORDER BY name').all() } }
@@ -12,24 +96,173 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:branches:findByCode', (_e, code: string) => {
     try {
-      const row = getDb().prepare('SELECT * FROM branches WHERE UPPER(code) = UPPER(?) AND is_active = 1').get(code.trim())
+      const db = getDb()
+      let row: unknown
+      const val = code.trim()
+      try {
+        // Prioritise exact code match; fall back to PIN match
+        row = db.prepare(
+          `SELECT * FROM branches WHERE UPPER(code) = UPPER(?) AND is_active = 1 LIMIT 1`
+        ).get(val)
+        if (!row) {
+          row = db.prepare(
+            `SELECT * FROM branches WHERE branch_pin = ? AND is_active = 1 LIMIT 1`
+          ).get(val)
+        }
+      } catch {
+        row = db.prepare(
+          'SELECT * FROM branches WHERE UPPER(code) = UPPER(?) AND is_active = 1 LIMIT 1'
+        ).get(val)
+      }
       return { success: true, data: row || null }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
   ipcMain.handle('admin:branches:create', async (_e, p) => {
     try {
+      const db = getDb()
       const id = crypto.randomUUID()
-      getDb().prepare(`INSERT INTO branches (id,name,address,phone,email,code) VALUES (?,?,?,?,?,?)`)
-        .run(id, p.name, p.address||null, p.phone||null, p.email||null, p.code||null)
+      if (p.branch_pin) {
+        const dup = db.prepare('SELECT id FROM branches WHERE branch_pin = ?').get(p.branch_pin)
+        if (dup) return { success: false, error: 'Another branch already uses this PIN. Choose a different PIN.' }
+      }
+      const existingCols = new Set(
+        (db.prepare('PRAGMA table_info(branches)').all() as { name: string }[]).map(c => c.name)
+      )
+      if (existingCols.has('branch_pin')) {
+        db.prepare(`INSERT INTO branches (id,name,address,phone,email,code,branch_pin) VALUES (?,?,?,?,?,?,?)`)
+          .run(id, p.name, p.address||null, p.phone||null, p.email||null, p.code||null, p.branch_pin||null)
+      } else {
+        db.prepare(`INSERT INTO branches (id,name,address,phone,email,code) VALUES (?,?,?,?,?,?)`)
+          .run(id, p.name, p.address||null, p.phone||null, p.email||null, p.code||null)
+      }
       await enqueuSync('branches', id, 'INSERT', { id, ...p })
+
+      // Auto-create Branch Manager for this branch if a branch_pin was provided
+      if (p.branch_pin) {
+        const BRANCH_MANAGER_ROLE_ID = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
+        const codeSlug = String(p.code || p.name).toUpperCase().replace(/\s+/g, '').slice(0, 10)
+        const managerEmail = `manager.${codeSlug.toLowerCase()}@pos.local`
+        const existingManager = db.prepare('SELECT id FROM users WHERE email = ?').get(managerEmail)
+        if (!existingManager) {
+          const userId = crypto.randomUUID()
+          const passwordHash = await bcrypt.hash(String(p.branch_pin), 10)
+          db.prepare(`
+            INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+          `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${p.name} Manager`, managerEmail, passwordHash, String(p.branch_pin))
+          await enqueuSync('users', userId, 'INSERT', { id: userId, branch_id: id, role_id: BRANCH_MANAGER_ROLE_ID, name: `${p.name} Manager`, email: managerEmail })
+        }
+      }
+
       return { success: true, data: { id } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
   ipcMain.handle('admin:branches:update', async (_e, id: string, p) => {
     try {
-      const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
-      getDb().prepare(`UPDATE branches SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
+      const db = getDb()
+      if ((p as Record<string,unknown>).branch_pin) {
+        const dup = db.prepare('SELECT id FROM branches WHERE branch_pin = ? AND id != ?').get((p as Record<string,unknown>).branch_pin, id)
+        if (dup) return { success: false, error: 'Another branch already uses this PIN. Choose a different PIN.' }
+      }
+      const existingCols = new Set(
+        (db.prepare('PRAGMA table_info(branches)').all() as { name: string }[]).map(c => c.name)
+      )
+      const safe = Object.fromEntries(Object.entries(p as Record<string,unknown>).filter(([k]) => existingCols.has(k)))
+      const fields = Object.keys(safe).map(k => `${k}=@${k}`).join(',')
+      if (fields) db.prepare(`UPDATE branches SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...safe, id})
       await enqueuSync('branches', id, 'UPDATE', { id, ...p })
+
+      // If a branch_pin was set and no manager user exists yet, auto-create one
+      const pin = (p as Record<string,unknown>).branch_pin as string | undefined
+      if (pin) {
+        const BRANCH_MANAGER_ROLE_ID = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
+        const branch = db.prepare('SELECT name, code FROM branches WHERE id=?').get(id) as { name: string; code: string } | undefined
+        if (branch) {
+          const existingManager = db.prepare(
+            'SELECT id FROM users WHERE branch_id=? AND role_id=?'
+          ).get(id, BRANCH_MANAGER_ROLE_ID)
+          if (!existingManager) {
+            const userId = crypto.randomUUID()
+            const codeSlug = String(branch.code || branch.name).toUpperCase().replace(/\s+/g, '').slice(0, 10).toLowerCase()
+            const managerEmail = `manager.${codeSlug}@pos.local`
+            const safeEmail = db.prepare('SELECT id FROM users WHERE email=?').get(managerEmail)
+              ? `manager.${codeSlug}.${userId.slice(0,4)}@pos.local`
+              : managerEmail
+            const passwordHash = await bcrypt.hash(pin, 10)
+            db.prepare(`
+              INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin, is_active)
+              VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+            `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${branch.name} Manager`, safeEmail, passwordHash, pin)
+            await enqueuSync('users', userId, 'INSERT', { id: userId, branch_id: id, role_id: BRANCH_MANAGER_ROLE_ID, name: `${branch.name} Manager`, email: safeEmail })
+          } else {
+            // Manager exists — update their PIN to match the new branch PIN
+            db.prepare('UPDATE users SET pin=?, updated_at=datetime(\'now\') WHERE branch_id=? AND role_id=?')
+              .run(pin, id, BRANCH_MANAGER_ROLE_ID)
+          }
+        }
+      }
+
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+  ipcMain.handle('admin:branches:delete', async (_e, id: string) => {
+    try {
+      const caller = authUser()
+      const perms = ((caller.role as Record<string,unknown>)?.permissions as Record<string,unknown>) || caller.permissions as Record<string,unknown> || {}
+      if (!perms.all) return { success: false, error: 'Company Admin access required to delete branches' }
+
+      const db = getDb()
+      const branch = db.prepare('SELECT id, name, code FROM branches WHERE id=?').get(id) as Record<string,unknown> | undefined
+      if (!branch) return { success: false, error: 'Branch not found' }
+      if (String(branch.id) === 'b1111111-1111-4111-8111-111111111111') return { success: false, error: 'The Main Branch cannot be deleted' }
+
+      // Block if real business data exists (all users — not just active — have NOT NULL branch_id)
+      const { cnt: userCnt } = db.prepare('SELECT COUNT(*) as cnt FROM users WHERE branch_id=?').get(id) as { cnt: number }
+      if (userCnt > 0) return { success: false, error: `Cannot delete: ${userCnt} user(s) still assigned to this branch. Reassign or delete them first.` }
+
+      const { cnt: invCnt } = db.prepare('SELECT COUNT(*) as cnt FROM invoices WHERE branch_id=?').get(id) as { cnt: number }
+      if (invCnt > 0) return { success: false, error: `Cannot delete: ${invCnt} invoice(s) exist for this branch. Deactivate it instead.` }
+
+      const { cnt: installCnt } = db.prepare('SELECT COUNT(*) as cnt FROM installments WHERE branch_id=?').get(id) as { cnt: number }
+      if (installCnt > 0) return { success: false, error: `Cannot delete: ${installCnt} installment(s) exist for this branch.` }
+
+      const { cnt: orderCnt } = db.prepare('SELECT COUNT(*) as cnt FROM customer_orders WHERE branch_id=?').get(id) as { cnt: number }
+      if (orderCnt > 0) return { success: false, error: `Cannot delete: ${orderCnt} customer order(s) exist for this branch.` }
+
+      const { cnt: poCnt } = db.prepare('SELECT COUNT(*) as cnt FROM purchase_orders WHERE branch_id=?').get(id) as { cnt: number }
+      if (poCnt > 0) return { success: false, error: `Cannot delete: ${poCnt} purchase order(s) exist for this branch.` }
+
+      // Disable FK checks for the duration of the cleanup (re-enabled in finally)
+      db.pragma('foreign_keys = OFF')
+      try {
+        db.transaction(() => {
+          // NULL out nullable branch_id refs (preserve history, just unlink)
+          db.prepare('UPDATE customers            SET branch_id=NULL WHERE branch_id=?').run(id)
+          db.prepare('UPDATE audit_logs           SET branch_id=NULL WHERE branch_id=?').run(id)
+          db.prepare('UPDATE installment_payments SET branch_id=NULL WHERE branch_id=?').run(id)
+          db.prepare('UPDATE expenses             SET branch_id=NULL WHERE branch_id=?').run(id)
+          db.prepare('UPDATE product_batches      SET branch_id=NULL WHERE branch_id=?').run(id)
+          db.prepare('UPDATE stock_movements      SET from_branch_id=NULL WHERE from_branch_id=?').run(id)
+          db.prepare('UPDATE stock_movements      SET to_branch_id=NULL   WHERE to_branch_id=?').run(id)
+          db.prepare('UPDATE stock_transfers      SET from_branch_id=NULL WHERE from_branch_id=?').run(id)
+          db.prepare('UPDATE stock_transfers      SET to_branch_id=NULL   WHERE to_branch_id=?').run(id)
+
+          // Delete operational records (no standalone business value)
+          db.prepare('DELETE FROM credit_ledger        WHERE branch_id=?').run(id)
+          db.prepare('DELETE FROM deliveries           WHERE branch_id=?').run(id)
+          db.prepare('DELETE FROM stock_count_sessions WHERE branch_id=?').run(id)
+          db.prepare('DELETE FROM stocks               WHERE branch_id=?').run(id)
+          db.prepare('DELETE FROM warehouses           WHERE branch_id=?').run(id)
+          db.prepare('DELETE FROM cash_sessions        WHERE branch_id=?').run(id)
+          db.prepare('DELETE FROM bill_sequences       WHERE branch_id=?').run(id)
+
+          db.prepare('DELETE FROM branches WHERE id=?').run(id)
+        })()
+      } finally {
+        db.pragma('foreign_keys = ON')
+      }
+
+      await enqueuSync('branches', id, 'DELETE', { id })
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -37,23 +270,57 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   // Users
   ipcMain.handle('admin:users:list', () => {
     try {
-      const rows = getDb().prepare(`
-        SELECT u.id, u.name, u.email, u.pin, u.is_active, u.last_login_at,
-               u.role_id, u.branch_id,
-               r.name as role_name, b.name as branch_name
-        FROM users u
-        LEFT JOIN roles r ON r.id = u.role_id
-        LEFT JOIN branches b ON b.id = u.branch_id
-        ORDER BY u.name
-      `).all()
+      const caller = authUser()
+      const perms  = (caller.permissions as Record<string, unknown>) || {}
+      const isGlobal = Boolean(perms.all)
+      const branchId = caller.branch_id as string | undefined
+
+      // Super Admin / Company Admin → all users
+      // Branch Manager (or anyone without global access) → own branch only
+      const rows = isGlobal
+        ? getDb().prepare(`
+            SELECT u.id, u.name, u.email, u.pin, u.is_active, u.last_login_at,
+                   u.role_id, u.branch_id,
+                   r.name as role_name, b.name as branch_name
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            LEFT JOIN branches b ON b.id = u.branch_id
+            ORDER BY u.name
+          `).all()
+        : getDb().prepare(`
+            SELECT u.id, u.name, u.email, u.pin, u.is_active, u.last_login_at,
+                   u.role_id, u.branch_id,
+                   r.name as role_name, b.name as branch_name
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            LEFT JOIN branches b ON b.id = u.branch_id
+            WHERE u.branch_id = ?
+            ORDER BY u.name
+          `).all(branchId || '')
+
       return { success: true, data: rows }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
   ipcMain.handle('admin:users:create', async (_e, p) => {
     try {
+      const { getMaxUsers } = await import('../services/licenseService')
+      const db = getDb()
+      const maxUsers = getMaxUsers()
+      const { cnt } = db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number }
+      if (cnt >= maxUsers) {
+        return { success: false, error: `User limit reached (${cnt}/${maxUsers}). Please upgrade your plan.` }
+      }
+
+      // Non-global callers can only create users in their own branch
+      const caller = authUser()
+      const perms  = (caller.permissions as Record<string, unknown>) || {}
+      if (!perms.all && caller.branch_id) {
+        p.branch_id = caller.branch_id
+      }
+
       const id = crypto.randomUUID()
       const hash = await bcrypt.hash(p.password, 10)
-      getDb().prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin)
+      db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin)
         VALUES (?,?,?,?,?,?,?)`)
         .run(id, p.branch_id||null, p.role_id, p.name, p.email, hash, p.pin||null)
       await enqueuSync('users', id, 'INSERT', { id, ...p, password_hash: hash })
@@ -85,9 +352,95 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const SUPER_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
       if (id === SUPER_ADMIN_ID) return { success: false, error: 'Cannot delete super admin account' }
       const db = getDb()
+      const user = db.prepare('SELECT id, name, branch_id FROM users WHERE id=?').get(id) as { id: string; name: string; branch_id: string | null } | undefined
+      if (!user) return { success: false, error: 'User not found' }
+
+      const caller = authUser()
+      const perms  = (caller.permissions as Record<string, unknown>) || {}
+      if (!perms.all && caller.branch_id && user.branch_id !== caller.branch_id) {
+        return { success: false, error: 'Cannot delete users from another branch' }
+      }
+
+      // Soft delete — just deactivate, preserve audit trail
+      db.prepare(`UPDATE users SET is_active=0, updated_at=datetime('now') WHERE id=?`).run(id)
+      db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id) VALUES (?,?,?,?,?,?)`)
+        .run(crypto.randomUUID(), caller.id, caller.branch_id, 'USER_DEACTIVATED', 'users', id)
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:users:hardDelete', (_e, id: string) => {
+    try {
+      const SUPER_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
+      if (id === SUPER_ADMIN_ID) return { success: false, error: 'Cannot permanently delete super admin account' }
+      const db = getDb()
       const user = db.prepare('SELECT id, name FROM users WHERE id=?').get(id) as { id: string; name: string } | undefined
       if (!user) return { success: false, error: 'User not found' }
-      db.prepare('DELETE FROM users WHERE id=?').run(id)
+
+      const caller = authUser()
+      if (id === String(caller.id)) return { success: false, error: 'Cannot delete your own account' }
+      const perms = ((caller.role as Record<string,unknown>)?.permissions as Record<string,unknown>) || caller.permissions as Record<string,unknown> || {}
+      if (!perms.all) return { success: false, error: 'Company Admin access required' }
+
+      db.pragma('foreign_keys = OFF')
+      try {
+        db.transaction(() => {
+          // NULL out all nullable refs to this user in other tables
+          db.prepare('UPDATE audit_logs       SET user_id=NULL    WHERE user_id=?').run(id)
+          db.prepare('UPDATE stock_movements  SET created_by=NULL WHERE created_by=?').run(id)
+          db.prepare('UPDATE stock_transfers  SET approved_by=NULL, released_by=NULL, initiated_by=NULL, received_by=NULL WHERE approved_by=? OR released_by=? OR initiated_by=? OR received_by=?').run(id, id, id, id)
+          db.prepare('UPDATE customer_orders  SET sales_staff_id=NULL WHERE sales_staff_id=?').run(id)
+          db.prepare('UPDATE customer_orders  SET approved_by=NULL    WHERE approved_by=?').run(id)
+          db.prepare('UPDATE customer_orders  SET released_by=NULL    WHERE released_by=?').run(id)
+          db.prepare('UPDATE customer_orders  SET delivery_confirmed_by=NULL WHERE delivery_confirmed_by=?').run(id)
+          db.prepare('UPDATE cash_sessions    SET opened_by=NULL  WHERE opened_by=?').run(id)
+          db.prepare('UPDATE deliveries       SET assigned_to=NULL WHERE assigned_to=?').run(id)
+          db.prepare('UPDATE installment_payments SET received_by=NULL, verified_by=NULL WHERE received_by=? OR verified_by=?').run(id, id)
+          db.prepare('UPDATE stock_count_sessions SET created_by=NULL WHERE created_by=?').run(id)
+          try { db.prepare('UPDATE stock_count_sessions SET completed_by=NULL WHERE completed_by=?').run(id) } catch { /* column may not exist on older DB */ }
+          db.prepare('UPDATE expenses         SET created_by=NULL WHERE created_by=?').run(id)
+          db.prepare('DELETE FROM users WHERE id=?').run(id)
+        })()
+      } finally {
+        db.pragma('foreign_keys = ON')
+      }
+
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:users:toggleActive', (_e, id: string, active: boolean) => {
+    try {
+      const db = getDb()
+      const caller = authUser()
+      db.prepare(`UPDATE users SET is_active=?, updated_at=datetime('now') WHERE id=?`).run(active ? 1 : 0, id)
+      db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values) VALUES (?,?,?,?,?,?,?)`)
+        .run(crypto.randomUUID(), caller.id, caller.branch_id,
+          active ? 'USER_ENABLED' : 'USER_DISABLED', 'users', id, JSON.stringify({ is_active: active }))
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:users:resetPassword', async (_e, id: string, newPassword: string) => {
+    try {
+      if (!newPassword || newPassword.length < 8) return { success: false, error: 'Password must be at least 8 characters' }
+      const db = getDb()
+      const caller = authUser()
+      const hash = await bcrypt.hash(newPassword, 10)
+      db.prepare(`UPDATE users SET password_hash=?, force_password_change=1, updated_at=datetime('now') WHERE id=?`).run(hash, id)
+      db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id) VALUES (?,?,?,?,?,?)`)
+        .run(crypto.randomUUID(), caller.id, caller.branch_id, 'PASSWORD_RESET_BY_ADMIN', 'users', id)
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:users:forcePasswordChange', (_e, id: string, force: boolean) => {
+    try {
+      const db = getDb()
+      const caller = authUser()
+      db.prepare(`UPDATE users SET force_password_change=?, updated_at=datetime('now') WHERE id=?`).run(force ? 1 : 0, id)
+      db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id) VALUES (?,?,?,?,?,?)`)
+        .run(crypto.randomUUID(), caller.id, caller.branch_id, 'FORCE_PASSWORD_CHANGE_SET', 'users', id)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -121,7 +474,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const role = db.prepare('SELECT name FROM roles WHERE id=?').get(id) as { name: string } | undefined
       if (!role) return { success: false, error: 'Role not found' }
-      if (role.name === 'Super Admin') return { success: false, error: 'Cannot delete Super Admin role' }
+      if (role.name === 'Company Admin') return { success: false, error: 'Cannot delete Company Admin role' }
       const used = db.prepare('SELECT COUNT(*) as count FROM users WHERE role_id=?').get(id) as { count: number }
       if (used.count > 0) return { success: false, error: 'Cannot delete role assigned to users' }
       db.prepare('DELETE FROM roles WHERE id=?').run(id)
@@ -226,29 +579,200 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
 
   // Installments
+  ipcMain.handle('admin:installments:calculate', (_e, p: Record<string, unknown>) => {
+    try { return { success: true, data: calculateInstallment(p) } }
+    catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:installments:plans', () => {
+    try {
+      return { success: true, data: getDb().prepare(`
+        SELECT * FROM installment_plans WHERE is_active=1 ORDER BY months
+      `).all() }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:installments:savePlan', async (_e, p: Record<string, unknown>) => {
+    try {
+      const db = getDb()
+      const id = String(p.id || crypto.randomUUID())
+      const row = {
+        id,
+        name: p.name || `${p.months} Months`,
+        months: Number(p.months || 12),
+        interest_type: p.interest_type || 'flat',
+        interest_rate: Number(p.interest_rate || 0),
+        min_down_payment_pct: Number(p.min_down_payment_pct || 0),
+        late_fee: Number(p.late_fee || 0),
+        grace_period_days: Number(p.grace_period_days || 0),
+        is_promotion: p.interest_type === 'no_interest' ? 1 : Number(p.is_promotion || 0),
+        is_active: p.is_active === false ? 0 : 1,
+      }
+      db.prepare(`
+        INSERT INTO installment_plans
+          (id,name,months,interest_type,interest_rate,min_down_payment_pct,late_fee,grace_period_days,is_promotion,is_active)
+        VALUES (@id,@name,@months,@interest_type,@interest_rate,@min_down_payment_pct,@late_fee,@grace_period_days,@is_promotion,@is_active)
+        ON CONFLICT(id) DO UPDATE SET
+          name=excluded.name, months=excluded.months, interest_type=excluded.interest_type,
+          interest_rate=excluded.interest_rate, min_down_payment_pct=excluded.min_down_payment_pct,
+          late_fee=excluded.late_fee, grace_period_days=excluded.grace_period_days,
+          is_promotion=excluded.is_promotion, is_active=excluded.is_active, updated_at=datetime('now')
+      `).run(row)
+      await enqueuSync('installment_plans', id, 'UPDATE', row)
+      return { success: true, data: { id } }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:installments:createSale', async (_e, p: Record<string, unknown>) => {
+    try {
+      const db = getDb()
+      const user = authUser()
+      const branchId = String(p.branch_id || user.branch_id || defaultBranchId())
+      let customerId = String(p.customer_id || '')
+      const items = Array.isArray(p.items) ? p.items as Record<string, unknown>[] : []
+      if (!items.length) return { success: false, error: 'Select at least one product' }
+
+      const calc = calculateInstallment(p)
+      const accountId = crypto.randomUUID()
+      const invoiceId = crypto.randomUUID()
+      const contractNumber = nextInstallmentNumber(branchId)
+      const invoiceNumber = contractNumber.replace('-INS-', '-INV-')
+      const startDate = String(p.start_date || new Date().toISOString().slice(0, 10))
+      const nextDue = addMonths(startDate, 1)
+      const downPayment = Number(calc.down_payment)
+
+      db.transaction(() => {
+        if (!customerId) {
+          customerId = crypto.randomUUID()
+          db.prepare(`
+            INSERT INTO customers (id, branch_id, name, phone, email, address, nic, notes)
+            VALUES (?,?,?,?,?,?,?,?)
+          `).run(
+            customerId, branchId, p.customer_name || 'Installment Customer',
+            p.customer_phone || null, p.customer_email || null, p.customer_address || null,
+            p.customer_nic || null, 'Created from installment sale'
+          )
+        }
+
+        db.prepare(`
+          INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id, bill_type, status,
+            subtotal, discount_amount, tax_amount, total_amount, paid_amount, due_amount, notes)
+          VALUES (?,?,?,?,?,'RETAIL','completed',?,?,?,?,?,?)
+        `).run(
+          invoiceId, invoiceNumber, branchId, customerId, user.id || null,
+          calc.cash_price, 0, 0, calc.cash_price, downPayment, calc.total_payable,
+          `Installment sale ${contractNumber}`
+        )
+
+        for (const item of items) {
+          const qty = Number(item.quantity || 1)
+          const productId = String(item.product_id)
+          const unitPrice = Number(item.unit_price || 0)
+          db.prepare(`
+            INSERT INTO invoice_items (id, invoice_id, product_id, quantity, unit_price,
+              discount_pct, discount_amount, tax_rate, tax_amount, line_total)
+            VALUES (?,?,?,?,?,0,0,0,0,?)
+          `).run(crypto.randomUUID(), invoiceId, productId, qty, unitPrice, money(qty * unitPrice))
+          const changed = db.prepare(`
+            UPDATE stocks SET quantity = quantity - ?, updated_at=datetime('now')
+            WHERE product_id=? AND branch_id=? AND quantity >= ?
+          `).run(qty, productId, branchId, qty)
+          if (!changed.changes) throw new Error(`Insufficient branch stock for product ${productId}`)
+        }
+
+        db.prepare(`
+          INSERT INTO installments
+            (id, contract_number, invoice_id, customer_id, branch_id, customer_phone, cash_price, down_payment,
+             financed_amount, interest_type, interest_rate, interest_amount, total_amount, paid_amount,
+             due_amount, monthly_amount, installment_count, remaining_installments, frequency, start_date,
+             next_due_date, status, grace_period_days, late_fee, notes)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        `).run(
+          accountId, contractNumber, invoiceId, customerId, branchId, p.customer_phone || null,
+          calc.cash_price, calc.down_payment, calc.financed_amount, calc.interest_type, calc.interest_rate,
+          calc.interest_amount, calc.total_payable, 0, calc.total_payable, calc.monthly_amount,
+          calc.months, calc.months, 'monthly', startDate, nextDue, 'active',
+          Number(p.grace_period_days || 0), Number(p.late_fee || 0), p.notes || null
+        )
+
+        for (let i = 1; i <= calc.months; i++) {
+          const dueDate = addMonths(startDate, i)
+          db.prepare(`
+            INSERT INTO installment_schedule
+              (id, installment_id, installment_no, due_date, principal, interest, total_due)
+            VALUES (?,?,?,?,?,?,?)
+          `).run(
+            crypto.randomUUID(), accountId, i, dueDate,
+            money(calc.financed_amount / calc.months),
+            money(calc.interest_amount / calc.months),
+            calc.monthly_amount
+          )
+          for (const offset of [7, 3, 0]) {
+            const scheduled = new Date(`${dueDate}T00:00:00`)
+            scheduled.setDate(scheduled.getDate() - offset)
+            db.prepare(`
+              INSERT INTO installment_reminders
+                (id, installment_id, channel, reminder_type, message, scheduled_at)
+              VALUES (?,?,?,?,?,?)
+            `).run(
+              crypto.randomUUID(), accountId, 'sms', offset === 0 ? 'due_today' : `${offset}_days_before`,
+              `Installment ${contractNumber}: Rs.${calc.monthly_amount} due on ${dueDate}`,
+              scheduled.toISOString().slice(0, 10)
+            )
+          }
+        }
+
+        if (downPayment > 0) {
+          const payId = crypto.randomUUID()
+          db.prepare(`
+            INSERT INTO installment_payments
+              (id, installment_id, amount, method, receipt_number, reference, status, received_by, branch_id, notes)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+          `).run(
+            payId, accountId, downPayment, p.down_payment_method || 'cash',
+            `${contractNumber}-DP`, p.down_payment_reference || null, 'approved',
+            user.id || null, branchId, 'Down payment'
+          )
+        }
+
+        db.prepare(`
+          INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
+          VALUES (?,?,?,?,?,?,?)
+        `).run(crypto.randomUUID(), user.id || null, branchId, 'INSTALLMENT_CREATED', 'installments', accountId, JSON.stringify({ contractNumber, calc }))
+      })()
+
+      await enqueuSync('invoices', invoiceId, 'INSERT', { id: invoiceId, invoice_number: invoiceNumber, branch_id: branchId, customer_id: customerId })
+      await enqueuSync('installments', accountId, 'INSERT', { id: accountId, contract_number: contractNumber, invoice_id: invoiceId, customer_id: customerId, branch_id: branchId, ...calc })
+      return { success: true, data: { id: accountId, contract_number: contractNumber, invoice_id: invoiceId } }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
   ipcMain.handle('admin:installments:list', (_e, filters: Record<string,unknown> = {}) => {
     try {
       const db = getDb()
-      let sql = `
-        SELECT inst.*,
-          c.name AS customer_name, c.phone AS customer_phone,
-          i.invoice_number,
-          COALESCE(inst.monthly_amount,
-            ROUND((inst.total_amount - inst.down_payment) / NULLIF(inst.installment_count,0), 2)
-          ) AS computed_monthly,
-          (SELECT COUNT(*) FROM installment_payments ip WHERE ip.installment_id = inst.id) AS payments_made
-        FROM installments inst
-        LEFT JOIN customers c ON c.id = inst.customer_id
-        LEFT JOIN invoices  i ON i.id = inst.invoice_id
-        WHERE 1=1`
-      const params: unknown[] = []
-      if (filters.status) { sql += ' AND inst.status=?'; params.push(filters.status) }
-      sql += ' ORDER BY inst.status ASC, inst.next_due_date ASC LIMIT 500'
-      // Auto-mark overdue
       db.prepare(`
         UPDATE installments SET status='overdue', updated_at=datetime('now')
         WHERE status='active' AND next_due_date < date('now') AND due_amount > 0
       `).run()
+      let sql = `
+        SELECT inst.*, c.name AS customer_name, c.phone AS customer_phone, b.name AS branch_name,
+          i.invoice_number,
+          inst.monthly_amount AS computed_monthly,
+          (SELECT COUNT(*) FROM installment_schedule s WHERE s.installment_id=inst.id AND s.status='paid') AS payments_made,
+          CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) AS overdue_days
+        FROM installments inst
+        LEFT JOIN customers c ON c.id = inst.customer_id
+        LEFT JOIN branches b ON b.id = inst.branch_id
+        LEFT JOIN invoices  i ON i.id = inst.invoice_id
+        WHERE 1=1`
+      const params: unknown[] = []
+      if (filters.status) { sql += ' AND inst.status=?'; params.push(filters.status) }
+      if (filters.branch_id) { sql += ' AND inst.branch_id=?'; params.push(filters.branch_id) }
+      if (filters.search) {
+        sql += ' AND (inst.contract_number LIKE ? OR c.name LIKE ? OR c.phone LIKE ?)'
+        const q = `%${filters.search}%`; params.push(q, q, q)
+      }
+      sql += ' ORDER BY inst.status DESC, inst.next_due_date ASC LIMIT 500'
       return { success: true, data: db.prepare(sql).all(...params) }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -258,88 +782,237 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const inst = db.prepare(`
         SELECT inst.*, c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
-          i.invoice_number, i.bill_date, i.total_amount AS invoice_total
+          b.name AS branch_name, i.invoice_number, i.created_at AS invoice_date
         FROM installments inst
         LEFT JOIN customers c ON c.id = inst.customer_id
+        LEFT JOIN branches b ON b.id = inst.branch_id
         LEFT JOIN invoices  i ON i.id = inst.invoice_id
         WHERE inst.id = ?
       `).get(id) as Record<string,unknown> | undefined
       if (!inst) return { success: false, error: 'Not found' }
-
+      const schedule = db.prepare(`
+        SELECT * FROM installment_schedule WHERE installment_id=? ORDER BY installment_no
+      `).all(id)
       const payments = db.prepare(`
-        SELECT ip.*, u.name AS received_by_name
+        SELECT ip.*, u.name AS received_by_name, v.name AS verified_by_name
         FROM installment_payments ip
         LEFT JOIN users u ON u.id = ip.received_by
+        LEFT JOIN users v ON v.id = ip.verified_by
         WHERE ip.installment_id = ?
-        ORDER BY ip.paid_at ASC
-      `).all(id) as Record<string,unknown>[]
-
-      // Build monthly schedule
-      const monthly = Number(inst.monthly_amount) ||
-        Math.round((Number(inst.total_amount) - Number(inst.down_payment)) / (Number(inst.installment_count) || 1) * 100) / 100
-      const startDate = new Date(String(inst.start_date))
-      const paymentsRemaining = [...payments]  // consumed greedily per slot
-      const today = new Date()
-
-      const schedule = Array.from({ length: Number(inst.installment_count) }, (_, idx) => {
-        const due = new Date(startDate)
-        if (inst.frequency === 'weekly') {
-          due.setDate(due.getDate() + idx * 7)
-        } else {
-          due.setMonth(due.getMonth() + idx)
-        }
-        const dueStr = due.toISOString().slice(0, 10)
-        // Greedily assign a payment to this slot
-        const pmt = paymentsRemaining.shift()
-        const status = pmt ? 'paid' : due < today ? 'overdue' : 'upcoming'
-        return {
-          month: idx + 1,
-          due_date: dueStr,
-          amount: monthly,
-          status,
-          paid_on:  pmt ? String(pmt.paid_at).slice(0, 10) : null,
-          paid_amount: pmt ? Number(pmt.amount) : null,
-          payment_id: pmt?.id ?? null,
-        }
-      })
-
-      return { success: true, data: { ...inst, schedule, payments, computed_monthly: monthly } }
+        ORDER BY ip.paid_at DESC
+      `).all(id)
+      const overdue = db.prepare(`
+        SELECT COALESCE(SUM(total_due + penalty - paid_amount),0) AS amount
+        FROM installment_schedule
+        WHERE installment_id=? AND status IN ('pending','partial','overdue') AND due_date < date('now')
+      `).get(id) as { amount: number }
+      return { success: true, data: { ...inst, schedule, payments, computed_monthly: inst.monthly_amount, overdue_amount: overdue.amount } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   ipcMain.handle('admin:installments:recordPayment', async (_e, id: string, p: Record<string,unknown>) => {
     try {
       const db = getDb()
+      const user = authUser()
+      const inst = db.prepare('SELECT * FROM installments WHERE id=?').get(id) as Record<string, unknown> | undefined
+      if (!inst) return { success: false, error: 'Installment account not found' }
+      const branchId = String(p.branch_id || inst.branch_id || user.branch_id || defaultBranchId())
+      const amount = money(Number(p.amount || 0))
+      if (amount <= 0) return { success: false, error: 'Enter a valid amount' }
+      const method = String(p.method || 'cash')
+      const status = method === 'bank_transfer' ? 'pending_verification' : 'approved'
       const paymentId = crypto.randomUUID()
+      const receiptNumber = String(p.receipt_number || `${inst.contract_number || 'INS'}-RCPT-${Date.now().toString().slice(-6)}`)
+
       db.transaction(() => {
-        db.prepare(`INSERT INTO installment_payments (id,installment_id,amount,notes)
-          VALUES (?,?,?,?)`).run(paymentId, id, p.amount, p.notes||null)
+        db.prepare(`
+          INSERT INTO installment_payments
+            (id, installment_id, amount, method, receipt_number, reference, receipt_image_url,
+             status, received_by, branch_id, notes)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?)
+        `).run(paymentId, id, amount, method, receiptNumber, p.reference || null, p.receipt_image_url || null, status, user.id || null, branchId, p.notes || null)
+
+        if (status === 'approved') {
+          let remaining = amount
+          const rows = db.prepare(`
+            SELECT * FROM installment_schedule
+            WHERE installment_id=? AND status IN ('pending','partial','overdue')
+            ORDER BY due_date, installment_no
+          `).all(id) as Record<string, unknown>[]
+          for (const row of rows) {
+            if (remaining <= 0) break
+            const due = Number(row.total_due || 0) + Number(row.penalty || 0) - Number(row.paid_amount || 0)
+            const apply = Math.min(remaining, due)
+            const newPaid = money(Number(row.paid_amount || 0) + apply)
+            const nextStatus = newPaid + 0.01 >= Number(row.total_due || 0) + Number(row.penalty || 0) ? 'paid' : 'partial'
+            db.prepare(`
+              UPDATE installment_schedule
+              SET paid_amount=?, status=?, paid_at=CASE WHEN ?='paid' THEN datetime('now') ELSE paid_at END, updated_at=datetime('now')
+              WHERE id=?
+            `).run(newPaid, nextStatus, nextStatus, row.id)
+            remaining = money(remaining - apply)
+          }
+          const paidRows = db.prepare('SELECT COUNT(*) AS count FROM installment_schedule WHERE installment_id=? AND status="paid"').get(id) as { count: number }
+          const dueAmount = money(Number(inst.due_amount || 0) - amount)
+          const next = db.prepare(`
+            SELECT due_date FROM installment_schedule
+            WHERE installment_id=? AND status IN ('pending','partial','overdue')
+            ORDER BY due_date LIMIT 1
+          `).get(id) as { due_date?: string } | undefined
+          db.prepare(`
+            UPDATE installments
+            SET paid_amount=paid_amount+?, due_amount=?, remaining_installments=?,
+                last_paid_date=date('now'), next_due_date=?, status=?, updated_at=datetime('now')
+            WHERE id=?
+          `).run(amount, Math.max(0, dueAmount), Math.max(0, Number(inst.installment_count || 0) - Number(paidRows.count || 0)), next?.due_date || null, dueAmount <= 0.01 ? 'completed' : 'active', id)
+        }
+
+        db.prepare(`
+          INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
+          VALUES (?,?,?,?,?,?,?)
+        `).run(crypto.randomUUID(), user.id || null, branchId, status === 'approved' ? 'INSTALLMENT_PAYMENT' : 'INSTALLMENT_PAYMENT_PENDING', 'installment_payments', paymentId, JSON.stringify({ amount, method, receiptNumber }))
+      })()
+      await enqueuSync('installment_payments', paymentId, 'INSERT', { id: paymentId, installment_id: id, amount, method, receipt_number: receiptNumber, status, branch_id: branchId, ...p })
+      return { success: true, data: { id: paymentId, receipt_number: receiptNumber, status } }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:installments:verifyPayment', async (_e, paymentId: string, action: 'approve' | 'reject', notes?: string) => {
+    try {
+      const db = getDb()
+      const user = authUser()
+      const payment = db.prepare('SELECT * FROM installment_payments WHERE id=?').get(paymentId) as Record<string, unknown> | undefined
+      if (!payment) return { success: false, error: 'Payment not found' }
+      if (action === 'reject') {
+        db.prepare(`
+          UPDATE installment_payments SET status='rejected', verified_by=?, verified_at=datetime('now'),
+            rejected_reason=?, updated_at=datetime('now') WHERE id=?
+        `).run(user.id || null, notes || null, paymentId)
+      } else {
+        db.prepare(`
+          UPDATE installment_payments SET status='approved', verified_by=?, verified_at=datetime('now'),
+            updated_at=datetime('now') WHERE id=?
+        `).run(user.id || null, paymentId)
+        const inst = db.prepare('SELECT * FROM installments WHERE id=?').get(payment.installment_id) as Record<string, unknown>
+        let remaining = Number(payment.amount || 0)
+        const rows = db.prepare(`
+          SELECT * FROM installment_schedule
+          WHERE installment_id=? AND status IN ('pending','partial','overdue')
+          ORDER BY due_date, installment_no
+        `).all(payment.installment_id) as Record<string, unknown>[]
+        for (const row of rows) {
+          if (remaining <= 0) break
+          const due = Number(row.total_due || 0) + Number(row.penalty || 0) - Number(row.paid_amount || 0)
+          const apply = Math.min(remaining, due)
+          const newPaid = money(Number(row.paid_amount || 0) + apply)
+          const nextStatus = newPaid + 0.01 >= Number(row.total_due || 0) + Number(row.penalty || 0) ? 'paid' : 'partial'
+          db.prepare(`
+            UPDATE installment_schedule
+            SET paid_amount=?, status=?, paid_at=CASE WHEN ?='paid' THEN datetime('now') ELSE paid_at END, updated_at=datetime('now')
+            WHERE id=?
+          `).run(newPaid, nextStatus, nextStatus, row.id)
+          remaining = money(remaining - apply)
+        }
+        const paidRows = db.prepare('SELECT COUNT(*) AS count FROM installment_schedule WHERE installment_id=? AND status="paid"').get(payment.installment_id) as { count: number }
+        const dueAmount = money(Number(inst.due_amount || 0) - Number(payment.amount || 0))
+        const next = db.prepare(`
+          SELECT due_date FROM installment_schedule
+          WHERE installment_id=? AND status IN ('pending','partial','overdue')
+          ORDER BY due_date LIMIT 1
+        `).get(payment.installment_id) as { due_date?: string } | undefined
         db.prepare(`
           UPDATE installments
-          SET paid_amount  = paid_amount + ?,
-              due_amount   = due_amount  - ?,
-              last_paid_date = date('now'),
-              updated_at   = datetime('now')
-          WHERE id = ?
-        `).run(p.amount, p.amount, id)
-        // Advance next_due_date by one period
-        const inst = db.prepare('SELECT * FROM installments WHERE id=?').get(id) as Record<string,unknown>
-        const nextDue = inst.next_due_date
-          ? (() => {
-              const d = new Date(String(inst.next_due_date))
-              if (inst.frequency === 'weekly') d.setDate(d.getDate() + 7)
-              else d.setMonth(d.getMonth() + 1)
-              return d.toISOString().slice(0, 10)
-            })()
-          : null
-        if ((inst.due_amount as number) - Number(p.amount) <= 0.01) {
-          db.prepare(`UPDATE installments SET status='completed', next_due_date=NULL WHERE id=?`).run(id)
-        } else {
-          db.prepare(`UPDATE installments SET status='active', next_due_date=? WHERE id=?`).run(nextDue, id)
+          SET paid_amount=paid_amount+?, due_amount=?, remaining_installments=?,
+              last_paid_date=date('now'), next_due_date=?, status=?, updated_at=datetime('now')
+          WHERE id=?
+        `).run(Number(payment.amount || 0), Math.max(0, dueAmount), Math.max(0, Number(inst.installment_count || 0) - Number(paidRows.count || 0)), next?.due_date || null, dueAmount <= 0.01 ? 'completed' : 'active', payment.installment_id)
+      }
+      db.prepare(`
+        INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
+        VALUES (?,?,?,?,?,?,?)
+      `).run(crypto.randomUUID(), user.id || null, payment.branch_id || null, action === 'approve' ? 'BANK_TRANSFER_APPROVED' : 'BANK_TRANSFER_REJECTED', 'installment_payments', paymentId, JSON.stringify({ notes }))
+      await enqueuSync('installment_payments', paymentId, 'UPDATE', { id: paymentId, status: action === 'approve' ? 'approved' : 'rejected', verified_by: user.id || null, rejected_reason: notes || null })
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:installments:pendingTransfers', (_e, filters: Record<string, unknown> = {}) => {
+    try {
+      const db = getDb()
+      let sql = `
+        SELECT ip.*, inst.contract_number, c.name AS customer_name, c.phone AS customer_phone,
+               b.name AS branch_name, u.name AS received_by_name
+        FROM installment_payments ip
+        JOIN installments inst ON inst.id = ip.installment_id
+        LEFT JOIN customers c ON c.id = inst.customer_id
+        LEFT JOIN branches b ON b.id = ip.branch_id
+        LEFT JOIN users u ON u.id = ip.received_by
+        WHERE ip.status = 'pending_verification'`
+      const params: unknown[] = []
+      if (filters.branch_id) { sql += ' AND ip.branch_id=?'; params.push(filters.branch_id) }
+      sql += ' ORDER BY ip.paid_at DESC LIMIT 200'
+      return { success: true, data: db.prepare(sql).all(...params) }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:installments:applyPenalties', () => {
+    try {
+      const db = getDb()
+      let count = 0
+      db.transaction(() => {
+        const rows = db.prepare(`
+          SELECT s.id, s.installment_id, inst.late_fee, inst.grace_period_days
+          FROM installment_schedule s
+          JOIN installments inst ON inst.id = s.installment_id
+          WHERE s.status IN ('pending','partial')
+            AND date('now') > date(s.due_date, '+' || CAST(inst.grace_period_days AS TEXT) || ' days')
+            AND s.penalty = 0
+            AND inst.late_fee > 0
+            AND inst.status IN ('active','overdue')
+        `).all() as Record<string, unknown>[]
+        for (const row of rows) {
+          const penalty = money(Number(row.late_fee))
+          db.prepare(`
+            UPDATE installment_schedule SET penalty=?, total_due=total_due+?, status='overdue',
+              updated_at=datetime('now') WHERE id=?
+          `).run(penalty, penalty, row.id)
+          db.prepare(`
+            UPDATE installments SET penalty_amount=penalty_amount+?, due_amount=due_amount+?,
+              updated_at=datetime('now') WHERE id=?
+          `).run(penalty, penalty, row.installment_id)
+          count++
         }
       })()
-      await enqueuSync('installment_payments', paymentId, 'INSERT', { id: paymentId, installment_id: id, ...p })
-      return { success: true }
+      return { success: true, data: { applied: count } }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:installments:reports', (_e, filters: Record<string, unknown> = {}) => {
+    try {
+      const db = getDb()
+      const params: unknown[] = []
+      let branchWhere = ''
+      if (filters.branch_id) { branchWhere = ' AND inst.branch_id=?'; params.push(filters.branch_id) }
+      const active = db.prepare(`SELECT COUNT(*) AS count FROM installments inst WHERE status IN ('active','overdue')${branchWhere}`).get(...params) as { count: number }
+      const overdue = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(due_amount),0) AS amount FROM installments inst WHERE status='overdue'${branchWhere}`).get(...params) as { count: number; amount: number }
+      const outstanding = db.prepare(`SELECT COALESCE(SUM(due_amount),0) AS amount FROM installments inst WHERE status IN ('active','overdue')${branchWhere}`).get(...params) as { amount: number }
+      const collections = db.prepare(`
+        SELECT substr(ip.paid_at,1,7) AS month, COALESCE(SUM(ip.amount),0) AS amount, COUNT(*) AS count
+        FROM installment_payments ip
+        JOIN installments inst ON inst.id=ip.installment_id
+        WHERE ip.status='approved'${branchWhere}
+        GROUP BY substr(ip.paid_at,1,7) ORDER BY month DESC LIMIT 12
+      `).all(...params)
+      const performance = db.prepare(`
+        SELECT b.name AS branch_name, u.name AS cashier_name, COALESCE(SUM(ip.amount),0) AS collected, COUNT(*) AS payments
+        FROM installment_payments ip
+        JOIN installments inst ON inst.id=ip.installment_id
+        LEFT JOIN branches b ON b.id=inst.branch_id
+        LEFT JOIN users u ON u.id=ip.received_by
+        WHERE ip.status='approved'${branchWhere}
+        GROUP BY b.name, u.name ORDER BY collected DESC LIMIT 20
+      `).all(...params)
+      return { success: true, data: { active: active.count, overdue, outstanding: outstanding.amount, collections, performance } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
@@ -425,6 +1098,165 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
       getDb().prepare(`UPDATE expenses SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
       await enqueuSync('expenses', id, 'UPDATE', { id, ...p })
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  // ── Clear All Data (wipe all transactional/test data, keep config) ────────
+  ipcMain.handle('admin:clearAllData', (_e) => {
+    try {
+      const db = getDb()
+      const caller = authUser()
+      const rolePerms = (caller?.role as Record<string,unknown>)?.permissions as Record<string,unknown> || {}
+      const directPerms = (caller?.permissions as Record<string,unknown>) || {}
+      const perms = Object.keys(rolePerms).length ? rolePerms : directPerms
+      if (!perms.all) return { success: false, error: 'Only Company Admin can clear all data' }
+
+      // Delete in FK-safe order
+      const tables = [
+        'sync_queue',
+        'audit_logs',
+        'loyalty_transactions',
+        'return_items',
+        'returns',
+        'installment_payments',
+        'installment_schedules',
+        'installments',
+        'order_items',
+        'orders',
+        'invoice_items',
+        'payments',
+        'invoices',
+        'stock_count_items',
+        'stock_counts',
+        'stock_transfer_items',
+        'stock_transfers',
+        'stock_movements',
+        'batches',
+        'stocks',
+        'purchase_order_items',
+        'purchase_orders',
+        'expenses',
+        'customers',
+        'products',
+        'notifications',
+        'categories',
+        'suppliers',
+      ]
+
+      // Disable FK constraints so we can delete in any order
+      db.pragma('foreign_keys = OFF')
+      db.transaction(() => {
+        for (const table of tables) {
+          try { db.prepare(`DELETE FROM ${table}`).run() } catch { /* table may not exist */ }
+        }
+        try { db.prepare(`DELETE FROM users`).run() } catch { /* ok */ }
+        try { db.prepare(`DELETE FROM branches`).run() } catch { /* ok */ }
+        try { db.prepare(`DELETE FROM roles`).run() } catch { /* ok */ }
+      })()
+      db.pragma('foreign_keys = ON')
+
+      // Delete all uploaded images (product photos, logos etc.)
+      const uploadsDir = path.join(app.getPath('userData'), 'uploads')
+      if (fs.existsSync(uploadsDir)) {
+        fs.rmSync(uploadsDir, { recursive: true, force: true })
+      }
+
+      // Mark first-time setup required and clear session
+      store.set('setup_required', true)
+      store.delete('auth_user')
+      store.delete('auth_token')
+      store.delete('last_pull_timestamp')
+
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  // ── Force Reset (called when cloud detects company was deleted by SuperAdmin) ─
+  // No permission check — this is triggered by the cloud, not the logged-in user.
+  ipcMain.handle('admin:forceReset', () => {
+    try {
+      const db = getDb()
+      const tables = [
+        'sync_queue', 'audit_logs', 'loyalty_transactions',
+        'return_items', 'returns', 'installment_payments', 'installment_schedules', 'installments',
+        'order_items', 'orders', 'invoice_items', 'payments', 'invoices',
+        'stock_count_items', 'stock_counts', 'stock_transfer_items', 'stock_transfers',
+        'stock_movements', 'batches', 'stocks', 'purchase_order_items', 'purchase_orders',
+        'expenses', 'customers', 'products', 'notifications', 'categories', 'suppliers',
+      ]
+      db.transaction(() => {
+        try { db.prepare(`UPDATE users SET branch_id = NULL, role_id = NULL`).run() } catch { /* ok */ }
+        for (const t of tables) { try { db.prepare(`DELETE FROM ${t}`).run() } catch { /* skip */ } }
+        try { db.prepare(`DELETE FROM branches`).run() } catch { /* ok */ }
+        try { db.prepare(`DELETE FROM users`).run() } catch { /* ok */ }
+        try { db.prepare(`DELETE FROM roles`).run() } catch { /* ok */ }
+      })()
+
+      // Delete all uploaded images (product photos, logos etc.)
+      const uploadsDir = path.join(app.getPath('userData'), 'uploads')
+      if (fs.existsSync(uploadsDir)) {
+        fs.rmSync(uploadsDir, { recursive: true, force: true })
+      }
+
+      // Clear cloud API settings so brand check doesn't re-trigger on next launch
+      const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+      settings.cloud_api_key = ''
+      settings.cloud_api_url = ''
+      store.set('app_settings', settings)
+
+      store.set('setup_required', true)
+      store.delete('auth_user')
+      store.delete('auth_token')
+      store.delete('last_pull_timestamp')
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  // ── Check if first-time setup is required: true when no active users exist ─
+  ipcMain.handle('admin:isSetupRequired', () => {
+    try {
+      const db = getDb()
+      const { cnt } = db.prepare('SELECT COUNT(*) as cnt FROM users WHERE is_active=1').get() as { cnt: number }
+      return cnt === 0
+    } catch {
+      return true
+    }
+  })
+
+  // ── Seed local defaults (used after Clear All Data to restore without cloud) ─
+  ipcMain.handle('admin:seedLocalDefaults', async () => {
+    try {
+      const db = getDb()
+      const branchId = 'b1111111-1111-4111-8111-111111111111'
+      const adminUserId = 'u9999999-9999-4999-8999-999999999999'
+      const companyAdminRoleId = '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d'
+
+      // Seed roles
+      db.prepare(`INSERT OR IGNORE INTO roles (id, name, permissions) VALUES
+        ('3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'Company Admin',   '{"all":true}'),
+        ('4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e', 'Branch Manager',  '{"pos":true,"inventory":true,"reports":true,"customers":true,"employees":true}'),
+        ('5c8d0e1f-3a4b-6c5d-0e1f-3a4b5c8d0e1f', 'Cashier',         '{"pos":true,"customers":true}'),
+        ('6d9e1f2a-4b5c-7d6e-1f2a-4b5c6d9e1f2a', 'Warehouse Staff', '{"inventory":true,"transfers":true}'),
+        ('7e0f2a3b-5c6d-8e7f-2a3b-5c6d7e0f2a3b', 'Delivery Staff',  '{"deliveries":true}')
+      `).run()
+
+      // Seed main branch
+      db.prepare(`
+        INSERT OR IGNORE INTO branches (id, name, code, address, phone)
+        VALUES (?, 'Main Branch', 'MAIN', 'Head Office', '+94 11 000 0000')
+      `).run(branchId)
+
+      // Seed default admin user
+      const hash = await bcrypt.hash('admin123', 10)
+      db.prepare(`
+        INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, pin, is_active)
+        VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, '1234', 1)
+      `).run(adminUserId, branchId, companyAdminRoleId, hash)
+
+      // Clear the setup_required flag
+      store.delete('setup_required')
+
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })

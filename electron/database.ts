@@ -59,6 +59,7 @@ function runMigrations(): void {
     ['audit_logs',           'updated_at',  "TEXT NOT NULL DEFAULT ''"],
     ['products',             'branch_id',   "TEXT"],
     ['branches',             'code',        "TEXT"],
+    ['branches',             'branch_pin',  "TEXT"],
     // Bill type system
     ['invoices', 'bill_type',    "TEXT NOT NULL DEFAULT 'RETAIL'"],
     ['invoices', 'valid_until',  "TEXT"],
@@ -292,6 +293,26 @@ function runMigrations(): void {
 
   // Stock count sessions
   db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_movements (
+      id                   TEXT PRIMARY KEY,
+      product_id            TEXT NOT NULL REFERENCES products(id),
+      from_branch_id        TEXT REFERENCES branches(id),
+      to_branch_id          TEXT REFERENCES branches(id),
+      quantity              INTEGER NOT NULL,
+      movement_type         TEXT NOT NULL CHECK (movement_type IN ('SALE','TRANSFER','ADJUSTMENT','RECEIVE')),
+      reference_order_id    TEXT,
+      reference_transfer_id TEXT REFERENCES stock_transfers(id),
+      notes                 TEXT,
+      created_by            TEXT REFERENCES users(id),
+      created_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at             TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_movements_product ON stock_movements(product_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_movements_from_branch ON stock_movements(from_branch_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_movements_to_branch ON stock_movements(to_branch_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_movements_type ON stock_movements(movement_type);
+    CREATE INDEX IF NOT EXISTS idx_stock_movements_created_at ON stock_movements(created_at);
+
     CREATE TABLE IF NOT EXISTS stock_count_sessions (
       id            TEXT PRIMARY KEY,
       branch_id     TEXT REFERENCES branches(id),
@@ -325,6 +346,17 @@ function runMigrations(): void {
     ['monthly_amount',  'REAL NOT NULL DEFAULT 0'],
     ['customer_phone',  'TEXT'],
     ['last_paid_date',  'TEXT'],
+    ['contract_number', 'TEXT'],
+    ['branch_id',       'TEXT'],
+    ['cash_price',      'REAL NOT NULL DEFAULT 0'],
+    ['financed_amount', 'REAL NOT NULL DEFAULT 0'],
+    ['interest_type',   "TEXT NOT NULL DEFAULT 'flat'"],
+    ['interest_rate',   'REAL NOT NULL DEFAULT 0'],
+    ['interest_amount', 'REAL NOT NULL DEFAULT 0'],
+    ['penalty_amount',  'REAL NOT NULL DEFAULT 0'],
+    ['grace_period_days', 'INTEGER NOT NULL DEFAULT 0'],
+    ['late_fee',        'REAL NOT NULL DEFAULT 0'],
+    ['remaining_installments', 'INTEGER NOT NULL DEFAULT 0'],
   ]
   for (const [col, def] of instCols) {
     if (!hasColumn('installments', col)) {
@@ -337,6 +369,107 @@ function runMigrations(): void {
     UPDATE installments
     SET monthly_amount = ROUND((due_amount + paid_amount - down_payment) / NULLIF(installment_count, 0), 2)
     WHERE monthly_amount = 0 AND installment_count > 0
+  `)
+  db.exec(`
+    UPDATE installments
+    SET contract_number = COALESCE(contract_number, 'INS-' || substr(id, 1, 8)),
+        branch_id = COALESCE(branch_id, (SELECT branch_id FROM invoices WHERE invoices.id = installments.invoice_id)),
+        cash_price = CASE WHEN cash_price = 0 THEN total_amount ELSE cash_price END,
+        financed_amount = CASE WHEN financed_amount = 0 THEN total_amount - down_payment ELSE financed_amount END,
+        remaining_installments = CASE
+          WHEN remaining_installments = 0 THEN MAX(installment_count - (
+            SELECT COUNT(*) FROM installment_payments ip
+            WHERE ip.installment_id = installments.id
+          ), 0)
+          ELSE remaining_installments
+        END
+    WHERE 1=1
+  `)
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_installments_contract ON installments(contract_number);
+    CREATE INDEX IF NOT EXISTS idx_installments_branch ON installments(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_installments_next_due ON installments(next_due_date);
+
+    CREATE TABLE IF NOT EXISTS installment_plans (
+      id                 TEXT PRIMARY KEY,
+      name               TEXT NOT NULL,
+      months             INTEGER NOT NULL,
+      interest_type      TEXT NOT NULL DEFAULT 'flat',
+      interest_rate      REAL NOT NULL DEFAULT 0,
+      min_down_payment_pct REAL NOT NULL DEFAULT 0,
+      late_fee           REAL NOT NULL DEFAULT 0,
+      grace_period_days  INTEGER NOT NULL DEFAULT 0,
+      is_promotion       INTEGER NOT NULL DEFAULT 0,
+      is_active          INTEGER NOT NULL DEFAULT 1,
+      created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at          TEXT
+    );
+    CREATE TABLE IF NOT EXISTS installment_schedule (
+      id              TEXT PRIMARY KEY,
+      installment_id  TEXT NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
+      installment_no  INTEGER NOT NULL,
+      due_date        TEXT NOT NULL,
+      principal       REAL NOT NULL DEFAULT 0,
+      interest        REAL NOT NULL DEFAULT 0,
+      penalty         REAL NOT NULL DEFAULT 0,
+      total_due       REAL NOT NULL DEFAULT 0,
+      paid_amount     REAL NOT NULL DEFAULT 0,
+      status          TEXT NOT NULL DEFAULT 'pending',
+      paid_at         TEXT,
+      updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at       TEXT,
+      UNIQUE(installment_id, installment_no)
+    );
+    CREATE INDEX IF NOT EXISTS idx_installment_schedule_account ON installment_schedule(installment_id);
+    CREATE INDEX IF NOT EXISTS idx_installment_schedule_due ON installment_schedule(due_date, status);
+
+    CREATE TABLE IF NOT EXISTS installment_reminders (
+      id              TEXT PRIMARY KEY,
+      installment_id  TEXT NOT NULL REFERENCES installments(id) ON DELETE CASCADE,
+      schedule_id     TEXT REFERENCES installment_schedule(id),
+      channel         TEXT NOT NULL,
+      reminder_type   TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'pending',
+      message         TEXT,
+      scheduled_at    TEXT NOT NULL,
+      sent_at         TEXT,
+      error           TEXT,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at       TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_installment_reminders_status ON installment_reminders(status, scheduled_at);
+  `)
+
+  const instPaymentCols: [string, string][] = [
+    ['method', 'TEXT NOT NULL DEFAULT "cash"'],
+    ['receipt_number', 'TEXT'],
+    ['reference', 'TEXT'],
+    ['receipt_image_url', 'TEXT'],
+    ['status', "TEXT NOT NULL DEFAULT 'approved'"],
+    ['verified_by', 'TEXT'],
+    ['verified_at', 'TEXT'],
+    ['rejected_reason', 'TEXT'],
+    ['branch_id', 'TEXT'],
+  ]
+  for (const [col, def] of instPaymentCols) {
+    if (!hasColumn('installment_payments', col)) {
+      db.exec(`ALTER TABLE installment_payments ADD COLUMN ${col} ${def}`)
+      console.log(`[DB] Migration: added installment_payments.${col}`)
+    }
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_installment_payments_status ON installment_payments(status);
+    CREATE INDEX IF NOT EXISTS idx_installment_payments_branch ON installment_payments(branch_id);
+    INSERT OR IGNORE INTO installment_plans
+      (id, name, months, interest_type, interest_rate, min_down_payment_pct, late_fee, grace_period_days, is_promotion)
+    VALUES
+      ('plan-3-flat',  '3 Months',  3,  'flat', 0, 0, 0, 0, 0),
+      ('plan-6-flat',  '6 Months',  6,  'flat', 0, 0, 0, 0, 0),
+      ('plan-12-flat', '12 Months', 12, 'flat', 0, 0, 0, 0, 0),
+      ('plan-18-flat', '18 Months', 18, 'flat', 0, 0, 0, 0, 0),
+      ('plan-24-flat', '24 Months', 24, 'flat', 0, 0, 0, 0, 0),
+      ('plan-36-flat', '36 Months', 36, 'flat', 0, 0, 0, 0, 0);
   `)
 
   // Returns & refunds
@@ -396,6 +529,124 @@ function runMigrations(): void {
   db.prepare(`
     UPDATE branches SET code = 'MAIN' WHERE id = 'b1111111-1111-4111-8111-111111111111' AND (code IS NULL OR code = '')
   `).run()
+
+  // Notification center
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS notifications (
+      id          TEXT PRIMARY KEY,
+      type        TEXT NOT NULL,
+      title       TEXT NOT NULL,
+      message     TEXT NOT NULL,
+      is_read     INTEGER NOT NULL DEFAULT 0,
+      data        TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_notifications_read    ON notifications(is_read);
+    CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
+  `)
+
+  // ── Loyalty Points ─────────────────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS loyalty_config (
+      id              TEXT PRIMARY KEY DEFAULT 'default',
+      enabled         INTEGER NOT NULL DEFAULT 0,
+      earn_points     INTEGER NOT NULL DEFAULT 1,
+      earn_per_amount REAL    NOT NULL DEFAULT 100,
+      redeem_points   INTEGER NOT NULL DEFAULT 100,
+      redeem_value    REAL    NOT NULL DEFAULT 10,
+      min_redeem      INTEGER NOT NULL DEFAULT 100,
+      expiry_days     INTEGER NOT NULL DEFAULT 0,
+      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    INSERT OR IGNORE INTO loyalty_config (id) VALUES ('default');
+
+    CREATE TABLE IF NOT EXISTS loyalty_transactions (
+      id          TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL REFERENCES customers(id),
+      invoice_id  TEXT REFERENCES invoices(id),
+      type        TEXT NOT NULL CHECK (type IN ('earn','redeem','expire','adjust')),
+      points      INTEGER NOT NULL,
+      balance     INTEGER NOT NULL DEFAULT 0,
+      note        TEXT,
+      created_by  TEXT REFERENCES users(id),
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_loyalty_customer ON loyalty_transactions(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_loyalty_type     ON loyalty_transactions(type);
+  `)
+  if (!hasColumn('customers', 'loyalty_points')) {
+    db.exec(`ALTER TABLE customers ADD COLUMN loyalty_points INTEGER NOT NULL DEFAULT 0`)
+  }
+
+  // ── Batch / Serial / Expiry Tracking ────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS product_batches (
+      id            TEXT PRIMARY KEY,
+      product_id    TEXT NOT NULL REFERENCES products(id),
+      branch_id     TEXT REFERENCES branches(id),
+      batch_number  TEXT,
+      serial_number TEXT,
+      expiry_date   TEXT,
+      mfg_date      TEXT,
+      quantity      REAL NOT NULL DEFAULT 0,
+      cost_price    REAL NOT NULL DEFAULT 0,
+      po_id         TEXT REFERENCES purchase_orders(id),
+      notes         TEXT,
+      created_by    TEXT REFERENCES users(id),
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_batches_product   ON product_batches(product_id);
+    CREATE INDEX IF NOT EXISTS idx_batches_branch    ON product_batches(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_batches_expiry    ON product_batches(expiry_date);
+    CREATE INDEX IF NOT EXISTS idx_batches_batch_no  ON product_batches(batch_number);
+  `)
+  if (!hasColumn('products', 'track_batches')) {
+    db.exec(`ALTER TABLE products ADD COLUMN track_batches INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('products', 'track_serial')) {
+    db.exec(`ALTER TABLE products ADD COLUMN track_serial INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('products', 'track_expiry')) {
+    db.exec(`ALTER TABLE products ADD COLUMN track_expiry INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('purchase_items', 'batch_number')) {
+    db.exec(`ALTER TABLE purchase_items ADD COLUMN batch_number TEXT`)
+  }
+  if (!hasColumn('purchase_items', 'expiry_date')) {
+    db.exec(`ALTER TABLE purchase_items ADD COLUMN expiry_date TEXT`)
+  }
+
+  // ── 2FA columns ────────────────────────────────────────────────────────────
+  if (!hasColumn('users', 'two_factor_enabled')) {
+    db.exec(`ALTER TABLE users ADD COLUMN two_factor_enabled INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('users', 'two_factor_secret')) {
+    db.exec(`ALTER TABLE users ADD COLUMN two_factor_secret TEXT`)
+  }
+
+  // Rename legacy 'Super Admin' role → 'Company Admin'
+  db.prepare(`UPDATE roles SET name = 'Company Admin' WHERE name = 'Super Admin'`).run()
+
+  // Add login_attempts and force_password_change columns if missing
+  if (!hasColumn('users', 'login_attempts')) {
+    db.exec(`ALTER TABLE users ADD COLUMN login_attempts INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('users', 'locked_until')) {
+    db.exec(`ALTER TABLE users ADD COLUMN locked_until TEXT`)
+  }
+  if (!hasColumn('users', 'force_password_change')) {
+    db.exec(`ALTER TABLE users ADD COLUMN force_password_change INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('stock_count_sessions', 'completed_by')) {
+    db.exec(`ALTER TABLE stock_count_sessions ADD COLUMN completed_by TEXT REFERENCES users(id)`)
+  }
+  if (!hasColumn('stock_count_sessions', 'completed_at')) {
+    db.exec(`ALTER TABLE stock_count_sessions ADD COLUMN completed_at TEXT`)
+  }
+  if (!hasColumn('stock_count_sessions', 'updated_at')) {
+    db.exec(`ALTER TABLE stock_count_sessions ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))`)
+  }
 }
 
 function seedDefaultData() {
@@ -414,7 +665,7 @@ function seedDefaultData() {
     VALUES (?, ?, 'Main Warehouse')
   `).run('w2222222-2222-4222-8222-222222222222', branchId)
 
-  // Seed super admin user (using standard UUID format and super admin role UUID)
+  // Seed default company admin user (using standard UUID format and company admin role UUID)
   const hash = bcrypt.hashSync('admin123', 10)
   db.prepare(`
     INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, pin)

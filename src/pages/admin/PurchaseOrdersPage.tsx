@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Eye, ChevronDown, ChevronUp, Send, PackageCheck, XCircle } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Plus, RefreshCw, Eye, ChevronDown, Send, PackageCheck, XCircle, Search } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import toast from 'react-hot-toast'
@@ -287,6 +287,118 @@ function ReceivePOModal({ po, onClose, onDone }:
   )
 }
 
+function ProductSearchSelect({
+  products, value, onChange
+}: {
+  products: Record<string, unknown>[]
+  value: string
+  onChange: (id: string) => void
+}) {
+  const [query, setQuery]       = useState('')
+  const [open, setOpen]         = useState(false)
+  const [highlighted, setHighlighted] = useState(0)
+  const ref     = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+
+  const selected = products.find(p => String(p.id) === value)
+  const filtered = products.filter(p => {
+    const q = query.toLowerCase()
+    return (
+      String(p.name).toLowerCase().includes(q) ||
+      String(p.sku || '').toLowerCase().includes(q)
+    )
+  })
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  // Reset highlight when filter changes
+  useEffect(() => { setHighlighted(0) }, [query])
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (!listRef.current) return
+    const item = listRef.current.children[highlighted] as HTMLElement | undefined
+    item?.scrollIntoView({ block: 'nearest' })
+  }, [highlighted])
+
+  const openDropdown = () => { setOpen(true); setQuery(''); setHighlighted(0) }
+
+  const select = (id: string) => {
+    onChange(id)
+    setQuery('')
+    setOpen(false)
+  }
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!open) { if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); openDropdown() } return }
+    if (e.key === 'ArrowDown')  { e.preventDefault(); setHighlighted(h => Math.min(h + 1, filtered.length - 1)) }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlighted(h => Math.max(h - 1, 0)) }
+    else if (e.key === 'Enter') { e.preventDefault(); if (filtered[highlighted]) select(String(filtered[highlighted].id)) }
+    else if (e.key === 'Escape') { e.preventDefault(); setOpen(false) }
+    else if (e.key === 'Tab')   { setOpen(false) }
+  }
+
+  return (
+    <div ref={ref} className="relative min-w-0 w-full">
+      <div
+        tabIndex={0}
+        className="input text-sm py-1.5 flex items-center gap-2 cursor-pointer overflow-hidden focus:outline-none"
+        onClick={openDropdown}
+        onKeyDown={onKeyDown}
+      >
+        <span className="min-w-0 flex-1 truncate" style={{ color: selected ? 'var(--text-1)' : 'var(--text-3)' }}>
+          {selected ? `${String(selected.name)} (${String(selected.sku || '')})` : 'Select product...'}
+        </span>
+        <ChevronDown size={12} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+      </div>
+
+      {open && (
+        <div className="absolute z-50 top-full mt-1 left-0 right-0 rounded-lg shadow-xl border"
+          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-2)' }}>
+          <div className="flex items-center gap-2 px-2 py-1.5" style={{ borderBottom: '1px solid var(--border)' }}>
+            <Search size={12} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+            <input
+              autoFocus
+              type="text"
+              placeholder="Search product or SKU..."
+              className="bg-transparent text-sm outline-none w-full"
+              style={{ color: 'var(--text-1)' }}
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onKeyDown={onKeyDown}
+            />
+          </div>
+          <div ref={listRef} className="max-h-52 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="text-xs text-center py-3" style={{ color: 'var(--text-3)' }}>No products found</p>
+            ) : filtered.map((p, i) => (
+              <div
+                key={String(p.id)}
+                onClick={() => select(String(p.id))}
+                onMouseEnter={() => setHighlighted(i)}
+                className="px-3 py-2 text-sm cursor-pointer flex items-center justify-between gap-2 transition-colors"
+                style={{
+                  background: i === highlighted ? 'var(--bg-soft)' : 'transparent',
+                  color: String(p.id) === value ? 'var(--brand-500, #6366f1)' : 'var(--text-1)',
+                }}
+              >
+                <span className="truncate">{String(p.name)}</span>
+                <span className="text-xs shrink-0" style={{ color: 'var(--text-3)' }}>{String(p.sku || '')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [suppliers, setSuppliers] = useState<Record<string, unknown>[]>([])
   const [products, setProducts]   = useState<Record<string, unknown>[]>([])
@@ -367,35 +479,49 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
             <p className="text-sm font-semibold">Items</p>
             <button className="btn-ghost btn-sm gap-1" onClick={addItem}><Plus size={12}/>Add Item</button>
           </div>
-          <div className="space-y-2">
+
+          {/* Column headers */}
+          <div className="grid gap-2 mb-1 px-1" style={{ gridTemplateColumns: '1fr 72px 110px 80px 20px' }}>
+            {['Product', 'Qty', 'Unit Cost', 'Total', ''].map((h, i) => (
+              <p key={h} className={`text-xs font-medium${i === 0 ? ' min-w-0 truncate' : ''}`} style={{ color: 'var(--text-3)' }}>{h}</p>
+            ))}
+          </div>
+
+          <div className="space-y-1.5">
             {form.items.map((item, idx) => (
-              <div key={idx} className="flex gap-2 items-center bg-surface-800 p-2 rounded-lg">
-                <select className="input flex-1 text-sm py-1.5" value={item.product_id}
-                  onChange={e => setItem(idx, 'product_id', e.target.value)}>
-                  <option value="">Select product...</option>
-                  {products.map(p => <option key={String(p.id)} value={String(p.id)}>{String(p.name)} ({String(p.sku || '')})</option>)}
-                </select>
-                <div>
-                  <p className="text-xs text-slate-500 mb-0.5">Qty</p>
-                  <input type="number" min={1} className="input w-20 text-sm py-1.5" value={item.quantity}
-                    onChange={e => setItem(idx, 'quantity', parseInt(e.target.value) || 1)} />
-                </div>
-                <div>
-                  <p className="text-xs text-slate-500 mb-0.5">Unit Cost</p>
-                  <input type="number" min={0} className="input w-28 text-sm py-1.5" value={item.unit_cost}
-                    onChange={e => setItem(idx, 'unit_cost', parseFloat(e.target.value) || 0)} />
-                </div>
-                <div className="text-sm font-semibold min-w-[80px] text-right">
+              <div key={idx} className="grid gap-2 items-center rounded-lg px-1 py-1.5"
+                style={{ gridTemplateColumns: '1fr 72px 110px 80px 20px', background: 'var(--bg-soft)', minWidth: 0 }}>
+                <ProductSearchSelect
+                  products={products}
+                  value={item.product_id}
+                  onChange={id => setItem(idx, 'product_id', id)}
+                />
+                <input
+                  type="number" min={1}
+                  className="input text-sm py-1.5 text-center"
+                  value={item.quantity}
+                  onChange={e => setItem(idx, 'quantity', parseInt(e.target.value) || 1)}
+                />
+                <input
+                  type="number" min={0}
+                  className="input text-sm py-1.5"
+                  value={item.unit_cost}
+                  onChange={e => setItem(idx, 'unit_cost', parseFloat(e.target.value) || 0)}
+                />
+                <p className="text-sm font-semibold text-right pr-1">
                   Rs.{(item.quantity * item.unit_cost).toLocaleString()}
+                </p>
+                <div className="flex justify-center">
+                  {form.items.length > 1 && (
+                    <button className="text-red-400 hover:text-red-300" onClick={() => removeItem(idx)}>
+                      <XCircle size={14}/>
+                    </button>
+                  )}
                 </div>
-                {form.items.length > 1 && (
-                  <button className="text-red-400 hover:text-red-300 p-1" onClick={() => removeItem(idx)}>
-                    <XCircle size={14}/>
-                  </button>
-                )}
               </div>
             ))}
           </div>
+
           <div className="flex justify-end mt-2 text-sm font-bold">
             Total: Rs.{totalAmount.toLocaleString()}
           </div>

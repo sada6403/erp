@@ -7,19 +7,26 @@ import toast from 'react-hot-toast'
 export default function InventoryPage() {
   const [stocks, setStocks]       = useState<Record<string, unknown>[]>([])
   const [transfers, setTransfers] = useState<Record<string, unknown>[]>([])
-  const [tab, setTab]             = useState<'stock' | 'transfers'>('stock')
+  const [movements, setMovements] = useState<Record<string, unknown>[]>([])
+  const [tab, setTab]             = useState<'stock' | 'transfers' | 'movements'>('stock')
+  const [movementType, setMovementType] = useState('')
   const [showTransfer, setShowTransfer] = useState(false)
   const [loading, setLoading]     = useState(true)
 
   const load = async () => {
     setLoading(true)
-    const [s, t] = await Promise.all([window.api.stocks.list(), window.api.stocks.listTransfers()])
+    const [s, t, m] = await Promise.all([
+      window.api.stocks.list(),
+      window.api.stocks.listTransfers(),
+      window.api.stocks.movements(movementType ? { movement_type: movementType } : {})
+    ])
     if (s.success) setStocks(s.data as Record<string, unknown>[])
     if (t.success) setTransfers(t.data as Record<string, unknown>[])
+    if (m.success) setMovements(m.data as Record<string, unknown>[])
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [movementType])
 
   const lowStock = stocks.filter(s => (s.quantity as number) <= (s.min_stock_level as number))
   const nextTransferStatus: Record<string, string> = {
@@ -53,10 +60,10 @@ export default function InventoryPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 px-6 pb-3 border-b border-slate-800 flex-shrink-0">
-        {['stock', 'transfers'].map(t => (
-          <button key={t} onClick={() => setTab(t as 'stock' | 'transfers')}
+        {(['stock', 'transfers', 'movements'] as const).map(t => (
+          <button key={t} onClick={() => setTab(t)}
             className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all capitalize ${tab === t ? 'bg-brand-600 text-white' : 'text-slate-400 hover:text-white'}`}>
-            {t}
+            {t === 'movements' ? 'Movement Log' : t}
           </button>
         ))}
       </div>
@@ -96,7 +103,7 @@ export default function InventoryPage() {
               ))}
             </tbody>
           </table>
-        ) : (
+        ) : tab === 'transfers' ? (
           <table className="w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
@@ -124,6 +131,47 @@ export default function InventoryPage() {
               ))}
             </tbody>
           </table>
+        ) : (
+          <div className="flex flex-col min-h-full">
+            <div className="flex gap-2 px-6 py-3 border-b border-slate-800 flex-shrink-0">
+              {['', 'SALE', 'TRANSFER', 'RECEIVE', 'ADJUSTMENT'].map(type => (
+                <button key={type || 'all'} onClick={() => setMovementType(type)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium ${movementType === type ? 'bg-brand-600 text-white' : 'bg-surface-800 text-slate-400'}`}>
+                  {type || 'All'}
+                </button>
+              ))}
+            </div>
+            <table className="w-full">
+              <thead className="sticky top-0 bg-surface-900 z-10">
+                <tr>
+                  {['Date', 'Product', 'From', 'To', 'Qty', 'Type', 'Done By', 'Ref'].map(h => (
+                    <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? <tr><td colSpan={8} className="text-center py-16 text-slate-500">Loading...</td></tr>
+                : movements.map(m => (
+                  <tr key={m.id as string} className="table-row">
+                    <td className="table-cell text-xs text-slate-400">{new Date(m.created_at as string).toLocaleString()}</td>
+                    <td className="table-cell">
+                      <p className="font-medium">{m.product_name as string}</p>
+                      <p className="text-xs text-slate-500 font-mono">{m.sku as string}</p>
+                    </td>
+                    <td className="table-cell text-slate-400">{m.from_branch_name as string || '-'}</td>
+                    <td className="table-cell text-slate-400">{m.to_branch_name as string || '-'}</td>
+                    <td className="table-cell font-bold">{m.quantity as number}</td>
+                    <td className="table-cell"><span className={`badge-${m.movement_type === 'SALE' ? 'red' : m.movement_type === 'TRANSFER' ? 'blue' : m.movement_type === 'RECEIVE' ? 'green' : 'yellow'}`}>{m.movement_type as string}</span></td>
+                    <td className="table-cell text-slate-400">{m.done_by_name as string || '-'}</td>
+                    <td className="table-cell font-mono text-xs text-brand-400">{(m.invoice_number as string) || (m.transfer_number as string) || '-'}</td>
+                  </tr>
+                ))}
+                {!loading && movements.length === 0 && (
+                  <tr><td colSpan={8} className="text-center py-16 text-slate-500">No stock movements found</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 

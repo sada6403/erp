@@ -59,6 +59,11 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [emailing, setEmailing]         = useState(false)
   const [receiptPayload, setReceiptPayload] = useState<Record<string, unknown> | null>(null)
   const [printDesign, setPrintDesign]   = useState<'dot' | 'thermal' | 'a4'>('thermal')
+  // Loyalty
+  const [loyaltyBalance, setLoyaltyBalance] = useState<{ points: number; redeem_value: number; config: Record<string,unknown> } | null>(null)
+  const [usePoints, setUsePoints]       = useState(false)
+  const [redeemPoints, setRedeemPoints] = useState(0)
+  const [earnedPoints, setEarnedPoints] = useState(0)
   const receivedRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -66,17 +71,33 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     receivedRef.current?.select()
   }, [])
 
+  // Load loyalty balance when customer changes
   useEffect(() => {
-    if (method === 'cash' || method === 'gift_voucher') setReceived(String(cart.total.toFixed(2)))
-  }, [method, cart.total])
+    if (!cart.customer?.id) { setLoyaltyBalance(null); setUsePoints(false); setRedeemPoints(0); return }
+    window.api.loyalty.getBalance(cart.customer.id).then((r: { success: boolean; points: number; redeem_value: number; config: Record<string,unknown> }) => {
+      if (r.success && (r.config?.enabled)) setLoyaltyBalance(r)
+      else setLoyaltyBalance(null)
+    })
+  }, [cart.customer?.id])
 
   const isQuotation = billType === 'QUOTATION'
   const isCredit    = billType === 'CREDIT'
   const isRetail    = billType === 'RETAIL'
 
+  // Loyalty discount computed from redeemPoints
+  const loyaltyCfg          = loyaltyBalance?.config
+  const maxRedeemablePoints = loyaltyBalance ? Math.min(loyaltyBalance.points, Math.floor(cart.total / (Number(loyaltyCfg?.redeem_value ?? 10) / Number(loyaltyCfg?.redeem_points ?? 100)))) : 0
+  const loyaltyDiscount     = usePoints && redeemPoints > 0 ? (redeemPoints / Number(loyaltyCfg?.redeem_points ?? 100)) * Number(loyaltyCfg?.redeem_value ?? 10) : 0
+  const totalAfterLoyalty   = Math.max(0, cart.total - loyaltyDiscount)
+
+  useEffect(() => {
+    if (method === 'cash' || method === 'gift_voucher') setReceived(String(totalAfterLoyalty.toFixed(2)))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [method, cart.total, loyaltyDiscount])
+
   const receivedAmount      = parseFloat(received) || 0
-  const voucherApplied      = method === 'gift_voucher' ? Math.min(Math.max(0, receivedAmount), cart.total) : 0
-  const voucherBalance      = method === 'gift_voucher' ? Math.max(0, cart.total - voucherApplied) : 0
+  const voucherApplied      = method === 'gift_voucher' ? Math.min(Math.max(0, receivedAmount), totalAfterLoyalty) : 0
+  const voucherBalance      = method === 'gift_voucher' ? Math.max(0, totalAfterLoyalty - voucherApplied) : 0
   const balanceReceivedAmount = parseFloat(balanceReceived) || 0
   const effectivePaidAmount = isCredit || method === 'installment'
     ? 0
@@ -85,7 +106,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       : receivedAmount
   const change = method === 'gift_voucher'
     ? Math.max(0, balanceReceivedAmount - voucherBalance)
-    : Math.max(0, receivedAmount - cart.total)
+    : Math.max(0, receivedAmount - totalAfterLoyalty)
 
   useEffect(() => {
     if (method === 'gift_voucher') setBalanceReceived(voucherBalance.toFixed(2))
@@ -134,7 +155,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
 
   const handleConfirm = useCallback(async () => {
     if (loading) return
-    if (isRetail && method !== 'installment' && method !== 'gift_voucher' && receivedAmount < cart.total) {
+    if (isRetail && method !== 'installment' && method !== 'gift_voucher' && receivedAmount < totalAfterLoyalty) {
       toast.error('Insufficient payment amount')
       receivedRef.current?.focus()
       receivedRef.current?.select()
@@ -201,6 +222,18 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       }
 
       const data = res.data as { id: string; invoice_number: string }
+
+      // Loyalty: redeem points first, then earn on net amount
+      if (cart.customer?.id) {
+        if (usePoints && redeemPoints > 0) {
+          await window.api.loyalty.redeem({ customer_id: cart.customer.id, invoice_id: data.id, points: redeemPoints, created_by: user?.id })
+        }
+        if (isRetail) {
+          const earnRes = await window.api.loyalty.earn({ customer_id: cart.customer.id, invoice_id: data.id, amount: totalAfterLoyalty, created_by: user?.id }) as { success: boolean; points_earned: number }
+          if (earnRes.success && earnRes.points_earned > 0) setEarnedPoints(earnRes.points_earned)
+        }
+      }
+
       const payload = buildPayload(data.invoice_number || invoiceNumber)
       setReceiptPayload(payload)
       setDone(true)
@@ -303,6 +336,17 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
             </div>
           )}
 
+          {/* Loyalty earned badge */}
+          {earnedPoints > 0 && (
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-3 my-2 flex items-center gap-2">
+              <span className="text-xl">⭐</span>
+              <div>
+                <p className="text-sm font-semibold text-yellow-400">+{earnedPoints} Points Earned!</p>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Added to customer's loyalty balance</p>
+              </div>
+            </div>
+          )}
+
           {/* Print options */}
           <div className="mt-4 space-y-2">
             <div className="grid grid-cols-3 gap-2">
@@ -381,9 +425,51 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               {isQuotation ? 'Quoted Amount' : isCredit ? 'Credit Amount' : 'Total Amount'}
             </p>
             <p className="text-4xl font-bold" style={{ color: 'var(--text-1)' }}>
-              Rs.{cart.total.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              Rs.{totalAfterLoyalty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
             </p>
+            {loyaltyDiscount > 0 && (
+              <p className="text-xs mt-1 text-green-400">
+                Rs.{loyaltyDiscount.toFixed(2)} loyalty discount applied
+              </p>
+            )}
           </div>
+
+          {/* Loyalty Points Redemption */}
+          {loyaltyBalance && loyaltyBalance.points > 0 && isRetail && (
+            <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)', background: 'color-mix(in srgb, #f59e0b 6%, transparent)' }}>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">⭐</span>
+                  <div>
+                    <p className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>Loyalty Points</p>
+                    <p className="text-[10px]" style={{ color: 'var(--text-3)' }}>{loyaltyBalance.points} pts available</p>
+                  </div>
+                </div>
+                <label className="flex items-center gap-1.5 cursor-pointer">
+                  <input type="checkbox" checked={usePoints} onChange={e => { setUsePoints(e.target.checked); if (!e.target.checked) setRedeemPoints(0) }} className="w-3.5 h-3.5 accent-yellow-500" />
+                  <span className="text-xs font-medium text-yellow-500">Use Points</span>
+                </label>
+              </div>
+              {usePoints && (
+                <div className="flex items-center gap-2 mt-1">
+                  <input
+                    type="number"
+                    min={Number(loyaltyCfg?.min_redeem ?? 100)}
+                    max={maxRedeemablePoints}
+                    step={Number(loyaltyCfg?.redeem_points ?? 100)}
+                    value={redeemPoints}
+                    onChange={e => setRedeemPoints(Math.min(maxRedeemablePoints, Math.max(0, parseInt(e.target.value) || 0)))}
+                    className="input py-1 text-sm w-28"
+                    placeholder="Points"
+                  />
+                  <span className="text-xs" style={{ color: 'var(--text-3)' }}>
+                    = Rs.{loyaltyDiscount.toFixed(2)} off
+                  </span>
+                  <button onClick={() => setRedeemPoints(maxRedeemablePoints)} className="text-xs text-yellow-500 underline ml-auto">Max</button>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* QUOTATION: valid until */}
           {isQuotation && (

@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
 import fs from 'fs'
+import { insertStockMovement } from '../services/stockMovement'
 
 const store = new Store()
 
@@ -99,12 +100,28 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           VALUES (?, ?, ?, ?, ?)`).run(id, product_id, branch_id, warehouse_id || null, quantity)
       }
 
+      const previousQty = existing ? Number((existing as Record<string, unknown>).quantity || 0) : 0
+      const delta = Number(quantity) - previousQty
+      let movement: Record<string, unknown> | null = null
+      if (delta !== 0) {
+        movement = insertStockMovement(db, {
+          product_id,
+          from_branch_id: delta < 0 ? branch_id : null,
+          to_branch_id: delta > 0 ? branch_id : null,
+          quantity: Math.abs(delta),
+          movement_type: 'ADJUSTMENT',
+          notes: reason || `Stock adjusted from ${previousQty} to ${quantity}`,
+          created_by: (user?.id as string) || null,
+        })
+      }
+
       db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, new_values)
         VALUES (?,?,?,?,?,?,?)`)
         .run(crypto.randomUUID(), user?.id, branch_id, 'STOCK_ADJUST', 'stocks', product_id,
           JSON.stringify({ quantity, reason }))
 
       await enqueuSync('stocks', `${product_id}-${branch_id}`, 'UPDATE', payload)
+      if (movement) await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -167,6 +184,38 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
+  ipcMain.handle('stocks:movements', (_e, filters: Record<string, unknown> = {}) => {
+    try {
+      const db = getDb()
+      let sql = `
+        SELECT sm.*, p.name AS product_name, p.sku,
+               fb.name AS from_branch_name, tb.name AS to_branch_name,
+               u.name AS done_by_name,
+               i.invoice_number,
+               st.transfer_number
+        FROM stock_movements sm
+        JOIN products p ON p.id = sm.product_id
+        LEFT JOIN branches fb ON fb.id = sm.from_branch_id
+        LEFT JOIN branches tb ON tb.id = sm.to_branch_id
+        LEFT JOIN users u ON u.id = sm.created_by
+        LEFT JOIN invoices i ON i.id = sm.reference_order_id
+        LEFT JOIN stock_transfers st ON st.id = sm.reference_transfer_id
+        WHERE 1=1
+      `
+      const params: unknown[] = []
+      if (filters.date_from) { sql += ' AND date(sm.created_at) >= ?'; params.push(filters.date_from) }
+      if (filters.date_to) { sql += ' AND date(sm.created_at) <= ?'; params.push(filters.date_to) }
+      if (filters.branch_id) {
+        sql += ' AND (sm.from_branch_id = ? OR sm.to_branch_id = ?)'
+        params.push(filters.branch_id, filters.branch_id)
+      }
+      if (filters.product_id) { sql += ' AND sm.product_id = ?'; params.push(filters.product_id) }
+      if (filters.movement_type) { sql += ' AND sm.movement_type = ?'; params.push(filters.movement_type) }
+      sql += ' ORDER BY sm.created_at DESC LIMIT 1000'
+      return { success: true, data: db.prepare(sql).all(...params) }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
   ipcMain.handle('stocks:availability', (_e, productId: string) => {
     try {
       const rows = getDb().prepare(`
@@ -218,6 +267,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       const now = new Date().toISOString()
       const patch: Record<string, unknown> = { status }
+      const movementRecords: Record<string, unknown>[] = []
 
       if (status === 'approved') {
         patch.approved_by = user?.id || null
@@ -268,6 +318,16 @@ export function registerStockHandlers(ipcMain: IpcMain) {
             WHERE product_id=? AND branch_id=? AND quantity>=?`)
             .run(transfer.quantity, transfer.product_id, transfer.from_branch_id, transfer.quantity)
           if (!changed.changes) throw new Error('Insufficient source stock at dispatch time')
+          movementRecords.push(insertStockMovement(db, {
+            product_id: String(transfer.product_id),
+            from_branch_id: String(transfer.from_branch_id),
+            to_branch_id: String(transfer.to_branch_id),
+            quantity: Number(transfer.quantity),
+            movement_type: 'TRANSFER',
+            reference_transfer_id: id,
+            notes: `Transfer dispatched: ${transfer.transfer_number || id}`,
+            created_by: (user?.id as string) || null,
+          }))
         }
 
         // Restore source stock if rejected after dispatching (defensive: shouldn't happen with transitions, but safe)
@@ -287,6 +347,18 @@ export function registerStockHandlers(ipcMain: IpcMain) {
             db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty)
               VALUES (?,?,?,?,?)`)
               .run(crypto.randomUUID(), transfer.product_id, transfer.to_branch_id, received, damaged)
+          }
+          if (received > 0) {
+            movementRecords.push(insertStockMovement(db, {
+              product_id: String(transfer.product_id),
+              from_branch_id: String(transfer.from_branch_id),
+              to_branch_id: String(transfer.to_branch_id),
+              quantity: received,
+              movement_type: 'RECEIVE',
+              reference_transfer_id: id,
+              notes: `Transfer received: ${transfer.transfer_number || id}`,
+              created_by: (user?.id as string) || null,
+            }))
           }
         }
 
@@ -317,6 +389,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         const destination = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
           .get(transfer.product_id, transfer.to_branch_id) as Record<string, unknown>
         if (destination) await enqueuSync('stocks', String(destination.id), 'UPDATE', destination)
+      }
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       }
 
       return { success: true }
@@ -472,17 +547,34 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (!session) return { success: false, error: 'Stock count not found' }
       if (session.status === 'completed') return { success: false, error: 'Stock count already completed' }
       const items = db.prepare('SELECT * FROM stock_count_items WHERE session_id=? AND counted_qty IS NOT NULL').all(id) as Record<string, unknown>[]
+      const movementRecords: Record<string, unknown>[] = []
 
       db.transaction(() => {
         for (const item of items) {
           const existing = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
-            .get(item.product_id, session.branch_id) as { id: string } | undefined
+            .get(item.product_id, session.branch_id) as { id: string; quantity?: number } | undefined
+          const previousQty = existing
+            ? Number((db.prepare('SELECT quantity FROM stocks WHERE id=?').get(existing.id) as { quantity: number } | undefined)?.quantity || 0)
+            : 0
+          const countedQty = Number(item.counted_qty || 0)
           if (existing) {
-            db.prepare('UPDATE stocks SET quantity=?, updated_at=datetime("now") WHERE id=?')
-              .run(item.counted_qty, existing.id)
+            db.prepare("UPDATE stocks SET quantity=?, updated_at=datetime('now') WHERE id=?")
+              .run(countedQty, existing.id)
           } else {
             db.prepare('INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)')
-              .run(crypto.randomUUID(), item.product_id, session.branch_id, item.counted_qty)
+              .run(crypto.randomUUID(), item.product_id, session.branch_id, countedQty)
+          }
+          const delta = countedQty - previousQty
+          if (delta !== 0) {
+            movementRecords.push(insertStockMovement(db, {
+              product_id: String(item.product_id),
+              from_branch_id: delta < 0 ? String(session.branch_id) : null,
+              to_branch_id: delta > 0 ? String(session.branch_id) : null,
+              quantity: Math.abs(delta),
+              movement_type: 'ADJUSTMENT',
+              notes: `Stock count finalized: ${previousQty} to ${countedQty}`,
+              created_by: (user?.id as string) || null,
+            }))
           }
         }
         db.prepare(`
@@ -492,6 +584,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         `).run(user?.id || null, id)
       })()
       await enqueuSync('stock_count_sessions', id, 'UPDATE', { id, status: 'completed' })
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
       return { success: true }
     } catch (err) { return { success: false, error: (err as Error).message } }
   })

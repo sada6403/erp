@@ -4,7 +4,7 @@ import Modal from '@/components/shared/Modal'
 import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
-  FileSpreadsheet, Trash2, Lock, Calculator, Info
+  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
@@ -21,6 +21,11 @@ export default function ProductsPage() {
   const [showForm, setShowForm]     = useState(false)
   const [editing, setEditing]       = useState<Product | null>(null)
   const [loading, setLoading]       = useState(true)
+  const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
+  const [deleteReason, setDeleteReason] = useState('')
+  const [deleting, setDeleting]     = useState(false)
+  const { user: currentUser } = useAuthStore()
+  const isCompanyAdmin = Boolean((currentUser?.role?.permissions as Record<string,boolean>)?.all)
 
   const load = async () => {
     setLoading(true)
@@ -51,8 +56,19 @@ export default function ProductsPage() {
   const handleImportExcel = async () => {
     const res = await window.api.products.importExcel()
     if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Import failed'); return }
-    const { imported, skipped } = res.data as { imported: number; skipped: number; errors: string[] }
-    toast.success(`Imported ${imported} products${skipped ? `, skipped ${skipped}` : ''}`)
+    const data = res.data as {
+      imported: number
+      created?: number
+      updated?: number
+      skipped: number
+      deactivatedDuplicates?: number
+      errors: string[]
+      mode?: string
+    }
+    const detail = data.mode === 'woocommerce'
+      ? ` (${data.created || 0} new, ${data.updated || 0} updated${data.deactivatedDuplicates ? `, ${data.deactivatedDuplicates} duplicates inactive` : ''})`
+      : ''
+    toast.success(`Imported ${data.imported} products${detail}${data.skipped ? `, skipped ${data.skipped}` : ''}`)
     load()
   }
 
@@ -67,6 +83,29 @@ export default function ProductsPage() {
     await window.api.products.update(p.id, { is_active: p.is_active ? 0 : 1 })
     toast.success(p.is_active ? 'Product deactivated' : 'Product activated')
     load()
+  }
+
+  const handlePermanentDelete = async () => {
+    if (!deleteTarget || !deleteReason.trim()) {
+      toast.error('Please provide a reason for deletion')
+      return
+    }
+    setDeleting(true)
+    try {
+      const res = await window.api.products.permanentDelete(deleteTarget.id, deleteReason.trim()) as { success: boolean; error?: string }
+      if (res.success) {
+        toast.success(`Product "${deleteTarget.name}" permanently deleted`)
+        setDeleteTarget(null)
+        setDeleteReason('')
+        load()
+      } else {
+        toast.error(res.error || 'Delete failed')
+      }
+    } catch (err) {
+      toast.error('Delete failed: ' + String(err))
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -148,10 +187,10 @@ export default function ProductsPage() {
                     {p.cost_price.toLocaleString()}
                     {pr.alert_qty ? <span className="text-xs text-slate-500 ml-1">({pr.alert_qty as number})</span> : null}
                   </td>
-                  <td className="table-cell px-3 text-sm text-brand-400 font-semibold">{p.selling_price.toLocaleString()}</td>
+                  <td className="table-cell px-3 text-sm font-semibold" style={{ color: 'var(--brand-primary)' }}>{p.selling_price.toLocaleString()}</td>
                   <td className="table-cell px-3 text-sm text-slate-400">{Number(pr.wholesale_price || 0).toLocaleString()}</td>
-                  <td className="table-cell px-3">
-                    <span className={`text-sm font-bold px-2 py-0.5 rounded text-white
+                  <td className="table-cell px-3 whitespace-nowrap">
+                    <span className={`text-sm font-bold px-2 py-0.5 rounded text-white whitespace-nowrap
                       ${(p.stock ?? 0) <= 0 ? 'bg-red-600' : (p.stock ?? 0) <= p.min_stock_level ? 'bg-yellow-600' : 'bg-green-700'}`}>
                       {p.stock ?? 0} ITEMS
                     </span>
@@ -159,10 +198,16 @@ export default function ProductsPage() {
                   <td className="table-cell px-3">
                     <div className="flex gap-1">
                       <button onClick={() => { setEditing(p); setShowForm(true) }}
-                        className="btn-ghost btn-sm p-1.5 text-blue-400" title="Edit"><Edit2 size={13} /></button>
+                        className="btn-ghost btn-sm p-1.5" style={{ color: 'var(--brand-primary)' }} title="Edit"><Edit2 size={13} /></button>
                       <button onClick={() => toggleActive(p)} className="btn-ghost btn-sm p-1.5" title={p.is_active ? 'Deactivate' : 'Activate'}>
                         {p.is_active ? <ToggleRight size={14} className="text-green-400" /> : <ToggleLeft size={14} />}
                       </button>
+                      {isCompanyAdmin && (
+                        <button onClick={() => { setDeleteTarget(p); setDeleteReason('') }}
+                          className="btn-ghost btn-sm p-1.5 text-red-400 hover:text-red-500" title="Permanently delete">
+                          <Trash2 size={13} />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -185,6 +230,53 @@ export default function ProductsPage() {
           onCategoryCreated={load}
         />
       )}
+
+      {/* Permanent Delete Confirmation Modal */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+          <div className="card w-full max-w-md" style={{ border: '1px solid #ef4444' }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={20} className="text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base" style={{ color: 'var(--text-1)' }}>Permanently Delete Product</h3>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>This action cannot be undone</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg p-3 mb-4 text-sm" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--text-2)' }}>
+              <p className="font-semibold mb-1" style={{ color: 'var(--text-1)' }}>{deleteTarget.name}</p>
+              <p className="text-xs">SKU: {deleteTarget.sku} {deleteTarget.barcode && `| Barcode: ${deleteTarget.barcode}`}</p>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>
+                Reason for Deletion <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                value={deleteReason}
+                onChange={e => setDeleteReason(e.target.value)}
+                className="input resize-none"
+                rows={3}
+                placeholder="Enter reason (e.g. wrongly added product, duplicate entry...)"
+                maxLength={500}
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setDeleteTarget(null); setDeleteReason('') }}
+                className="btn-secondary btn-sm">Cancel</button>
+              <button onClick={handlePermanentDelete} disabled={deleting || !deleteReason.trim()}
+                className="btn-sm px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)' }}>
+                {deleting ? 'Deleting...' : 'Permanently Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }

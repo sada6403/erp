@@ -1,13 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAuthorized } from '@/lib/auth'
-import { rows } from '@/lib/db'
+import { resolveCompany, AccountStatusError } from '@/lib/auth'
 import { assertTable, quoteIdentifier } from '@/lib/sync'
+import { syncLimiter } from '@/lib/rateLimit'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  const limited = syncLimiter(request)
+  if (limited) return limited
+
+  let company
+  try {
+    company = await resolveCompany(request)
+  } catch (err) {
+    if (err instanceof AccountStatusError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 403 })
+    }
+    throw err
+  }
+  if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -19,11 +31,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'A valid since timestamp is required' }, { status: 400 })
     }
 
-    const data = await rows<Record<string, unknown>>(
-      `SELECT * FROM ${quoteIdentifier(table)}
-        WHERE updated_at > $1::timestamptz
-        ORDER BY updated_at ASC
-        LIMIT 5000`,
+    const { rows: data } = await company.tp.query(
+      `SELECT * FROM ${quoteIdentifier(table)} WHERE updated_at > ? ORDER BY updated_at ASC LIMIT 5000`,
       [since]
     )
     return NextResponse.json({ data })
