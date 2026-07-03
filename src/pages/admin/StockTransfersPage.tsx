@@ -156,7 +156,7 @@ function DispatchModal({ t, onClose, onDone }: { t: Transfer; onClose: () => voi
     if (!form.driver_name.trim()) { toast.error('Driver name required'); return }
     setLoading(true)
     const res = await window.api.stocks.updateTransfer(t.id, 'dispatched', form)
-    if (res.success) { toast.success('Dispatched — stock deducted from source branch'); onDone() }
+    if (res.success) { toast.success('Dispatched - stock will update when receiving branch confirms'); onDone() }
     else toast.error(res.error || 'Failed')
     setLoading(false)
   }
@@ -172,7 +172,7 @@ function DispatchModal({ t, onClose, onDone }: { t: Transfer; onClose: () => voi
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>
             <strong>{t.from_branch_name}</strong> → {t.to_branch_name} · {t.quantity} units
           </p>
-          <p className="text-xs mt-1 text-orange-500">⚠ Stock will be deducted from {t.from_branch_name}</p>
+          <p className="text-xs mt-1 text-orange-500">Stock will be deducted only after the receiving branch confirms receipt.</p>
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
@@ -431,6 +431,10 @@ export default function StockTransfersPage() {
   }, [statusFilter, branchFilter, isAdmin, myBranchId, direction])
 
   useEffect(() => { load() }, [load])
+  useEffect(() => {
+    const timer = window.setInterval(load, 12000)
+    return () => window.clearInterval(timer)
+  }, [load])
   useEffect(() => {
     window.api.admin.branches.list().then((r: any) => r.success && setBranches(r.data))
   }, [])

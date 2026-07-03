@@ -36,6 +36,40 @@ function parseCsvLine(line: string): string[] {
   return result
 }
 
+function insertTransferHistory(
+  db: ReturnType<typeof getDb>,
+  transfer: Record<string, unknown>,
+  status: string,
+  actorId: unknown,
+  notes?: string | null
+) {
+  const record = {
+    id: crypto.randomUUID(),
+    transfer_id: String(transfer.id),
+    product_id: String(transfer.product_id),
+    variant_id: transfer.variant_id ? String(transfer.variant_id) : null,
+    quantity: Number(transfer.quantity || 0),
+    from_branch_id: transfer.from_branch_id ? String(transfer.from_branch_id) : null,
+    to_branch_id: transfer.to_branch_id ? String(transfer.to_branch_id) : null,
+    requested_by: transfer.initiated_by ? String(transfer.initiated_by) : null,
+    approved_by: transfer.approved_by ? String(transfer.approved_by) : null,
+    status,
+    notes: notes || null,
+    created_by: actorId ? String(actorId) : null,
+  }
+  db.prepare(`
+    INSERT INTO stock_transfer_history (
+      id, transfer_id, product_id, variant_id, quantity, from_branch_id, to_branch_id,
+      requested_by, approved_by, status, notes, created_by
+    )
+    VALUES (
+      @id, @transfer_id, @product_id, @variant_id, @quantity, @from_branch_id, @to_branch_id,
+      @requested_by, @approved_by, @status, @notes, @created_by
+    )
+  `).run(record)
+  return record
+}
+
 export function registerStockHandlers(ipcMain: IpcMain) {
   ipcMain.handle('stocks:list', (_e, branchId?: string) => {
     try {
@@ -154,13 +188,27 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         vehicle_number: payload.vehicle_number || null,
         expected_delivery_at: payload.expected_delivery_at || null,
       }
-      db.prepare(`INSERT INTO stock_transfers
-        (id,transfer_number,product_id,from_branch_id,to_branch_id,from_warehouse_id,
-         to_warehouse_id,quantity,status,notes,initiated_by,driver_name,driver_phone,
-         vehicle_number,expected_delivery_at)
-        VALUES (@id,@transfer_number,@product_id,@from_branch_id,@to_branch_id,@from_warehouse_id,
-         @to_warehouse_id,@quantity,@status,@notes,@initiated_by,@driver_name,@driver_phone,
-         @vehicle_number,@expected_delivery_at)`).run(record)
+      db.transaction(() => {
+        db.prepare(`INSERT INTO stock_transfers
+          (id,transfer_number,product_id,from_branch_id,to_branch_id,from_warehouse_id,
+           to_warehouse_id,quantity,status,notes,initiated_by,driver_name,driver_phone,
+           vehicle_number,expected_delivery_at)
+          VALUES (@id,@transfer_number,@product_id,@from_branch_id,@to_branch_id,@from_warehouse_id,
+           @to_warehouse_id,@quantity,@status,@notes,@initiated_by,@driver_name,@driver_phone,
+           @vehicle_number,@expected_delivery_at)`).run(record)
+        insertTransferHistory(db, record, 'Pending', user?.id, record.notes)
+        db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
+          VALUES (?,?,?,?,?,?,?)`)
+          .run(
+            crypto.randomUUID(),
+            user?.id,
+            record.to_branch_id,
+            'TRANSFER_REQUEST_CREATED',
+            'stock_transfers',
+            id,
+            JSON.stringify(record)
+          )
+      })()
       const product = db.prepare('SELECT name FROM products WHERE id=?').get(payload.product_id) as { name?: string } | undefined
       const fromBranch = db.prepare('SELECT name FROM branches WHERE id=?').get(payload.from_branch_id) as { name?: string } | undefined
       createNotification(
@@ -271,6 +319,14 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         if (String(transfer.initiated_by) === String(user?.id)) {
           throw new Error('You cannot approve a transfer you initiated (maker-checker rule)')
         }
+        const source = db.prepare(`
+          SELECT quantity FROM stocks
+          WHERE product_id=? AND branch_id=?
+          LIMIT 1
+        `).get(transfer.product_id, transfer.from_branch_id) as { quantity: number } | undefined
+        if (!source || Number(source.quantity) < Number(transfer.quantity)) {
+          throw new Error('Insufficient source stock at approval time')
+        }
       }
 
       // Rejection requires a reason
@@ -330,35 +386,23 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       }
 
       db.transaction(() => {
-        // Deduct source stock when dispatched
-        if (status === 'dispatched') {
-          const changed = db.prepare(`
-            UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
-            WHERE product_id=? AND branch_id=? AND quantity>=?`)
-            .run(transfer.quantity, transfer.product_id, transfer.from_branch_id, transfer.quantity)
-          if (!changed.changes) throw new Error('Insufficient source stock at dispatch time')
-          movementRecords.push(insertStockMovement(db, {
-            product_id: String(transfer.product_id),
-            from_branch_id: String(transfer.from_branch_id),
-            to_branch_id: String(transfer.to_branch_id),
-            quantity: Number(transfer.quantity),
-            movement_type: 'TRANSFER',
-            reference_transfer_id: id,
-            notes: `Transfer dispatched: ${transfer.transfer_number || id}`,
-            created_by: (user?.id as string) || null,
-          }))
-        }
-
-        // Direct accept (pending → received): deduct source AND credit destination in one step
-        const isDirectAccept = status === 'received' &&
-          ['pending', 'pending_approval', 'approved'].includes(String(transfer.status))
+        // Final confirmation: deduct source and credit destination in one transaction.
+        const isDirectAccept = (
+          status === 'received' ||
+          status === 'partially_received' ||
+          (status === 'discrepancy' && patch.received_quantity !== undefined)
+        ) && !db.prepare(`
+          SELECT id FROM stock_movements
+          WHERE reference_transfer_id=? AND movement_type='TRANSFER'
+          LIMIT 1
+        `).get(id)
         if (isDirectAccept) {
           const qty = Number(transfer.quantity)
           const changed = db.prepare(`
             UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
             WHERE product_id=? AND branch_id=? AND quantity>=?`)
             .run(qty, transfer.product_id, transfer.from_branch_id, qty)
-          if (!changed.changes) throw new Error('Insufficient source stock for direct accept')
+          if (!changed.changes) throw new Error('Insufficient source stock at confirmation time')
           movementRecords.push(insertStockMovement(db, {
             product_id: String(transfer.product_id),
             from_branch_id: String(transfer.from_branch_id),
@@ -366,7 +410,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
             quantity: qty,
             movement_type: 'TRANSFER',
             reference_transfer_id: id,
-            notes: `Direct accept: ${transfer.transfer_number || id}`,
+            notes: `Transfer confirmed - source deducted: ${transfer.transfer_number || id}`,
             created_by: (user?.id as string) || null,
           }))
         }
@@ -407,6 +451,14 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         db.prepare(`UPDATE stock_transfers SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
           .run({ id, ...patch })
 
+        insertTransferHistory(
+          db,
+          { ...transfer, ...patch },
+          status === 'received' ? 'Completed' : status.replace(/_/g, ' '),
+          user?.id,
+          String(payload.notes || payload.reject_reason || payload.discrepancy_note || '')
+        )
+
         // Audit log
         db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
           VALUES (?,?,?,?,?,?,?)`)
@@ -421,7 +473,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('stock_transfers', id, 'UPDATE', { id, ...patch })
 
-      if (status === 'dispatched') {
+      if (status === 'received' || status === 'partially_received' || status === 'discrepancy') {
         const source = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
           .get(transfer.product_id, transfer.from_branch_id) as Record<string, unknown>
         if (source) await enqueuSync('stocks', String(source.id), 'UPDATE', source)

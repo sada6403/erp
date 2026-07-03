@@ -145,6 +145,28 @@ function runMigrations(): void {
   }
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS stock_transfer_history (
+      id             TEXT PRIMARY KEY,
+      transfer_id    TEXT NOT NULL REFERENCES stock_transfers(id),
+      product_id     TEXT NOT NULL REFERENCES products(id),
+      variant_id     TEXT,
+      quantity       REAL NOT NULL DEFAULT 0,
+      from_branch_id TEXT REFERENCES branches(id),
+      to_branch_id   TEXT REFERENCES branches(id),
+      requested_by   TEXT REFERENCES users(id),
+      approved_by    TEXT REFERENCES users(id),
+      status         TEXT NOT NULL,
+      notes          TEXT,
+      created_by     TEXT REFERENCES users(id),
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_transfer ON stock_transfer_history(transfer_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_product ON stock_transfer_history(product_id);
+    CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_branches ON stock_transfer_history(from_branch_id, to_branch_id);
+  `)
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS customer_orders (
       id TEXT PRIMARY KEY, order_number TEXT NOT NULL UNIQUE,
       branch_id TEXT NOT NULL REFERENCES branches(id),

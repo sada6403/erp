@@ -101,6 +101,15 @@ export default function StockRequestsPage() {
     if (tab === 'requests') loadTransfers()
   }, [tfFilter, tab, loadTransfers])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (tab === 'my-stock') loadMyStock()
+      if (tab === 'requests') loadTransfers()
+      if (tab === 'branches') loadBranchStats()
+    }, 12000)
+    return () => window.clearInterval(timer)
+  }, [tab, loadMyStock, loadTransfers, loadBranchStats])
+
   const drillIntoBranch = async (b: BranchStat) => {
     setDrillBranch(b)
     const res = await window.api.stocks.branchDetail(String(b.id))
@@ -755,7 +764,7 @@ function TransferDetailModal({ tf, isAdmin, userBranchId, onClose, onAction }: {
                 onChange={e => setDispatchForm(p => ({ ...p, vehicle_number: e.target.value }))} className="input text-sm" />
             </div>
             <button onClick={() => onAction('dispatched', dispatchForm)} className="btn-primary w-full gap-1.5">
-              <Truck size={14} /> Mark Dispatched
+              <Truck size={14} /> Mark Ready / Dispatched
             </button>
           </div>
         )}

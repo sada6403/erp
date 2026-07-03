@@ -232,6 +232,29 @@ export function registerNotificationHandlers() {
             tf
           )
         }
+
+        const sourceUpdates = db.prepare(`
+          SELECT st.id, st.transfer_number, st.quantity, st.status,
+                 p.name AS product_name, fb.name AS from_branch_name, tb.name AS to_branch_name
+          FROM stock_transfers st
+          LEFT JOIN products p ON p.id = st.product_id
+          LEFT JOIN branches fb ON fb.id = st.from_branch_id
+          LEFT JOIN branches tb ON tb.id = st.to_branch_id
+          WHERE st.from_branch_id = ?
+            AND st.status IN ('received','partially_received','discrepancy','cancelled')
+          ORDER BY st.updated_at DESC
+          LIMIT 30
+        `).all(branchId) as Record<string, unknown>[]
+        for (const tf of sourceUpdates) {
+          const status = String(tf.status).replace(/_/g, ' ')
+          createUniqueTransferNotification(
+            `source_status_${tf.status}`,
+            String(tf.id),
+            `Transfer ${status}`,
+            `${tf.to_branch_name || 'Destination branch'} confirmed ${Number(tf.quantity)} x ${tf.product_name || 'product'} as ${status}.`,
+            tf
+          )
+        }
       }
 
       return { success: true }
