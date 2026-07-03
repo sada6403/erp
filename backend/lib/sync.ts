@@ -53,6 +53,39 @@ function normalizeValue(value: unknown): unknown {
   return value
 }
 
+async function resolveRoleId(client: QueryClient, record: Record<string, unknown>): Promise<void> {
+  if (!record.role_id) return
+
+  const roleId = String(record.role_id)
+  const existing = await client.query<{ id: string }>(
+    `SELECT id FROM roles WHERE id = ? LIMIT 1`,
+    [roleId]
+  )
+  if (existing.rows[0]) return
+
+  const email = String(record.email || '').toLowerCase()
+  const name = String(record.name || '').toLowerCase()
+  const localBranchManagerRoleId = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
+  const fallbackRoleName =
+    roleId === localBranchManagerRoleId || email.startsWith('manager.') || name.includes('manager')
+      ? 'Branch Manager'
+      : 'Cashier'
+
+  const fallback = await client.query<{ id: string }>(
+    `SELECT id FROM roles WHERE name = ? LIMIT 1`,
+    [fallbackRoleName]
+  )
+  if (fallback.rows[0]?.id) {
+    record.role_id = fallback.rows[0].id
+    return
+  }
+
+  const anyRole = await client.query<{ id: string }>(
+    `SELECT id FROM roles ORDER BY is_system DESC, created_at ASC LIMIT 1`
+  )
+  if (anyRole.rows[0]?.id) record.role_id = anyRole.rows[0].id
+}
+
 export async function applySyncOperation(
   client: QueryClient,
   input: {
@@ -73,6 +106,9 @@ export async function applySyncOperation(
 
   if (input.table === 'users' && columns.has('password_hash') && !record.password_hash) {
     record.password_hash = ''
+  }
+  if (input.table === 'users') {
+    await resolveRoleId(client, record)
   }
 
   if (input.table === 'stocks' && !record.id) {
