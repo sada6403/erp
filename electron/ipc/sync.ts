@@ -18,7 +18,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
   ipcMain.handle('sync:status', () => {
     try {
       const db = getDb()
-      const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='pending'").get() as { c: number }).c
+      const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
       const failed = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='failed'").get() as { c: number }).c
       const last = db.prepare("SELECT synced_at FROM sync_queue WHERE status='synced' ORDER BY synced_at DESC LIMIT 1").get() as { synced_at: string } | undefined
       return { success: true, data: { pending, failed, last_sync: last?.synced_at } }
@@ -30,7 +30,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
   ipcMain.handle('sync:queueCount', () => {
     try {
       const db = getDb()
-      const row = db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='pending'").get() as { c: number }
+      const row = db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }
       return { success: true, data: row.c }
     } catch (err: unknown) {
       return { success: false, error: (err as Error).message }
@@ -39,9 +39,9 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
 
   ipcMain.handle('sync:trigger', async () => {
     try {
-      const { SyncService } = await import('../services/syncService')
-      const service = new SyncService()
-      await service.runOnce()
+      const { getSyncService } = await import('../services/syncService')
+      const service = getSyncService()
+      service.runSoon()
       return { success: true }
     } catch (err: unknown) {
       return { success: false, error: (err as Error).message }
@@ -53,7 +53,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const result = db.prepare(`
         UPDATE sync_queue SET status='pending', attempts=0, last_error=NULL
-        WHERE status='failed'
+        WHERE status IN ('failed','processing')
       `).run()
       return { success: true, data: result.changes }
     } catch (err: unknown) {
@@ -93,16 +93,23 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     let queryDetail = ''
     try {
       if (!url || !key) throw new Error('Cloud API URL/key is missing')
-      const data = await withTimeout(
-        new CloudApi({ baseUrl: url, apiKey: key }).changes(
-          'categories',
-          '1970-01-01T00:00:00.000Z'
-        ),
-        5000,
-        'Cloud query'
-      )
-      queryOk = true
-      queryDetail = `OK (${data.length} rows)`
+      const db = getDb()
+      const activeQueue = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
+      if (activeQueue > 0) {
+        queryOk = true
+        queryDetail = `Skipped while ${activeQueue} item(s) are syncing`
+      } else {
+        const data = await withTimeout(
+          new CloudApi({ baseUrl: url, apiKey: key }).changes(
+            'categories',
+            '1970-01-01T00:00:00.000Z'
+          ),
+          5000,
+          'Cloud query'
+        )
+        queryOk = true
+        queryDetail = `OK (${data.length} rows)`
+      }
     } catch (error) {
       queryDetail = (error as Error).message
     }
@@ -112,7 +119,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     let sqliteDetail = ''
     try {
       const db = getDb()
-      const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='pending'").get() as { c: number }).c
+      const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
       sqliteOk = true
       sqliteDetail = `${pending} pending item(s) in queue`
     } catch (error) {

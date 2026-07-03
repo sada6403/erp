@@ -203,6 +203,10 @@ CREATE TABLE IF NOT EXISTS invoices (
   total_amount    NUMERIC(14,2) NOT NULL DEFAULT 0,
   paid_amount     NUMERIC(14,2) NOT NULL DEFAULT 0,
   due_amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
+  agent_code      TEXT,
+  agent_name      TEXT,
+  agent_commission_pct    NUMERIC(6,2) NOT NULL DEFAULT 0,
+  agent_commission_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   notes           TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()

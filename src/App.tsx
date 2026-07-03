@@ -35,6 +35,7 @@ import BackupPage from '@/pages/admin/BackupPage'
 import SecurityPage from '@/pages/admin/SecurityPage'
 import SystemHealthPage from '@/pages/admin/SystemHealthPage'
 import TransactionReportPage from '@/pages/admin/TransactionReportPage'
+import AdvancedReportsPage from '@/pages/admin/AdvancedReportsPage'
 import ActivationPage from '@/pages/ActivationPage'
 import SetupWizardPage from '@/pages/SetupWizardPage'
 import { loadAndApplySystemTheme } from '@/lib/systemTheme'
@@ -72,6 +73,13 @@ export default function App() {
   const navigate   = useNavigate()
   const [activated, setActivated] = useState<boolean | null>(null)
 
+  async function finishActivation() {
+    setActivated(true)
+    await init()
+    const setupRequired = await window.api.admin?.isSetupRequired?.().catch(() => false)
+    navigate(setupRequired ? '/setup' : '/login', { replace: true })
+  }
+
   useEffect(() => {
     loadAndApplySystemTheme().catch(() => undefined)
     // In browser (non-Electron) skip activation check
@@ -90,7 +98,7 @@ export default function App() {
   }, [init, navigate])
 
   if (activated === null) return <LoadingScreen />
-  if (!activated) return <ActivationPage onActivated={() => { setActivated(true); init() }} />
+  if (!activated) return <ActivationPage onActivated={() => { finishActivation().catch(() => navigate('/login', { replace: true })) }} />
 
   return (
     <Routes>
@@ -130,7 +138,9 @@ export default function App() {
         <Route path="/admin/security"       element={<SecurityPage />} />
         <Route path="/admin/system-health"  element={<RequireSuperAdmin><SystemHealthPage /></RequireSuperAdmin>} />
         <Route path="/admin/transactions"   element={<TransactionReportPage />} />
+        <Route path="/admin/reports"        element={<AdvancedReportsPage />} />
       </Route>
+      <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   )
 }

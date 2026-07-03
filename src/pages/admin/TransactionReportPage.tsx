@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Search, Filter, Download, FileText, Eye, RefreshCw, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Search, Filter, Download, FileText, Eye, RefreshCw, X, ChevronLeft, ChevronRight, Printer } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 
 interface TxRow {
@@ -17,6 +17,10 @@ interface TxRow {
   total_amount: number
   paid_amount: number
   due_amount: number
+  agent_code?: string | null
+  agent_name?: string | null
+  agent_commission_pct?: number
+  agent_commission_amount?: number
   payment_methods: string
   notes: string | null
   created_at: string
@@ -38,6 +42,10 @@ interface TxDetail {
   total_amount: number
   paid_amount: number
   due_amount: number
+  agent_code?: string | null
+  agent_name?: string | null
+  agent_commission_pct?: number
+  agent_commission_amount?: number
   notes: string | null
   created_at: string
   items: Array<{
@@ -70,6 +78,18 @@ interface Filters {
   paymentMethod: string
   status: string
   billType: string
+  agentCode: string
+}
+
+interface AgentCommissionRow {
+  agent_code: string
+  agent_name: string
+  invoice_count: number
+  sales_total: number
+  avg_commission_pct: number
+  commission_total: number
+  first_sale_at: string
+  last_sale_at: string
 }
 
 const PAGE_SIZE = 50
@@ -90,9 +110,10 @@ const STATUS_COLORS: Record<string, string> = {
 export default function TransactionReportPage() {
   const [filters, setFilters] = useState<Filters>({
     search: '', dateFrom: '', dateTo: '', branchId: '', cashierId: '',
-    paymentMethod: '', status: '', billType: '',
+    paymentMethod: '', status: '', billType: '', agentCode: '',
   })
   const [rows, setRows] = useState<TxRow[]>([])
+  const [agentCommissions, setAgentCommissions] = useState<AgentCommissionRow[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -127,6 +148,7 @@ export default function TransactionReportPage() {
         paymentMethod: filters.paymentMethod || undefined,
         status: filters.status || undefined,
         billType: filters.billType || undefined,
+        agentCode: filters.agentCode || undefined,
         limit: PAGE_SIZE,
         offset: pg * PAGE_SIZE,
       })
@@ -134,6 +156,17 @@ export default function TransactionReportPage() {
         setRows(res.data)
         setTotal(res.total)
       }
+      const agentRes = await window.api?.reports.agentCommissions({
+        ...filters,
+        search: filters.search || undefined,
+        dateFrom: filters.dateFrom || undefined,
+        dateTo: filters.dateTo || undefined,
+        branchId: filters.branchId || undefined,
+        status: filters.status || undefined,
+        billType: filters.billType || undefined,
+        agentCode: filters.agentCode || undefined,
+      })
+      if (agentRes?.success) setAgentCommissions(agentRes.data)
     } finally {
       setLoading(false)
     }
@@ -144,7 +177,7 @@ export default function TransactionReportPage() {
   const applyFilters = () => { setPage(0); load(0) }
 
   const clearFilters = () => {
-    const empty: Filters = { search: '', dateFrom: '', dateTo: '', branchId: '', cashierId: '', paymentMethod: '', status: '', billType: '' }
+    const empty: Filters = { search: '', dateFrom: '', dateTo: '', branchId: '', cashierId: '', paymentMethod: '', status: '', billType: '', agentCode: '' }
     setFilters(empty)
     setPage(0)
   }
@@ -192,6 +225,10 @@ export default function TransactionReportPage() {
         'Customer': r.customer_name ?? '',
         'Phone': r.customer_phone ?? '',
         'Payment Method': r.payment_methods ?? '',
+        'Agent Code': r.agent_code ?? '',
+        'Agent Name': r.agent_name ?? '',
+        'Commission %': r.agent_commission_pct ?? 0,
+        'Commission Amount': r.agent_commission_amount ?? 0,
         'Subtotal': r.subtotal,
         'Discount': r.discount_amount,
         'Tax': r.tax_amount,
@@ -211,6 +248,68 @@ export default function TransactionReportPage() {
     setExporting(true)
     await window.api?.reports.exportPdf({ filename: `transactions-${new Date().toISOString().slice(0, 10)}` })
     setExporting(false)
+  }
+
+  const printAgentCommissions = () => {
+    const title = `Agent Commission Report - ${new Date().toLocaleString()}`
+    const html = `
+      <html>
+        <head>
+          <title>${title}</title>
+          <style>
+            body { font-family: Arial, sans-serif; padding: 24px; color: #111827; }
+            h1 { font-size: 20px; margin: 0 0 4px; }
+            .meta { color: #6b7280; font-size: 12px; margin-bottom: 18px; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; }
+            th { background: #f3f4f6; }
+            td.num, th.num { text-align: right; }
+            tfoot td { font-weight: 700; background: #f9fafb; }
+          </style>
+        </head>
+        <body>
+          <h1>Agent Commission Report</h1>
+          <div class="meta">
+            ${filters.dateFrom || 'Start'} to ${filters.dateTo || 'Today'}
+            ${filters.branchId ? ` | Branch filtered` : ''}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Agent Code</th><th>Agent Name</th><th class="num">Bills</th>
+                <th class="num">Sales</th><th class="num">Avg %</th><th class="num">Commission</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${agentCommissions.map(r => `
+                <tr>
+                  <td>${r.agent_code || ''}</td>
+                  <td>${r.agent_name || ''}</td>
+                  <td class="num">${r.invoice_count}</td>
+                  <td class="num">${fmt(r.sales_total)}</td>
+                  <td class="num">${fmt(r.avg_commission_pct)}</td>
+                  <td class="num">${fmt(r.commission_total)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="2">Total</td>
+                <td class="num">${agentCommissions.reduce((a, r) => a + Number(r.invoice_count || 0), 0)}</td>
+                <td class="num">${fmt(agentCommissions.reduce((a, r) => a + Number(r.sales_total || 0), 0))}</td>
+                <td></td>
+                <td class="num">${fmt(agentCommissions.reduce((a, r) => a + Number(r.commission_total || 0), 0))}</td>
+              </tr>
+            </tfoot>
+          </table>
+          <script>window.print(); setTimeout(() => window.close(), 500)</script>
+        </body>
+      </html>
+    `
+    const win = window.open('', '_blank', 'width=900,height=700')
+    if (!win) return
+    win.document.write(html)
+    win.document.close()
   }
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
@@ -294,6 +393,13 @@ export default function TransactionReportPage() {
           >
             <FileText className="w-4 h-4" /> PDF
           </button>
+          <button
+            onClick={printAgentCommissions}
+            disabled={agentCommissions.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm bg-surface-800 border border-surface-600 text-slate-300 hover:border-emerald-500 hover:text-emerald-400 disabled:opacity-50"
+          >
+            <Printer className="w-4 h-4" /> Agent Print
+          </button>
         </div>
       </div>
 
@@ -353,6 +459,16 @@ export default function TransactionReportPage() {
                 <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
+          <div>
+            <label className="block text-xs text-slate-400 mb-1">Agent Code / Name</label>
+            <input
+              type="text"
+              value={filters.agentCode}
+              onChange={e => setFilters(p => ({ ...p, agentCode: e.target.value }))}
+              placeholder="AG-001"
+              className="w-full px-2 py-1.5 bg-surface-700 border border-surface-600 rounded text-sm text-slate-200 focus:outline-none focus:border-brand-500"
+            />
+          </div>
           <div className="flex items-end">
             <button onClick={applyFilters}
               className="w-full px-3 py-1.5 bg-brand-600 hover:bg-brand-700 text-white rounded text-sm font-medium">
@@ -372,6 +488,7 @@ export default function TransactionReportPage() {
             { label: 'Revenue (Page)', value: rows.reduce((a, r) => a + (r.total_amount || 0), 0) },
             { label: 'Collected', value: rows.reduce((a, r) => a + (r.paid_amount || 0), 0) },
             { label: 'Outstanding', value: rows.reduce((a, r) => a + (r.due_amount || 0), 0) },
+            { label: 'Agent Commission', value: rows.reduce((a, r) => a + (r.agent_commission_amount || 0), 0) },
           ].map(s => (
             <div key={s.label} className="flex gap-1.5 items-baseline">
               <span className="text-slate-500">{s.label}:</span>
@@ -380,6 +497,46 @@ export default function TransactionReportPage() {
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {agentCommissions.length > 0 && (
+        <div className="px-6 py-3 border-b border-surface-700 bg-emerald-500/5">
+          <div className="flex items-center justify-between mb-2">
+            <div>
+              <p className="text-sm font-semibold text-emerald-300">Agent Commission Summary</p>
+              <p className="text-xs text-slate-500">Grouped by agent for manager review and printing.</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-slate-500">Total Commission</p>
+              <p className="text-lg font-bold text-emerald-300">
+                Rs.{fmt(agentCommissions.reduce((a, r) => a + Number(r.commission_total || 0), 0))}
+              </p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs min-w-[720px]">
+              <thead>
+                <tr className="text-slate-400">
+                  {['Agent Code','Agent Name','Bills','Sales','Avg %','Commission'].map((h, idx) => (
+                    <th key={h} className={`py-1.5 pr-3 ${idx >= 2 ? 'text-right' : 'text-left'}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {agentCommissions.map(r => (
+                  <tr key={`${r.agent_code}-${r.agent_name}`} className="border-t border-surface-700/50">
+                    <td className="py-1.5 pr-3 font-mono text-emerald-300">{r.agent_code}</td>
+                    <td className="py-1.5 pr-3 text-slate-200">{r.agent_name || '-'}</td>
+                    <td className="py-1.5 pr-3 text-right text-slate-300">{r.invoice_count}</td>
+                    <td className="py-1.5 pr-3 text-right text-slate-300">{fmt(r.sales_total)}</td>
+                    <td className="py-1.5 pr-3 text-right text-slate-300">{fmt(r.avg_commission_pct)}</td>
+                    <td className="py-1.5 pr-3 text-right font-semibold text-emerald-300">{fmt(r.commission_total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -401,7 +558,7 @@ export default function TransactionReportPage() {
           <table className="w-full text-sm min-w-[1200px]">
             <thead className="sticky top-0 bg-surface-800 border-b border-surface-700 z-10">
               <tr>
-                {['Bill No','Date & Time','Type','Branch','Cashier','Customer','Payment','Subtotal','Discount','Tax','Total','Paid','Balance','Status',''].map(h => (
+                {['Bill No','Date & Time','Type','Branch','Cashier','Customer','Agent','Payment','Subtotal','Discount','Tax','Total','Paid','Balance','Commission','Status',''].map(h => (
                   <th key={h} className="px-3 py-2 text-left text-xs font-medium text-slate-400 whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -422,6 +579,14 @@ export default function TransactionReportPage() {
                       </div>
                     ) : <span className="text-slate-500 text-xs">Walk-in</span>}
                   </td>
+                  <td className="px-3 py-2 text-xs whitespace-nowrap">
+                    {r.agent_code ? (
+                      <div>
+                        <p className="font-mono text-emerald-300">{r.agent_code}</p>
+                        <p className="text-slate-500">{r.agent_name || '-'}</p>
+                      </div>
+                    ) : <span className="text-slate-600">-</span>}
+                  </td>
                   <td className="px-3 py-2 text-slate-300 text-xs whitespace-nowrap">{r.payment_methods || '-'}</td>
                   <td className="px-3 py-2 text-right text-slate-300 whitespace-nowrap">{fmt(r.subtotal)}</td>
                   <td className="px-3 py-2 text-right text-orange-400 whitespace-nowrap">{r.discount_amount > 0 ? `-${fmt(r.discount_amount)}` : '-'}</td>
@@ -429,6 +594,9 @@ export default function TransactionReportPage() {
                   <td className="px-3 py-2 text-right font-semibold text-slate-100 whitespace-nowrap">{fmt(r.total_amount)}</td>
                   <td className="px-3 py-2 text-right text-green-400 whitespace-nowrap">{fmt(r.paid_amount)}</td>
                   <td className={`px-3 py-2 text-right whitespace-nowrap font-medium ${r.due_amount > 0 ? 'text-yellow-400' : 'text-slate-500'}`}>{r.due_amount > 0 ? fmt(r.due_amount) : '-'}</td>
+                  <td className="px-3 py-2 text-right text-emerald-300 whitespace-nowrap">
+                    {r.agent_commission_amount ? fmt(r.agent_commission_amount) : '-'}
+                  </td>
                   <td className="px-3 py-2">
                     <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[r.status] || 'bg-slate-500/10 text-slate-400'}`}>
                       {r.status}
@@ -500,11 +668,25 @@ export default function TransactionReportPage() {
             ) : detail ? (
               <div className="overflow-y-auto flex-1 px-6 py-4 space-y-5">
                 {/* Customer + Payment Summary */}
-                <div className="grid grid-cols-2 gap-4 text-sm">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                   <div className="bg-surface-700/50 rounded-lg p-3">
                     <p className="text-xs text-slate-400 mb-1">Customer</p>
                     <p className="text-slate-200 font-medium">{detail.customer_name || 'Walk-in Customer'}</p>
                     {detail.customer_phone && <p className="text-slate-400 text-xs mt-0.5">{detail.customer_phone}</p>}
+                  </div>
+                  <div className="bg-surface-700/50 rounded-lg p-3">
+                    <p className="text-xs text-slate-400 mb-1">Agent Commission</p>
+                    {detail.agent_code ? (
+                      <>
+                        <p className="text-emerald-300 font-mono text-xs">{detail.agent_code}</p>
+                        <p className="text-slate-200 text-sm">{detail.agent_name || '-'}</p>
+                        <p className="text-emerald-300 text-xs mt-1">
+                          {fmt(detail.agent_commission_pct || 0)}% - Rs.{fmt(detail.agent_commission_amount || 0)}
+                        </p>
+                      </>
+                    ) : (
+                      <p className="text-slate-500 text-xs">No agent recorded</p>
+                    )}
                   </div>
                   <div className="bg-surface-700/50 rounded-lg p-3">
                     <p className="text-xs text-slate-400 mb-1">Payments</p>

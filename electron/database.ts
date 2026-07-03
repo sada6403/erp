@@ -66,6 +66,10 @@ function runMigrations(): void {
     ['invoices', 'due_date',     "TEXT"],
     ['invoices', 'approved_by',  "TEXT"],
     ['invoices', 'locked_at',    "TEXT"],
+    ['invoices', 'agent_code',   "TEXT"],
+    ['invoices', 'agent_name',   "TEXT"],
+    ['invoices', 'agent_commission_pct',    "REAL NOT NULL DEFAULT 0"],
+    ['invoices', 'agent_commission_amount', "REAL NOT NULL DEFAULT 0"],
     // Transfer extended statuses
     ['stock_transfers', 'reject_reason',    "TEXT"],
     ['stock_transfers', 'discrepancy_note', "TEXT"],

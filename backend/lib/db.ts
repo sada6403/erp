@@ -1,4 +1,4 @@
-import mysql from 'mysql2/promise'
+import mysql, { type Pool, type PoolOptions } from 'mysql2/promise'
 import { format as sqlFormat } from 'mysql2'
 
 // ─── Convert PostgreSQL $1,$2 placeholders → MySQL ? ─────────────────────────
@@ -14,7 +14,7 @@ function convertSql(sql: string): string {
 // (PrepareStatementCache.set) that throws "Use `delete()` to clear values".
 function fmt(sql: string, values?: unknown[]): string {
   const converted = convertSql(sql)
-  return values && values.length > 0 ? sqlFormat(converted, values) : converted
+  return values && values.length > 0 ? sqlFormat(converted, values as Parameters<typeof sqlFormat>[1]) : converted
 }
 
 // ─── pg-style query result type ───────────────────────────────────────────────
@@ -28,7 +28,12 @@ export interface QueryClient {
 }
 
 // ─── MySQL connection config ──────────────────────────────────────────────────
-function getConfig(database?: string) {
+interface WrappedPool {
+  query<T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>>
+  connect(): Promise<QueryClient>
+}
+
+function getConfig(database?: string): PoolOptions {
   if (process.env.DATABASE_URL) {
     const url = new URL(process.env.DATABASE_URL)
     return {
@@ -39,7 +44,7 @@ function getConfig(database?: string) {
       database: database ?? url.pathname.slice(1),
       timezone: '+00:00',
       waitForConnections: true,
-      connectionLimit: 20,
+      connectionLimit: Number(process.env.MYSQL_CONNECTION_LIMIT ?? 8),
     }
   }
   return {
@@ -50,17 +55,22 @@ function getConfig(database?: string) {
     database: database ?? (process.env.MYSQL_DATABASE ?? 'pos_erp_saas'),
     timezone: '+00:00',
     waitForConnections: true,
-    connectionLimit: 20,
+    connectionLimit: Number(process.env.MYSQL_CONNECTION_LIMIT ?? 8),
   }
 }
 
 // ─── Singleton pool (main SaaS database) ─────────────────────────────────────
-declare global { var _posErpPool: mysql.Pool | undefined }
+declare global {
+  var _posErpPool: Pool | undefined
+  var _posErpTenantPools: Map<string, Pool> | undefined
+}
 
 const poolInstance = global._posErpPool ?? mysql.createPool(getConfig())
-if (process.env.NODE_ENV !== 'production') global._posErpPool = poolInstance
+global._posErpPool = poolInstance
+const tenantPoolInstances = global._posErpTenantPools ?? new Map<string, Pool>()
+global._posErpTenantPools = tenantPoolInstances
 
-function wrapPool(instance: mysql.Pool): typeof pool {
+function wrapPool(instance: Pool): WrappedPool {
   return {
     query: async <T = Record<string, unknown>>(sql: string, values?: unknown[]): Promise<QueryResult<T>> => {
       const [rows] = await instance.query(fmt(sql, values))
@@ -111,8 +121,13 @@ export async function rows<T = Record<string, unknown>>(sql: string, values: unk
 }
 
 // ─── Create a pool connected to a specific tenant database ───────────────────
-export function tenantPool(database: string): ReturnType<typeof wrapPool> {
-  return wrapPool(mysql.createPool(getConfig(database)))
+export function tenantPool(database: string): WrappedPool {
+  let instance = tenantPoolInstances.get(database)
+  if (!instance) {
+    instance = mysql.createPool(getConfig(database))
+    tenantPoolInstances.set(database, instance)
+  }
+  return wrapPool(instance)
 }
 
 // ─── Auto-migrate: create Phase-2 tables if they don't exist ─────────────────
@@ -127,6 +142,7 @@ async function autoMigrate() {
     `ALTER TABLE companies ADD COLUMN brand_color    VARCHAR(7)   NULL`,
     `ALTER TABLE companies ADD COLUMN brand_logo_url VARCHAR(512) NULL`,
     `ALTER TABLE companies ADD COLUMN company_key    VARCHAR(36)  NULL UNIQUE`,
+    `UPDATE companies SET company_key = UUID() WHERE company_key IS NULL OR company_key = ''`,
 
     // subscription grace period on packages
     `ALTER TABLE packages ADD COLUMN grace_period_days INT NOT NULL DEFAULT 7`,

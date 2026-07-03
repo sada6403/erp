@@ -3,24 +3,38 @@ import Store from 'electron-store'
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
-import { CloudApi } from './cloudApi'
+import { CloudApi, CloudRateLimitError } from './cloudApi'
 
 const store = new Store()
-const BATCH_SIZE = 50
+const BATCH_SIZE = 5
 const MAX_ATTEMPTS = 5
+const REQUEST_DELAY_MS = 1_000
+const STALE_PROCESSING_MINUTES = 3
+const SYNC_INTERVAL_MS = 30_000
+const DRAIN_RETRY_MS = 5_000
+
+function sleep(ms: number) {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
 
 export class SyncService {
   private timer: ReturnType<typeof setInterval> | null = null
+  private drainTimer: ReturnType<typeof setTimeout> | null = null
   private running = false
   private colCache = new Map<string, Set<string>>()
+  private backoffUntil = 0
 
   start() {
-    this.timer = setInterval(() => this.runOnce(), 30_000)
+    if (this.timer) return
+    this.timer = setInterval(() => this.runOnce(), SYNC_INTERVAL_MS)
     this.runOnce()
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer)
+    if (this.drainTimer) clearTimeout(this.drainTimer)
+    this.timer = null
+    this.drainTimer = null
   }
 
   private getCloudApi(): CloudApi | null {
@@ -33,6 +47,7 @@ export class SyncService {
 
   async runOnce(): Promise<void> {
     if (this.running) return
+    if (Date.now() < this.backoffUntil) return
     this.running = true
 
     try {
@@ -40,13 +55,35 @@ export class SyncService {
       if (!cloud) return
       if (!await this.checkOnline(cloud)) return
 
+      this.resetStaleProcessing()
       await this.processBatch(cloud)
+      if (this.hasPendingPushes()) return
       await this.pullChanges(cloud)
     } catch (err) {
+      if (err instanceof CloudRateLimitError) {
+        this.backoffUntil = Date.now() + err.retryAfterSeconds * 1000
+        console.warn(`[SyncService] Rate limited. Retrying after ${err.retryAfterSeconds}s`)
+        return
+      }
       console.error('[SyncService]', err)
     } finally {
       this.running = false
+      if (Date.now() >= this.backoffUntil && this.safeHasPendingPushes()) {
+        this.scheduleSoon(DRAIN_RETRY_MS)
+      }
     }
+  }
+
+  runSoon(): void {
+    this.scheduleSoon(250)
+  }
+
+  private scheduleSoon(ms: number): void {
+    if (this.drainTimer) return
+    this.drainTimer = setTimeout(() => {
+      this.drainTimer = null
+      this.runOnce()
+    }, ms)
   }
 
   private async processBatch(cloud: CloudApi): Promise<void> {
@@ -66,7 +103,32 @@ export class SyncService {
 
     for (const item of items) {
       await this.syncItem(cloud, item, db)
+      await sleep(REQUEST_DELAY_MS)
     }
+  }
+
+  private resetStaleProcessing(): void {
+    const db = getDb()
+    db.prepare(`
+      UPDATE sync_queue
+      SET status='pending', last_error='Recovered stale processing item'
+      WHERE status='processing'
+        AND datetime(created_at) <= datetime('now', ?)
+    `).run(`-${STALE_PROCESSING_MINUTES} minutes`)
+  }
+
+  private hasPendingPushes(): boolean {
+    const db = getDb()
+    const row = db.prepare(`
+      SELECT COUNT(*) as c
+      FROM sync_queue
+      WHERE status IN ('pending','processing') AND attempts < ?
+    `).get(MAX_ATTEMPTS) as { c: number }
+    return row.c > 0
+  }
+
+  private safeHasPendingPushes(): boolean {
+    try { return this.hasPendingPushes() } catch { return false }
   }
 
   private async uploadOfflineImage(cloud: CloudApi, localUrl: string): Promise<string | null> {
@@ -126,6 +188,11 @@ export class SyncService {
       db.prepare(`UPDATE sync_queue SET status='synced', synced_at=datetime('now') WHERE id=?`)
         .run(item.id)
     } catch (err: unknown) {
+      if (err instanceof CloudRateLimitError) {
+        db.prepare(`UPDATE sync_queue SET status='pending', attempts=?, last_error=? WHERE id=?`)
+          .run(item.attempts, err.message, item.id)
+        throw err
+      }
       const message = err instanceof Error ? err.message : String(err)
       const attempts = item.attempts + 1
       const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending'
@@ -146,22 +213,21 @@ export class SyncService {
       'installment_reminders', 'stock_transfers', 'customer_orders', 'customer_order_items',
     ]
 
-    // Pull all global tables in parallel (18 HTTP requests → concurrent)
-    const results = await Promise.allSettled(
-      globalTables.map(table => cloud.changes(table, lastPull).then(data => ({ table, data })))
-    )
-
     let pulledInstallmentIds: string[] = []
 
-    for (const result of results) {
-      if (result.status === 'rejected') {
-        console.error('[SyncService] Failed to pull table:', result.reason)
+    for (const table of globalTables) {
+      let data: Record<string, unknown>[] = []
+      try {
+        data = await cloud.changes(table, lastPull)
+        await sleep(REQUEST_DELAY_MS)
+      } catch (err) {
+        if (err instanceof CloudRateLimitError) throw err
+        console.error('[SyncService] Failed to pull table:', table, err)
         continue
       }
-      const { table, data } = result.value
       if (data.length === 0) continue
 
-      // Capture installment IDs now — reuse below, no duplicate fetch
+      // Capture installment IDs now; reuse below, no duplicate fetch.
       if (table === 'installments') {
         pulledInstallmentIds = data.map(row => String(row.id))
       }
@@ -199,10 +265,10 @@ export class SyncService {
 
         for (let index = 0; index < pulledInvoiceIds.length; index += 50) {
           const ids = pulledInvoiceIds.slice(index, index + 50)
-          const [items, payments] = await Promise.all([
-            cloud.related('invoice_items', 'invoice_id', ids),
-            cloud.related('payments', 'invoice_id', ids),
-          ])
+          const items = await cloud.related('invoice_items', 'invoice_id', ids)
+          await sleep(REQUEST_DELAY_MS)
+          const payments = await cloud.related('payments', 'invoice_id', ids)
+          await sleep(REQUEST_DELAY_MS)
           db.transaction(() => {
             for (const item of items) this.insertFiltered(db, 'invoice_items', item)
             for (const payment of payments) this.insertFiltered(db, 'payments', payment)
@@ -210,6 +276,7 @@ export class SyncService {
         }
       }
     } catch (err) {
+      if (err instanceof CloudRateLimitError) throw err
       console.error('[SyncService] Failed to pull invoices:', err)
     }
 
@@ -221,11 +288,13 @@ export class SyncService {
             'installment_payments', 'installment_id',
             pulledInstallmentIds.slice(index, index + 50)
           )
+          await sleep(REQUEST_DELAY_MS)
           db.transaction(() => {
             for (const payment of payments) this.insertFiltered(db, 'installment_payments', payment)
           })()
         }
       } catch (err) {
+        if (err instanceof CloudRateLimitError) throw err
         console.error('[SyncService] Failed to pull installment payments:', err)
       }
     }
@@ -290,6 +359,13 @@ export class SyncService {
       return false
     }
   }
+}
+
+let singleton: SyncService | null = null
+
+export function getSyncService(): SyncService {
+  if (!singleton) singleton = new SyncService()
+  return singleton
 }
 
 function normalizeForCloud(payload: Record<string, unknown>): Record<string, unknown> {

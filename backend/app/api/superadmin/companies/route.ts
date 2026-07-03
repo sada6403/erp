@@ -51,5 +51,5 @@ export async function POST(req: NextRequest) {
     resource: 'companies', resourceId: result.companyId,
     newValues: { name, email, adminEmail, slug: result.slug } })
 
-  return NextResponse.json({ ...result, adminEmail }, { status: 201 })
+  return NextResponse.json({ ...result, company_key: result.companyKey, adminEmail }, { status: 201 })
 }

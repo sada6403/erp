@@ -5,6 +5,16 @@ export interface CloudConfig {
   apiKey: string
 }
 
+export class CloudRateLimitError extends Error {
+  constructor(
+    message: string,
+    public readonly retryAfterSeconds: number = 60
+  ) {
+    super(message)
+    this.name = 'CloudRateLimitError'
+  }
+}
+
 export class CloudApi {
   private readonly baseUrl: string
   private readonly apiKey: string
@@ -84,6 +94,13 @@ export class CloudApi {
       const message = payload && typeof payload === 'object' && 'error' in payload
         ? String((payload as { error: unknown }).error)
         : `Cloud API request failed with HTTP ${response.status}`
+      if (response.status === 429) {
+        const headerRetry = Number(response.headers.get('Retry-After') || 0)
+        const bodyRetry = payload && typeof payload === 'object' && 'retryAfter' in payload
+          ? Number((payload as { retryAfter: unknown }).retryAfter)
+          : 0
+        throw new CloudRateLimitError(message, Math.max(15, headerRetry || bodyRetry || 60))
+      }
       throw new Error(message)
     }
 

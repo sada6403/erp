@@ -1,6 +1,6 @@
 {
   "name": "pos-erp",
-  "version": "1.0.0",
+  "version": "2.0.10",
   "description": "Enterprise Multi Branch Offline-First POS ERP for Furniture & Electronics",
   "main": "dist-electron/main.js",
   "author": "Enterprise POS ERP",
@@ -69,7 +69,7 @@
     "asarUnpack": [
       "node_modules/better-sqlite3/**/*"
     ],
-    "icon": "assets/icon.png",
+    "icon": "assets/icon.ico",
     "win": {
       "icon": "assets/icon.ico",
       "target": [
@@ -82,6 +82,10 @@
       "assets/**/*"
     ],
     "extraResources": [
+      {
+        "from": "assets/",
+        "to": "assets/"
+      },
       {
         "from": "database/",
         "to": "database/"

@@ -5,7 +5,7 @@ import { useKeyboard } from '@/hooks/useKeyboard'
 import type { BillType } from '@/store/cartStore'
 import {
   X, CreditCard, Banknote, Building2, Calendar, Printer, CheckCircle2,
-  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Gift, Keyboard
+  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Gift, Keyboard, Handshake
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { PaymentMethod } from '@/types'
@@ -51,6 +51,9 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [balanceMethod, setBalanceMethod] = useState<BalancePaymentMethod>('cash')
   const [balanceReceived, setBalanceReceived] = useState<string>('0.00')
   const [balanceReference, setBalanceReference] = useState('')
+  const [agentCode, setAgentCode]         = useState('')
+  const [agentName, setAgentName]         = useState('')
+  const [agentPct, setAgentPct]           = useState('')
   const [validUntil, setValidUntil]     = useState(cart.validUntil)
   const [dueDate, setDueDate]           = useState(cart.dueDate)
   const [loading, setLoading]           = useState(false)
@@ -89,6 +92,10 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const maxRedeemablePoints = loyaltyBalance ? Math.min(loyaltyBalance.points, Math.floor(cart.total / (Number(loyaltyCfg?.redeem_value ?? 10) / Number(loyaltyCfg?.redeem_points ?? 100)))) : 0
   const loyaltyDiscount     = usePoints && redeemPoints > 0 ? (redeemPoints / Number(loyaltyCfg?.redeem_points ?? 100)) * Number(loyaltyCfg?.redeem_value ?? 10) : 0
   const totalAfterLoyalty   = Math.max(0, cart.total - loyaltyDiscount)
+  const agentCommissionPct  = Math.max(0, Math.min(100, parseFloat(agentPct) || 0))
+  const agentCommissionAmount = (agentCode.trim() || agentName.trim()) && agentCommissionPct > 0
+    ? (totalAfterLoyalty * agentCommissionPct) / 100
+    : 0
 
   useEffect(() => {
     if (method === 'cash' || method === 'gift_voucher') setReceived(String(totalAfterLoyalty.toFixed(2)))
@@ -149,6 +156,10 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       ? `Voucher ${reference}${balanceReference ? ` / ${balanceReference}` : ''}`
       : reference,
     payments:          buildPayments(),
+    agent_code:        agentCode.trim() || undefined,
+    agent_name:        agentName.trim() || undefined,
+    agent_commission_pct: agentCommissionPct,
+    agent_commission_amount: agentCommissionAmount,
     valid_until:       isQuotation ? validUntil : undefined,
     due_date:          isCredit    ? dueDate    : undefined,
   })
@@ -199,6 +210,9 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
         total_amount:    cart.total,
         paid_amount:     effectivePaidAmount,
         due_amount:      isCredit ? cart.total : Math.max(0, cart.total - effectivePaidAmount),
+        agent_code:      agentCode.trim() || undefined,
+        agent_name:      agentName.trim() || undefined,
+        agent_commission_pct: agentCommissionPct,
         notes:           cart.notes,
         items: cart.items.map(i => ({
           product_id:      i.product.id,
@@ -244,7 +258,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     }
   }, [loading, isRetail, isCredit, isQuotation, method, receivedAmount, reference, voucherApplied, voucherBalance,
       balanceReceivedAmount, balanceMethod, balanceReference, cart, billType, validUntil, dueDate,
-      effectivePaidAmount, invoiceNumber, user])
+      effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentCommissionPct, agentCommissionAmount])
 
   const handlePrint = useCallback(async (design: 'dot' | 'thermal' | 'a4' = printDesign) => {
     if (!receiptPayload) return
@@ -432,6 +446,57 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                 Rs.{loyaltyDiscount.toFixed(2)} loyalty discount applied
               </p>
             )}
+          </div>
+
+          <div className="rounded-xl border border-slate-700 p-4" style={{ background: 'var(--bg-soft)' }}>
+            <div className="flex items-center gap-2 mb-3">
+              <Handshake size={16} className="text-emerald-400" />
+              <div>
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Agent Commission</p>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Optional - enter who brought this customer and their commission percentage.</p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.4fr_0.75fr] gap-3">
+              <div>
+                <label className="label">Agent Code</label>
+                <input
+                  type="text"
+                  value={agentCode}
+                  onChange={e => setAgentCode(e.target.value.toUpperCase())}
+                  className="input"
+                  placeholder="AG-001"
+                />
+              </div>
+              <div>
+                <label className="label">Agent Name</label>
+                <input
+                  type="text"
+                  value={agentName}
+                  onChange={e => setAgentName(e.target.value)}
+                  className="input"
+                  placeholder="Agent name"
+                />
+              </div>
+              <div>
+                <label className="label">Commission %</label>
+                <input
+                  type="number"
+                  value={agentPct}
+                  onChange={e => setAgentPct(e.target.value)}
+                  className="input"
+                  min={0}
+                  max={100}
+                  step="0.01"
+                  placeholder="0"
+                />
+              </div>
+            </div>
+            <div className="mt-3 flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
+              <span className="text-xs text-emerald-300">Commission Amount</span>
+              <span className="font-bold text-emerald-300">
+                Rs.{agentCommissionAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+            </div>
           </div>
 
           {/* Loyalty Points Redemption */}

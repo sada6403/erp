@@ -3,7 +3,7 @@ import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { pool } from '@/lib/db'
 import { randomUUID } from 'crypto'
 
-type Params = { params: { id: string } }
+type Params = { params: Promise<{ id: string }> }
 
 // All modules the platform supports (source of truth)
 const ALL_MODULES = [
@@ -23,6 +23,7 @@ const ALL_MODULES = [
 ]
 
 export async function GET(_req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(_req)
   if ('error' in auth) return auth.error
 
@@ -31,7 +32,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
     `SELECT s.package_id FROM company_subscriptions s
      WHERE s.company_id = ? AND s.status IN ('active','trial')
      ORDER BY s.created_at DESC LIMIT 1`,
-    [params.id]
+    [companyId]
   )
   const packageId = (subRows[0] as Record<string, string> | undefined)?.package_id ?? null
 
@@ -54,7 +55,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
   try {
     const { rows: compMods } = await pool.query(
       `SELECT module_key, is_enabled FROM company_modules WHERE company_id = ?`,
-      [params.id]
+      [companyId]
     )
     for (const m of compMods as { module_key: string; is_enabled: number }[]) {
       compModuleMap[m.module_key] = Boolean(m.is_enabled)
@@ -80,6 +81,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
@@ -97,7 +99,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       `INSERT INTO company_modules (id, company_id, module_key, is_enabled, enabled_by, enabled_at)
        VALUES (?, ?, ?, ?, ?, NOW())
        ON DUPLICATE KEY UPDATE is_enabled = VALUES(is_enabled), enabled_by = VALUES(enabled_by), enabled_at = NOW()`,
-      [randomUUID(), params.id, module_key, is_enabled ? 1 : 0, auth.payload.sub]
+      [randomUUID(), companyId, module_key, is_enabled ? 1 : 0, auth.payload.sub]
     )
   } catch (e) {
     return NextResponse.json({ error: 'Database migration required: run migrate-001-limits-devices.sql' }, { status: 503 })
@@ -107,7 +109,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     portal: 'superadmin', actorType: 'superadmin',
     actorId: auth.payload.sub, actorName: auth.payload.name,
     action: is_enabled ? 'module.enable' : 'module.disable',
-    resource: 'company_modules', resourceId: params.id,
+    resource: 'company_modules', resourceId: companyId,
     newValues: { module_key, is_enabled },
   })
 

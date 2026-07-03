@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS companies (
   country          VARCHAR(5)   NOT NULL DEFAULT 'LK',
   db_schema        VARCHAR(80)  NOT NULL UNIQUE,
   api_key          CHAR(36)     UNIQUE,
+  company_key      CHAR(36)     UNIQUE,
   status           VARCHAR(20)  NOT NULL DEFAULT 'trial',
   trial_ends_at    DATETIME,
   max_branches     INT          NOT NULL DEFAULT 1,

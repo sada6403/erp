@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { KeyRound, Loader2, CheckCircle2, Monitor, Globe, GitBranch, ChevronRight, ShieldCheck, ArrowLeft } from 'lucide-react'
+import { Loader2, CheckCircle2, Monitor, Globe, GitBranch, ChevronRight, ShieldCheck, ArrowLeft, Settings } from 'lucide-react'
 
 interface Branch { id: string; name: string; address?: string }
 interface VerifyResult {
@@ -12,11 +12,18 @@ interface VerifyResult {
 type Step = 'key' | 'branch' | 'activating' | 'done'
 
 interface Props { onActivated: () => void }
+type VerifyResponse = VerifyResult & { success?: boolean; error?: string }
+
+const DEFAULT_API_URL =
+  (import.meta.env.VITE_CLOUD_API_URL as string | undefined)?.trim().replace(/\/+$/, '') ||
+  (import.meta.env.DEV ? 'http://localhost:3000' : '')
 
 export default function ActivationPage({ onActivated }: Props) {
   const [step, setStep]             = useState<Step>('key')
   const [companyKey, setCompanyKey] = useState('')
-  const [apiUrl, setApiUrl]         = useState('http://localhost:3000')
+  const [apiUrl, setApiUrl]         = useState(DEFAULT_API_URL)
+  const [showServerSettings, setShowServerSettings] = useState(false)
+  const [supportTapCount, setSupportTapCount] = useState(0)
   const [deviceName, setDeviceName] = useState('')
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
   const [verifyResult, setVerifyResult]     = useState<VerifyResult | null>(null)
@@ -29,27 +36,50 @@ export default function ActivationPage({ onActivated }: Props) {
     window.api.app.getDeviceInfo().then((info: Record<string, string>) => {
       setDeviceName(info.device_name ?? '')
     })
-    const saved = localStorage.getItem('activation_api_url')
-    if (saved) setApiUrl(saved)
+    const saved = localStorage.getItem('activation_api_url')?.trim()
+    if (saved && !DEFAULT_API_URL) setApiUrl(saved)
   }, [])
+
+  function handleSupportUnlock() {
+    const next = supportTapCount + 1
+    setSupportTapCount(next)
+    if (next >= 5) {
+      setSupportTapCount(0)
+      setShowServerSettings(true)
+    }
+  }
 
   // Step 1 — Verify company key
   async function handleVerify() {
     if (!companyKey.trim()) { setError('Company key is required'); return }
-    if (!apiUrl.trim())     { setError('Cloud API URL is required'); return }
+    const serverUrl = apiUrl.trim().replace(/\/+$/, '')
+    if (!serverUrl) {
+      setError('Activation server is not configured. Open Server Settings and enter the API URL.')
+      setShowServerSettings(true)
+      return
+    }
     setLoading(true); setError('')
     try {
-      const url = `${apiUrl.trim()}/api/activate/verify?company_key=${encodeURIComponent(companyKey.trim())}`
-      const res = await fetch(url)
-      const data = await res.json()
-      if (!res.ok) { setError(data.error ?? 'Verification failed'); setLoading(false); return }
+      let data: VerifyResponse
+      if (window.api?.app?.verifyCompanyKey) {
+        data = await window.api.app.verifyCompanyKey({
+          company_key: companyKey.trim(),
+          cloud_api_url: serverUrl,
+        }) as VerifyResponse
+        if (!data.success) { setError(data.error ?? 'Verification failed'); setLoading(false); return }
+      } else {
+        const url = `${serverUrl}/api/activate/verify?company_key=${encodeURIComponent(companyKey.trim())}`
+        const res = await fetch(url)
+        data = await res.json() as VerifyResponse
+        if (!res.ok) { setError(data.error ?? 'Verification failed'); setLoading(false); return }
+      }
       if (data.device_slots_left <= 0) {
         setError(`Device limit reached (${data.active_devices}/${data.max_devices}). Please upgrade your subscription.`)
         setLoading(false); return
       }
       setVerifyResult(data)
       setCompanyName(data.company_name)
-      localStorage.setItem('activation_api_url', apiUrl.trim())
+      localStorage.setItem('activation_api_url', serverUrl)
       setStep('branch')
     } catch (err) {
       setError('Cannot reach the backend. Check the Cloud API URL.')
@@ -63,7 +93,7 @@ export default function ActivationPage({ onActivated }: Props) {
     try {
       const res = await window.api.app.activate({
         company_key:   companyKey.trim(),
-        cloud_api_url: apiUrl.trim(),
+        cloud_api_url: apiUrl.trim().replace(/\/+$/, ''),
         branch_id:     selectedBranch?.id ?? null,
         device_name:   deviceName,
       }) as Record<string, unknown>
@@ -176,7 +206,9 @@ export default function ActivationPage({ onActivated }: Props) {
           {step === 'key' && (
             <div className="space-y-6">
               <div>
-                <h2 className="text-2xl font-bold text-white mb-1">Device Activation</h2>
+                <button type="button" onClick={handleSupportUnlock} className="text-left">
+                  <h2 className="text-2xl font-bold text-white mb-1">Device Activation</h2>
+                </button>
                 <p className="text-sm text-gray-400">Enter the Company Key provided by your administrator</p>
               </div>
 
@@ -205,20 +237,36 @@ export default function ActivationPage({ onActivated }: Props) {
                     />
                   </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-400 mb-1.5">Cloud API URL</label>
-                  <div className="relative">
-                    <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-                    <input
-                      className="w-full pl-10 pr-4 py-3 rounded-xl font-mono text-sm text-white border outline-none focus:border-emerald-500 transition-colors"
-                      style={{ background: '#16181f', borderColor: '#2a2d3a' }}
-                      placeholder="http://localhost:3000"
-                      value={apiUrl}
-                      onChange={e => setApiUrl(e.target.value)}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-600 mt-1">Your backend server URL</p>
+                {showServerSettings && (
+                <div className="rounded-xl border" style={{ borderColor: '#2a2d3a', background: '#12151d' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowServerSettings(v => !v)}
+                    className="w-full px-4 py-3 flex items-center gap-2 text-sm font-medium"
+                    style={{ color: '#94a3b8' }}
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span className="flex-1 text-left">Server Settings</span>
+                    <ChevronRight className={`w-4 h-4 transition-transform ${showServerSettings ? 'rotate-90' : ''}`} />
+                  </button>
+                  {showServerSettings && (
+                    <div className="px-4 pb-4">
+                      <label className="block text-xs font-medium text-gray-400 mb-1.5">Cloud API URL</label>
+                      <div className="relative">
+                        <Globe className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                        <input
+                          className="w-full pl-10 pr-4 py-3 rounded-xl font-mono text-sm text-white border outline-none focus:border-emerald-500 transition-colors"
+                          style={{ background: '#16181f', borderColor: '#2a2d3a' }}
+                          placeholder="https://pos-api.example.com"
+                          value={apiUrl}
+                          onChange={e => setApiUrl(e.target.value)}
+                        />
+                      </div>
+                      <p className="text-xs text-gray-600 mt-1">Only change this if support asks you to.</p>
+                    </div>
+                  )}
                 </div>
+                )}
               </div>
 
               <button onClick={handleVerify} disabled={loading}

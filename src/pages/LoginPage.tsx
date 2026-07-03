@@ -140,7 +140,10 @@ export default function LoginPage() {
   const [branding,  setBranding]  = useState<Record<string, unknown>>({})
   const [licenseOk, setLicenseOk] = useState(true)
   const [deviceId,  setDeviceId]  = useState('POS-001')
-  const [version]                  = useState('2.0.1')
+  const [version, setVersion]      = useState('')
+  const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null)
+  const [updateState, setUpdateState] = useState<'idle' | 'downloading' | 'ready'>('idle')
+  const [downloadPct, setDownloadPct] = useState(0)
 
   // Branch — never pre-populate; always verify DB first so deleted branches can't bypass
   const [terminalBranch, setTerminalBranch]   = useState<{ id: string; name: string; code: string } | null>(null)
@@ -176,6 +179,23 @@ export default function LoginPage() {
     window.api.app?.getDeviceInfo?.().then((r: { deviceId?: string }) => {
       if (r?.deviceId) setDeviceId(r.deviceId.slice(0, 12).toUpperCase())
     }).catch(() => {})
+    window.api.app?.getVersion?.().then((v: string) => setVersion(v)).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!window.api?.on) return
+    const off1 = window.api.on('update:available', (info: unknown) => setUpdateInfo(info as { version: string }))
+    const off2 = window.api.on('update:progress', (p: unknown) => {
+      setUpdateState('downloading')
+      setDownloadPct(Math.round((p as { percent: number }).percent))
+    })
+    const off3 = window.api.on('update:downloaded', () => setUpdateState('ready'))
+    const off4 = window.api.on('update:error', () => {
+      setUpdateState('idle')
+      setUpdateInfo(null)
+    })
+    window.api.updater?.check?.().catch(() => undefined)
+    return () => { off1?.(); off2?.(); off3?.(); off4?.() }
   }, [])
 
   // Verify stored branch on startup — only restore if still exists in DB
@@ -418,8 +438,36 @@ export default function LoginPage() {
 
       <StatusBar
         online={syncStatus.online} pending={syncStatus.pending}
-        lastSync={syncStatus.last_sync} licenseOk={licenseOk} version={version}
+        lastSync={syncStatus.last_sync} licenseOk={licenseOk} version={version || '...'}
       />
+      {updateInfo && (
+        <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-xl border px-4 py-2 shadow-xl"
+          style={{ background: '#111827', borderColor: '#3730a3', color: '#e0e7ff' }}>
+          <span className="text-sm font-semibold">
+            {updateState === 'ready'
+              ? `Update v${updateInfo.version} ready`
+              : updateState === 'downloading'
+              ? `Downloading update v${updateInfo.version} ${downloadPct}%`
+              : `Update v${updateInfo.version} available`}
+          </span>
+          {updateState === 'idle' && (
+            <button
+              onClick={() => { setUpdateState('downloading'); window.api.updater?.download?.() }}
+              className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-bold text-white hover:bg-indigo-500"
+            >
+              Download
+            </button>
+          )}
+          {updateState === 'ready' && (
+            <button
+              onClick={() => window.api.updater?.install?.()}
+              className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500"
+            >
+              Install
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex-1 flex items-center justify-center" style={{ paddingTop: '32px' }}>
         <div className="w-full max-w-[330px] px-4 space-y-3">

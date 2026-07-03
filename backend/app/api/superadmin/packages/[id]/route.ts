@@ -2,18 +2,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { pool } from '@/lib/db'
 
-type Params = { params: { id: string } }
+type Params = { params: Promise<{ id: string }> }
 
 export async function GET(req: NextRequest, { params }: Params) {
+  const { id: packageId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
-  const { rows } = await pool.query(`SELECT * FROM packages WHERE id = ?`, [params.id])
+  const { rows } = await pool.query(`SELECT * FROM packages WHERE id = ?`, [packageId])
   if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json(rows[0])
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
+  const { id: packageId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
@@ -40,15 +42,15 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   if (!setClauses.length) return NextResponse.json({ error: 'Nothing to update' }, { status: 400 })
 
-  vals.push(params.id)
+  vals.push(packageId)
   await pool.query(`UPDATE packages SET ${setClauses.join(', ')} WHERE id = ?`, vals)
 
   await auditLog({
     portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
     actorName: auth.payload.name, action: 'package.update',
-    resource: 'packages', resourceId: params.id, newValues: body,
+    resource: 'packages', resourceId: packageId, newValues: body,
   })
 
-  const { rows } = await pool.query(`SELECT * FROM packages WHERE id = ?`, [params.id])
+  const { rows } = await pool.query(`SELECT * FROM packages WHERE id = ?`, [packageId])
   return NextResponse.json(rows[0])
 }

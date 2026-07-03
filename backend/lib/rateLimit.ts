@@ -65,5 +65,5 @@ export function rateLimit(config: RateLimitConfig) {
 
 // Pre-configured limiters for common routes
 export const authLimiter     = rateLimit({ limit: 10,  windowMs: 15 * 60 * 1000, keyPrefix: 'auth' })
-export const syncLimiter     = rateLimit({ limit: 120, windowMs: 60 * 1000,       keyPrefix: 'sync' })
+export const syncLimiter     = rateLimit({ limit: 600, windowMs: 60 * 1000,       keyPrefix: 'sync' })
 export const defaultLimiter  = rateLimit({ limit: 200, windowMs: 60 * 1000,       keyPrefix: 'api'  })

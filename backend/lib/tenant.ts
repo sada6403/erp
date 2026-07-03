@@ -84,7 +84,11 @@ CREATE TABLE IF NOT EXISTS categories (
   id         CHAR(36)     NOT NULL PRIMARY KEY,
   name       VARCHAR(255) NOT NULL,
   parent_id  CHAR(36),
-  created_at DATETIME     NOT NULL DEFAULT NOW()
+  description TEXT,
+  sort_order INT          NOT NULL DEFAULT 0,
+  is_active  BOOLEAN      NOT NULL DEFAULT 1,
+  created_at DATETIME     NOT NULL DEFAULT NOW(),
+  updated_at DATETIME     NOT NULL DEFAULT NOW() ON UPDATE NOW()
 );
 
 CREATE TABLE IF NOT EXISTS products (
@@ -279,11 +283,12 @@ export async function createTenant(params: {
   timezone?: string; currency?: string; country?: string
   packageId?: string; trialDays?: number; createdBy?: string; notes?: string
   maxBranches?: number; maxUsers?: number; maxPosDevices?: number; maxStorageGb?: number
-}): Promise<{ companyId: string; slug: string; dbSchema: string; apiKey: string }> {
+}): Promise<{ companyId: string; slug: string; dbSchema: string; apiKey: string; companyKey: string }> {
   const slug     = await uniqueSlug(slugify(params.name))
   const dbSchema = `pos_erp_${slug.replace(/-/g, '_').slice(0, 35)}_${Date.now().toString(36)}`
   const companyId = randomUUID()
   const apiKey    = randomUUID()   // unique key the Electron POS uses to sync
+  const companyKey = randomUUID()  // shared activation key for POS device onboarding
   const trialDays = params.trialDays ?? 14
 
   // Fetch package limits, then apply any manual overrides from params
@@ -311,14 +316,14 @@ export async function createTenant(params: {
   await pool.query(
     `INSERT INTO companies
        (id, slug, name, email, phone, address, timezone, currency, country,
-        db_schema, api_key, status, trial_ends_at,
+        db_schema, api_key, company_key, status, trial_ends_at,
         max_branches, max_users, max_pos_devices, max_storage_gb,
         admin_email, admin_name, admin_phone, notes, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,'trial', DATE_ADD(NOW(), INTERVAL ? DAY),?,?,?,?,?,?,?,?,?)`,
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'trial', DATE_ADD(NOW(), INTERVAL ? DAY),?,?,?,?,?,?,?,?,?)`,
     [
       companyId, slug, params.name, params.email, params.phone ?? null, params.address ?? null,
       params.timezone ?? 'Asia/Colombo', params.currency ?? 'LKR', params.country ?? 'LK',
-      dbSchema, apiKey, trialDays,
+      dbSchema, apiKey, companyKey, trialDays,
       maxBranches, maxUsers, maxPosDevices, maxStorageGb,
       params.adminEmail, params.adminName, params.adminPhone ?? null,
       params.notes ?? null, params.createdBy ?? null,
@@ -367,7 +372,7 @@ export async function createTenant(params: {
     )
   }
 
-  return { companyId, slug, dbSchema, apiKey }
+  return { companyId, slug, dbSchema, apiKey, companyKey }
 }
 
 // ─── Change company status ────────────────────────────────────────────────────

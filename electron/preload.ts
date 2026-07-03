@@ -239,10 +239,13 @@ const api = {
   // Reports
   reports: {
     exportExcel:            (payload: unknown)  => ipcRenderer.invoke('reports:exportExcel', payload),
+    exportCsvRows:          (payload: unknown)  => ipcRenderer.invoke('reports:exportCsvRows', payload),
     exportPdf:              (payload: unknown)  => ipcRenderer.invoke('reports:exportPdf', payload),
     openFile:               (filePath: string)  => ipcRenderer.invoke('reports:openFile', filePath),
     transactions:           (filters?: unknown) => ipcRenderer.invoke('reports:transactions', filters),
     transactionDetail:      (id: string)        => ipcRenderer.invoke('reports:transactionDetail', id),
+    agentCommissions:       (filters?: unknown) => ipcRenderer.invoke('reports:agentCommissions', filters),
+    advancedSummary:        (filters?: unknown) => ipcRenderer.invoke('reports:advancedSummary', filters),
     exportTransactionsCsv:  (filters?: unknown) => ipcRenderer.invoke('reports:exportTransactionsCsv', filters),
   },
 
@@ -261,6 +264,8 @@ const api = {
     isActivated:        () => ipcRenderer.invoke('app:isActivated'),
     getDeviceInfo:      () => ipcRenderer.invoke('app:getDeviceInfo'),
     getActivationInfo:  () => ipcRenderer.invoke('app:getActivationInfo'),
+    getVersion:         () => ipcRenderer.invoke('app:getVersion'),
+    verifyCompanyKey:   (payload: unknown) => ipcRenderer.invoke('app:verifyCompanyKey', payload),
     activate:           (payload: unknown) => ipcRenderer.invoke('app:activate', payload),
     deactivate:         () => ipcRenderer.invoke('app:deactivate'),
   },

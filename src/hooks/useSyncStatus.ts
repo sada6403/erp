@@ -7,6 +7,8 @@ interface SyncStatus {
   online: boolean
 }
 
+let lastOnlineSyncAt = 0
+
 export function useSyncStatus() {
   const [status, setStatus] = useState<SyncStatus>({ pending: 0, failed: 0, online: navigator.onLine })
 
@@ -20,7 +22,15 @@ export function useSyncStatus() {
   useEffect(() => {
     refresh()
     const interval = setInterval(refresh, 10_000)
-    const onOnline  = () => setStatus(s => ({ ...s, online: true }))
+    const onOnline  = () => {
+      setStatus(s => ({ ...s, online: true }))
+      const now = Date.now()
+      if (now - lastOnlineSyncAt > 15_000) {
+        lastOnlineSyncAt = now
+        window.api.sync.trigger().catch(() => undefined)
+        setTimeout(refresh, 1500)
+      }
+    }
     const onOffline = () => setStatus(s => ({ ...s, online: false }))
     window.addEventListener('online',  onOnline)
     window.addEventListener('offline', onOffline)

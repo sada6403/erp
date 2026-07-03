@@ -3,9 +3,10 @@ import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { pool } from '@/lib/db'
 import { randomUUID } from 'crypto'
 
-type Params = { params: { id: string } }
+type Params = { params: Promise<{ id: string }> }
 
 export async function GET(_req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(_req)
   if ('error' in auth) return auth.error
 
@@ -17,7 +18,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
        FROM pos_devices
        WHERE company_id = ?
        ORDER BY created_at DESC`,
-      [params.id]
+      [companyId]
     )
     return NextResponse.json(rows)
   } catch {
@@ -27,6 +28,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
@@ -40,7 +42,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   let currentCount = 0
   try {
     const { rows: [company] } = await pool.query(
-      `SELECT max_pos_devices FROM companies WHERE id = ?`, [params.id]
+      `SELECT max_pos_devices FROM companies WHERE id = ?`, [companyId]
     )
     if (!company) return NextResponse.json({ error: 'Company not found' }, { status: 404 })
     maxDevices = Number((company as Record<string, number>).max_pos_devices ?? 2)
@@ -49,7 +51,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   try {
     const { rows: [row] } = await pool.query(
       `SELECT COUNT(*) as count FROM pos_devices WHERE company_id = ? AND status != 'deactivated'`,
-      [params.id]
+      [companyId]
     )
     currentCount = Number((row as Record<string, number>).count ?? 0)
   } catch { /* table not yet created — treat as 0 */ }
@@ -68,7 +70,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await pool.query(
       `INSERT INTO pos_devices (id, company_id, branch_id, device_name, license_key, status, notes, created_at)
        VALUES (?, ?, ?, ?, ?, 'pending', ?, NOW())`,
-      [id, params.id, branch_id ?? null, device_name, license_key, notes ?? null]
+      [id, companyId, branch_id ?? null, device_name, license_key, notes ?? null]
     )
   } catch (e) {
     return NextResponse.json(
@@ -81,13 +83,14 @@ export async function POST(req: NextRequest, { params }: Params) {
     portal: 'superadmin', actorType: 'superadmin',
     actorId: auth.payload.sub, actorName: auth.payload.name,
     action: 'device.create', resource: 'pos_devices', resourceId: id,
-    newValues: { device_name, company_id: params.id, license_key },
+    newValues: { device_name, company_id: companyId, license_key },
   })
 
   return NextResponse.json({ id, device_name, license_key, status: 'pending' }, { status: 201 })
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
@@ -100,7 +103,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     await pool.query(
       `UPDATE pos_devices SET status = 'deactivated', deactivated_at = NOW(), notes = COALESCE(?, notes)
        WHERE id = ? AND company_id = ?`,
-      [notes ?? null, deviceRowId, params.id]
+      [notes ?? null, deviceRowId, companyId]
     )
     await auditLog({
       portal: 'superadmin', actorType: 'superadmin',
@@ -112,7 +115,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     await pool.query(
       `UPDATE pos_devices SET device_id = NULL, status = 'pending', activated_at = NULL, deactivated_at = NULL
        WHERE id = ? AND company_id = ?`,
-      [deviceRowId, params.id]
+      [deviceRowId, companyId]
     )
     await auditLog({
       portal: 'superadmin', actorType: 'superadmin',

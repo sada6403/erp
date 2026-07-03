@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { isAuthorized } from '@/lib/auth'
+import { AccountStatusError, isAuthorized, resolveCompany } from '@/lib/auth'
 import { db } from '@/lib/db'
 
 export const runtime = 'nodejs'
@@ -7,7 +7,17 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(request: NextRequest) {
   if (!isAuthorized(request)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    try {
+      const company = await resolveCompany(request)
+      if (!company) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+    } catch (error) {
+      if (error instanceof AccountStatusError) {
+        return NextResponse.json({ error: error.message, code: error.code }, { status: 403 })
+      }
+      throw error
+    }
   }
 
   try {

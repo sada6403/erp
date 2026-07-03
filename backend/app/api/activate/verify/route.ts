@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { pool } from '@/lib/db'
+import { pool, tenantPool } from '@/lib/db'
 
 // GET /api/activate/verify?company_key=NP-ERP-XXXX
 // Called by POS before activation — returns company info + branches for branch selection
@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
     if (!key) return NextResponse.json({ error: 'company_key required' }, { status: 400 })
 
     const { rows } = await pool.query(
-      `SELECT c.id, c.name, c.status, c.company_key,
+      `SELECT c.id, c.name, c.status, c.company_key, c.db_schema,
               c.max_pos_devices, c.brand_color, c.brand_logo_url,
               s.ends_at as sub_ends_at, s.status as sub_status,
               p.name as package_name, p.grace_period_days
@@ -49,13 +49,11 @@ export async function GET(req: NextRequest) {
 
     const maxDevices = Number(c.max_pos_devices ?? 2)
 
-    // Get branches
+    // Get branches from the isolated tenant database, not the central SaaS DB.
     let branches: unknown[] = []
     try {
-      const { rows: br } = await pool.query(
-        `SELECT id, name, address FROM branches WHERE company_id = ? ORDER BY name`,
-        [c.id]
-      )
+      const tp = tenantPool(String(c.db_schema))
+      const { rows: br } = await tp.query(`SELECT id, name, address FROM branches WHERE is_active = 1 ORDER BY name`)
       branches = br
     } catch { /* branches table may not be in saas db */ }
 

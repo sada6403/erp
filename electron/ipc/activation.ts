@@ -5,6 +5,27 @@ import { randomUUID, createHash } from 'crypto'
 
 const store = new Store()
 
+function normalizeApiUrl(url: string): string {
+  return url.trim().replace(/\/+$/, '') || 'http://localhost:3000'
+}
+
+function htmlSummary(text: string): string {
+  const title = text.match(/<title[^>]*>(.*?)<\/title>/is)?.[1]
+  return (title ?? text)
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 160)
+}
+
+function parseJson(text: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(text) as Record<string, unknown>
+  } catch {
+    return null
+  }
+}
+
 function getOrCreateDeviceId(): string {
   let id = store.get('device_uuid') as string | undefined
   if (!id) {
@@ -42,6 +63,40 @@ export function registerActivationHandlers() {
     os_info:     `${os.type()} ${os.release()}`,
   }))
 
+  ipcMain.handle('app:verifyCompanyKey', async (_event, payload: {
+    company_key?: string
+    cloud_api_url: string
+  }) => {
+    try {
+      const companyKey = payload.company_key?.trim()
+      if (!companyKey) {
+        return { success: false, error: 'Company key is required' }
+      }
+
+      const apiUrl = normalizeApiUrl(payload.cloud_api_url ?? '')
+      const verifyUrl = `${apiUrl}/api/activate/verify?company_key=${encodeURIComponent(companyKey)}`
+      const res = await fetch(verifyUrl)
+      const responseText = await res.text()
+      const data = parseJson(responseText)
+
+      if (!data) {
+        const detail = htmlSummary(responseText)
+        return {
+          success: false,
+          error: `Activation server returned HTML instead of JSON (${res.status} ${res.statusText}). Check Cloud API URL: ${verifyUrl}${detail ? ` - ${detail}` : ''}`,
+        }
+      }
+
+      if (!res.ok) {
+        return { success: false, error: String(data.error ?? 'Verification failed') }
+      }
+
+      return { success: true, ...data }
+    } catch (err) {
+      return { success: false, error: (err as Error).message || 'Cannot reach the backend. Check the Cloud API URL.' }
+    }
+  })
+
   ipcMain.handle('app:activate', async (_event, payload: {
     company_key?: string
     license_key?: string
@@ -55,7 +110,7 @@ export function registerActivationHandlers() {
         return { success: false, error: 'Company key or license key is required' }
       }
 
-      const apiUrl    = (cloud_api_url ?? '').trim() || 'http://localhost:3000'
+      const apiUrl    = normalizeApiUrl(cloud_api_url ?? '')
       const device_id   = getOrCreateDeviceId()
       const device_name = payload.device_name?.trim() || os.hostname()
       const os_info     = `${os.type()} ${os.release()}`
@@ -68,26 +123,39 @@ export function registerActivationHandlers() {
       else body.license_key = license_key!.trim()
       if (branch_id) body.branch_id = branch_id
 
-      const res = await fetch(`${apiUrl}/api/activate`, {
+      const activateUrl = `${apiUrl}/api/activate`
+      const res = await fetch(activateUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
 
-      const data = await res.json() as Record<string, string>
-      if (!res.ok) return { success: false, error: data.error ?? 'Activation failed' }
+      const responseText = await res.text()
+      const data = parseJson(responseText)
+
+      if (!data) {
+        const detail = htmlSummary(responseText)
+        return {
+          success: false,
+          error: `Activation server returned HTML instead of JSON (${res.status} ${res.statusText}). Check Cloud API URL: ${activateUrl}${detail ? ` - ${detail}` : ''}`,
+        }
+      }
+
+      if (!res.ok) return { success: false, error: String(data.error ?? 'Activation failed') }
 
       // Persist activation state
       store.set('device_activated', true)
-      store.set('device_license_key', license_key)
+      if (license_key?.trim()) store.set('device_license_key', license_key.trim())
+      else store.delete('device_license_key')
+      if (company_key?.trim()) store.set('device_company_key', company_key.trim())
       store.set('device_id', device_id)
-      store.set('activation_company_name', data.company_name)
+      store.set('activation_company_name', data.company_name ?? '')
 
       // Auto-save api_key + branding into app_settings
       const current = (store.get('app_settings') as Record<string, unknown>) ?? {}
       store.set('app_settings', {
         ...current,
-        cloud_api_url,
+        cloud_api_url:   apiUrl,
         cloud_api_key:   data.api_key,
         brand_color:     data.brand_color    ?? null,
         brand_logo_url:  data.brand_logo_url ?? null,

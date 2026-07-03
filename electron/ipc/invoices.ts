@@ -77,6 +77,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const id = crypto.randomUUID()
       const invoiceNumber = getNextBillNumber(branchId, billType)
       const movementRecords: Record<string, unknown>[] = []
+      const agentCode = String(payload.agent_code || '').trim() || null
+      const agentName = String(payload.agent_name || '').trim() || null
+      const agentCommissionPct = Math.max(0, Math.min(100, Number(payload.agent_commission_pct || 0)))
+      const agentCommissionAmount = agentCode || agentName
+        ? Number(((Number(payload.total_amount || 0) * agentCommissionPct) / 100).toFixed(2))
+        : 0
 
       // --- Credit bill validation ---
       if (billType === 'CREDIT') {
@@ -115,10 +121,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         db.prepare(`
           INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id,
             bill_type, status, valid_until, due_date, approved_by,
-            subtotal, discount_amount, tax_amount, total_amount, paid_amount, due_amount, notes)
+            subtotal, discount_amount, tax_amount, total_amount, paid_amount, due_amount,
+            agent_code, agent_name, agent_commission_pct, agent_commission_amount, notes)
           VALUES (@id, @invoice_number, @branch_id, @customer_id, @cashier_id,
             @bill_type, @status, @valid_until, @due_date, @approved_by,
-            @subtotal, @discount_amount, @tax_amount, @total_amount, @paid_amount, @due_amount, @notes)
+            @subtotal, @discount_amount, @tax_amount, @total_amount, @paid_amount, @due_amount,
+            @agent_code, @agent_name, @agent_commission_pct, @agent_commission_amount, @notes)
         `).run({
           id,
           invoice_number:  invoiceNumber,
@@ -136,6 +144,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           total_amount:    payload.total_amount,
           paid_amount:     payload.paid_amount || 0,
           due_amount:      payload.due_amount || 0,
+          agent_code:      agentCode,
+          agent_name:      agentName,
+          agent_commission_pct: agentCommissionPct,
+          agent_commission_amount: agentCommissionAmount,
           notes:           payload.notes || null,
         })
 
@@ -245,6 +257,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         subtotal: payload.subtotal, discount_amount: payload.discount_amount || 0,
         tax_amount: payload.tax_amount || 0, total_amount: payload.total_amount,
         paid_amount: payload.paid_amount || 0, due_amount: payload.due_amount || 0,
+        agent_code: agentCode, agent_name: agentName,
+        agent_commission_pct: agentCommissionPct,
+        agent_commission_amount: agentCommissionAmount,
         notes: payload.notes || null,
       })
       for (const movement of movementRecords) {

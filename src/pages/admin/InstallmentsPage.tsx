@@ -1378,6 +1378,7 @@ function PaymentModal({ installment, onClose, onSave }: {
   const [amount, setAmount]     = useState(Math.min(monthly, maxAmt))
   const [method, setMethod]     = useState('cash')
   const [reference, setRef]     = useState('')
+  const [proofUrl, setProofUrl] = useState('')
   const [notes, setNotes]       = useState('')
   const [saving, setSaving]     = useState(false)
 
@@ -1388,7 +1389,11 @@ function PaymentModal({ installment, onClose, onSave }: {
     if (amount > maxAmt + 0.01) { toast.error(`Max payable: ${fmt(maxAmt)}`); return }
     setSaving(true)
     const res = await window.api.admin.installments.recordPayment(installment.id as string, {
-      amount, method, reference: reference || null, notes: notes || null
+      amount,
+      method,
+      reference: reference || null,
+      receipt_image_url: proofUrl || null,
+      notes: notes || null,
     })
     setSaving(false)
     if (res.success) {
@@ -1485,6 +1490,18 @@ function PaymentModal({ installment, onClose, onSave }: {
             <label className="label">Reference / Transaction ID</label>
             <input value={reference} onChange={e => setRef(e.target.value)} className="input w-full"
               placeholder={method === 'bank_transfer' ? 'Bank transaction reference number…' : 'Card approval code…'} />
+          </div>
+        )}
+
+        {(method === 'bank_transfer' || method === 'card') && (
+          <div>
+            <label className="label">Payment Proof URL / File Path</label>
+            <input
+              value={proofUrl}
+              onChange={e => setProofUrl(e.target.value)}
+              className="input w-full"
+              placeholder="Bank slip image URL or local file path"
+            />
           </div>
         )}
 

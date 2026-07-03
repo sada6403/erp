@@ -28,13 +28,16 @@ import { registerMonitorHandlers } from './ipc/monitor'
 import { registerLicenseHandlers } from './ipc/license'
 import { startAutoBackup, stopAutoBackup } from './services/backupService'
 import { startLicenseChecks, stopLicenseChecks } from './services/licenseService'
-import { SyncService } from './services/syncService'
+import { type SyncService, getSyncService } from './services/syncService'
 
 const isDev = process.env.NODE_ENV === 'development'
 const devPort = process.env.DEV_PORT || '5173'
 
 // Fix blank screen on some Windows GPUs
 app.disableHardwareAcceleration()
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.enterprise.pos-erp')
+}
 
 // Register custom protocol scheme before app is ready
 protocol.registerSchemesAsPrivileged([
@@ -44,8 +47,19 @@ protocol.registerSchemesAsPrivileged([
 let mainWindow: BrowserWindow | null = null
 let syncService: SyncService | null = null
 
+function getWindowIconPath() {
+  const fs = require('fs') as typeof import('fs')
+  const candidates = [
+    app.isPackaged ? path.join(process.resourcesPath, 'assets', 'icon.ico') : '',
+    path.join(__dirname, '../assets/icon.ico'),
+    path.join(__dirname, '../assets/icon.png'),
+  ].filter(Boolean)
+
+  return candidates.find((candidate) => fs.existsSync(candidate))
+}
+
 function createWindow() {
-  const iconPath = path.join(__dirname, '../assets/icon.png')
+  const iconPath = getWindowIconPath()
   mainWindow = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -53,7 +67,7 @@ function createWindow() {
     minHeight: 768,
     backgroundColor: '#0f172a',
     show: false,
-    icon: require('fs').existsSync(iconPath) ? iconPath : undefined,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -136,6 +150,8 @@ async function bootstrap() {
   startAutoBackup()
   startLicenseChecks()
 
+  ipcMain.handle('app:getVersion', () => app.getVersion())
+
   createWindow()
 
   // Auto-updater (production only)
@@ -165,7 +181,7 @@ async function bootstrap() {
   }
 
   // Start background sync service
-  syncService = new SyncService()
+  syncService = getSyncService()
   syncService.start()
 
   app.on('activate', () => {

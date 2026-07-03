@@ -14,6 +14,7 @@ import {
   Receipt, ClipboardList, BadgeDollarSign, Star, RotateCcw, Keyboard
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { setSystemTheme } from '@/lib/systemTheme'
 
 const BILL_TYPES: { value: BillType; label: string; icon: React.ReactNode; key: string }[] = [
   { value: 'RETAIL',    label: 'Retail',    icon: <Receipt size={13} />,      key: 'Ctrl+1' },
@@ -185,9 +186,9 @@ export default function POSPage() {
 
   const toggleTheme = useCallback(() => {
     const nextDark = !document.documentElement.classList.contains('dark')
-    document.documentElement.classList.toggle('dark', nextDark)
-    localStorage.setItem('theme', nextDark ? 'dark' : 'light')
-    window.dispatchEvent(new Event('themechange'))
+    const theme = nextDark ? 'dark' : 'light'
+    setSystemTheme(theme)
+    window.api?.settings?.update?.({ theme }).catch(() => undefined)
   }, [])
 
   const handleBillTypeChange = useCallback((type: BillType) => {

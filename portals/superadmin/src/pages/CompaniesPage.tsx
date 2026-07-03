@@ -232,7 +232,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
     maxBranches: '1', maxUsers: '5', maxPosDevices: '2', maxStorageGb: '5',
   })
   const [showAdminPw, setShowAdminPw] = useState(false)
-  const [createdInfo, setCreatedInfo] = useState<{ adminEmail: string; adminPassword: string; apiKey: string; companyName: string } | null>(null)
+  const [createdInfo, setCreatedInfo] = useState<{ adminEmail: string; adminPassword: string; apiKey: string; companyKey: string; companyName: string } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
 
   useEffect(() => {
@@ -274,9 +274,15 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
         maxUsers:      Number(form.maxUsers),
         maxPosDevices: Number(form.maxPosDevices),
         maxStorageGb:  Number(form.maxStorageGb),
-      }) as { apiKey: string; adminEmail: string }
+      }) as { apiKey: string; companyKey?: string; company_key?: string; adminEmail: string }
       onCreated()
-      setCreatedInfo({ adminEmail: res.adminEmail || form.adminEmail, adminPassword: form.adminPassword, apiKey: res.apiKey || '', companyName: form.name })
+      setCreatedInfo({
+        adminEmail: res.adminEmail || form.adminEmail,
+        adminPassword: form.adminPassword,
+        apiKey: res.apiKey || '',
+        companyKey: res.companyKey || res.company_key || '',
+        companyName: form.name,
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed')
     }
@@ -302,6 +308,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
             {[
               { label: 'Admin Email', value: createdInfo.adminEmail },
               { label: 'Admin Password', value: createdInfo.adminPassword },
+              { label: 'Company Activation Key', value: createdInfo.companyKey },
               { label: 'POS API Key', value: createdInfo.apiKey },
             ].map(({ label, value }) => (
               <div key={label}>

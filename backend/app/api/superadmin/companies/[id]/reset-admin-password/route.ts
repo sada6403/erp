@@ -4,7 +4,7 @@ import { withTenant } from '@/lib/tenant'
 import bcrypt from 'bcryptjs'
 import { randomBytes } from 'crypto'
 
-type Params = { params: { id: string } }
+type Params = { params: Promise<{ id: string }> }
 
 function generateTempPassword(): string {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789!@#$'
@@ -14,11 +14,12 @@ function generateTempPassword(): string {
 }
 
 export async function POST(req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
   try {
-    const result = await withTenant(params.id, async (client) => {
+    const result = await withTenant(companyId, async (client) => {
       // Find the most privileged active user — try Company Admin role first, then any admin perm
       const { rows: adminRows } = await client.query(
         `SELECT u.id, u.name, u.email
@@ -56,7 +57,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await auditLog({
       portal: 'superadmin', actorType: 'superadmin',
       actorId: auth.payload.sub, actorName: auth.payload.name,
-      action: 'company.resetAdminPassword', resource: 'companies', resourceId: params.id,
+      action: 'company.resetAdminPassword', resource: 'companies', resourceId: companyId,
     })
 
     return NextResponse.json(result)

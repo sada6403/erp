@@ -2,6 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { pool } from '@/lib/db'
 import { randomUUID } from 'crypto'
 
+async function step<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    const e = err as Error
+    console.error(`[activate POST] step failed: ${name}`, e.message)
+    throw err
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -21,15 +31,17 @@ export async function POST(req: NextRequest) {
 
     // ── Company Key Flow (new) ─────────────────────────────────────────────
     if (company_key) {
-      const { rows } = await pool.query(
-        `SELECT c.id as company_id, c.name as company_name, c.status as company_status,
-                c.api_key, c.max_pos_devices, c.brand_color, c.brand_logo_url,
-                s.ends_at as sub_ends_at, s.status as sub_status, p.grace_period_days
-         FROM companies c
-         LEFT JOIN company_subscriptions s ON s.company_id = c.id AND s.status IN ('active','trial','grace')
-         LEFT JOIN packages p ON p.id = s.package_id
-         WHERE c.company_key = ?`,
-        [company_key]
+      const { rows } = await step('find company by company_key', () =>
+        pool.query(
+          `SELECT c.id as company_id, c.name as company_name, c.status as company_status,
+                  c.api_key, c.max_pos_devices, c.brand_color, c.brand_logo_url,
+                  s.ends_at as sub_ends_at, s.status as sub_status, p.grace_period_days
+           FROM companies c
+           LEFT JOIN company_subscriptions s ON s.company_id = c.id AND s.status IN ('active','trial','grace')
+           LEFT JOIN packages p ON p.id = s.package_id
+           WHERE c.company_key = ?`,
+          [company_key]
+        )
       )
 
       if (!rows.length) {
@@ -48,9 +60,11 @@ export async function POST(req: NextRequest) {
       // Check if this device is already registered (re-activation)
       let existingDevice: Record<string, unknown> | null = null
       try {
-        const { rows: ed } = await pool.query(
-          `SELECT * FROM pos_devices WHERE device_id = ? AND company_id = ?`,
-          [device_id, co.company_id]
+        const { rows: ed } = await step('find existing device', () =>
+          pool.query(
+            `SELECT * FROM pos_devices WHERE device_id = ? AND company_id = ?`,
+            [device_id, co.company_id]
+          )
         )
         if (ed.length) existingDevice = ed[0] as Record<string, unknown>
       } catch { /* table may not exist */ }
@@ -60,9 +74,11 @@ export async function POST(req: NextRequest) {
         const maxDevices = Number(co.max_pos_devices ?? 2)
         let activeCount = 0
         try {
-          const { rows: [dc] } = await pool.query(
-            `SELECT COUNT(*) as cnt FROM pos_devices WHERE company_id = ? AND status = 'active'`,
-            [co.company_id]
+          const { rows: [dc] } = await step('count active devices', () =>
+            pool.query(
+              `SELECT COUNT(*) as cnt FROM pos_devices WHERE company_id = ? AND status = 'active'`,
+              [co.company_id]
+            )
           )
           activeCount = Number((dc as Record<string, unknown>).cnt ?? 0)
         } catch { /* treat as 0 */ }
@@ -78,29 +94,35 @@ export async function POST(req: NextRequest) {
         const newDeviceId = randomUUID()
         const newLicenseKey = randomUUID()
         try {
-          await pool.query(
-            `INSERT INTO pos_devices
-               (id, company_id, branch_id, device_name, device_id, license_key, status, created_at)
-             VALUES (?, ?, ?, ?, ?, ?, 'active', NOW())`,
-            [newDeviceId, co.company_id, branch_id, device_name, device_id, newLicenseKey]
+          await step('insert new device', () =>
+            pool.query(
+              `INSERT INTO pos_devices
+                 (id, company_id, branch_id, device_name, device_id, license_key, status, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, 'active', NOW())`,
+              [newDeviceId, co.company_id, branch_id, device_name, device_id, newLicenseKey]
+            )
           )
         } catch (e) {
           return NextResponse.json({ error: 'Failed to register device. ' + (e as Error).message }, { status: 500 })
         }
       } else {
         // Update existing device
-        await pool.query(
-          `UPDATE pos_devices SET device_name=?, branch_id=COALESCE(?,branch_id), status='active' WHERE device_id=? AND company_id=?`,
-          [device_name, branch_id, device_id, co.company_id]
+        await step('update existing device', () =>
+          pool.query(
+            `UPDATE pos_devices SET device_name=?, branch_id=COALESCE(?,branch_id), status='active' WHERE device_id=? AND company_id=?`,
+            [device_name, branch_id, device_id, co.company_id]
+          )
         )
       }
 
       // Optional tracking columns
       try {
-        await pool.query(
-          `UPDATE pos_devices SET activated_at=COALESCE(activated_at,NOW()), os_info=?, app_version=?, last_seen_at=NOW()
-           WHERE device_id=? AND company_id=?`,
-          [os_info ?? null, app_version ?? null, device_id, co.company_id]
+        await step('update device tracking columns', () =>
+          pool.query(
+            `UPDATE pos_devices SET activated_at=COALESCE(activated_at,NOW()), os_info=?, app_version=?, last_seen_at=NOW()
+             WHERE device_id=? AND company_id=?`,
+            [os_info ?? null, app_version ?? null, device_id, co.company_id]
+          )
         )
       } catch { /* columns not yet migrated */ }
 

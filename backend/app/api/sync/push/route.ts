@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { resolveCompany, AccountStatusError } from '@/lib/auth'
-import { withTransaction } from '@/lib/db'
+import type { QueryClient } from '@/lib/db'
 import { applySyncOperation } from '@/lib/sync'
-import mysql from 'mysql2/promise'
 import { syncLimiter } from '@/lib/rateLimit'
 
 export const runtime = 'nodejs'
@@ -37,7 +36,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use a connection from the company's tenant pool
-    const conn = await (company.tp as unknown as { connect: () => Promise<{ query: (sql: string, vals?: unknown[]) => Promise<{ rows: unknown[] }>; release: () => void }> }).connect()
+    const conn = await company.tp.connect() as QueryClient
     try {
       await applySyncOperation(conn, {
         table:     body.table as string,

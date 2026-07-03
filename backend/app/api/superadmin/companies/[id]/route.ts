@@ -4,9 +4,10 @@ import { setCompanyStatus, deleteTenant } from '@/lib/tenant'
 import { pool } from '@/lib/db'
 import { randomUUID } from 'crypto'
 
-type Params = { params: { id: string } }
+type Params = { params: Promise<{ id: string }> }
 
 export async function GET(req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
@@ -17,13 +18,14 @@ export async function GET(req: NextRequest, { params }: Params) {
      LEFT JOIN company_subscriptions s ON s.company_id = c.id AND s.status IN ('active','trial')
      LEFT JOIN packages p ON p.id = s.package_id
      WHERE c.id = ?`,
-    [params.id]
+    [companyId]
   )
   if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   return NextResponse.json(rows[0])
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
@@ -34,10 +36,10 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           brandColor, brandLogoUrl,
           subscriptionEndsAt, newPackageId, extendTrialDays } = body
 
-  const { rows: [old] } = await pool.query(`SELECT * FROM companies WHERE id = ?`, [params.id])
+  const { rows: [old] } = await pool.query(`SELECT * FROM companies WHERE id = ?`, [companyId])
   if (!old) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (status) await setCompanyStatus(params.id, status)
+  if (status) await setCompanyStatus(companyId, status)
 
   const setClauses: string[] = []
   const vals: unknown[] = []
@@ -56,7 +58,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (brandLogoUrl  !== undefined) { setClauses.push('brand_logo_url = ?') ; vals.push(brandLogoUrl || null) }
 
   if (setClauses.length) {
-    vals.push(params.id)
+    vals.push(companyId)
     await pool.query(`UPDATE companies SET ${setClauses.join(', ')} WHERE id = ?`, vals)
   }
 
@@ -64,7 +66,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (subscriptionEndsAt || newPackageId || extendTrialDays) {
     const { rows: subs } = await pool.query(
       `SELECT id, ends_at, package_id FROM company_subscriptions WHERE company_id = ? AND status IN ('active','trial') ORDER BY created_at DESC LIMIT 1`,
-      [params.id]
+      [companyId]
     )
     if (subs.length) {
       const sub = subs[0] as Record<string, unknown>
@@ -94,22 +96,23 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       await pool.query(
         `INSERT INTO company_subscriptions (id, company_id, package_id, status, billing_cycle, amount, starts_at, ends_at)
          VALUES (?, ?, ?, 'trial', 'monthly', 0, NOW(), ?)`,
-        [randomUUID(), params.id, newPackageId || null, subscriptionEndsAt || null]
+        [randomUUID(), companyId, newPackageId || null, subscriptionEndsAt || null]
       )
     }
   }
 
   await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
     actorName: auth.payload.name, action: 'company.update',
-    resource: 'companies', resourceId: params.id,
+    resource: 'companies', resourceId: companyId,
     oldValues: { status: (old as Record<string,string>).status }, newValues: body })
 
   // Return updated row (including new api_key if regenerated)
-  const { rows: [updated] } = await pool.query(`SELECT * FROM companies WHERE id = ?`, [params.id])
+  const { rows: [updated] } = await pool.query(`SELECT * FROM companies WHERE id = ?`, [companyId])
   return NextResponse.json(updated)
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {
+  const { id: companyId } = await params
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
@@ -117,18 +120,18 @@ export async function DELETE(req: NextRequest, { params }: Params) {
 
   if (body.permanent) {
     try {
-      await deleteTenant(params.id)
+      await deleteTenant(companyId)
       await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
         actorName: auth.payload.name, action: 'company.permanentDelete',
-        resource: 'companies', resourceId: params.id })
+        resource: 'companies', resourceId: companyId })
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 500 })
     }
   } else {
-    await setCompanyStatus(params.id, 'cancelled')
+    await setCompanyStatus(companyId, 'cancelled')
     await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
       actorName: auth.payload.name, action: 'company.cancel',
-      resource: 'companies', resourceId: params.id })
+      resource: 'companies', resourceId: companyId })
   }
 
   return NextResponse.json({ ok: true })

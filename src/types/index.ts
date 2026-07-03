@@ -159,6 +159,10 @@ export interface Invoice {
   total_amount: number
   paid_amount: number
   due_amount: number
+  agent_code?: string
+  agent_name?: string
+  agent_commission_pct?: number
+  agent_commission_amount?: number
   notes?: string
   created_at: string
   updated_at: string

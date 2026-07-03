@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useSyncStatus } from '@/hooks/useSyncStatus'
 import {
@@ -11,6 +11,7 @@ import {
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
 import NotificationPanel from './NotificationPanel'
+import { setSystemTheme } from '@/lib/systemTheme'
 
 function useTheme() {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
@@ -21,10 +22,10 @@ function useTheme() {
   }, [])
   const toggle = () => {
     const next = !dark
-    document.documentElement.classList.toggle('dark', next)
-    localStorage.setItem('theme', next ? 'dark' : 'light')
+    const theme = next ? 'dark' : 'light'
+    setSystemTheme(theme)
+    window.api?.settings?.update?.({ theme }).catch(() => undefined)
     setDark(next)
-    window.dispatchEvent(new Event('themechange'))
   }
   return { dark, toggle }
 }
@@ -89,6 +90,7 @@ const NAV_GROUPS: NavGroup[] = [
   { label: 'Expenses', icon: Receipt, perm: 'expenses', module: 'expenses', items: [{ to: '/admin/expenses', label: 'Expenses', perm: 'expenses' }] },
   { label: 'Reports', icon: BarChart3, perm: 'reports', module: 'reports_basic', items: [
     { to: '/admin/analytics', label: 'Analytics', perm: 'reports' },
+    { to: '/admin/reports', label: 'Advanced Reports', perm: 'reports' },
     { to: '/admin/transactions', label: 'Transaction Report', perm: 'reports' },
   ]},
   {
@@ -131,9 +133,17 @@ function SidebarGroup({
   collapsed: boolean
   enabledModules: string[] | null
 }) {
-  const [open, setOpen] = useState(false)
+  const location = useLocation()
   const Icon = group.icon
   const visibleItems = group.items.filter(item => canSeeItem(item, permissions, isAdmin))
+  const groupActive = visibleItems.some(item =>
+    location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
+  )
+  const [open, setOpen] = useState(groupActive)
+
+  useEffect(() => {
+    if (groupActive) setOpen(true)
+  }, [groupActive])
 
   if (!isAdmin && group.adminOnly) return null
   if (!isAdmin && group.perm && !permissions[group.perm] && !visibleItems.length) return null
@@ -158,19 +168,46 @@ function SidebarGroup({
     )
   }
 
+  if (visibleItems.length === 1) {
+    const item = visibleItems[0]
+    return (
+      <NavLink
+        to={item.to}
+        title={group.label}
+        className={({ isActive }) =>
+          `w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 ${
+            isActive ? 'bg-blue-600 text-white' : 'hover:bg-[var(--bg-soft)]'
+          }`
+        }
+        style={({ isActive }) => isActive ? {} : { color: 'var(--text-2)' }}
+      >
+        <Icon size={15} className="flex-shrink-0" />
+        <span className="flex-1 text-left truncate">{group.label}</span>
+      </NavLink>
+    )
+  }
+
   return (
     <div>
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 hover:bg-[var(--bg-soft)]"
-        style={{ color: open ? 'var(--brand-primary)' : 'var(--text-2)' }}
+        style={{
+          color: open || groupActive ? 'var(--brand-primary)' : 'var(--text-2)',
+          background: groupActive ? 'color-mix(in srgb, var(--brand-primary) 8%, transparent)' : undefined,
+        }}
       >
         <Icon size={15} className="flex-shrink-0" />
         <span className="flex-1 text-left truncate">{group.label}</span>
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       </button>
       {open && (
-        <div className="ml-4 mt-1 mb-1 space-y-0.5 border-l pl-2" style={{ borderColor: 'var(--border)' }}>
+        <div className="relative ml-4 mt-1 mb-1 space-y-0.5 pl-3">
+          <span
+            aria-hidden="true"
+            className="absolute left-0 top-0 bottom-0 w-px rounded-full"
+            style={{ background: 'var(--border)' }}
+          />
           {visibleItems.map(item => (
             <NavLink
               key={item.to}
@@ -309,6 +346,7 @@ export default function AppLayout() {
     const off2 = window.api.on('update:progress',   (p: unknown)    => { setUpdateState('downloading'); setDownloadPct(Math.round((p as { percent: number }).percent)) })
     const off3 = window.api.on('update:downloaded', ()              => setUpdateState('ready'))
     const off4 = window.api.on('update:error',      ()              => { setUpdateState('idle'); setUpdateInfo(null) })
+    window.api.updater?.check?.().catch(() => undefined)
     return () => { off1?.(); off2?.(); off3?.(); off4?.() }
   }, [])
 
@@ -419,7 +457,6 @@ export default function AppLayout() {
           {!sidebarOpen ? (
             <div className="px-2 py-3 space-y-1">
               {(isAdmin || Boolean(permissions.reports)) && <SidebarLink to="/admin" end icon={LayoutDashboard} label="Dashboard" collapsed />}
-              {(isAdmin || Boolean(permissions.inventory)) && <SidebarLink to="/admin/purchase-orders" end icon={FileText} label="GRN" collapsed />}
               {NAV_GROUPS.map(group => <SidebarGroup key={group.label} group={group} permissions={permissions} isAdmin={isAdmin} collapsed enabledModules={enabledModules} />)}
               {isAdmin && <SidebarLink to="/admin/settings" icon={Settings} label="Settings" collapsed />}
             </div>
@@ -430,7 +467,6 @@ export default function AppLayout() {
               </div>
               <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-0.5">
                 {(isAdmin || Boolean(permissions.reports)) && <SidebarLink to="/admin" end icon={LayoutDashboard} label="Dashboard" collapsed={false} />}
-                {(isAdmin || Boolean(permissions.inventory)) && <SidebarLink to="/admin/purchase-orders" end icon={FileText} label="GRN" collapsed={false} />}
                 {NAV_GROUPS.map(group => <SidebarGroup key={group.label} group={group} permissions={permissions} isAdmin={isAdmin} collapsed={false} enabledModules={enabledModules} />)}
                 {isAdmin && <SidebarLink to="/admin/settings" icon={Settings} label="Settings" collapsed={false} />}
               </nav>
