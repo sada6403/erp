@@ -118,6 +118,96 @@ CREATE TABLE IF NOT EXISTS stock_levels (
   UNIQUE KEY uq_stock (product_id, branch_id)
 );
 
+CREATE TABLE IF NOT EXISTS stocks (
+  id           CHAR(36)      NOT NULL PRIMARY KEY,
+  product_id   CHAR(36)      NOT NULL,
+  branch_id    CHAR(36)      NOT NULL,
+  warehouse_id CHAR(36)      NULL,
+  quantity     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  damaged_qty  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  updated_at   DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at    DATETIME      NULL,
+  UNIQUE KEY uq_stocks_product_branch_wh (product_id, branch_id, warehouse_id),
+  INDEX idx_stocks_product (product_id),
+  INDEX idx_stocks_branch (branch_id)
+);
+
+CREATE TABLE IF NOT EXISTS stock_movements (
+  id                    CHAR(36)      NOT NULL PRIMARY KEY,
+  product_id             CHAR(36)      NOT NULL,
+  from_branch_id         CHAR(36)      NULL,
+  to_branch_id           CHAR(36)      NULL,
+  quantity               DECIMAL(12,2) NOT NULL DEFAULT 0,
+  movement_type          VARCHAR(32)   NOT NULL,
+  reference_order_id     CHAR(36)      NULL,
+  reference_transfer_id  CHAR(36)      NULL,
+  notes                  TEXT          NULL,
+  created_by             CHAR(36)      NULL,
+  created_at             DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at             DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at              DATETIME      NULL,
+  INDEX idx_stock_movements_product (product_id),
+  INDEX idx_stock_movements_from_branch (from_branch_id),
+  INDEX idx_stock_movements_to_branch (to_branch_id),
+  INDEX idx_stock_movements_type (movement_type),
+  INDEX idx_stock_movements_updated (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS stock_transfers (
+  id                   CHAR(36)      NOT NULL PRIMARY KEY,
+  transfer_number      VARCHAR(64)   NULL UNIQUE,
+  product_id           CHAR(36)      NOT NULL,
+  from_branch_id       CHAR(36)      NULL,
+  to_branch_id         CHAR(36)      NULL,
+  from_warehouse_id    CHAR(36)      NULL,
+  to_warehouse_id      CHAR(36)      NULL,
+  quantity             DECIMAL(12,2) NOT NULL DEFAULT 0,
+  status               VARCHAR(32)   NOT NULL DEFAULT 'pending_approval',
+  approved_by          CHAR(36)      NULL,
+  released_by          CHAR(36)      NULL,
+  driver_name          VARCHAR(255)  NULL,
+  driver_phone         VARCHAR(50)   NULL,
+  vehicle_number       VARCHAR(64)   NULL,
+  dispatch_at          DATETIME      NULL,
+  expected_delivery_at DATETIME      NULL,
+  actual_delivery_at   DATETIME      NULL,
+  received_quantity    DECIMAL(12,2) NOT NULL DEFAULT 0,
+  missing_quantity     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  damaged_quantity     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  notes                TEXT          NULL,
+  initiated_by         CHAR(36)      NULL,
+  received_by          CHAR(36)      NULL,
+  reject_reason        TEXT          NULL,
+  rejected_by          CHAR(36)      NULL,
+  discrepancy_note     TEXT          NULL,
+  discrepancy_by       CHAR(36)      NULL,
+  initiated_at         DATETIME      NOT NULL DEFAULT NOW(),
+  received_at          DATETIME      NULL,
+  updated_at           DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at            DATETIME      NULL,
+  INDEX idx_stock_transfers_from_branch (from_branch_id),
+  INDEX idx_stock_transfers_to_branch (to_branch_id),
+  INDEX idx_stock_transfers_status (status),
+  INDEX idx_stock_transfers_updated (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id          CHAR(36)     NOT NULL PRIMARY KEY,
+  user_id     CHAR(36)     NULL,
+  branch_id   CHAR(36)     NULL,
+  action      VARCHAR(100) NOT NULL,
+  table_name  VARCHAR(100) NULL,
+  record_id   VARCHAR(100) NULL,
+  old_values  JSON         NULL,
+  new_values  JSON         NULL,
+  created_at  DATETIME     NOT NULL DEFAULT NOW(),
+  updated_at  DATETIME     NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at   DATETIME     NULL,
+  INDEX idx_audit_logs_user (user_id),
+  INDEX idx_audit_logs_action (action),
+  INDEX idx_audit_logs_updated (updated_at)
+);
+
 CREATE TABLE IF NOT EXISTS customers (
   id            CHAR(36)      NOT NULL PRIMARY KEY,
   name          VARCHAR(255)  NOT NULL,
