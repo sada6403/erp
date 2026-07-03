@@ -209,6 +209,7 @@ export class SyncService {
     const globalTables = [
       'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers',
       'products', 'stocks', 'stock_movements', 'customers', 'deliveries',
+      'purchase_orders', 'purchase_items',
       'installments', 'installment_plans', 'installment_schedule',
       'installment_reminders', 'stock_transfers', 'customer_orders', 'customer_order_items',
     ]

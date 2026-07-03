@@ -91,6 +91,21 @@ CREATE TABLE IF NOT EXISTS categories (
   updated_at DATETIME     NOT NULL DEFAULT NOW() ON UPDATE NOW()
 );
 
+CREATE TABLE IF NOT EXISTS suppliers (
+  id         CHAR(36)     NOT NULL PRIMARY KEY,
+  name       VARCHAR(255) NOT NULL,
+  contact    VARCHAR(255),
+  phone      VARCHAR(50),
+  email      VARCHAR(255),
+  address    TEXT,
+  tax_number VARCHAR(100),
+  is_active  BOOLEAN      NOT NULL DEFAULT 1,
+  created_at DATETIME     NOT NULL DEFAULT NOW(),
+  updated_at DATETIME     NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at  DATETIME     NULL,
+  INDEX idx_suppliers_updated (updated_at)
+);
+
 CREATE TABLE IF NOT EXISTS products (
   id             CHAR(36)       NOT NULL PRIMARY KEY,
   category_id    CHAR(36),
@@ -206,6 +221,51 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   INDEX idx_audit_logs_user (user_id),
   INDEX idx_audit_logs_action (action),
   INDEX idx_audit_logs_updated (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_orders (
+  id             CHAR(36)      NOT NULL PRIMARY KEY,
+  po_number      VARCHAR(100)  NOT NULL UNIQUE,
+  branch_id      CHAR(36)      NULL,
+  supplier_id    CHAR(36)      NULL,
+  status         VARCHAR(32)   NOT NULL DEFAULT 'DRAFT',
+  subtotal       DECIMAL(14,2) NOT NULL DEFAULT 0,
+  tax_amount     DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total          DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_amount   DECIMAL(14,2) NOT NULL DEFAULT 0,
+  expected_date  DATETIME      NULL,
+  received_date  DATETIME      NULL,
+  received_at    DATETIME      NULL,
+  sent_at        DATETIME      NULL,
+  cancelled_at   DATETIME      NULL,
+  notes          TEXT          NULL,
+  created_by     CHAR(36)      NULL,
+  approved_by    CHAR(36)      NULL,
+  created_at     DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at     DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at      DATETIME      NULL,
+  INDEX idx_purchase_orders_branch (branch_id),
+  INDEX idx_purchase_orders_supplier (supplier_id),
+  INDEX idx_purchase_orders_status (status),
+  INDEX idx_purchase_orders_updated (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS purchase_items (
+  id           CHAR(36)      NOT NULL PRIMARY KEY,
+  po_id        CHAR(36)      NULL,
+  product_id   CHAR(36)      NULL,
+  ordered_qty  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  received_qty DECIMAL(12,2) NOT NULL DEFAULT 0,
+  quantity     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  unit_cost    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  line_total   DECIMAL(14,2) NOT NULL DEFAULT 0,
+  notes        TEXT          NULL,
+  created_at   DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at   DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at    DATETIME      NULL,
+  INDEX idx_purchase_items_po (po_id),
+  INDEX idx_purchase_items_product (product_id),
+  INDEX idx_purchase_items_updated (updated_at)
 );
 
 CREATE TABLE IF NOT EXISTS customers (

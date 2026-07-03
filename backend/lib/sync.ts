@@ -4,6 +4,7 @@ import type { QueryClient } from './db'
 export const ALLOWED_TABLES = new Set([
   'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers',
   'products', 'stocks', 'stock_movements', 'stock_transfers', 'customers',
+  'purchase_orders', 'purchase_items',
   'invoices', 'invoice_items', 'payments', 'installments', 'installment_payments',
   'installment_plans', 'installment_schedule', 'installment_reminders',
   'deliveries', 'audit_logs', 'customer_orders', 'customer_order_items',
@@ -46,6 +47,9 @@ async function getColumns(client: QueryClient, table: string): Promise<Set<strin
 
 function normalizeValue(value: unknown): unknown {
   if (value === undefined) return null
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value)) {
+    return value.slice(0, 19).replace('T', ' ')
+  }
   return value
 }
 
@@ -66,6 +70,10 @@ export async function applySyncOperation(
       .filter(([key]) => columns.has(key))
       .map(([key, value]) => [key, normalizeValue(value)])
   )
+
+  if (input.table === 'users' && columns.has('password_hash') && !record.password_hash) {
+    record.password_hash = ''
+  }
 
   if (input.table === 'stocks' && !record.id) {
     // MySQL NULL-safe equals: <=>
