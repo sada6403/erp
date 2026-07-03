@@ -12,7 +12,4 @@ jobs:
     steps:
       - name: Deploy on VPS
         run: |
-          cd /var/www/pos-backend
-          git fetch origin main
-          git reset --hard origin/main
-          bash scripts/deploy-vps.sh
+          sudo /usr/local/bin/pos-deploy
