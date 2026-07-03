@@ -29,8 +29,13 @@ function CrossBranchModal({
   const [branches, setBranches]   = useState<BranchStock[]>([])
   const [loading, setLoading]     = useState(true)
   const [selected, setSelected]   = useState<string | null>(null)
+  const [qty, setQty]             = useState(1)
   const [requesting, setRequesting] = useState(false)
   const [done, setDone]           = useState(false)
+
+  const selectedBranch = branches.find(b => b.branch_id === selected)
+  const maxQty = Number(selectedBranch?.available_quantity || 1)
+  const requestQty = Math.max(1, Math.min(qty || 1, maxQty))
 
   useEffect(() => {
     window.api.stocks.availability(product.id)
@@ -53,7 +58,7 @@ function CrossBranchModal({
         product_id:     product.id,
         from_branch_id: selected,
         to_branch_id:   myBranchId,
-        quantity:       1,
+        quantity:       requestQty,
         notes:          `Requested from POS — ${product.name} out of stock`,
       })
       if (res.success) {
@@ -114,7 +119,10 @@ function CrossBranchModal({
               </p>
               {branches.map(b => (
                 <button key={b.branch_id}
-                  onClick={() => setSelected(s => s === b.branch_id ? null : b.branch_id)}
+                  onClick={() => {
+                    setSelected(s => s === b.branch_id ? null : b.branch_id)
+                    setQty(q => Math.max(1, Math.min(q || 1, b.available_quantity)))
+                  }}
                   className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all border ${
                     selected === b.branch_id
                       ? 'border-brand-500 bg-brand-500/10'
@@ -133,6 +141,22 @@ function CrossBranchModal({
                   )}
                 </button>
               ))}
+              {selectedBranch && (
+                <div className="rounded-xl border p-3 mt-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
+                  <label className="text-xs font-semibold" style={{ color: 'var(--text-2)' }}>Quantity to request</label>
+                  <input
+                    className="input mt-2 text-center text-lg font-bold"
+                    type="number"
+                    min={1}
+                    max={maxQty}
+                    value={qty}
+                    onChange={e => setQty(Number(e.target.value))}
+                  />
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                    Maximum available at {selectedBranch.branch_name}: {maxQty}
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

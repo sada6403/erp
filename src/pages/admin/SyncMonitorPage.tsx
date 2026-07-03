@@ -3,6 +3,7 @@ import PageHeader from '@/components/shared/PageHeader'
 import { useSyncStatus } from '@/hooks/useSyncStatus'
 import { RefreshCw, Wifi, WifiOff, CheckCircle2, AlertCircle, Clock, FlaskConical, Trash2, Activity } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/store/authStore'
 
 type QueueItem = {
   id: string
@@ -18,6 +19,10 @@ type DiagStep = { step: string; ok: boolean; detail: string }
 
 export default function SyncMonitorPage() {
   const { status, triggerSync } = useSyncStatus()
+  const { user } = useAuthStore()
+  const permissions = (user?.role?.permissions ||
+    (user as unknown as Record<string, unknown>)?.permissions) as Record<string, unknown> || {}
+  const canManageSync = Boolean(permissions.all)
   const [syncing, setSyncing] = useState(false)
   const [diagnosing, setDiagnosing] = useState(false)
   const [diagSteps, setDiagSteps] = useState<DiagStep[]>([])
@@ -76,24 +81,30 @@ export default function SyncMonitorPage() {
         subtitle="Offline-first queue, conflict, and cloud synchronization status"
         actions={
           <div className="flex gap-2">
-            {(status.failed > 0 || status.pending > 0) && (
+            {canManageSync && (status.failed > 0 || status.pending > 0) && (
               <button onClick={handleFixAndSync} disabled={syncing} className="btn-secondary btn-sm gap-1.5 text-yellow-400">
                 <AlertCircle size={14} /> Fix & Retry
               </button>
             )}
-            {status.failed > 0 && (
+            {canManageSync && status.failed > 0 && (
               <button onClick={handleResetFailed} className="btn-secondary btn-sm gap-1.5 text-slate-400">
                 <AlertCircle size={14} /> Reset Failed
               </button>
             )}
-            <button onClick={handleDiagnose} disabled={diagnosing} className="btn-secondary btn-sm gap-1.5">
-              <FlaskConical size={14} className={diagnosing ? 'animate-pulse' : ''} />
-              {diagnosing ? 'Diagnosing...' : 'Diagnose'}
-            </button>
-            <button onClick={handleSync} disabled={syncing} className="btn-primary btn-sm gap-1.5">
-              <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-              {syncing ? 'Syncing...' : 'Sync Now'}
-            </button>
+            {canManageSync ? (
+              <>
+                <button onClick={handleDiagnose} disabled={diagnosing} className="btn-secondary btn-sm gap-1.5">
+                  <FlaskConical size={14} className={diagnosing ? 'animate-pulse' : ''} />
+                  {diagnosing ? 'Diagnosing...' : 'Diagnose'}
+                </button>
+                <button onClick={handleSync} disabled={syncing} className="btn-primary btn-sm gap-1.5">
+                  <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
+                  {syncing ? 'Syncing...' : 'Sync Now'}
+                </button>
+              </>
+            ) : (
+              <span className="badge-blue">Auto sync enabled</span>
+            )}
           </div>
         }
       />
@@ -108,7 +119,7 @@ export default function SyncMonitorPage() {
           />
           <StatusCard icon={Clock} tone={status.pending > 0 ? 'yellow' : 'green'} value={status.pending} label="Pending sync items" />
           <StatusCard icon={status.failed > 0 ? AlertCircle : CheckCircle2} tone={status.failed > 0 ? 'red' : 'green'} value={status.failed} label="Failed sync items" />
-          <StatusCard icon={Activity} tone="blue" value={syncing ? 'Syncing' : 'Ready'} label="Manual and background sync" spinning={syncing} />
+          <StatusCard icon={Activity} tone="blue" value={syncing ? 'Syncing' : 'Ready'} label={canManageSync ? 'Manual and background sync' : 'Automatic background sync'} spinning={syncing} />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -181,17 +192,19 @@ export default function SyncMonitorPage() {
                       <td className="table-cell">{item.attempts}</td>
                       <td className="table-cell text-red-400 max-w-xs truncate" title={item.last_error || ''}>{item.last_error || '-'}</td>
                       <td className="table-cell text-right">
-                        <button
-                          onClick={async () => {
-                            await window.api.sync.discardItem(item.id)
-                            toast.success('Item discarded')
-                            await loadQueue()
-                          }}
-                          className="text-slate-500 hover:text-red-400 transition-colors"
-                          title="Discard this stuck item"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        {canManageSync && (
+                          <button
+                            onClick={async () => {
+                              await window.api.sync.discardItem(item.id)
+                              toast.success('Item discarded')
+                              await loadQueue()
+                            }}
+                            className="text-slate-500 hover:text-red-400 transition-colors"
+                            title="Discard this stuck item"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -212,7 +225,7 @@ export default function SyncMonitorPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm" style={{ color: 'var(--text-3)' }}>
             {[
               ['Local-First Operations', 'Every transaction is saved instantly to local SQLite for zero data loss during outages.'],
-              ['Background Sync Queue', 'Changes are queued automatically and sent to the cloud ERP when online.'],
+              ['Background Sync Queue', 'Changes are queued automatically and sent to the cloud ERP when online. Branch staff do not need a manual sync button.'],
               ['Conflict Handling', 'Failed syncs retry before being marked failed so staff can diagnose or retry manually.'],
             ].map(([title, detail], i) => (
               <div key={title} className="rounded-lg border p-4" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>

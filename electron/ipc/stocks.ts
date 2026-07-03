@@ -6,6 +6,7 @@ import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
 import fs from 'fs'
 import { insertStockMovement } from '../services/stockMovement'
+import { createNotification } from './notifications'
 
 const store = new Store()
 
@@ -160,6 +161,14 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         VALUES (@id,@transfer_number,@product_id,@from_branch_id,@to_branch_id,@from_warehouse_id,
          @to_warehouse_id,@quantity,@status,@notes,@initiated_by,@driver_name,@driver_phone,
          @vehicle_number,@expected_delivery_at)`).run(record)
+      const product = db.prepare('SELECT name FROM products WHERE id=?').get(payload.product_id) as { name?: string } | undefined
+      const fromBranch = db.prepare('SELECT name FROM branches WHERE id=?').get(payload.from_branch_id) as { name?: string } | undefined
+      createNotification(
+        'transfer_request',
+        'Stock request submitted',
+        `${Number(payload.quantity)} x ${product?.name || 'product'} requested from ${fromBranch?.name || 'source branch'}.`,
+        { event: 'request_submitted', transfer_id: id, transfer_number: transferNumber, from_branch_id: payload.from_branch_id, to_branch_id: payload.to_branch_id }
+      )
       await enqueuSync('stock_transfers', id, 'INSERT', record)
       return { success: true, data: { id, transfer_number: transferNumber } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
@@ -425,6 +434,16 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       }
+
+      const product = db.prepare('SELECT name FROM products WHERE id=?').get(transfer.product_id) as { name?: string } | undefined
+      const fromBranch = db.prepare('SELECT name FROM branches WHERE id=?').get(transfer.from_branch_id) as { name?: string } | undefined
+      const messageStatus = status.replace(/_/g, ' ')
+      createNotification(
+        'transfer_request',
+        `Stock request ${messageStatus}`,
+        `${fromBranch?.name || 'Source branch'} marked ${Number(transfer.quantity)} x ${product?.name || 'product'} as ${messageStatus}.`,
+        { event: `status_${status}`, transfer_id: id, transfer_number: transfer.transfer_number, status }
+      )
 
       return { success: true }
     } catch (err) { return { success: false, error: (err as Error).message } }

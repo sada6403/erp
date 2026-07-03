@@ -557,6 +557,10 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
       return
     }
     if (qty <= 0) { toast.error('Enter a valid quantity'); return }
+    if (available > 0 && qty > available) {
+      toast.error(`Only ${available} unit(s) available at the source branch`)
+      return
+    }
     setSaving(true)
     const res = await window.api.stocks.transfer({
       product_id: productId,
@@ -577,7 +581,7 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
       footer={
         <>
           <button onClick={onClose} className="btn-secondary">Cancel</button>
-          <button onClick={save} disabled={saving} className="btn-primary gap-1">
+          <button onClick={save} disabled={saving || (available > 0 && qty > available)} className="btn-primary gap-1">
             <ArrowRightLeft size={13} /> {saving ? 'Submitting…' : 'Submit Request'}
           </button>
         </>

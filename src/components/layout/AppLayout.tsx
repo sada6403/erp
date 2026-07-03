@@ -105,7 +105,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/branches', label: 'Branches', perm: 'branches' },
       { to: '/admin/audit-logs', label: 'Audit Logs', perm: 'branches' },
-      { to: '/admin/sync', label: 'Sync Monitor', perm: 'branches' },
+      { to: '/admin/sync', label: 'Sync Monitor', adminOnly: true },
     ]
   },
   {
@@ -418,10 +418,17 @@ export default function AppLayout() {
           {dark ? <Sun size={16} className="text-yellow-500" /> : <Moon size={16} />}
         </button>
 
-        <button onClick={triggerSync} className="relative p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors" title={`Sync - ${status.pending} pending`} style={{ color: 'var(--text-3)' }}>
-          {status.online ? <Wifi size={16} className="text-green-500" /> : <WifiOff size={16} className="text-red-400" />}
-          {status.failed > 0 && <AlertCircle size={12} className="absolute right-0 top-0 text-yellow-400" />}
-        </button>
+        {isAdmin ? (
+          <button onClick={triggerSync} className="relative p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors" title={`Sync - ${status.pending} pending`} style={{ color: 'var(--text-3)' }}>
+            {status.online ? <Wifi size={16} className="text-green-500" /> : <WifiOff size={16} className="text-red-400" />}
+            {status.failed > 0 && <AlertCircle size={12} className="absolute right-0 top-0 text-yellow-400" />}
+          </button>
+        ) : (
+          <span className="relative p-2 rounded-lg" title={`Auto sync - ${status.pending} pending`} style={{ color: 'var(--text-3)' }}>
+            {status.online ? <Wifi size={16} className="text-green-500" /> : <WifiOff size={16} className="text-red-400" />}
+            {status.pending > 0 && <span className="absolute right-0 top-0 h-2 w-2 rounded-full bg-yellow-400" />}
+          </span>
+        )}
 
         <NotificationPanel />
 

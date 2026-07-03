@@ -1,6 +1,9 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
+import Store from 'electron-store'
+
+const store = new Store()
 
 export type NotifType =
   | 'low_stock' | 'installment_due' | 'installment_overdue'
@@ -24,6 +27,26 @@ export function createNotification(type: NotifType, title: string, message: stri
       INSERT OR IGNORE INTO notifications (id, type, title, message, data, created_at)
       VALUES (?, ?, ?, ?, ?, datetime('now'))
     `).run(randomUUID(), type, title, message, data ? JSON.stringify(data) : null)
+  } catch { /* db not ready */ }
+}
+
+function createUniqueTransferNotification(
+  event: string,
+  transferId: string,
+  title: string,
+  message: string,
+  data: Record<string, unknown>
+) {
+  try {
+    const db = getDb()
+    const existing = db.prepare(`
+      SELECT id FROM notifications
+      WHERE type='transfer_request'
+        AND data LIKE ?
+        AND data LIKE ?
+      LIMIT 1
+    `).get(`%"transfer_id":"${transferId}"%`, `%"event":"${event}"%`)
+    if (!existing) createNotification('transfer_request', title, message, { ...data, event, transfer_id: transferId })
   } catch { /* db not ready */ }
 }
 
@@ -158,6 +181,58 @@ export function registerNotificationHandlers() {
           if (!recent) createNotification('low_stock', 'Expired Stock Alert', `${expiredBatches.cnt} batch${expiredBatches.cnt > 1 ? 'es' : ''} have expired but still have stock. Remove from sale immediately.`, { count: expiredBatches.cnt })
         }
       } catch { /* product_batches table may not exist on first run */ }
+
+      // Inter-branch transfer notifications. These are generated from synced
+      // stock_transfers so every branch sees the correct request/status after
+      // background sync pulls the row down.
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const branchId = String(user?.branch_id || (user?.branch as Record<string, unknown> | undefined)?.id || '')
+      if (branchId) {
+        const incoming = db.prepare(`
+          SELECT st.id, st.transfer_number, st.quantity, st.status,
+                 p.name AS product_name, fb.name AS from_branch_name, tb.name AS to_branch_name
+          FROM stock_transfers st
+          LEFT JOIN products p ON p.id = st.product_id
+          LEFT JOIN branches fb ON fb.id = st.from_branch_id
+          LEFT JOIN branches tb ON tb.id = st.to_branch_id
+          WHERE st.from_branch_id = ?
+            AND st.status = 'pending_approval'
+          ORDER BY st.initiated_at DESC
+          LIMIT 20
+        `).all(branchId) as Record<string, unknown>[]
+        for (const tf of incoming) {
+          createUniqueTransferNotification(
+            'incoming_request',
+            String(tf.id),
+            'New stock request',
+            `${tf.to_branch_name || 'A branch'} requested ${Number(tf.quantity)} x ${tf.product_name || 'product'}.`,
+            tf
+          )
+        }
+
+        const updates = db.prepare(`
+          SELECT st.id, st.transfer_number, st.quantity, st.status,
+                 p.name AS product_name, fb.name AS from_branch_name, tb.name AS to_branch_name
+          FROM stock_transfers st
+          LEFT JOIN products p ON p.id = st.product_id
+          LEFT JOIN branches fb ON fb.id = st.from_branch_id
+          LEFT JOIN branches tb ON tb.id = st.to_branch_id
+          WHERE st.to_branch_id = ?
+            AND st.status IN ('approved','rejected','dispatched','in_transit','received','partially_received','discrepancy','cancelled')
+          ORDER BY st.updated_at DESC
+          LIMIT 30
+        `).all(branchId) as Record<string, unknown>[]
+        for (const tf of updates) {
+          const status = String(tf.status).replace(/_/g, ' ')
+          createUniqueTransferNotification(
+            `status_${tf.status}`,
+            String(tf.id),
+            `Stock request ${status}`,
+            `${tf.from_branch_name || 'Source branch'} marked ${Number(tf.quantity)} x ${tf.product_name || 'product'} as ${status}.`,
+            tf
+          )
+        }
+      }
 
       return { success: true }
     } catch { return { success: false } }
