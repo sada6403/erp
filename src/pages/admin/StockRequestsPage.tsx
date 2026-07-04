@@ -566,10 +566,6 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
       return
     }
     if (qty <= 0) { toast.error('Enter a valid quantity'); return }
-    if (available > 0 && qty > available) {
-      toast.error(`Only ${available} unit(s) available at the source branch`)
-      return
-    }
     setSaving(true)
     const res = await window.api.stocks.transfer({
       product_id: productId,
@@ -590,7 +586,7 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
       footer={
         <>
           <button onClick={onClose} className="btn-secondary">Cancel</button>
-          <button onClick={save} disabled={saving || (available > 0 && qty > available)} className="btn-primary gap-1">
+          <button onClick={save} disabled={saving} className="btn-primary gap-1">
             <ArrowRightLeft size={13} /> {saving ? 'Submitting…' : 'Submit Request'}
           </button>
         </>
@@ -670,9 +666,11 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
         <div>
           <label className="label">Quantity to Request *</label>
           <input type="number" value={qty} onChange={e => setQty(Number(e.target.value))} className="input text-xl font-bold text-center"
-            min="1" max={available || 9999} />
+            min="1" />
           {available > 0 && qty > available && (
-            <p className="text-xs text-red-400 mt-1">Exceeds available stock ({available})</p>
+            <p className="text-xs text-yellow-500 mt-1">
+              Requested quantity is higher than current source stock ({available}). It can be submitted, but approval will need enough stock.
+            </p>
           )}
         </div>
         <div>
@@ -769,7 +767,7 @@ function TransferDetailModal({ tf, isAdmin, userBranchId, onClose, onAction }: {
           </div>
         )}
 
-        {(status === 'dispatched' || status === 'in_transit') && isToBranch && (
+        {(['approved', 'dispatched', 'in_transit'].includes(status)) && isToBranch && (
           <div className="rounded-xl p-4 border border-blue-500/30 bg-blue-500/5 space-y-3">
             <p className="font-semibold text-sm text-blue-400">Receive Stock</p>
             <div className="grid grid-cols-2 gap-2">

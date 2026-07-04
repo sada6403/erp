@@ -89,15 +89,15 @@ function ApproveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
   const submit = async () => {
     setLoading(true)
     const res = await window.api.stocks.updateTransfer(t.id, 'approved', {})
-    if (res.success) { toast.success('Transfer approved'); onDone() }
+    if (res.success) { toast.success('Transfer approved and stock moved'); onDone() }
     else toast.error(res.error || 'Failed')
     setLoading(false)
   }
   return (
-    <Modal title="Approve Transfer" onClose={onClose}
+    <Modal title="Approve & Move Stock" onClose={onClose}
       footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button>
         <button className="btn-primary flex items-center gap-1.5" onClick={submit} disabled={loading}>
-          <Check size={14} /> Approve
+          <Check size={14} /> Approve & Move
         </button></>}>
       <div className="p-4 rounded-lg" style={{ background: 'var(--bg-soft)' }}>
         <p className="font-semibold" style={{ color: 'var(--text-1)' }}>{t.product_name}</p>
@@ -281,7 +281,7 @@ function TransferCard({ t, userId, isAdmin, myBranchId, onRefresh }: {
   const canReject   = t.status === 'pending_approval' && (isAdmin || t.from_branch_id === myBranchId)
   const canDispatch = ['approved', 'ready_for_dispatch'].includes(t.status) &&
     (isAdmin || t.from_branch_id === myBranchId)
-  const canReceive  = ['dispatched', 'in_transit'].includes(t.status) &&
+  const canReceive  = ['approved', 'dispatched', 'in_transit'].includes(t.status) &&
     (isAdmin || t.to_branch_id === myBranchId)
   const isDone      = DONE.includes(t.status)
 

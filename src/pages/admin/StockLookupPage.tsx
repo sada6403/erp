@@ -47,8 +47,8 @@ export default function StockLookupPage() {
                   <p className="text-xs text-slate-500 mt-1">Estimated transfer: 1–3 business days</p></div>
                 <div className="text-right"><p className={`text-xl font-bold ${Number(a.available_quantity) ? 'text-green-400' : 'text-red-400'}`}>{Number(a.available_quantity)}</p>
                   <p className="text-xs text-slate-500">available</p>
-                  {Number(a.available_quantity) > 0 && <button className="btn-primary btn-sm mt-2" onClick={() => setTransferFrom(a)}>
-                    <ArrowRightLeft size={12} /> Request</button>}</div>
+                  <button className="btn-primary btn-sm mt-2" onClick={() => setTransferFrom(a)}>
+                    <ArrowRightLeft size={12} /> Request</button></div>
               </div>)}
             </div>
           </>}
@@ -112,9 +112,11 @@ function QuickTransfer({ product, source, onClose, onDone }: any) {
         <div>
           <label className="text-xs text-slate-400">Quantity</label>
           <input className="input mt-1" type="number" min={1}
-            max={Number(source.available_quantity)} value={qty}
+            value={qty}
             onChange={e => setQty(Number(e.target.value))} />
-          <p className="text-xs text-slate-500 mt-1">{source.available_quantity} available at {source.branch_name}</p>
+          <p className="text-xs text-slate-500 mt-1">
+            {source.available_quantity} available at {source.branch_name}. You can request any quantity; approval will validate stock.
+          </p>
         </div>
       </div>
     </Modal>
