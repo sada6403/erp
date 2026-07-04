@@ -29,9 +29,17 @@ function currentUser() {
   return store.get('auth_user') as Record<string, unknown> | undefined
 }
 
+function currentPermissions() {
+  const caller = currentUser()
+  const role = caller?.role as Record<string, unknown> | undefined
+  return ((role?.permissions as Record<string, unknown>) ||
+    (caller?.permissions as Record<string, unknown>) ||
+    {}) as Record<string, unknown>
+}
+
 function scopedInvoiceWhere(filters: ReportFilters = {}, alias = 'i') {
   const caller = currentUser()
-  const perms = (caller?.permissions as Record<string, unknown>) || {}
+  const perms = currentPermissions()
   const isGlobal = Boolean(perms.all || perms.reports)
   const callerBranchId = caller?.branch_id as string | undefined
   const conditions: string[] = []
@@ -51,6 +59,36 @@ function scopedInvoiceWhere(filters: ReportFilters = {}, alias = 'i') {
   if (filters.status)   { conditions.push(`${alias}.status = ?`); params.push(filters.status) }
   if (filters.billType) { conditions.push(`COALESCE(${alias}.bill_type,'RETAIL') = ?`); params.push(filters.billType) }
   if (filters.agentCode){ conditions.push(`(${alias}.agent_code = ? OR ${alias}.agent_name LIKE ?)`); params.push(filters.agentCode, `%${filters.agentCode}%`) }
+  if (filters.paymentMethod) {
+    conditions.push(`EXISTS (SELECT 1 FROM payments p_filter WHERE p_filter.invoice_id = ${alias}.id AND UPPER(p_filter.method) = UPPER(?))`)
+    params.push(filters.paymentMethod)
+  }
+
+  return {
+    where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
+    conditions,
+    params,
+  }
+}
+
+function pickScopedConditions(
+  scope: ReturnType<typeof scopedInvoiceWhere>,
+  predicate: (condition: string) => boolean,
+  mapCondition: (condition: string) => string = condition => condition,
+) {
+  const conditions: string[] = []
+  const params: unknown[] = []
+  let paramIndex = 0
+
+  for (const condition of scope.conditions) {
+    const paramCount = condition.split('?').length - 1
+    const conditionParams = scope.params.slice(paramIndex, paramIndex + paramCount)
+    if (predicate(condition)) {
+      conditions.push(mapCondition(condition))
+      params.push(...conditionParams)
+    }
+    paramIndex += paramCount
+  }
 
   return {
     where: conditions.length ? `WHERE ${conditions.join(' AND ')}` : '',
@@ -97,29 +135,9 @@ export function registerReportHandlers() {
   ipcMain.handle('reports:transactions', (_e, filters: TxFilters = {}) => {
     try {
       const db = getDb()
-      const caller = currentUser()
-      const perms = (caller?.permissions as Record<string, unknown>) || {}
-      const isGlobal = Boolean(perms.all || perms.reports)
-      const callerBranchId = caller?.branch_id as string | undefined
-
-      const conditions: string[] = []
-      const params: unknown[] = []
-
-      // Branch scoping
-      if (!isGlobal && callerBranchId) {
-        conditions.push('i.branch_id = ?')
-        params.push(callerBranchId)
-      } else if (filters.branchId) {
-        conditions.push('i.branch_id = ?')
-        params.push(filters.branchId)
-      }
-
-      if (filters.dateFrom) { conditions.push(`date(i.created_at) >= date(?)`); params.push(filters.dateFrom) }
-      if (filters.dateTo)   { conditions.push(`date(i.created_at) <= date(?)`); params.push(filters.dateTo) }
-      if (filters.cashierId){ conditions.push('i.cashier_id = ?'); params.push(filters.cashierId) }
-      if (filters.status)   { conditions.push('i.status = ?'); params.push(filters.status) }
-      if (filters.billType) { conditions.push('COALESCE(i.bill_type,\'RETAIL\') = ?'); params.push(filters.billType) }
-      if (filters.agentCode){ conditions.push('(i.agent_code = ? OR i.agent_name LIKE ?)'); params.push(filters.agentCode, `%${filters.agentCode}%`) }
+      const scope = scopedInvoiceWhere(filters)
+      const conditions = [...scope.conditions]
+      const params = [...scope.params]
       if (filters.search) {
         conditions.push('(i.invoice_number LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR i.agent_code LIKE ? OR i.agent_name LIKE ?)')
         params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`)
@@ -198,6 +216,17 @@ export function registerReportHandlers() {
           : filters.groupBy === 'weekly'
             ? "strftime('%Y-W%W', i.created_at)"
             : "date(i.created_at)"
+      const branchDateScope = pickScopedConditions(scope, c => c.includes('branch_id') || c.includes('created_at'))
+      const expenseScope = pickScopedConditions(
+        scope,
+        c => c.includes('branch_id') || c.includes('created_at'),
+        c => c.replace(/i\./g, 'e.'),
+      )
+      const installmentScope = pickScopedConditions(
+        scope,
+        c => c.includes('branch_id') || c.includes('created_at'),
+        c => c.replace(/i\./g, 'ins.'),
+      )
 
       const summary = safeGet(db, `
         SELECT
@@ -228,12 +257,8 @@ export function registerReportHandlers() {
         ? safeGet(db, `
             SELECT COALESCE(SUM(amount), 0) as expense_total, COALESCE(SUM(paid_amount), 0) as expense_paid
             FROM expenses e
-            ${scope.conditions.length
-              ? `WHERE ${scope.conditions
-                  .filter(c => !c.includes('cashier_id') && !c.includes('bill_type') && !c.includes('agent_') && !c.includes('status'))
-                  .map(c => c.replace(/i\./g, 'e.')).join(' AND ')}`
-              : ''}
-          `, params.slice(0, scope.conditions.filter(c => !c.includes('cashier_id') && !c.includes('bill_type') && !c.includes('agent_') && !c.includes('status')).length), { expense_total: 0, expense_paid: 0 })
+            ${expenseScope.where}
+          `, expenseScope.params, { expense_total: 0, expense_paid: 0 })
         : { expense_total: 0, expense_paid: 0 }
 
       const profit = Number((summary as Record<string, number>).sales_total || 0)
@@ -369,18 +394,10 @@ export function registerReportHandlers() {
           COALESCE(SUM(e.paid_amount), 0) as paid_total
         FROM expenses e
         LEFT JOIN expense_categories ec ON ec.id = e.category_id
-        ${filters.dateFrom || filters.dateTo
-          ? `WHERE ${[
-              ...(filters.dateFrom ? ['date(e.created_at) >= date(?)'] : []),
-              ...(filters.dateTo ? ['date(e.created_at) <= date(?)'] : []),
-            ].join(' AND ')}`
-          : ''}
+        ${expenseScope.where}
         GROUP BY e.category_id
         ORDER BY amount_total DESC
-      `, [
-        ...(filters.dateFrom ? [filters.dateFrom] : []),
-        ...(filters.dateTo ? [filters.dateTo] : []),
-      ]) : []
+      `, expenseScope.params) : []
 
       const installmentSummary = safeGet(db, `
         SELECT COUNT(i.id) as contract_count,
@@ -391,12 +408,8 @@ export function registerReportHandlers() {
           COALESCE(SUM(i.due_amount), 0) as balance_total,
           COALESCE(SUM(CASE WHEN i.status='overdue' OR date(i.next_due_date) < date('now') THEN 1 ELSE 0 END), 0) as overdue_count
         FROM installments i
-        ${scope.conditions.length
-          ? `WHERE ${scope.conditions
-              .filter(c => c.includes('branch_id') || c.includes('created_at'))
-              .map(c => c.replace(/i\./g, 'i.')).join(' AND ')}`
-          : ''}
-      `, params.slice(0, scope.conditions.filter(c => c.includes('branch_id') || c.includes('created_at')).length), {
+        ${branchDateScope.where}
+      `, branchDateScope.params, {
         contract_count: 0, installment_sales_total: 0, down_payment_total: 0,
         interest_total: 0, paid_total: 0, balance_total: 0, overdue_count: 0,
       })
@@ -414,15 +427,11 @@ export function registerReportHandlers() {
         LEFT JOIN customers c ON c.id = ins.customer_id
         LEFT JOIN invoices inv ON inv.id = ins.invoice_id
         LEFT JOIN installment_payments ip ON ip.installment_id = ins.id AND ip.status='approved'
-        ${scope.conditions.length
-          ? `WHERE ${scope.conditions
-              .filter(c => c.includes('branch_id') || c.includes('created_at'))
-              .map(c => c.replace(/i\./g, 'ins.')).join(' AND ')}`
-          : ''}
+        ${installmentScope.where}
         GROUP BY ins.id
         ORDER BY date(ins.next_due_date) ASC
         LIMIT 500
-      `, params.slice(0, scope.conditions.filter(c => c.includes('branch_id') || c.includes('created_at')).length))
+      `, installmentScope.params)
 
       const paidInstallmentHistory = safeAll(db, `
         SELECT ip.receipt_number, ip.paid_at, ip.amount, ip.method, ip.reference, ip.receipt_image_url,
@@ -476,25 +485,9 @@ export function registerReportHandlers() {
   ipcMain.handle('reports:agentCommissions', (_e, filters: TxFilters = {}) => {
     try {
       const db = getDb()
-      const caller = store.get('auth_user') as Record<string, unknown> | undefined
-      const perms = (caller?.permissions as Record<string, unknown>) || {}
-      const isGlobal = Boolean(perms.all || perms.reports)
-      const callerBranchId = caller?.branch_id as string | undefined
-
-      const conditions = ["COALESCE(i.agent_code, '') <> ''"]
-      const params: unknown[] = []
-      if (!isGlobal && callerBranchId) {
-        conditions.push('i.branch_id = ?')
-        params.push(callerBranchId)
-      } else if (filters.branchId) {
-        conditions.push('i.branch_id = ?')
-        params.push(filters.branchId)
-      }
-      if (filters.dateFrom) { conditions.push(`date(i.created_at) >= date(?)`); params.push(filters.dateFrom) }
-      if (filters.dateTo)   { conditions.push(`date(i.created_at) <= date(?)`); params.push(filters.dateTo) }
-      if (filters.status)   { conditions.push('i.status = ?'); params.push(filters.status) }
-      if (filters.billType) { conditions.push('COALESCE(i.bill_type,\'RETAIL\') = ?'); params.push(filters.billType) }
-      if (filters.agentCode){ conditions.push('(i.agent_code = ? OR i.agent_name LIKE ?)'); params.push(filters.agentCode, `%${filters.agentCode}%`) }
+      const scope = scopedInvoiceWhere(filters)
+      const conditions = ["COALESCE(i.agent_code, '') <> ''", ...scope.conditions]
+      const params: unknown[] = [...scope.params]
 
       const where = `WHERE ${conditions.join(' AND ')}`
       const rows = db.prepare(`
@@ -536,6 +529,10 @@ export function registerReportHandlers() {
   ipcMain.handle('reports:transactionDetail', (_e, invoiceId: string) => {
     try {
       const db = getDb()
+      const caller = currentUser()
+      const perms = currentPermissions()
+      const isGlobal = Boolean(perms.all || perms.reports)
+      const callerBranchId = caller?.branch_id as string | undefined
       const invoice = db.prepare(`
         SELECT i.*, b.name as branch_name, c.name as customer_name, c.phone as customer_phone,
                u.name as cashier_name
@@ -546,6 +543,9 @@ export function registerReportHandlers() {
         WHERE i.id = ?
       `).get(invoiceId) as Record<string, unknown> | undefined
       if (!invoice) return { success: false, error: 'Invoice not found' }
+      if (!isGlobal && callerBranchId && invoice.branch_id !== callerBranchId) {
+        return { success: false, error: 'Invoice not found' }
+      }
 
       const items = db.prepare(`
         SELECT ii.*, p.name as product_name, p.sku, p.barcode, p.unit
@@ -577,14 +577,13 @@ export function registerReportHandlers() {
       if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true }
 
       const db = getDb()
-      const conditions: string[] = []
-      const params: unknown[] = []
-      if (filters.dateFrom) { conditions.push(`date(i.created_at) >= date(?)`); params.push(filters.dateFrom) }
-      if (filters.dateTo)   { conditions.push(`date(i.created_at) <= date(?)`); params.push(filters.dateTo) }
-      if (filters.branchId) { conditions.push('i.branch_id = ?'); params.push(filters.branchId) }
-      if (filters.cashierId){ conditions.push('i.cashier_id = ?'); params.push(filters.cashierId) }
-      if (filters.status)   { conditions.push('i.status = ?'); params.push(filters.status) }
-      if (filters.search)   { conditions.push('i.invoice_number LIKE ?'); params.push(`%${filters.search}%`) }
+      const scope = scopedInvoiceWhere(filters)
+      const conditions = [...scope.conditions]
+      const params = [...scope.params]
+      if (filters.search) {
+        conditions.push('(i.invoice_number LIKE ? OR c.name LIKE ? OR c.phone LIKE ? OR i.agent_code LIKE ? OR i.agent_name LIKE ?)')
+        params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`)
+      }
 
       const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
       const rows = db.prepare(`

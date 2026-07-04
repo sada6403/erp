@@ -193,8 +193,9 @@ function SidebarGroup({
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 hover:bg-[var(--bg-soft)]"
         style={{
-          color: open || groupActive ? 'var(--brand-primary)' : 'var(--text-2)',
-          background: groupActive ? 'color-mix(in srgb, var(--brand-primary) 8%, transparent)' : undefined,
+          color: groupActive ? 'var(--text-1)' : open ? 'var(--brand-primary)' : 'var(--text-2)',
+          background: groupActive ? 'color-mix(in srgb, var(--brand-primary) 6%, transparent)' : undefined,
+          boxShadow: groupActive ? 'inset 3px 0 0 var(--brand-primary)' : undefined,
         }}
       >
         <Icon size={15} className="flex-shrink-0" />
@@ -213,12 +214,12 @@ function SidebarGroup({
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `block px-2 py-1.5 rounded-md text-xs transition-colors duration-100 truncate font-medium ${
-                  isActive ? '' : 'hover:bg-[var(--bg-soft)]'
+                `block px-2.5 py-1.5 rounded-md text-xs transition-colors duration-100 truncate font-semibold ${
+                  isActive ? 'shadow-sm' : 'hover:bg-[var(--bg-soft)]'
                 }`
               }
               style={({ isActive }) => isActive
-                ? { color: 'var(--brand-primary)', background: 'color-mix(in srgb, var(--brand-primary) 12%, transparent)' }
+                ? { color: '#ffffff', background: 'var(--brand-primary)' }
                 : { color: 'var(--text-3)' }
               }
             >

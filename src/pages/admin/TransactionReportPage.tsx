@@ -211,6 +211,12 @@ export default function TransactionReportPage() {
       search: filters.search || undefined,
       dateFrom: filters.dateFrom || undefined,
       dateTo: filters.dateTo || undefined,
+      branchId: filters.branchId || undefined,
+      cashierId: filters.cashierId || undefined,
+      paymentMethod: filters.paymentMethod || undefined,
+      status: filters.status || undefined,
+      billType: filters.billType || undefined,
+      agentCode: filters.agentCode || undefined,
       limit: 50000,
       offset: 0,
     })
