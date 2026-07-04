@@ -6,12 +6,13 @@ import { app } from 'electron'
 import { CloudApi, CloudRateLimitError } from './cloudApi'
 
 const store = new Store()
-const BATCH_SIZE = 5
+const BATCH_SIZE = 10
 const MAX_ATTEMPTS = 5
-const REQUEST_DELAY_MS = 1_000
+const REQUEST_DELAY_MS = 300
 const STALE_PROCESSING_MINUTES = 3
-const SYNC_INTERVAL_MS = 30_000
-const DRAIN_RETRY_MS = 5_000
+const SYNC_INTERVAL_MS = 15_000
+const DRAIN_RETRY_MS = 1_500
+const DEFAULT_FAILED_RETRY_MINUTES = 2
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
@@ -23,6 +24,7 @@ export class SyncService {
   private running = false
   private colCache = new Map<string, Set<string>>()
   private backoffUntil = 0
+  private lastFailedRetryAt = 0
 
   start() {
     if (this.timer) return
@@ -56,6 +58,7 @@ export class SyncService {
       if (!await this.checkOnline(cloud)) return
 
       this.resetStaleProcessing()
+      this.resetFailedForAutoRetry()
       await this.processBatch(cloud)
       if (this.hasPendingPushes()) return
       await this.pullChanges(cloud)
@@ -115,6 +118,30 @@ export class SyncService {
       WHERE status='processing'
         AND datetime(created_at) <= datetime('now', ?)
     `).run(`-${STALE_PROCESSING_MINUTES} minutes`)
+  }
+
+  private resetFailedForAutoRetry(): void {
+    const settings = store.get('app_settings') as Record<string, unknown> | undefined
+    const retryMinutes = Math.max(
+      1,
+      Number(settings?.failed_sync_retry_minutes || DEFAULT_FAILED_RETRY_MINUTES)
+    )
+    const now = Date.now()
+    if (now - this.lastFailedRetryAt < retryMinutes * 60_000) return
+
+    const db = getDb()
+    const result = db.prepare(`
+      UPDATE sync_queue
+      SET status='pending',
+          attempts=0,
+          last_error='Automatic retry scheduled'
+      WHERE status='failed'
+    `).run()
+
+    if (result.changes > 0) {
+      this.lastFailedRetryAt = now
+      console.info(`[SyncService] Auto-retrying ${result.changes} failed sync item(s)`)
+    }
   }
 
   private hasPendingPushes(): boolean {

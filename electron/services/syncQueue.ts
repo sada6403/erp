@@ -1,6 +1,12 @@
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
 
+function wakeSyncService(): void {
+  import('./syncService')
+    .then(({ getSyncService }) => getSyncService().runSoon())
+    .catch(() => undefined)
+}
+
 export async function enqueuSync(
   table: string,
   recordId: string,
@@ -26,6 +32,7 @@ export async function enqueuSync(
             last_error = NULL
         WHERE id = ?
       `).run(operation, JSON.stringify(payload), existing.id)
+      wakeSyncService()
       return
     }
 
@@ -33,6 +40,7 @@ export async function enqueuSync(
       INSERT INTO sync_queue (id, table_name, record_id, operation, payload)
       VALUES (?, ?, ?, ?, ?)
     `).run(randomUUID(), table, recordId, operation, JSON.stringify(payload))
+    wakeSyncService()
   } catch {
     // Non-blocking: sync queue failure shouldn't interrupt main flow
   }
