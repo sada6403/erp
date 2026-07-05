@@ -178,6 +178,12 @@ async function bootstrap() {
 
     // Check after 8s so the app fully loads first
     setTimeout(() => { autoUpdater.checkForUpdates().catch(() => {}) }, 8000)
+  } else {
+    // Dev: register no-op update handlers so the renderer's updater.check()/download()/install()
+    // calls don't spam "No handler registered for 'update:check'" errors.
+    ipcMain.handle('update:check',    () => ({ updateInfo: null }))
+    ipcMain.handle('update:download', () => ({ ok: false }))
+    ipcMain.handle('update:install',  () => ({ ok: false }))
   }
 
   // Start background sync service

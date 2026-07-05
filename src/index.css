@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -410,3 +411,134 @@ html:not(.dark) .border-slate-800 { border-color: var(--border)  !important; }
 
 html:not(.dark) .border-white\/10,
 html:not(.dark) .border-white\/20 { border-color: var(--border) !important; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   CASHIER THEME — a unique register look scoped to the POS screen via the
+   `pos-cashier` class on the POS shell. Indigo→violet identity that follows the
+   app's dark/light toggle: soft-lavender LIGHT palette by default, deep
+   indigo-violet DARK palette under `html.dark`, so the whole POS switches
+   consistently with the rest of the app.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.pos-cashier {
+  font-family: 'Poppins', 'Segoe UI', 'Inter', system-ui, sans-serif;
+
+  /* ── LIGHT palette ── */
+  --text-1: #1b2242;
+  --text-2: #49527a;
+  --text-3: #8b93b6;
+  --border: #e6e8f6;
+  --border-2: #d5d9ef;
+  --bg-page: #eef0fb;
+  --bg-card: #ffffff;
+  --bg-soft: #f2f4fd;
+  --bg-elevated: #ffffff;
+  --ring: rgba(99,102,241,0.30);
+  --shadow: 0 1px 2px rgba(70,80,150,0.08);
+  --shadow-lg: 0 20px 45px rgba(60,70,140,0.14);
+
+  --pos-bg: #eef0fb;
+  --pos-toolbar: #ffffff;
+  --pos-panel: #ffffff;
+  --pos-panel-solid: #ffffff;
+  --pos-panel-soft: #f6f7fe;
+  --pos-hover: #eaedfd;
+  --pos-card: #ffffff;
+  --pos-card-hover: #f8f9ff;
+  --pos-card-border: #e6e8f6;
+  --pos-card-selected: rgba(99,102,241,0.10);
+  --pos-card-selected-border: #6366f1;
+  --pos-media: #eef1fb;
+  --pos-shadow: 0 6px 18px rgba(80,90,170,0.10);
+}
+
+/* ── DARK palette (unique indigo-violet dark; wins over the light vars above) ── */
+html.dark .pos-cashier {
+  --text-1: #eef0ff;
+  --text-2: #b9bee6;
+  --text-3: #838abb;
+  --border: rgba(139,146,220,0.16);
+  --border-2: rgba(139,146,220,0.26);
+  --bg-page: #16172c;
+  --bg-card: #20223f;
+  --bg-soft: #262a4a;
+  --bg-elevated: #20223f;
+  --ring: rgba(139,92,246,0.35);
+  --shadow: 0 1px 2px rgba(0,0,0,0.40);
+  --shadow-lg: 0 20px 50px rgba(0,0,0,0.50);
+
+  --pos-bg: #16172c;
+  --pos-toolbar: #1b1d38;
+  --pos-panel: #20223f;
+  --pos-panel-solid: #1b1d38;
+  --pos-panel-soft: #20223f;
+  --pos-hover: #2a2d52;
+  --pos-card: #23264a;
+  --pos-card-hover: #2a2e57;
+  --pos-card-border: rgba(139,146,220,0.16);
+  --pos-card-selected: rgba(139,92,246,0.22);
+  --pos-card-selected-border: #8b5cf6;
+  --pos-media: #1b1d38;
+  --pos-shadow: 0 10px 26px rgba(0,0,0,0.40);
+}
+
+/* Ambient tinted background — light + dark variants (specificity beats .pos-shell) */
+.pos-cashier.pos-shell {
+  background:
+    radial-gradient(1200px 480px at 12% -8%, rgba(99,102,241,0.10), transparent 60%),
+    radial-gradient(900px 420px at 108% 4%, rgba(139,92,246,0.10), transparent 58%),
+    linear-gradient(180deg, #f4f5fc 0%, #eceffb 100%);
+}
+html.dark .pos-cashier.pos-shell {
+  background:
+    radial-gradient(1200px 480px at 12% -8%, rgba(99,102,241,0.20), transparent 60%),
+    radial-gradient(900px 420px at 108% 4%, rgba(139,92,246,0.18), transparent 58%),
+    linear-gradient(180deg, #191a38 0%, #121227 100%);
+}
+
+/* Solid, softly-shadowed header like a real register (light + dark) */
+.pos-cashier .pos-toolbar {
+  background: #ffffff;
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 2px 10px rgba(70,80,150,0.05);
+  backdrop-filter: none;
+}
+html.dark .pos-cashier .pos-toolbar {
+  background: #1b1d38;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.28);
+}
+
+/* Premium indigo→violet gradient on primary accents (bill type, category, pay) */
+.pos-cashier .bg-blue-600 {
+  background-image: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%) !important;
+  border-color: transparent !important;
+  box-shadow: 0 4px 12px rgba(99,102,241,0.32);
+}
+.pos-cashier .btn-primary:hover,
+.pos-cashier .hover\:bg-blue-700:hover {
+  background-image: linear-gradient(135deg, #5457ec 0%, #7c4ef4 100%) !important;
+}
+
+/* Rounder product tiles with a soft lift on hover */
+.pos-cashier .pos-product-card { border-radius: 14px; }
+.pos-cashier .pos-product-card:hover { box-shadow: 0 10px 24px rgba(90,100,180,0.16); }
+html.dark .pos-cashier .pos-product-card:hover { box-shadow: 0 12px 28px rgba(0,0,0,0.45); }
+
+/* Softer, rounder inputs & chips */
+.pos-cashier .input { border-radius: 12px; }
+.pos-cashier .pos-chip,
+.pos-cashier .pos-segment { border-radius: 12px; }
+
+/* Cart panel with a faint accent divider */
+.pos-cashier .pos-cart-pane {
+  box-shadow: -1px 0 0 var(--border), -14px 0 30px rgba(80,90,170,0.05);
+}
+.pos-cashier .kbd {
+  background: #f1f3fd;
+  border-color: #dfe3f5;
+  color: #6b73a0;
+}
+html.dark .pos-cashier .kbd {
+  background: rgba(139,146,220,0.12);
+  border-color: rgba(139,146,220,0.20);
+  color: #a6acd8;
+}

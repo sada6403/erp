@@ -12,6 +12,7 @@ import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
 import NotificationPanel from './NotificationPanel'
 import { setSystemTheme } from '@/lib/systemTheme'
+import ThemeToggle from '@/components/shared/ThemeToggle'
 
 function useTheme() {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
@@ -268,7 +269,6 @@ export default function AppLayout() {
   const [isLocked, setIsLocked] = useState(false)
   const [lockReason, setLockReason] = useState<'suspended' | 'cancelled' | null>(null)
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null)
-  const { dark, toggle: toggleTheme } = useTheme()
 
   const permissions = (user?.role?.permissions ||
     (user as unknown as Record<string, unknown>)?.permissions) as Record<string, unknown> || {}
@@ -415,9 +415,7 @@ export default function AppLayout() {
           POS
         </NavLink>
 
-        <button onClick={toggleTheme} className="p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors" style={{ color: 'var(--text-3)' }} title="Toggle theme">
-          {dark ? <Sun size={16} className="text-yellow-500" /> : <Moon size={16} />}
-        </button>
+        <ThemeToggle />
 
         {isAdmin ? (
           <button onClick={triggerSync} className="relative p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors" title={`Sync - ${status.pending} pending`} style={{ color: 'var(--text-3)' }}>

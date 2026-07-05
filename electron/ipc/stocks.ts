@@ -297,11 +297,14 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!transfer) throw new Error('Transfer not found')
 
+      // Physical transfer flow: goods leave source on APPROVE (deducted, now in
+      // transit), and only reach destination on RECEIVE. So 'received' is NOT
+      // allowed straight from pending (source hasn't been deducted yet).
       const transitions: Record<string, string[]> = {
-        pending:            ['approved', 'rejected', 'cancelled', 'received'],
-        pending_approval:   ['approved', 'rejected', 'cancelled', 'received'],
-        approved:           ['ready_for_dispatch', 'dispatched', 'cancelled', 'received'],
-        ready_for_dispatch: ['dispatched', 'cancelled'],
+        pending:            ['approved', 'rejected', 'cancelled'],
+        pending_approval:   ['approved', 'rejected', 'cancelled'],
+        approved:           ['ready_for_dispatch', 'dispatched', 'received', 'partially_received', 'cancelled'],
+        ready_for_dispatch: ['dispatched', 'received', 'partially_received', 'cancelled'],
         dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy'],
         in_transit:         ['received', 'partially_received', 'discrepancy'],
       }
@@ -336,129 +339,142 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       }
 
       const now = new Date().toISOString()
-      const completesOnApproval = status === 'approved'
-      const effectiveStatus = completesOnApproval ? 'received' : status
-      const patch: Record<string, unknown> = { status: effectiveStatus }
+      const patch: Record<string, unknown> = { status }
       const movementRecords: Record<string, unknown>[] = []
+      const qty = Number(transfer.quantity)
+
+      // Has the source branch already been deducted? (goods left source on approve)
+      const sourceDeducted = ['approved', 'ready_for_dispatch', 'dispatched', 'in_transit'].includes(String(transfer.status))
 
       if (status === 'approved') {
-        patch.approved_by          = user?.id || null
-        patch.received_by          = user?.id || null
-        patch.received_quantity    = Number(transfer.quantity)
-        patch.missing_quantity     = 0
-        patch.damaged_quantity     = 0
-        patch.actual_delivery_at   = now
+        patch.approved_by = user?.id || null
       }
       if (status === 'rejected') {
-        patch.rejected_by      = user?.id || null
-        patch.reject_reason    = payload.reject_reason
+        patch.rejected_by   = user?.id || null
+        patch.reject_reason = payload.reject_reason
       }
       if (status === 'ready_for_dispatch') {
         patch.released_by = user?.id || null
       }
-      if (status === 'dispatched') {
-        patch.dispatch_at  = now
-        if (payload.driver_name)    patch.driver_name    = payload.driver_name
-        if (payload.driver_phone)   patch.driver_phone   = payload.driver_phone
-        if (payload.vehicle_number) patch.vehicle_number = payload.vehicle_number
+      if (status === 'dispatched' || status === 'in_transit') {
+        patch.dispatch_at = transfer.dispatch_at || now
+        if (payload.driver_name)          patch.driver_name          = payload.driver_name
+        if (payload.driver_phone)         patch.driver_phone         = payload.driver_phone
+        if (payload.vehicle_number)       patch.vehicle_number       = payload.vehicle_number
+        if (payload.expected_delivery_at) patch.expected_delivery_at = payload.expected_delivery_at
       }
       if (status === 'received' || status === 'partially_received') {
-        const received = status === 'received'
-          ? Number(transfer.quantity)
-          : Number(payload.received_quantity || 0)
-        const damaged = Number(payload.damaged_quantity || 0)
-        if (received < 0 || damaged < 0 || received + damaged > Number(transfer.quantity)) {
+        const received = status === 'received' ? qty : Number(payload.received_quantity || 0)
+        const damaged  = Number(payload.damaged_quantity || 0)
+        if (received < 0 || damaged < 0 || received + damaged > qty) {
           throw new Error('Received and damaged quantities exceed the dispatched quantity')
         }
-        patch.received_quantity    = received
-        patch.missing_quantity     = Number(transfer.quantity) - received - damaged
-        patch.actual_delivery_at   = now
-        patch.received_by          = user?.id || null
-        patch.approved_by          = patch.approved_by ?? user?.id ?? null
-        if (payload.damaged_quantity !== undefined) patch.damaged_quantity = damaged
+        patch.received_quantity  = received
+        patch.damaged_quantity   = damaged
+        patch.missing_quantity   = qty - received - damaged
+        patch.actual_delivery_at = now
+        patch.received_by        = user?.id || null
       }
       if (status === 'discrepancy') {
         patch.discrepancy_note = payload.discrepancy_note
         patch.discrepancy_by   = user?.id || null
         if (payload.received_quantity !== undefined) {
-          patch.received_quantity  = Number(payload.received_quantity)
-          patch.missing_quantity   = Number(transfer.quantity) - Number(payload.received_quantity)
+          const received = Number(payload.received_quantity)
+          const damaged  = Number(payload.damaged_quantity || 0)
+          patch.received_quantity  = received
+          patch.damaged_quantity   = damaged
+          patch.missing_quantity   = qty - received - damaged
           patch.actual_delivery_at = now
           patch.received_by        = user?.id || null
         }
       }
 
+      // Does this step credit the destination branch? (goods arrive)
+      const creditsDestination = status === 'received' || status === 'partially_received' ||
+        (status === 'discrepancy' && patch.received_quantity !== undefined)
+
       db.transaction(() => {
-        // Approval/confirmation: deduct source and credit destination in one transaction.
-        const isDirectAccept = (
-          completesOnApproval ||
-          status === 'received' ||
-          status === 'partially_received' ||
-          (status === 'discrepancy' && patch.received_quantity !== undefined)
-        ) && !db.prepare(`
-          SELECT id FROM stock_movements
-          WHERE reference_transfer_id=? AND movement_type='TRANSFER'
-          LIMIT 1
-        `).get(id)
-        if (isDirectAccept) {
-          const qty = Number(transfer.quantity)
-          const changed = db.prepare(`
-            UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
+        // 1. APPROVE → goods leave source: deduct source stock, mark in-transit.
+        if (status === 'approved') {
+          const changed = db.prepare(`UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
             WHERE product_id=? AND branch_id=? AND quantity>=?`)
             .run(qty, transfer.product_id, transfer.from_branch_id, qty)
-          if (!changed.changes) throw new Error('Insufficient source stock at confirmation time')
+          if (!changed.changes) throw new Error('Insufficient source stock at approval time')
           movementRecords.push(insertStockMovement(db, {
             product_id: String(transfer.product_id),
             from_branch_id: String(transfer.from_branch_id),
             to_branch_id: String(transfer.to_branch_id),
-            quantity: qty,
-            movement_type: 'TRANSFER',
-            reference_transfer_id: id,
-            notes: `Transfer confirmed - source deducted: ${transfer.transfer_number || id}`,
+            quantity: qty, movement_type: 'TRANSFER', reference_transfer_id: id,
+            notes: `Approved - dispatched from source (in transit): ${transfer.transfer_number || id}`,
             created_by: (user?.id as string) || null,
           }))
         }
 
-        // Restore source stock if rejected after dispatching (defensive: shouldn't happen with transitions, but safe)
-        // Note: rejections happen before dispatch, so no stock restore needed here
-
-        // Credit destination stock when received or discrepancy (with actual count)
-        if (completesOnApproval || status === 'received' || status === 'partially_received' ||
-            (status === 'discrepancy' && patch.received_quantity !== undefined)) {
-          const received = Number(patch.received_quantity ?? transfer.quantity)
+        // 2. RECEIVE / partial / discrepancy → goods arrive: credit destination
+        //    with the actually-received qty (missing goods stay lost in transit).
+        if (creditsDestination) {
+          const received = Number(patch.received_quantity ?? qty)
           const damaged  = Number(patch.damaged_quantity || 0)
-          const dest = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
-            .get(transfer.product_id, transfer.to_branch_id) as { id: string } | undefined
-          if (dest) {
-            db.prepare(`UPDATE stocks SET quantity=quantity+?, damaged_qty=damaged_qty+?,
-              updated_at=datetime('now') WHERE id=?`).run(received, damaged, dest.id)
-          } else {
-            db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty)
-              VALUES (?,?,?,?,?)`)
-              .run(crypto.randomUUID(), transfer.product_id, transfer.to_branch_id, received, damaged)
+          if (received > 0 || damaged > 0) {
+            const dest = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
+              .get(transfer.product_id, transfer.to_branch_id) as { id: string } | undefined
+            if (dest) {
+              db.prepare(`UPDATE stocks SET quantity=quantity+?, damaged_qty=damaged_qty+?,
+                updated_at=datetime('now') WHERE id=?`).run(received, damaged, dest.id)
+            } else {
+              db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty)
+                VALUES (?,?,?,?,?)`)
+                .run(crypto.randomUUID(), transfer.product_id, transfer.to_branch_id, received, damaged)
+            }
+            if (received > 0) {
+              movementRecords.push(insertStockMovement(db, {
+                product_id: String(transfer.product_id),
+                from_branch_id: String(transfer.from_branch_id),
+                to_branch_id: String(transfer.to_branch_id),
+                quantity: received, movement_type: 'RECEIVE', reference_transfer_id: id,
+                notes: `Received at destination: ${transfer.transfer_number || id}`,
+                created_by: (user?.id as string) || null,
+              }))
+            }
           }
-          if (received > 0) {
-            movementRecords.push(insertStockMovement(db, {
-              product_id: String(transfer.product_id),
-              from_branch_id: String(transfer.from_branch_id),
-              to_branch_id: String(transfer.to_branch_id),
-              quantity: received,
-              movement_type: 'RECEIVE',
-              reference_transfer_id: id,
-              notes: `Transfer received: ${transfer.transfer_number || id}`,
-              created_by: (user?.id as string) || null,
-            }))
-          }
+        }
+
+        // 3. CANCEL after source was deducted → return goods to source.
+        if (status === 'cancelled' && sourceDeducted) {
+          const src = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
+            .get(transfer.product_id, transfer.from_branch_id) as { id: string } | undefined
+          if (src) db.prepare(`UPDATE stocks SET quantity=quantity+?, updated_at=datetime('now') WHERE id=?`).run(qty, src.id)
+          else db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity) VALUES (?,?,?,?)`)
+            .run(crypto.randomUUID(), transfer.product_id, transfer.from_branch_id, qty)
+          movementRecords.push(insertStockMovement(db, {
+            product_id: String(transfer.product_id),
+            from_branch_id: String(transfer.to_branch_id),
+            to_branch_id: String(transfer.from_branch_id),
+            quantity: qty, movement_type: 'TRANSFER', reference_transfer_id: id,
+            notes: `Cancelled - stock returned to source: ${transfer.transfer_number || id}`,
+            created_by: (user?.id as string) || null,
+          }))
         }
 
         const fields = Object.keys(patch).map(k => `${k}=@${k}`).join(',')
         db.prepare(`UPDATE stock_transfers SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
           .run({ id, ...patch })
 
+        const historyLabel: Record<string, string> = {
+          approved:           'Approved & dispatched from source',
+          rejected:           'Rejected',
+          ready_for_dispatch: 'Ready for dispatch',
+          dispatched:         'Dispatched — in transit',
+          in_transit:         'In transit',
+          received:           'Received — completed',
+          partially_received: 'Partially received',
+          discrepancy:        'Discrepancy reported',
+          cancelled:          'Cancelled',
+        }
         insertTransferHistory(
           db,
           { ...transfer, ...patch },
-          effectiveStatus === 'received' ? 'Completed' : effectiveStatus.replace(/_/g, ' '),
+          historyLabel[status] || status.replace(/_/g, ' '),
           user?.id,
           String(payload.notes || payload.reject_reason || payload.discrepancy_note || '')
         )
@@ -469,23 +485,22 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           .run(
             crypto.randomUUID(),
             user?.id, transfer.from_branch_id,
-            `TRANSFER_${effectiveStatus.toUpperCase()}`,
+            `TRANSFER_${status.toUpperCase()}`,
             'stock_transfers', id,
-            JSON.stringify({ from_status: transfer.status, to_status: effectiveStatus, ...patch })
+            JSON.stringify({ from_status: transfer.status, to_status: status, ...patch })
           )
       })()
 
       await enqueuSync('stock_transfers', id, 'UPDATE', { id, ...patch })
 
-      if (completesOnApproval || status === 'received' || status === 'partially_received' || status === 'discrepancy') {
-        const source = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
-          .get(transfer.product_id, transfer.from_branch_id) as Record<string, unknown>
-        if (source) await enqueuSync('stocks', String(source.id), 'UPDATE', source)
-      }
-      if (completesOnApproval || status === 'received' || status === 'partially_received' || status === 'discrepancy') {
-        const destination = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
-          .get(transfer.product_id, transfer.to_branch_id) as Record<string, unknown>
-        if (destination) await enqueuSync('stocks', String(destination.id), 'UPDATE', destination)
+      // Sync whichever branch stock actually changed
+      const changedBranches = new Set<string>()
+      if (status === 'approved' || (status === 'cancelled' && sourceDeducted)) changedBranches.add(String(transfer.from_branch_id))
+      if (creditsDestination) changedBranches.add(String(transfer.to_branch_id))
+      for (const bId of changedBranches) {
+        const s = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
+          .get(transfer.product_id, bId) as Record<string, unknown> | undefined
+        if (s) await enqueuSync('stocks', String(s.id), 'UPDATE', s)
       }
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
@@ -493,15 +508,35 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       const product = db.prepare('SELECT name FROM products WHERE id=?').get(transfer.product_id) as { name?: string } | undefined
       const fromBranch = db.prepare('SELECT name FROM branches WHERE id=?').get(transfer.from_branch_id) as { name?: string } | undefined
-      const messageStatus = effectiveStatus.replace(/_/g, ' ')
+      const messageStatus = status.replace(/_/g, ' ')
       createNotification(
         'transfer_request',
-        `Stock request ${messageStatus}`,
-        `${fromBranch?.name || 'Source branch'} marked ${Number(transfer.quantity)} x ${product?.name || 'product'} as ${messageStatus}.`,
-        { event: `status_${effectiveStatus}`, transfer_id: id, transfer_number: transfer.transfer_number, status: effectiveStatus }
+        `Stock transfer ${messageStatus}`,
+        `${fromBranch?.name || 'Source branch'} — ${Number(transfer.quantity)} x ${product?.name || 'product'} is now ${messageStatus}.`,
+        { event: `status_${status}`, transfer_id: id, transfer_number: transfer.transfer_number, status }
       )
 
       return { success: true }
+    } catch (err) { return { success: false, error: (err as Error).message } }
+  })
+
+  // Full handover timeline for one transfer (who did what, when) — read the audit trail
+  ipcMain.handle('stocks:transferHistory', (_e, transferId: string) => {
+    try {
+      const db = getDb()
+      const rows = db.prepare(`
+        SELECT h.id, h.status, h.notes, h.quantity, h.created_at,
+               u.name  AS actor_name,
+               fb.name AS from_branch_name,
+               tb.name AS to_branch_name
+        FROM stock_transfer_history h
+        LEFT JOIN users    u  ON u.id  = h.created_by
+        LEFT JOIN branches fb ON fb.id = h.from_branch_id
+        LEFT JOIN branches tb ON tb.id = h.to_branch_id
+        WHERE h.transfer_id = ?
+        ORDER BY h.created_at ASC, h.id ASC
+      `).all(transferId)
+      return { success: true, data: rows }
     } catch (err) { return { success: false, error: (err as Error).message } }
   })
 

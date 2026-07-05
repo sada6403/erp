@@ -184,11 +184,10 @@ export default function POSPage() {
     toast.success(`${item.product.name} removed`)
   }, [cart, cartFocusedIdx])
 
+  // Theme changes go through the single confirmation flow in <ThemeToggle/>
+  // (rendered in AppLayout). Alt+T just requests it — no silent toggle.
   const toggleTheme = useCallback(() => {
-    const nextDark = !document.documentElement.classList.contains('dark')
-    const theme = nextDark ? 'dark' : 'light'
-    setSystemTheme(theme)
-    window.api?.settings?.update?.({ theme }).catch(() => undefined)
+    window.dispatchEvent(new Event('request-theme-toggle'))
   }, [])
 
   const handleBillTypeChange = useCallback((type: BillType) => {
@@ -276,7 +275,7 @@ export default function POSPage() {
   const meta = TYPE_META[cart.billType]
 
   return (
-    <div className="pos-shell absolute inset-0 flex flex-col overflow-hidden">
+    <div className="pos-shell pos-cashier absolute inset-0 flex flex-col overflow-hidden">
       {/* Toolbar */}
       <div className="pos-toolbar flex items-center gap-2 px-3 py-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         {/* Bill type selector */}

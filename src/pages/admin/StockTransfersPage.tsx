@@ -4,7 +4,8 @@ import Modal from '@/components/shared/Modal'
 import { useAuthStore } from '@/store/authStore'
 import {
   ArrowRightLeft, Check, X, Truck, RefreshCw,
-  CheckCircle, XCircle, ChevronDown, ChevronUp, AlertTriangle
+  CheckCircle, XCircle, ChevronDown, ChevronUp, AlertTriangle,
+  Printer, Search, Clock
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -89,15 +90,15 @@ function ApproveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
   const submit = async () => {
     setLoading(true)
     const res = await window.api.stocks.updateTransfer(t.id, 'approved', {})
-    if (res.success) { toast.success('Transfer approved and stock moved'); onDone() }
+    if (res.success) { toast.success('Approved — stock deducted from source & now in transit'); onDone() }
     else toast.error(res.error || 'Failed')
     setLoading(false)
   }
   return (
-    <Modal title="Approve & Move Stock" onClose={onClose}
+    <Modal title="Approve Transfer" onClose={onClose}
       footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button>
         <button className="btn-primary flex items-center gap-1.5" onClick={submit} disabled={loading}>
-          <Check size={14} /> Approve & Move
+          <Check size={14} /> Approve
         </button></>}>
       <div className="p-4 rounded-lg" style={{ background: 'var(--bg-soft)' }}>
         <p className="font-semibold" style={{ color: 'var(--text-1)' }}>{t.product_name}</p>
@@ -276,6 +277,23 @@ function TransferCard({ t, userId, isAdmin, myBranchId, onRefresh }: {
 }) {
   const [expanded, setExpanded] = useState(false)
   const [modal, setModal] = useState<'approve' | 'reject' | 'dispatch' | 'receive' | null>(null)
+  const [history, setHistory] = useState<Record<string, unknown>[]>([])
+  const [printing, setPrinting] = useState(false)
+
+  useEffect(() => {
+    if (expanded) {
+      window.api.stocks.transferHistory(t.id).then((r: any) => { if (r.success) setHistory(r.data) })
+    }
+  }, [expanded, t.id, t.status])
+
+  const handlePrint = async () => {
+    setPrinting(true)
+    try {
+      const r = await window.api.printer.printTransfer(t as unknown as Record<string, unknown>)
+      if (r?.success) toast.success('Transfer note sent to printer')
+      else toast.error(r?.error || 'Print failed')
+    } finally { setPrinting(false) }
+  }
 
   const canApprove  = t.status === 'pending_approval' && t.initiated_by !== userId
   const canReject   = t.status === 'pending_approval' && (isAdmin || t.from_branch_id === myBranchId)
@@ -342,9 +360,15 @@ function TransferCard({ t, userId, isAdmin, myBranchId, onRefresh }: {
                 )}
               </div>
             )}
-            <button className="btn-ghost btn-sm p-1.5" onClick={() => setExpanded(e => !e)}>
-              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
+            <div className="flex items-center gap-1">
+              <button className="btn-ghost btn-sm p-1.5" onClick={handlePrint} disabled={printing}
+                title="Print transfer note / hard copy (with tracking number)">
+                <Printer size={14} />
+              </button>
+              <button className="btn-ghost btn-sm p-1.5" onClick={() => setExpanded(e => !e)}>
+                {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -370,6 +394,33 @@ function TransferCard({ t, userId, isAdmin, myBranchId, onRefresh }: {
             {t.reject_reason    && <Detail label="Reject Reason"    value={t.reject_reason}    color="text-red-500" />}
             {t.discrepancy_note && <Detail label="Discrepancy Note" value={t.discrepancy_note} color="text-red-500" />}
             {t.notes            && <Detail label="Notes"            value={t.notes} />}
+          </div>
+        )}
+        {expanded && history.length > 0 && (
+          <div className="mt-4 pt-4 border-t" style={{ borderColor: 'var(--border)' }}>
+            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--text-3)' }}>
+              Handover Timeline
+            </p>
+            <div className="space-y-0">
+              {history.map((h, i) => (
+                <div key={String(h.id)} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className={`w-2.5 h-2.5 rounded-full mt-1.5 ${i === history.length - 1 ? 'bg-brand-500' : ''}`}
+                      style={i === history.length - 1 ? undefined : { background: 'var(--border-2)' }} />
+                    {i < history.length - 1 && <div className="w-px flex-1 my-1" style={{ background: 'var(--border)' }} />}
+                  </div>
+                  <div className="pb-3">
+                    <p className="text-sm font-medium capitalize" style={{ color: 'var(--text-1)' }}>{String(h.status)}</p>
+                    <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>
+                      <Clock size={10} className="inline mr-1" />
+                      {fmt(String(h.created_at))}
+                      {h.actor_name ? <> · by <strong style={{ color: 'var(--text-2)' }}>{String(h.actor_name)}</strong></> : null}
+                    </p>
+                    {h.notes ? <p className="text-xs mt-0.5" style={{ color: 'var(--text-2)' }}>{String(h.notes)}</p> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -404,6 +455,7 @@ export default function StockTransfersPage() {
   const [loading,      setLoading]      = useState(false)
   const [statusFilter, setStatusFilter] = useState('all')
   const [branchFilter, setBranchFilter] = useState('')
+  const [search, setSearch] = useState('')
   const [direction,    setDirection]    = useState<'all' | 'outgoing' | 'incoming'>('all')
   const [branches,     setBranches]     = useState<Record<string, unknown>[]>([])
 
@@ -442,6 +494,14 @@ export default function StockTransfersPage() {
   const pending    = transfers.filter(t => t.status === 'pending_approval').length
   const inTransit  = transfers.filter(t => ['dispatched', 'in_transit'].includes(t.status)).length
   const received   = transfers.filter(t => ['received', 'partially_received'].includes(t.status)).length
+
+  const q = search.trim().toLowerCase()
+  const visible = q
+    ? transfers.filter(t =>
+        (t.transfer_number || '').toLowerCase().includes(q) ||
+        (t.product_name || '').toLowerCase().includes(q) ||
+        (t.sku || '').toLowerCase().includes(q))
+    : transfers
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -507,6 +567,16 @@ export default function StockTransfersPage() {
               ))}
             </select>
           )}
+
+          <div className="relative ml-auto">
+            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
+            <input
+              className="input text-xs py-1.5 pl-8 w-56"
+              placeholder="Track by number / product…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
         </div>
       </div>
 
@@ -520,15 +590,15 @@ export default function StockTransfersPage() {
           </div>
         )}
 
-        {!loading && transfers.length === 0 && (
+        {!loading && visible.length === 0 && (
           <div className="flex flex-col items-center justify-center h-64" style={{ color: 'var(--text-3)' }}>
             <ArrowRightLeft size={40} className="mb-3 opacity-30" />
             <p className="font-medium" style={{ color: 'var(--text-2)' }}>No transfers found</p>
-            <p className="text-xs mt-1">Use Stock Lookup to request transfers between branches</p>
+            <p className="text-xs mt-1">{q ? 'No transfer matches your search' : 'Use Stock Lookup to request transfers between branches'}</p>
           </div>
         )}
 
-        {!loading && transfers.map(t => (
+        {!loading && visible.map(t => (
           <TransferCard
             key={t.id} t={t}
             userId={userId} isAdmin={isAdmin} myBranchId={myBranchId}

@@ -77,6 +77,7 @@ const api = {
     movements:    (filters?: unknown)  => ipcRenderer.invoke('stocks:movements', filters),
     availability:  (productId: string)  => ipcRenderer.invoke('stocks:availability', productId),
     updateTransfer:(id: string, status: string, payload?: unknown) => ipcRenderer.invoke('stocks:updateTransfer', id, status, payload),
+    transferHistory:(transferId: string) => ipcRenderer.invoke('stocks:transferHistory', transferId),
     branchSummary: ()                   => ipcRenderer.invoke('stocks:branchSummary'),
     branchDetail:  (branchId: string)   => ipcRenderer.invoke('stocks:branchDetail', branchId),
   },
@@ -155,6 +156,7 @@ const api = {
   printer: {
     printReceipt: (payload: unknown) => ipcRenderer.invoke('printer:printReceipt', payload),
     printInvoice: (payload: unknown) => ipcRenderer.invoke('printer:printInvoice', payload),
+    printTransfer:(payload: unknown) => ipcRenderer.invoke('printer:printTransfer', payload),
     emailInvoice: (payload: unknown) => ipcRenderer.invoke('printer:emailInvoice', payload),
     test:         ()                 => ipcRenderer.invoke('printer:test'),
     listDevices:  ()                 => ipcRenderer.invoke('printer:listDevices'),

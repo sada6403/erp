@@ -60,6 +60,15 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
+  ipcMain.handle('printer:printTransfer', async (_e, payload: Record<string, unknown>) => {
+    try {
+      const settings = store.get('app_settings') as Record<string, unknown> || {}
+      const html = buildTransferNoteHtml(payload, settings)
+      await printHtml(html, 'a4', 'A4')
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
   ipcMain.handle('printer:emailInvoice', async (_e, payload: InvoicePayload) => {
     try {
       const settings = store.get('app_settings') as Record<string, unknown> || {}
@@ -82,6 +91,59 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
     try { return { success: true, data: [] } }
     catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
+}
+
+// A4 stock-transfer note / gate pass — the printable hard copy carrying the
+// tracking number. Meant to travel with the goods and be signed at each handover.
+function buildTransferNoteHtml(t: Record<string, unknown>, settings: Record<string, unknown>): string {
+  const company = esc((settings.company_name as string) || 'Nature Plantation')
+  const v = (k: string) => esc(String(t[k] ?? ''))
+  const fmtDate = (s: unknown) => s ? esc(new Date(String(s)).toLocaleString()) : '—'
+  const tracking = esc(String(t.transfer_number || t.id || ''))
+  const qty = esc(String(t.quantity ?? ''))
+  const status = esc(String(t.status ?? '').replace(/_/g, ' ').toUpperCase())
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 24px; }
+    .head { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111; padding-bottom:10px; }
+    .company { font-size:20px; font-weight:800; }
+    .title { font-size:15px; font-weight:700; letter-spacing:2px; color:#444; }
+    .track { text-align:right; }
+    .track .num { font-family:'Courier New',monospace; font-size:22px; font-weight:800; letter-spacing:2px; }
+    .track .lbl { font-size:10px; color:#666; text-transform:uppercase; letter-spacing:1px; }
+    .status { display:inline-block; margin-top:6px; padding:3px 10px; border:1px solid #111; border-radius:4px; font-size:11px; font-weight:700; }
+    table { width:100%; border-collapse:collapse; margin-top:18px; }
+    td { padding:8px 10px; border:1px solid #bbb; font-size:13px; vertical-align:top; }
+    td.k { background:#f3f3f3; font-weight:700; width:170px; color:#333; }
+    .prod { font-size:16px; font-weight:800; }
+    .signs { display:flex; gap:20px; margin-top:44px; }
+    .sign { flex:1; text-align:center; }
+    .sign .line { border-top:1px solid #111; margin-top:40px; padding-top:6px; font-size:11px; color:#444; }
+    .foot { margin-top:26px; font-size:10px; color:#888; text-align:center; }
+  </style></head><body>
+    <div class="head">
+      <div><div class="company">${company}</div><div class="title">STOCK TRANSFER NOTE</div></div>
+      <div class="track"><div class="lbl">Tracking No.</div><div class="num">${tracking}</div>
+        <div class="status">${status}</div></div>
+    </div>
+    <table>
+      <tr><td class="k">Product</td><td class="prod">${v('product_name')} <span style="font-weight:400;color:#666">(${v('sku')})</span></td></tr>
+      <tr><td class="k">Quantity</td><td><b>${qty}</b> units</td></tr>
+      <tr><td class="k">From Branch</td><td>${v('from_branch_name')}</td></tr>
+      <tr><td class="k">To Branch</td><td>${v('to_branch_name')}</td></tr>
+      <tr><td class="k">Requested By</td><td>${v('initiated_by_name')} &nbsp;·&nbsp; ${fmtDate(t.initiated_at)}</td></tr>
+      <tr><td class="k">Approved By</td><td>${v('approved_by_name') || '—'}</td></tr>
+      <tr><td class="k">Driver / Vehicle</td><td>${v('driver_name') || '—'} ${t.driver_phone ? '· ' + v('driver_phone') : ''} ${t.vehicle_number ? '· ' + v('vehicle_number') : ''}</td></tr>
+      <tr><td class="k">Dispatched At</td><td>${fmtDate(t.dispatch_at)}</td></tr>
+      <tr><td class="k">Expected Delivery</td><td>${fmtDate(t.expected_delivery_at)}</td></tr>
+    </table>
+    <div class="signs">
+      <div class="sign"><div class="line">Released By (Source)</div></div>
+      <div class="sign"><div class="line">Driver / Carrier</div></div>
+      <div class="sign"><div class="line">Received By (Destination)</div></div>
+    </div>
+    <div class="foot">Keep this note with the goods. Present the tracking number <b>${tracking}</b> at the destination to confirm receipt.</div>
+  </body></html>`
 }
 
 async function printHtml(html: string, design: 'dot' | 'thermal' | 'a4' = 'thermal', paperType = '80mm'): Promise<void> {
