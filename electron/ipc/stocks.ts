@@ -316,6 +316,19 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         throw new Error(`Cannot move transfer from '${transfer.status}' to '${status}'`)
       }
 
+      // Only a Branch Manager or Admin may APPROVE a request — including the
+      // dashboard quick-accept (pending -> received). Cashiers cannot approve.
+      const isApprovalAction = status === 'approved' ||
+        ((status === 'received' || status === 'partially_received') &&
+         ['pending', 'pending_approval'].includes(String(transfer.status)))
+      if (isApprovalAction) {
+        const cperms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+          || (user?.permissions as Record<string, unknown>) || {}
+        if (!cperms.all && !cperms.employees) {
+          throw new Error('Only a Branch Manager or Admin can approve transfer requests')
+        }
+      }
+
       // Maker-checker: the person who initiated cannot approve
       if (status === 'approved') {
         if (String(transfer.initiated_by) === String(user?.id)) {

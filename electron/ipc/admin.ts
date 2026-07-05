@@ -657,7 +657,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         db.prepare(`
           INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id, bill_type, status,
             subtotal, discount_amount, tax_amount, total_amount, paid_amount, due_amount, notes)
-          VALUES (?,?,?,?,?,'RETAIL','completed',?,?,?,?,?,?)
+          VALUES (?,?,?,?,?,'RETAIL','completed',?,?,?,?,?,?,?)
         `).run(
           invoiceId, invoiceNumber, branchId, customerId, user.id || null,
           calc.cash_price, 0, 0, calc.cash_price, downPayment, calc.total_payable,
@@ -852,7 +852,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
             `).run(newPaid, nextStatus, nextStatus, row.id)
             remaining = money(remaining - apply)
           }
-          const paidRows = db.prepare('SELECT COUNT(*) AS count FROM installment_schedule WHERE installment_id=? AND status="paid"').get(id) as { count: number }
+          const paidRows = db.prepare(`SELECT COUNT(*) AS count FROM installment_schedule WHERE installment_id=? AND status='paid'`).get(id) as { count: number }
           const dueAmount = money(Number(inst.due_amount || 0) - amount)
           const next = db.prepare(`
             SELECT due_date FROM installment_schedule

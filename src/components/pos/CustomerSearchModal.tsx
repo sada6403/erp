@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import type { Customer } from '@/types'
 import { X, Search, User, Plus } from 'lucide-react'
 import { useKeyboard } from '@/hooks/useKeyboard'
+import toast from 'react-hot-toast'
+import { validateCustomer } from '@/lib/validateCustomer'
 
 interface Props {
   onSelect: (customer: Customer) => void
@@ -82,18 +84,24 @@ export default function CustomerSearchModal({ onSelect, onClose }: Props) {
 function QuickCreateCustomer({ onCreate, onCancel }: { onCreate: (c: Customer) => void; onCancel: () => void }) {
   const [name, setName]   = useState('')
   const [phone, setPhone] = useState('')
+  const [email, setEmail] = useState('')
   const [nic, setNic]     = useState('')
+  const [address, setAddress] = useState('')
   const [saving, setSaving] = useState(false)
 
   const save = async () => {
-    if (!name) return
+    const err = validateCustomer({ name, phone, email, nic, address })
+    if (err) { toast.error(err); return }
     setSaving(true)
-    const res = await window.api.customers.create({ name, phone, nic })
+    const res = await window.api.customers.create({
+      name: name.trim(), phone: phone.trim(), email: email.trim() || null,
+      nic: nic.trim() || null, address: address.trim(),
+    })
     setSaving(false)
     if (res.success) {
       const getRes = await window.api.customers.get((res.data as { id: string }).id)
       if (getRes.success) onCreate(getRes.data as Customer)
-    }
+    } else toast.error(res.error || 'Failed to create customer')
   }
 
   return (
@@ -101,12 +109,14 @@ function QuickCreateCustomer({ onCreate, onCancel }: { onCreate: (c: Customer) =
       <p className="text-sm font-medium" style={{ color: 'var(--text-2)' }}>Quick Create Customer</p>
       <input value={name} onChange={e=>setName(e.target.value)} placeholder="Full Name *" className="input" />
       <div className="grid grid-cols-2 gap-2">
-        <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Phone" className="input" />
+        <input value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Mobile Number *" className="input" />
         <input value={nic} onChange={e=>setNic(e.target.value)} placeholder="NIC" className="input" />
       </div>
+      <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" className="input" />
+      <input value={address} onChange={e=>setAddress(e.target.value)} placeholder="Address *" className="input" />
       <div className="flex gap-2">
         <button onClick={onCancel} className="btn-secondary flex-1 btn-sm">Cancel</button>
-        <button onClick={save} disabled={!name || saving} className="btn-primary flex-1 btn-sm">
+        <button onClick={save} disabled={saving} className="btn-primary flex-1 btn-sm">
           {saving ? 'Saving...' : 'Create & Select'}
         </button>
       </div>

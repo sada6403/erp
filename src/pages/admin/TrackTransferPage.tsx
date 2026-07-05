@@ -41,6 +41,7 @@ export default function TrackTransferPage() {
   const u = user as unknown as Record<string, unknown>
   const perms = ((u?.role as Record<string, unknown>)?.permissions ?? u?.permissions ?? {}) as Record<string, unknown>
   const isAdmin = Boolean(perms.all)
+  const canApproveRole = Boolean(perms.all || perms.employees) // Admin or Manager only
   const userId = String(u?.id ?? '')
   const myBranchId = String(u?.branch_id ?? '')
 
@@ -112,8 +113,8 @@ export default function TrackTransferPage() {
   const t = transfer
   const stage = t ? stageIndex(t.status) : -1
   const isDone = t ? ['received', 'rejected', 'cancelled', 'discrepancy'].includes(t.status) : false
-  const canApprove  = t && ['pending_approval', 'pending'].includes(t.status) && t.initiated_by !== userId && (isAdmin || t.from_branch_id === myBranchId)
-  const canReject   = t && ['pending_approval', 'pending'].includes(t.status) && (isAdmin || t.from_branch_id === myBranchId)
+  const canApprove  = t && ['pending_approval', 'pending'].includes(t.status) && t.initiated_by !== userId && canApproveRole && (isAdmin || t.from_branch_id === myBranchId)
+  const canReject   = t && ['pending_approval', 'pending'].includes(t.status) && canApproveRole && (isAdmin || t.from_branch_id === myBranchId)
   const canDispatch = t && ['approved', 'ready_for_dispatch'].includes(t.status) && (isAdmin || t.from_branch_id === myBranchId)
   const canReceive  = t && ['approved', 'ready_for_dispatch', 'dispatched', 'in_transit'].includes(t.status) && (isAdmin || t.to_branch_id === myBranchId)
   const canCancel   = t && !isDone && (isAdmin || t.from_branch_id === myBranchId)

@@ -3,6 +3,7 @@ import { sendEmail, testEmail, invoiceEmailHtml, installmentReminderHtml, lowSto
 import { sendSms, testSms, installmentDueMessage, installmentOverdueMessage, lowStockMessage } from '../services/smsService'
 import { sendWhatsApp, testWhatsApp } from '../services/whatsappService'
 import { getDb } from '../database'
+import { createNotification } from './notifications'
 import Store from 'electron-store'
 
 const store = new Store<Record<string, unknown>>()
@@ -141,45 +142,46 @@ export function registerCommunicationHandlers() {
 
 export function startReminderScheduler() {
   const runReminders = async () => {
-    const emailEnabled = Boolean(store.get('email_enabled', false))
-    const smsEnabled   = Boolean(store.get('sms_enabled', false))
-    if (!emailEnabled && !smsEnabled) return
-
     try {
       const db = getDb()
       const companyName = String(store.get('company_name', 'POS System'))
       const currency    = String(store.get('currency_symbol', 'Rs.'))
+      const emailEnabled = Boolean(store.get('email_enabled', false))
+      const smsEnabled   = Boolean(store.get('sms_enabled', false))
 
-      // Overdue installments
-      const overdue = db.prepare(`
+      const pick = (cond: string) => db.prepare(`
         SELECT i.id, i.next_due_date, i.due_amount, i.paid_amount,
                c.name as customer_name, c.phone, c.email
         FROM installments i
         JOIN customers c ON c.id = i.customer_id
-        WHERE i.status = 'active' AND i.next_due_date < date('now')
-          AND i.due_amount > i.paid_amount
+        WHERE i.status = 'active' AND i.due_amount > i.paid_amount AND ${cond}
       `).all() as Record<string, unknown>[]
 
-      // Due today
-      const dueToday = db.prepare(`
-        SELECT i.id, i.next_due_date, i.due_amount, i.paid_amount,
-               c.name as customer_name, c.phone, c.email
-        FROM installments i
-        JOIN customers c ON c.id = i.customer_id
-        WHERE i.status = 'active' AND i.next_due_date = date('now')
-          AND i.due_amount > i.paid_amount
-      `).all() as Record<string, unknown>[]
+      const overdue  = pick(`i.next_due_date < date('now')`)
+      const dueToday = pick(`i.next_due_date = date('now')`)
+      const due1Day  = pick(`i.next_due_date = date('now', '+1 day')`)   // 1-day reminder
+      const dueSoon  = pick(`i.next_due_date = date('now', '+3 days')`)  // 3-day reminder
 
-      // Due in 3 days
-      const dueSoon = db.prepare(`
-        SELECT i.id, i.next_due_date, i.due_amount, i.paid_amount,
-               c.name as customer_name, c.phone, c.email
-        FROM installments i
-        JOIN customers c ON c.id = i.customer_id
-        WHERE i.status = 'active' AND i.next_due_date = date('now', '+3 days')
-          AND i.due_amount > i.paid_amount
-      `).all() as Record<string, unknown>[]
+      // In-app notification for admins & managers — always, even without email/SMS.
+      // Deduped to at most once per calendar day.
+      const today = new Date().toISOString().slice(0, 10)
+      const notedToday = (type: string) => Boolean(db.prepare(
+        `SELECT 1 FROM notifications WHERE type=? AND date(created_at)=? LIMIT 1`
+      ).get(type, today))
+      if (overdue.length && !notedToday('installment_overdue')) {
+        createNotification('installment_overdue', 'Overdue Installments',
+          `${overdue.length} installment${overdue.length > 1 ? 's are' : ' is'} overdue and need follow-up.`,
+          { count: overdue.length })
+      }
+      const upcoming = dueToday.length + due1Day.length + dueSoon.length
+      if (upcoming && !notedToday('installment_due')) {
+        createNotification('installment_due', 'Installment Payments Due',
+          `${dueToday.length} due today, ${due1Day.length} due tomorrow, ${dueSoon.length} due in 3 days.`,
+          { today: dueToday.length, in1: due1Day.length, in3: dueSoon.length })
+      }
 
+      // Customer email / SMS reminders — only if configured.
+      if (!emailEnabled && !smsEnabled) return
       for (const inst of overdue) {
         const amount = Number(Number(inst.due_amount) - Number(inst.paid_amount)).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })
         const dueDate = String(inst.next_due_date)
@@ -195,7 +197,7 @@ export function startReminderScheduler() {
         }
       }
 
-      for (const inst of [...dueToday, ...dueSoon]) {
+      for (const inst of [...dueToday, ...due1Day, ...dueSoon]) {
         const amount = Number(Number(inst.due_amount) - Number(inst.paid_amount)).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })
         const dueDate = String(inst.next_due_date)
         if (inst.email && emailEnabled) {

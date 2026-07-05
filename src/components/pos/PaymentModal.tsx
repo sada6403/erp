@@ -5,7 +5,7 @@ import { useKeyboard } from '@/hooks/useKeyboard'
 import type { BillType } from '@/store/cartStore'
 import {
   X, CreditCard, Banknote, Building2, Calendar, Printer, CheckCircle2,
-  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Gift, Keyboard, Handshake
+  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Gift, Keyboard, Handshake, UserPlus
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { PaymentMethod } from '@/types'
@@ -73,6 +73,42 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     receivedRef.current?.focus()
     receivedRef.current?.select()
   }, [])
+
+  // Installment
+  const [plans, setPlans]           = useState<Record<string, unknown>[]>([])
+  const [planId, setPlanId]         = useState('')
+  const [downPayment, setDownPayment] = useState('')
+
+  const [customers, setCustomers] = useState<Record<string, unknown>[]>([])
+
+  useEffect(() => {
+    if (method !== 'installment' || plans.length) return
+    window.api.admin.installments.plans().then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+      if (r.success && r.data?.length) { setPlans(r.data); setPlanId(String(r.data[0].id)) }
+    })
+  }, [method, plans.length])
+
+  // Load customers for the dropdown (refresh when one is added / selection changes)
+  useEffect(() => {
+    if (method !== 'installment') return
+    window.api.customers.list().then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+      if (r.success && r.data) setCustomers(r.data)
+    })
+  }, [method, cart.customer?.id])
+
+  const onInstallmentCustomerChange = (val: string) => {
+    if (val === '__new__') { window.dispatchEvent(new Event('pos:open-customer')); return }
+    const c = customers.find(x => String(x.id) === val)
+    cart.setCustomer((c ?? null) as typeof cart.customer)
+  }
+
+  const selectedPlan = plans.find(p => String(p.id) === planId)
+  const planMonths   = Number(selectedPlan?.months || 0)
+  const planRate     = Number(selectedPlan?.interest_rate || 0)
+  const planType     = String(selectedPlan?.interest_type || 'flat')
+  const insFinanced  = Math.max(0, cart.total - Number(downPayment || 0))
+  const insInterest  = planType === 'no_interest' || planRate <= 0 ? 0 : insFinanced * (planRate / 100)
+  const insMonthly   = planMonths > 0 ? (insFinanced + insInterest) / planMonths : insFinanced
 
   // Load loyalty balance when customer changes
   useEffect(() => {
@@ -149,13 +185,18 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     discount_amount:   cart.discountAmount,
     tax_amount:        cart.taxAmount,
     total_amount:      cart.total,
-    paid_amount:       effectivePaidAmount,
+    paid_amount:       method === 'installment' ? Number(downPayment || 0) : effectivePaidAmount,
     change_amount:     change,
-    payment_method:    isCredit ? 'credit' : (method === 'gift_voucher' && voucherBalance > 0 ? 'split' : method),
-    payment_reference: method === 'gift_voucher' && voucherBalance > 0
-      ? `Voucher ${reference}${balanceReference ? ` / ${balanceReference}` : ''}`
-      : reference,
-    payments:          buildPayments(),
+    payment_method:    isCredit ? 'credit' : method === 'installment' ? 'installment'
+                        : (method === 'gift_voucher' && voucherBalance > 0 ? 'split' : method),
+    payment_reference: method === 'installment'
+      ? `Down payment — balance Rs.${Math.max(0, cart.total - Number(downPayment || 0)).toFixed(2)}`
+      : method === 'gift_voucher' && voucherBalance > 0
+        ? `Voucher ${reference}${balanceReference ? ` / ${balanceReference}` : ''}`
+        : reference,
+    payments:          method === 'installment'
+      ? [{ method: 'installment', amount: Number(downPayment || 0), reference: `Balance Rs.${Math.max(0, cart.total - Number(downPayment || 0)).toFixed(2)}` }]
+      : buildPayments(),
     agent_code:        agentCode.trim() || undefined,
     agent_name:        agentName.trim() || undefined,
     agent_commission_pct: agentCommissionPct,
@@ -166,6 +207,42 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
 
   const handleConfirm = useCallback(async () => {
     if (loading) return
+
+    // ── Installment sale: needs a registered customer + a plan, then builds a
+    //    proper installment account + schedule (not a plain invoice). ──
+    if (isRetail && method === 'installment') {
+      if (!cart.customer) { toast.error('Installment requires a customer — press F2 to select or add one'); return }
+      if (!planId) { toast.error('Select an installment plan'); return }
+      const plan = plans.find(p => String(p.id) === planId)
+      setLoading(true)
+      try {
+        const settings = await window.api.settings.get()
+        const branchId = user?.branch?.id || (settings.data as { branch_id?: string } | undefined)?.branch_id
+        const cust = cart.customer as Record<string, string>
+        const res = await window.api.admin.installments.createSale({
+          branch_id:      branchId,
+          customer_id:    cust.id,
+          customer_name:  cust.name,
+          customer_phone: cust.phone,
+          cash_price:     cart.total,
+          down_payment:   Number(downPayment || 0),
+          months:         Number(plan?.months || 0),
+          interest_type:  plan?.interest_type,
+          interest_rate:  Number(plan?.interest_rate || 0),
+          plan_id:        planId,
+          grace_period_days: Number(plan?.grace_period_days || 0),
+          late_fee:       Number(plan?.late_fee || 0),
+          notes:          cart.notes,
+          items: cart.items.map(i => ({ product_id: i.product.id, quantity: i.quantity, unit_price: i.unit_price })),
+        }) as { success: boolean; data?: { invoice_number?: string }; error?: string }
+        if (!res.success) { toast.error(res.error || 'Failed to create installment'); return }
+        window.dispatchEvent(new Event('pos:stock-changed'))
+        setReceiptPayload(buildPayload(res.data?.invoice_number || invoiceNumber))
+        setDone(true)
+      } catch (err) { toast.error((err as Error).message) } finally { setLoading(false) }
+      return
+    }
+
     if (isRetail && method !== 'installment' && method !== 'gift_voucher' && receivedAmount < totalAfterLoyalty) {
       toast.error('Insufficient payment amount')
       receivedRef.current?.focus()
@@ -258,7 +335,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     }
   }, [loading, isRetail, isCredit, isQuotation, method, receivedAmount, reference, voucherApplied, voucherBalance,
       balanceReceivedAmount, balanceMethod, balanceReference, cart, billType, validUntil, dueDate,
-      effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentCommissionPct, agentCommissionAmount])
+      effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentCommissionPct, agentCommissionAmount,
+      planId, downPayment, plans])
 
   const handlePrint = useCallback(async (design: 'dot' | 'thermal' | 'a4' = printDesign) => {
     if (!receiptPayload) return
@@ -620,6 +698,56 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                     step="0.01"
                     autoFocus
                   />
+                </div>
+              )}
+
+              {/* Installment: requires a customer + a plan */}
+              {method === 'installment' && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="label">Customer <span className="text-red-500">*</span></label>
+                    <select
+                      className="input"
+                      value={(cart.customer as Record<string, string> | null)?.id || ''}
+                      onChange={e => onInstallmentCustomerChange(e.target.value)}
+                    >
+                      <option value="">Select a customer…</option>
+                      {customers.map(c => (
+                        <option key={String(c.id)} value={String(c.id)}>
+                          {String(c.name)}{c.phone ? ` · ${c.phone}` : ''}{c.nic ? ` · ${c.nic}` : ''}
+                        </option>
+                      ))}
+                      <option value="__new__">＋ Add New Customer…</option>
+                    </select>
+                    {!cart.customer && (
+                      <p className="text-xs mt-1 flex items-center gap-1" style={{ color: '#dc2626' }}>
+                        <UserPlus size={11} /> Installment requires a customer — pick one above or add new.
+                      </p>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Installment Plan</label>
+                      <select className="input" value={planId} onChange={e => setPlanId(e.target.value)}>
+                        <option value="">Select plan…</option>
+                        {plans.map(p => (
+                          <option key={String(p.id)} value={String(p.id)}>
+                            {String(p.name)} — {String(p.months)}mo{Number(p.interest_rate) > 0 ? ` @ ${p.interest_rate}%` : ' (0%)'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Down Payment</label>
+                      <input type="number" className="input" value={downPayment} onChange={e => setDownPayment(e.target.value)} placeholder="0" min={0} max={cart.total} />
+                    </div>
+                  </div>
+                  {selectedPlan && planMonths > 0 && (
+                    <div className="rounded-lg p-3 text-sm" style={{ background: 'var(--bg-soft)' }}>
+                      <div className="flex justify-between"><span style={{ color: 'var(--text-3)' }}>Financed</span><span>Rs.{insFinanced.toFixed(2)}</span></div>
+                      <div className="flex justify-between"><span style={{ color: 'var(--text-3)' }}>{planMonths} monthly payments</span><strong style={{ color: 'var(--text-1)' }}>Rs.{insMonthly.toFixed(2)}/mo</strong></div>
+                    </div>
+                  )}
                 </div>
               )}
 

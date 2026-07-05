@@ -33,6 +33,8 @@ export default function AdminDashboard() {
   const u = user as unknown as Record<string, unknown>
   const perms = ((u?.role as Record<string, unknown>)?.permissions ?? u?.permissions ?? {}) as Record<string, unknown>
   const isAdmin    = Boolean(perms.all)
+  // Only Admin or Branch Manager may approve transfer requests — cashiers cannot.
+  const canApproveRole = Boolean(perms.all || perms.employees)
   const myBranchId = String(u?.branch_id ?? '')
 
   const [revenue, setRevenue]             = useState<RevenueData | null>(null)
@@ -273,6 +275,7 @@ export default function AdminDashboard() {
                         {' · '}{new Date(t.initiated_at).toLocaleString('en-GB', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}
                       </p>
                     </div>
+                    {canApproveRole ? (
                     <div className="flex gap-1.5 flex-shrink-0">
                       <button
                         onClick={() => handleAccept(t.id)}
@@ -290,6 +293,9 @@ export default function AdminDashboard() {
                         <X size={12} /> Reject
                       </button>
                     </div>
+                    ) : (
+                      <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-3)' }}>Manager / Admin approval required</span>
+                    )}
                   </div>
 
                   {/* Inline reject reason */}

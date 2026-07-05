@@ -272,8 +272,8 @@ function ReceiveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
 }
 
 // ─── Transfer Card ────────────────────────────────────────────────────────────
-function TransferCard({ t, userId, isAdmin, myBranchId, onRefresh, onModalToggle }: {
-  t: Transfer; userId: string; isAdmin: boolean; myBranchId: string; onRefresh: () => void
+function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefresh, onModalToggle }: {
+  t: Transfer; userId: string; isAdmin: boolean; myBranchId: string; canApproveRole: boolean; onRefresh: () => void
   onModalToggle?: (open: boolean) => void
 }) {
   const [expanded, setExpanded] = useState(false)
@@ -302,8 +302,8 @@ function TransferCard({ t, userId, isAdmin, myBranchId, onRefresh, onModalToggle
     } finally { setPrinting(false) }
   }
 
-  const canApprove  = t.status === 'pending_approval' && t.initiated_by !== userId
-  const canReject   = t.status === 'pending_approval' && (isAdmin || t.from_branch_id === myBranchId)
+  const canApprove  = t.status === 'pending_approval' && t.initiated_by !== userId && canApproveRole && (isAdmin || t.from_branch_id === myBranchId)
+  const canReject   = t.status === 'pending_approval' && canApproveRole && (isAdmin || t.from_branch_id === myBranchId)
   const canDispatch = ['approved', 'ready_for_dispatch'].includes(t.status) &&
     (isAdmin || t.from_branch_id === myBranchId)
   const canReceive  = ['approved', 'dispatched', 'in_transit'].includes(t.status) &&
@@ -455,6 +455,8 @@ export default function StockTransfersPage() {
   const u = user as unknown as Record<string, unknown>
   const perms = ((u?.role as Record<string, unknown>)?.permissions ?? u?.permissions ?? {}) as Record<string, unknown>
   const isAdmin     = Boolean(perms.all)
+  // Only Admin or Branch Manager may approve/reject requests — cashiers cannot.
+  const canApproveRole = Boolean(perms.all || perms.employees)
   const myBranchId  = String(u?.branch_id ?? '')
   const userId      = String(u?.id ?? '')
 
@@ -612,6 +614,7 @@ export default function StockTransfersPage() {
           <TransferCard
             key={t.id} t={t}
             userId={userId} isAdmin={isAdmin} myBranchId={myBranchId}
+            canApproveRole={canApproveRole}
             onRefresh={load}
             onModalToggle={open => { modalOpenRef.current = open }}
           />

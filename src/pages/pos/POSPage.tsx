@@ -11,7 +11,7 @@ import CustomerSearchModal from '@/components/pos/CustomerSearchModal'
 import HeldInvoicesModal from '@/components/pos/HeldInvoicesModal'
 import {
   ShoppingCart, Search, User, Pause, CreditCard, Plus, FileText,
-  Receipt, ClipboardList, BadgeDollarSign, Star, RotateCcw, Keyboard
+  Receipt, ClipboardList, BadgeDollarSign, Star, RotateCcw, Keyboard, Trash2
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { setSystemTheme } from '@/lib/systemTheme'
@@ -72,6 +72,13 @@ export default function POSPage() {
     window.addEventListener('keydown', captureKey)
     return () => window.removeEventListener('keydown', captureKey)
   }, [showPayment, showCustomer, showHeld, showHelp])
+
+  // Let child modals (e.g. the installment payment step) open the customer picker
+  useEffect(() => {
+    const openCustomer = () => setShowCustomer(true)
+    window.addEventListener('pos:open-customer', openCustomer)
+    return () => window.removeEventListener('pos:open-customer', openCustomer)
+  }, [])
 
   useEffect(() => {
     loadInvoiceNumber(cart.billType)
@@ -430,6 +437,14 @@ export default function POSPage() {
             <span className="font-semibold text-sm">{meta.label} Cart</span>
             <span className="ml-auto text-xs font-mono" style={{ color: 'var(--text-3)' }}>{invoiceNumber || '...'}</span>
             {cart.items.length > 0 && <span className="badge-blue">{cart.items.length} items</span>}
+            {cart.items.length > 0 && (
+              <button
+                onClick={() => { if (window.confirm('Clear all items from the cart?')) { cart.clear(); setCartFocusedIdx(-1); searchRef.current?.focus() } }}
+                className="btn-ghost btn-sm gap-1 shrink-0 text-red-500 hover:bg-red-500/10"
+                title="Clear all items">
+                <Trash2 size={13} /> Clear
+              </button>
+            )}
           </div>
           <Cart focusedIdx={cartFocusedIdx} onFocusIdx={setCartFocusedIdx} />
         </div>

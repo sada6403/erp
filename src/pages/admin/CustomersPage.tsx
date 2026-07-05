@@ -4,6 +4,7 @@ import Modal from '@/components/shared/Modal'
 import type { Customer } from '@/types'
 import { Plus, Search, Edit2, Eye } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { validateCustomer } from '@/lib/validateCustomer'
 
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([])
@@ -103,7 +104,8 @@ function CustomerForm({ customer, onClose, onSave }: { customer: Customer | null
   const [saving, setSaving] = useState(false)
 
   const save = async () => {
-    if (!form.name) { toast.error('Name is required'); return }
+    const err = validateCustomer(form)
+    if (err) { toast.error(err); return }
     setSaving(true)
     if (customer) { await window.api.customers.update(customer.id, form); toast.success('Customer updated') }
     else { await window.api.customers.create(form); toast.success('Customer created') }
@@ -120,11 +122,11 @@ function CustomerForm({ customer, onClose, onSave }: { customer: Customer | null
       <div className="space-y-4">
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Full Name *</label><input value={form.name} onChange={f('name')} className="input" /></div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Phone</label><input value={form.phone} onChange={f('phone')} className="input" /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Mobile Number *</label><input value={form.phone} onChange={f('phone')} className="input" /></div>
           <div><label className="block text-xs font-medium text-slate-400 mb-1">NIC</label><input value={form.nic} onChange={f('nic')} className="input" /></div>
         </div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Email</label><input value={form.email} onChange={f('email')} className="input" /></div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Address</label><input value={form.address} onChange={f('address')} className="input" /></div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Address *</label><input value={form.address} onChange={f('address')} className="input" /></div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Credit Limit (Rs.)</label><input type="number" value={form.credit_limit} onChange={f('credit_limit')} className="input" /></div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><textarea value={form.notes} onChange={f('notes')} className="input h-20 resize-none" /></div>
       </div>
