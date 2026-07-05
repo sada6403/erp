@@ -3,8 +3,39 @@ import { BrowserWindow, shell, app } from 'electron'
 import Store from 'electron-store'
 import path from 'path'
 import fs from 'fs'
+import QRCode from 'qrcode'
 
 const store = new Store()
+
+// ─── Code 39 barcode → monochrome SVG (real, scannable) ──────────────────────
+const CODE39: Record<string, string> = {
+  '0':'000110100','1':'100100001','2':'001100001','3':'101100000','4':'000110001',
+  '5':'100110000','6':'001110000','7':'000100101','8':'100100100','9':'001100100',
+  'A':'100001001','B':'001001001','C':'101001000','D':'000011001','E':'100011000',
+  'F':'001011000','G':'000001101','H':'100001100','I':'001001100','J':'000011100',
+  'K':'100000011','L':'001000011','M':'101000010','N':'000010011','O':'100010010',
+  'P':'001010010','Q':'000000111','R':'100000110','S':'001000110','T':'000010110',
+  'U':'110000001','V':'011000001','W':'111000000','X':'010010001','Y':'110010000',
+  'Z':'011010000','-':'010000101','.':'110000100',' ':'011000100','$':'010101000',
+  '/':'010100010','+':'010001010','%':'000101010','*':'010010100',
+}
+function buildBarcodeSvg(raw: string, height = 44): string {
+  const text = String(raw || '').toUpperCase().replace(/[^0-9A-Z\-. $/+%]/g, '-')
+  const data = `*${text}*`
+  const NARROW = 2, WIDE = 5, GAP = NARROW
+  let x = 0
+  const rects: string[] = []
+  for (const ch of data) {
+    const pat = CODE39[ch] || CODE39['-']
+    for (let i = 0; i < 9; i++) {
+      const w = pat[i] === '1' ? WIDE : NARROW
+      if (i % 2 === 0) rects.push(`<rect x="${x}" y="0" width="${w}" height="${height}"/>`) // even = bar
+      x += w
+    }
+    x += GAP
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} ${height}" preserveAspectRatio="none" fill="#000">${rects.join('')}</svg>`
+}
 
 interface PaymentLine {
   method: string
@@ -53,7 +84,7 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
   ipcMain.handle('printer:printInvoice', async (_e, payload: InvoicePayload) => {
     try {
       const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const html = buildInvoiceHtml(payload, settings)
+      const html = await buildInvoiceHtml(payload, settings)
       const design = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
       await printHtml(html, design, selectedPaperType(settings, design))
       return { success: true }
@@ -63,7 +94,7 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
   ipcMain.handle('printer:printTransfer', async (_e, payload: Record<string, unknown>) => {
     try {
       const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const html = buildTransferNoteHtml(payload, settings)
+      const html = await buildTransferNoteHtml(payload, settings)
       await printHtml(html, 'a4', 'A4')
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
@@ -95,13 +126,31 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
 
 // A4 stock-transfer note / gate pass — the printable hard copy carrying the
 // tracking number. Meant to travel with the goods and be signed at each handover.
-function buildTransferNoteHtml(t: Record<string, unknown>, settings: Record<string, unknown>): string {
+async function buildTransferNoteHtml(t: Record<string, unknown>, settings: Record<string, unknown>): Promise<string> {
   const company = esc((settings.company_name as string) || 'Nature Plantation')
   const v = (k: string) => esc(String(t[k] ?? ''))
+  const raw = (k: string) => String(t[k] ?? '')
   const fmtDate = (s: unknown) => s ? esc(new Date(String(s)).toLocaleString()) : '—'
   const tracking = esc(String(t.transfer_number || t.id || ''))
   const qty = esc(String(t.quantity ?? ''))
   const status = esc(String(t.status ?? '').replace(/_/g, ' ').toUpperCase())
+
+  // Real QR carrying the full transfer detail — scan it to verify authenticity.
+  const qrText = [
+    `${(settings.company_name as string) || 'Nature Plantation'} — STOCK TRANSFER`,
+    `Tracking: ${raw('transfer_number') || raw('id')}`,
+    `Status: ${String(t.status ?? '').replace(/_/g, ' ')}`,
+    `Product: ${raw('product_name')} (${raw('sku')})`,
+    `Qty: ${raw('quantity')} units`,
+    `From: ${raw('from_branch_name')}  ->  To: ${raw('to_branch_name')}`,
+    `Requested by: ${raw('initiated_by_name')}`,
+    t.approved_by_name ? `Approved by: ${raw('approved_by_name')}` : '',
+    t.driver_name ? `Driver: ${raw('driver_name')} ${raw('vehicle_number')}` : '',
+    t.received_by_name ? `Received by: ${raw('received_by_name')}` : '',
+  ].filter(Boolean).join('\n')
+  let qrSvg = ''
+  try { qrSvg = await QRCode.toString(qrText, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }) } catch { /* ignore */ }
+  const barcodeSvg = buildBarcodeSvg(String(t.transfer_number || t.id || ''), 40)
   return `<!doctype html><html><head><meta charset="utf-8"><style>
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 24px; }
@@ -120,11 +169,20 @@ function buildTransferNoteHtml(t: Record<string, unknown>, settings: Record<stri
     .sign { flex:1; text-align:center; }
     .sign .line { border-top:1px solid #111; margin-top:40px; padding-top:6px; font-size:11px; color:#444; }
     .foot { margin-top:26px; font-size:10px; color:#888; text-align:center; }
+    .head { gap:20px; }
+    .qr { width:112px; height:112px; flex-shrink:0; }
+    .qr svg { width:100%; height:100%; display:block; }
+    .barcode { margin-top:12px; max-width:250px; line-height:0; }
+    .barcode svg { width:100%; height:38px; display:block; }
   </style></head><body>
     <div class="head">
-      <div><div class="company">${company}</div><div class="title">STOCK TRANSFER NOTE</div></div>
+      <div>
+        <div class="company">${company}</div><div class="title">STOCK TRANSFER NOTE</div>
+        ${barcodeSvg ? `<div class="barcode">${barcodeSvg}</div>` : ''}
+      </div>
       <div class="track"><div class="lbl">Tracking No.</div><div class="num">${tracking}</div>
         <div class="status">${status}</div></div>
+      ${qrSvg ? `<div class="qr">${qrSvg}</div>` : ''}
     </div>
     <table>
       <tr><td class="k">Product</td><td class="prod">${v('product_name')} <span style="font-weight:400;color:#666">(${v('sku')})</span></td></tr>
@@ -253,7 +311,7 @@ function selectedPaperType(settings: Record<string, unknown>, design: 'dot' | 't
   return scoped === 'A5' ? 'A5' : 'A4'
 }
 
-function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string, unknown>): string {
+async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string, unknown>): Promise<string> {
   const companyName    = (settings.company_name    as string) || 'Nature Plantation'
   const companyAddress = (settings.company_address as string) || ''
   const companyPhone   = (settings.company_phone   as string) || ''
@@ -317,7 +375,30 @@ function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string, unkn
   const pageMinHeight = paperType === '80mm' || paperType === '58mm' || dotMatrix ? 'auto' : paperType === 'A5' ? '780px' : '1100px'
   const pagePadding = dotMatrix ? '24px 36px' : paperType === '80mm' || paperType === '58mm' ? '14px' : '48px'
   const compact = paperType === '80mm' || paperType === '58mm'
+  const thermal = activeDesign === 'thermal'
   const printPageSize = dotMatrix ? '241mm 279mm' : paperType === '58mm' ? '58mm 297mm' : paperType === '80mm' ? '80mm 297mm' : paperType === 'A5' ? 'A5' : 'A4'
+
+  // Real barcode (Code39 of the invoice no) + real QR encoding the full bill (scannable)
+  const barcodeSvg = showBarcode ? buildBarcodeSvg(String(payload.invoice_number || '')) : ''
+  const money = (n: unknown) => `${currency}${Number(n || 0).toFixed(2)}`
+  const payLabelForQr = String(payload.payment_method || '').replace(/_/g, ' ')
+  const qrText = [
+    companyName,
+    `Invoice: ${payload.invoice_number}`,
+    `Date: ${invoiceDate}`,
+    payload.cashier_name ? `Cashier: ${payload.cashier_name}` : '',
+    branchName ? `Branch: ${branchName}` : '',
+    payload.customer_name && payload.customer_name !== 'Walk-in' ? `Customer: ${payload.customer_name}` : '',
+    `Total: ${money(payload.total_amount)}`,
+    `Paid: ${money(payload.paid_amount)}${payLabelForQr ? ' (' + payLabelForQr + ')' : ''}`,
+    '--- Items ---',
+    ...payload.items.slice(0, 20).map(i => `${i.product_name} x${i.quantity} = ${money(i.line_total)}`),
+    payload.items.length > 20 ? `...+${payload.items.length - 20} more` : '',
+  ].filter(Boolean).join('\n')
+  let qrSvg = ''
+  if (showQr) {
+    try { qrSvg = await QRCode.toString(qrText, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }) } catch { /* ignore */ }
+  }
 
   const paymentMethodLabel: Record<string, string> = {
     cash: 'Cash',
@@ -422,11 +503,11 @@ td{padding:11px 14px;font-size:12px;color:#374151}
 .foot{border-top:2px solid #e5e7eb;padding-top:20px;text-align:center}
 .foot .ty{font-size:17px;font-weight:700;color:#15803d;margin-bottom:4px}
 .foot .contact{font-size:11px;color:#9ca3af;margin-top:10px}
-.barcode{height:34px;margin:8px auto;background:repeating-linear-gradient(90deg,#111 0 2px,transparent 2px 4px,#111 4px 5px,transparent 5px 8px);max-width:230px}
-.qr{width:54px;height:54px;margin:8px auto;background:
-  linear-gradient(90deg,#111 50%,transparent 0) 0 0/8px 8px,
-  linear-gradient(#111 50%,transparent 0) 0 0/8px 8px;
-  border:6px solid #111}
+.barcode{margin:12px auto 2px;max-width:250px;line-height:0}
+.barcode svg{width:100%;height:46px;display:block}
+.bc-num{font-size:10px;font-family:monospace;letter-spacing:2px;margin-bottom:8px;color:#111}
+.qr{width:120px;height:120px;margin:12px auto;line-height:0}
+.qr svg{width:100%;height:100%;display:block}
 .sig{width:190px;margin:24px auto 0;border-top:1px solid #6b7280;padding-top:5px;font-size:10px;color:#4b5563}
 ${compact ? `
 .hdr{display:block;text-align:center;margin-bottom:10px}.brand{justify-content:center;gap:8px}.inv-right{text-align:center;margin-top:6px}
@@ -436,7 +517,7 @@ ${compact ? `
 table{margin-bottom:12px}th,td{padding:5px 3px;font-size:8px}.pname{font-size:9px}.psku{font-size:7px}
 .bottom{display:block;margin-bottom:12px}.pay-box{padding:9px;margin-bottom:8px;border-radius:6px}.pay-box h4{font-size:8px}.badge{font-size:8px;padding:3px 8px}.prow{font-size:9px;padding:3px 0}.tot-box{width:100%}
 .trow{font-size:10px;padding:5px 0}.trow.grand{padding:9px 10px;border-radius:6px}.trow.grand .tl,.trow.grand .tv{font-size:13px}.note{padding:7px 9px;margin-bottom:12px}.note p,.foot .contact{font-size:8px}.foot{padding-top:10px}.foot .ty{font-size:12px}
-.barcode{height:24px;max-width:180px}.qr{width:42px;height:42px;border-width:4px}
+.barcode{max-width:210px}.barcode svg{height:40px}.qr{width:104px;height:104px}
 ` : ''}
 ${dotMatrix ? `
 body{font-family:'Courier New',monospace}.page{font-family:'Courier New',monospace}
@@ -446,6 +527,29 @@ body{font-family:'Courier New',monospace}.page{font-family:'Courier New',monospa
 thead tr{background:#fff;border-top:1px dashed #111;border-bottom:1px dashed #111}th{color:#111;padding:6px 8px}td{padding:6px 8px}
 tbody tr,tbody tr:nth-child(even){background:#fff;border-bottom:1px dashed #d1d5db}.trow.grand{background:#fff;border:1px dashed #111;border-radius:0}.trow.grand .tl,.trow.grand .tv{color:#111}
 .note{background:#fff;border:1px dashed #111;border-radius:0}.foot{border-top:1px dashed #111}
+` : ''}
+${thermal ? `
+/* Thermal: clean black & white, no logo, no colour */
+.logo{display:none}
+.brand{gap:0}
+.co-name,.inv-word,.inv-num,.foot .ty,.pay-box h4,.pv.green,.badge{color:#000!important}
+.co-sub{color:#555}
+.gbar{display:none}
+/* borderless, professional receipt — separator lines instead of boxes */
+.two{border-top:1px solid #000;padding-top:8px}
+.meta-box{background:#fff!important;border:none!important;border-radius:0!important;padding:0!important;min-width:0!important}
+.info-box h4{border-bottom:1px solid #000!important;color:#000!important}
+.pay-box{background:#fff!important;border:none!important;border-radius:0!important;padding:8px 0 0!important;margin-top:6px!important;border-top:1px dashed #000!important}
+.pay-box h4{border-bottom:1px solid #000!important;padding-bottom:3px;display:inline-block}
+thead tr{background:#fff!important;border-top:1px solid #000;border-bottom:1px solid #000}
+th{color:#000!important}
+tbody tr:nth-child(even){background:#fff!important}
+.badge{background:#000!important;color:#fff!important}
+.trow.grand{background:#fff!important;border:none;border-top:1.5px solid #000;border-bottom:1.5px solid #000;border-radius:0;margin:8px 0 0}
+.trow.grand .tl,.trow.grand .tv{color:#000!important}
+.note{background:#fff!important;border:none!important;border-top:1px dashed #000!important;border-radius:0!important;padding:8px 0 0!important;margin-top:8px;text-align:center}
+.note p{font-style:italic}
+.foot{border-top:1px solid #000!important}
 ` : ''}
 
 @media print{
@@ -541,8 +645,8 @@ tbody tr,tbody tr:nth-child(even){background:#fff;border-bottom:1px dashed #d1d5
   ${invoiceTerms ? `<div class="note"><p>${esc(invoiceTerms)}</p></div>` : ''}
 
   <div class="foot">
-    ${showBarcode ? `<div class="barcode"></div><div style="font-size:10px;font-family:monospace">${esc(payload.invoice_number)}</div>` : ''}
-    ${showQr ? `<div class="qr"></div>` : ''}
+    ${showBarcode && barcodeSvg ? `<div class="barcode">${barcodeSvg}</div><div class="bc-num">${esc(payload.invoice_number)}</div>` : ''}
+    ${showQr && qrSvg ? `<div class="qr">${qrSvg}</div>` : ''}
     ${showSignature ? `<div class="sig">Authorized Signature</div>` : ''}
     <div class="ty">${esc(footerMessage)}</div>
     ${contactLine ? `<div class="contact">${contactLine}</div>` : ''}

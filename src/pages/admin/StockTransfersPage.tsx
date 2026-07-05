@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import { useAuthStore } from '@/store/authStore'
@@ -272,11 +272,18 @@ function ReceiveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
 }
 
 // ─── Transfer Card ────────────────────────────────────────────────────────────
-function TransferCard({ t, userId, isAdmin, myBranchId, onRefresh }: {
+function TransferCard({ t, userId, isAdmin, myBranchId, onRefresh, onModalToggle }: {
   t: Transfer; userId: string; isAdmin: boolean; myBranchId: string; onRefresh: () => void
+  onModalToggle?: (open: boolean) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [modal, setModal] = useState<'approve' | 'reject' | 'dispatch' | 'receive' | null>(null)
+
+  // Tell the page to pause its 12s auto-refresh while a modal is open here
+  useEffect(() => {
+    onModalToggle?.(modal !== null)
+    return () => onModalToggle?.(false)
+  }, [modal, onModalToggle])
   const [history, setHistory] = useState<Record<string, unknown>[]>([])
   const [printing, setPrinting] = useState(false)
 
@@ -482,9 +489,12 @@ export default function StockTransfersPage() {
     }
   }, [statusFilter, branchFilter, isAdmin, myBranchId, direction])
 
+  // Pause the background auto-refresh while any card modal is open, so it doesn't
+  // wipe the form / close the dialog mid-edit.
+  const modalOpenRef = useRef(false)
   useEffect(() => { load() }, [load])
   useEffect(() => {
-    const timer = window.setInterval(load, 12000)
+    const timer = window.setInterval(() => { if (!modalOpenRef.current) load() }, 12000)
     return () => window.clearInterval(timer)
   }, [load])
   useEffect(() => {
@@ -603,6 +613,7 @@ export default function StockTransfersPage() {
             key={t.id} t={t}
             userId={userId} isAdmin={isAdmin} myBranchId={myBranchId}
             onRefresh={load}
+            onModalToggle={open => { modalOpenRef.current = open }}
           />
         ))}
       </div>

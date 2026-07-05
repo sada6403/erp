@@ -465,6 +465,8 @@ export default function POSPage() {
             cart.clear()
             setCartFocusedIdx(-1)
             loadInvoiceNumber(cart.billType)
+            // Refresh product-grid stock counts now that the sale deducted stock
+            window.dispatchEvent(new Event('pos:stock-changed'))
             searchRef.current?.focus()
             toast.success(
               cart.billType === 'QUOTATION' ? 'Quotation saved!' :

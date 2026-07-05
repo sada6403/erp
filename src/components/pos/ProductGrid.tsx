@@ -202,15 +202,21 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
   const [checkProduct, setCheckProduct] = useState<Product | null>(null)
   const gridRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    setLoading(true)
+  const load = useCallback((silent = false) => {
+    if (!silent) setLoading(true)
     window.api.products.list({ category_id: categoryId || undefined, is_active: true })
-      .then((res: any) => {
-        if (res.success) setProducts(res.data as Product[])
-        setFocused(0)
-      })
+      .then((res: any) => { if (res.success) setProducts(res.data as Product[]) })
       .finally(() => setLoading(false))
   }, [categoryId])
+
+  useEffect(() => { setFocused(0); load() }, [load])
+
+  // Refresh stock counts after a sale (or any stock change) without flashing the skeleton
+  useEffect(() => {
+    const onChange = () => load(true)
+    window.addEventListener('pos:stock-changed', onChange)
+    return () => window.removeEventListener('pos:stock-changed', onChange)
+  }, [load])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     const cols = Math.floor((gridRef.current?.offsetWidth || 700) / 180)

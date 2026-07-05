@@ -78,6 +78,7 @@ const api = {
     availability:  (productId: string)  => ipcRenderer.invoke('stocks:availability', productId),
     updateTransfer:(id: string, status: string, payload?: unknown) => ipcRenderer.invoke('stocks:updateTransfer', id, status, payload),
     transferHistory:(transferId: string) => ipcRenderer.invoke('stocks:transferHistory', transferId),
+    trackTransfer:(query: string) => ipcRenderer.invoke('stocks:trackTransfer', query),
     branchSummary: ()                   => ipcRenderer.invoke('stocks:branchSummary'),
     branchDetail:  (branchId: string)   => ipcRenderer.invoke('stocks:branchDetail', branchId),
   },

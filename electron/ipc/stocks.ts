@@ -297,12 +297,15 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!transfer) throw new Error('Transfer not found')
 
-      // Physical transfer flow: goods leave source on APPROVE (deducted, now in
-      // transit), and only reach destination on RECEIVE. So 'received' is NOT
-      // allowed straight from pending (source hasn't been deducted yet).
+      // Two supported flows:
+      //  • Quick accept (dashboard): pending -> received (source deducted + dest
+      //    credited in one step).
+      //  • Full tracked flow: pending -> approved (source deducted, in transit)
+      //    -> dispatched -> received (dest credited).
+      // The receive handler deducts the source first if it wasn't already.
       const transitions: Record<string, string[]> = {
-        pending:            ['approved', 'rejected', 'cancelled'],
-        pending_approval:   ['approved', 'rejected', 'cancelled'],
+        pending:            ['approved', 'rejected', 'cancelled', 'received', 'partially_received'],
+        pending_approval:   ['approved', 'rejected', 'cancelled', 'received', 'partially_received'],
         approved:           ['ready_for_dispatch', 'dispatched', 'received', 'partially_received', 'cancelled'],
         ready_for_dispatch: ['dispatched', 'received', 'partially_received', 'cancelled'],
         dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy'],
@@ -413,6 +416,21 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         // 2. RECEIVE / partial / discrepancy → goods arrive: credit destination
         //    with the actually-received qty (missing goods stay lost in transit).
         if (creditsDestination) {
+          // Quick accept straight from pending: goods never left source — deduct now.
+          if (!sourceDeducted) {
+            const changed = db.prepare(`UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
+              WHERE product_id=? AND branch_id=? AND quantity>=?`)
+              .run(qty, transfer.product_id, transfer.from_branch_id, qty)
+            if (!changed.changes) throw new Error('Insufficient source stock')
+            movementRecords.push(insertStockMovement(db, {
+              product_id: String(transfer.product_id),
+              from_branch_id: String(transfer.from_branch_id),
+              to_branch_id: String(transfer.to_branch_id),
+              quantity: qty, movement_type: 'TRANSFER', reference_transfer_id: id,
+              notes: `Accepted - deducted from source: ${transfer.transfer_number || id}`,
+              created_by: (user?.id as string) || null,
+            }))
+          }
           const received = Number(patch.received_quantity ?? qty)
           const damaged  = Number(patch.damaged_quantity || 0)
           if (received > 0 || damaged > 0) {
@@ -495,7 +513,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       // Sync whichever branch stock actually changed
       const changedBranches = new Set<string>()
-      if (status === 'approved' || (status === 'cancelled' && sourceDeducted)) changedBranches.add(String(transfer.from_branch_id))
+      if (status === 'approved' || (creditsDestination && !sourceDeducted) || (status === 'cancelled' && sourceDeducted)) changedBranches.add(String(transfer.from_branch_id))
       if (creditsDestination) changedBranches.add(String(transfer.to_branch_id))
       for (const bId of changedBranches) {
         const s = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
@@ -537,6 +555,39 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ORDER BY h.created_at ASC, h.id ASC
       `).all(transferId)
       return { success: true, data: rows }
+    } catch (err) { return { success: false, error: (err as Error).message } }
+  })
+
+  // Track a single transfer by tracking number (or id) — full detail + live timeline
+  ipcMain.handle('stocks:trackTransfer', (_e, query: string) => {
+    try {
+      const db = getDb()
+      const q = String(query || '').trim()
+      if (!q) return { success: false, error: 'Enter a tracking number' }
+      const t = db.prepare(`
+        SELECT st.*, p.name AS product_name, p.sku,
+               fb.name AS from_branch_name, tb.name AS to_branch_name,
+               iu.name AS initiated_by_name, au.name AS approved_by_name,
+               ru.name AS received_by_name, du.name AS dispatched_by_name
+        FROM stock_transfers st
+        LEFT JOIN products p  ON p.id  = st.product_id
+        LEFT JOIN branches fb ON fb.id = st.from_branch_id
+        LEFT JOIN branches tb ON tb.id = st.to_branch_id
+        LEFT JOIN users iu ON iu.id = st.initiated_by
+        LEFT JOIN users au ON au.id = st.approved_by
+        LEFT JOIN users ru ON ru.id = st.received_by
+        LEFT JOIN users du ON du.id = st.released_by
+        WHERE st.transfer_number = ? OR st.id = ?
+        LIMIT 1
+      `).get(q, q) as Record<string, unknown> | undefined
+      if (!t) return { success: false, error: `No transfer found for "${q}"` }
+      const history = db.prepare(`
+        SELECT h.status, h.notes, h.quantity, h.created_at, u.name AS actor_name
+        FROM stock_transfer_history h
+        LEFT JOIN users u ON u.id = h.created_by
+        WHERE h.transfer_id = ? ORDER BY h.created_at ASC, h.id ASC
+      `).all(t.id)
+      return { success: true, data: { transfer: t, history } }
     } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
