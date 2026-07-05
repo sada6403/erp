@@ -81,9 +81,7 @@ function overdueChip(days: number) {
 }
 
 function printReceiptWindow(data: ReceiptData) {
-  const w = window.open('', '_blank', 'width=380,height=600')
-  if (!w) return
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
     body { font-family: 'Courier New', monospace; padding: 24px; font-size: 13px; color: #111; }
     .center { text-align: center; } .bold { font-weight: bold; }
     .line { border-top: 1px dashed #666; margin: 8px 0; }
@@ -117,9 +115,175 @@ function printReceiptWindow(data: ReceiptData) {
         : '<p>Thank you for your payment</p>'}
       <p style="margin-top: 8px; font-size: 10px;">Powered by Enterprise POS ERP</p>
     </div>
-  </body></html>`)
-  w.document.close()
-  setTimeout(() => { w.print(); }, 600)
+  </body></html>`
+  // Print via a hidden iframe — window.open('') fails inside Electron (about: link).
+  const iframe = document.createElement('iframe')
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+  document.body.appendChild(iframe)
+  const doc = iframe.contentWindow?.document
+  if (!doc) { document.body.removeChild(iframe); return }
+  doc.open(); doc.write(html); doc.close()
+  setTimeout(() => {
+    iframe.contentWindow?.focus()
+    iframe.contentWindow?.print()
+    setTimeout(() => { try { document.body.removeChild(iframe) } catch { /* ignore */ } }, 1500)
+  }, 300)
+}
+
+// ─── Passbook Print ──────────────────────────────────────────────────────────
+function printPassbookWindow(detail: Inst) {
+  const schedule = (detail.schedule as ScheduleRow[]) || []
+  const payments = (detail.payments as Inst[]) || []
+  const monthly = Number(detail.computed_monthly || detail.monthly_amount || 0)
+
+  const blank = `<div class="blank-line"></div>`
+
+  const rows = schedule.map(s => {
+    const isPaid   = s.status === 'paid' || s.paid_amount > 0
+    const isOverdue = s.status === 'overdue'
+
+    let matched: Inst | null = null
+    if (isPaid && s.paid_at) {
+      const d = new Date(s.paid_at).toDateString()
+      matched = payments.find(p => p.paid_at && new Date(p.paid_at as string).toDateString() === d) || null
+    }
+
+    const mark = isPaid
+      ? `<span style="color:#16a34a;font-weight:700;"> ✓</span>`
+      : isOverdue
+      ? `<span style="color:#dc2626;font-weight:700;"> !</span>`
+      : ''
+
+    return `<tr class="${isPaid ? 'paid' : 'unpaid'}">
+      <td style="font-weight:700;">${s.installment_no}${mark}</td>
+      <td>${dateFmt(s.due_date)}</td>
+      <td style="font-weight:600;">${fmt(s.total_due)}${s.penalty > 0 ? `<br><small style="color:#dc2626;">+${fmt(s.penalty)} penalty</small>` : ''}</td>
+      <td>${isPaid && s.paid_at ? dateFmt(s.paid_at) : blank}</td>
+      <td>${isPaid && s.paid_amount > 0 ? fmt(s.paid_amount) : blank}</td>
+      <td>${matched ? String(matched.method || '').replace(/_/g, ' ').toUpperCase() : blank}</td>
+      <td style="font-family:monospace;font-size:9px;">${matched?.receipt_number ? String(matched.receipt_number) : blank}</td>
+      <td>${blank}</td>
+      <td>${blank}</td>
+    </tr>`
+  }).join('')
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Passbook — ${detail.contract_number as string}</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;padding:18px;color:#1a1a1a;background:#fff;font-size:12px}
+  .hdr{background:linear-gradient(135deg,#14532d,#15803d);color:#fff;padding:16px 20px;border-radius:10px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+  .co{font-size:19px;font-weight:700;letter-spacing:.8px}
+  .co-sub{font-size:9.5px;opacity:.75;margin-top:2px}
+  .cnt-lbl{font-size:8.5px;opacity:.8;text-transform:uppercase;letter-spacing:.8px;text-align:right}
+  .cnt-val{font-family:monospace;font-size:17px;font-weight:700;background:rgba(255,255,255,.2);padding:5px 13px;border-radius:6px;margin-top:4px;display:inline-block}
+  .info-grid{display:grid;grid-template-columns:2fr 1fr 1fr 1fr;gap:9px;margin-bottom:11px}
+  .ibox{border:1px solid #e2e8f0;border-radius:7px;padding:7px 11px}
+  .ilbl{font-size:8px;text-transform:uppercase;color:#64748b;font-weight:700;letter-spacing:.4px}
+  .ival{font-size:13px;font-weight:700;color:#1e293b;margin-top:2px}
+  .fin{display:grid;grid-template-columns:repeat(5,1fr);background:#f1f5f9;border-radius:8px;padding:11px 15px;margin-bottom:13px;gap:6px}
+  .fi{text-align:center}
+  .fl{font-size:8px;text-transform:uppercase;color:#64748b;font-weight:700;letter-spacing:.3px}
+  .fv{font-size:13px;font-weight:700;margin-top:3px}
+  .g{color:#16a34a}.b{color:#1d4ed8}.r{color:#dc2626}.d{color:#1e293b}
+  .sec{font-size:9.5px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:#334155;margin-bottom:7px;padding-bottom:5px;border-bottom:2px solid #14532d}
+  table{width:100%;border-collapse:collapse;font-size:10px}
+  thead tr{background:#14532d;color:#fff}
+  th{padding:7px 7px;text-align:center;font-weight:600;font-size:9px;letter-spacing:.2px}
+  td{padding:7px 6px;border-bottom:1px solid #e2e8f0;text-align:center;vertical-align:middle}
+  tr.paid{background:#f0fdf4}
+  tr.unpaid{background:#fff}
+  .blank-line{border-bottom:1px solid #b0bec5;height:15px;margin:0 6px}
+  .foot{margin-top:13px;display:flex;justify-content:space-between;align-items:flex-end;border-top:1px solid #e2e8f0;padding-top:9px}
+  .fn{font-size:8px;color:#94a3b8;max-width:68%;line-height:1.5}
+  .sig-area{text-align:right}
+  .sig-line{border-bottom:1px solid #475569;width:130px;height:22px;margin:0 0 3px auto}
+  .sig-lbl{font-size:8px;color:#475569}
+  @media print{body{padding:8px}@page{margin:7mm 9mm;size:A4 portrait}}
+</style></head><body>
+
+<div class="hdr">
+  <div>
+    <div class="co">🌿 Nature Plantation</div>
+    <div class="co-sub">Installment Payment Passbook</div>
+  </div>
+  <div>
+    <div class="cnt-lbl">Contract Number</div>
+    <div class="cnt-val">${detail.contract_number as string}</div>
+  </div>
+</div>
+
+<div class="info-grid">
+  <div class="ibox">
+    <div class="ilbl">Customer Name</div>
+    <div class="ival">${detail.customer_name as string}</div>
+  </div>
+  <div class="ibox">
+    <div class="ilbl">Phone</div>
+    <div class="ival">${(detail.customer_phone as string) || '—'}</div>
+  </div>
+  <div class="ibox">
+    <div class="ilbl">Branch</div>
+    <div class="ival">${(detail.branch_name as string) || '—'}</div>
+  </div>
+  <div class="ibox">
+    <div class="ilbl">Start Date</div>
+    <div class="ival">${dateFmt(detail.start_date as string)}</div>
+  </div>
+</div>
+
+<div class="fin">
+  <div class="fi"><div class="fl">Cash Price</div><div class="fv d">${fmt(detail.cash_price)}</div></div>
+  <div class="fi"><div class="fl">Down Payment</div><div class="fv g">${fmt(detail.down_payment)}</div></div>
+  <div class="fi"><div class="fl">Financed Amount</div><div class="fv d">${fmt(detail.financed_amount)}</div></div>
+  <div class="fi"><div class="fl">Monthly EMI × ${detail.installment_count}</div><div class="fv b">${fmt(monthly)}</div></div>
+  <div class="fi"><div class="fl">Total Payable</div><div class="fv r">${fmt(detail.total_amount)}</div></div>
+</div>
+
+<div class="sec">Payment Schedule &amp; Record</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:30px">#</th>
+      <th>Due Date</th>
+      <th>Amount Due</th>
+      <th>Date Paid</th>
+      <th>Amount Paid</th>
+      <th>Method</th>
+      <th>Receipt No.</th>
+      <th style="width:95px">Staff Signature</th>
+      <th style="width:95px">Customer Signature</th>
+    </tr>
+  </thead>
+  <tbody>${rows}</tbody>
+</table>
+
+<div class="foot">
+  <div class="fn">
+    &#9432; This passbook is the official payment record for your installment agreement with Nature Plantation.<br>
+    Please bring this passbook on every payment visit. Keep it safe &mdash; lost passbooks will not be replaced.<br>
+    Interest: ${detail.interest_type as string} @ ${detail.interest_rate}% &nbsp;|&nbsp; Duration: ${detail.installment_count} months
+  </div>
+  <div class="sig-area">
+    <div class="sig-line"></div>
+    <div class="sig-lbl">Authorised Signature</div>
+    <div style="margin-top:5px;font-size:7px;color:#94a3b8;">Printed: ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+  </div>
+</div>
+
+</body></html>`
+
+  const iframe = document.createElement('iframe')
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+  document.body.appendChild(iframe)
+  const doc = iframe.contentWindow?.document
+  if (!doc) { document.body.removeChild(iframe); return }
+  doc.open(); doc.write(html); doc.close()
+  setTimeout(() => {
+    iframe.contentWindow?.focus()
+    iframe.contentWindow?.print()
+    setTimeout(() => { try { document.body.removeChild(iframe) } catch { /* ignore */ } }, 1500)
+  }, 300)
 }
 
 // ─── Main Page ───────────────────────────────────────────────────────────────
@@ -425,6 +589,15 @@ function DetailPanel({ detail, onPayNow, onRefresh }: {
   }
 
   return (
+    <div>
+      <div className="flex items-center justify-between mb-3">
+        <h4 className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>Account Details</h4>
+        <button
+          onClick={() => printPassbookWindow(detail)}
+          className="btn-secondary btn-sm gap-1.5 text-xs">
+          <Printer size={12} /> Print Passbook
+        </button>
+      </div>
     <div className="grid grid-cols-3 gap-5">
       {/* Left: Summary */}
       <div className="col-span-1 space-y-2">
@@ -540,6 +713,7 @@ function DetailPanel({ detail, onPayNow, onRefresh }: {
           )}
         </div>
       </div>
+    </div>
     </div>
   )
 }
