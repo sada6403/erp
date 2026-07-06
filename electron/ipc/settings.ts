@@ -1,10 +1,20 @@
 import type { IpcMain } from 'electron'
 import Store from 'electron-store'
-import { safeStorage } from 'electron'
+import { app, safeStorage } from 'electron'
 import crypto from 'crypto'
+import fs from 'fs'
+import path from 'path'
 import { getDb } from '../database'
+import { CloudApi } from '../services/cloudApi'
 
 const store = new Store()
+
+// Company-wide branding keys — synced through the cloud so every activated
+// device of the company shows the same logo/branding.
+export const CLOUD_BRANDING_KEYS = [
+  'company_name', 'company_logo_url', 'login_logo_url', 'pos_bill_logo_url',
+  'invoice_logo_url', 'favicon_url', 'brand_color', 'footer_text',
+] as const
 const MASKED_SECRET = '********'
 const FALLBACK_KEY = crypto.createHash('sha256').update('pos-erp-local-settings-key').digest()
 
@@ -192,6 +202,67 @@ function auditSettingsUpdate(keys: string[]) {
   }
 }
 
+function getCloudApiFromSettings(): CloudApi | null {
+  const settings = store.get('app_settings') as Record<string, unknown> | undefined
+  const baseUrl = String(settings?.cloud_api_url || '').trim()
+  const apiKey = decryptSecret(settings?.cloud_api_key).trim()
+  if (!baseUrl || !apiKey) return null
+  return new CloudApi({ baseUrl, apiKey })
+}
+
+// Upload a local app-img:// logo so other devices can load it, then return
+// the public URL (or null when the upload isn't possible right now).
+async function publishLocalImage(cloud: CloudApi, localUrl: string): Promise<string | null> {
+  try {
+    const fileName = localUrl.replace('app-img://', '')
+    const filePath = path.join(app.getPath('userData'), 'uploads', fileName)
+    if (!fs.existsSync(filePath)) return null
+    const contentTypes: Record<string, string> = {
+      '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+      '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+    }
+    const contentType = contentTypes[path.extname(filePath).toLowerCase()]
+    if (!contentType) return null
+    return await cloud.uploadImage(filePath, fileName, contentType)
+  } catch (err) {
+    console.error('[Settings] Branding image upload failed:', err)
+    return null
+  }
+}
+
+// Push the company branding to the cloud. Retried by the sync service while
+// `branding_push_pending` stays set (e.g. saved while offline).
+export async function pushBrandingToCloud(): Promise<boolean> {
+  const cloud = getCloudApiFromSettings()
+  if (!cloud) return false
+  const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+
+  const branding: Record<string, unknown> = {}
+  let localChanged = false
+  for (const key of CLOUD_BRANDING_KEYS) {
+    let value = settings[key]
+    if (typeof value === 'string' && value.startsWith('app-img://')) {
+      const publicUrl = await publishLocalImage(cloud, value)
+      if (!publicUrl) return false // retry later — image not uploadable right now
+      settings[key] = publicUrl
+      value = publicUrl
+      localChanged = true
+    }
+    branding[key] = value ?? null
+  }
+  if (localChanged) store.set('app_settings', settings)
+
+  try {
+    await cloud.putBranding(branding)
+    store.set('company_branding_synced', JSON.stringify(branding))
+    store.delete('branding_push_pending')
+    return true
+  } catch (err) {
+    console.error('[Settings] Branding push failed:', err)
+    return false
+  }
+}
+
 export function ensureSettingsDefaults() {
   const saved = store.get('app_settings') as Record<string, unknown> || {}
   const merged: Record<string, unknown> = { ...DEFAULTS }
@@ -220,6 +291,20 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
       const next = normalizeForStorage(payload as Record<string, unknown>, current)
       store.set('app_settings', next)
       auditSettingsUpdate(Object.keys(payload as Record<string, unknown>))
+
+      // Company Admin branding edits are company-wide: push to the cloud so
+      // every activated device picks them up on its next sync.
+      const payloadKeys = Object.keys(payload as Record<string, unknown>)
+      const touchesBranding = payloadKeys.some(k => (CLOUD_BRANDING_KEYS as readonly string[]).includes(k))
+      if (touchesBranding) {
+        const user = store.get('auth_user') as Record<string, unknown> | undefined
+        const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+          || user?.permissions as Record<string, unknown> || {}
+        if (perms.all) {
+          store.set('branding_push_pending', true)
+          void pushBrandingToCloud()
+        }
+      }
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })

@@ -7,6 +7,24 @@ function wakeSyncService(): void {
     .catch(() => undefined)
 }
 
+// Enqueue the full users row (cloud-safe columns only) so credential changes
+// (password_hash / pin_hash) always reach the cloud without clobbering other
+// pending fields of the same record.
+export async function enqueueUserRow(userId: string): Promise<void> {
+  try {
+    const db = getDb()
+    const row = db.prepare(`
+      SELECT id, branch_id, role_id, name, email, password_hash, pin_hash,
+             is_active, last_login_at, created_at, updated_at
+      FROM users WHERE id = ?
+    `).get(userId) as Record<string, unknown> | undefined
+    if (!row) return
+    await enqueuSync('users', userId, 'UPDATE', row)
+  } catch {
+    // Non-blocking: sync queue failure shouldn't interrupt main flow
+  }
+}
+
 export async function enqueuSync(
   table: string,
   recordId: string,

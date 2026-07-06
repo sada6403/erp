@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
 import { CloudApi, CloudRateLimitError } from './cloudApi'
+import { CLOUD_BRANDING_KEYS, decryptSecret, pushBrandingToCloud } from '../ipc/settings'
 
 const store = new Store()
 const BATCH_SIZE = 10
@@ -42,7 +43,8 @@ export class SyncService {
   private getCloudApi(): CloudApi | null {
     const settings = store.get('app_settings') as Record<string, unknown> | undefined
     const baseUrl = String(settings?.cloud_api_url || '').trim()
-    const apiKey = String(settings?.cloud_api_key || '').trim()
+    // decryptSecret passes plaintext values through unchanged
+    const apiKey = decryptSecret(settings?.cloud_api_key).trim()
     if (!baseUrl || !apiKey) return null
     return new CloudApi({ baseUrl, apiKey })
   }
@@ -62,6 +64,7 @@ export class SyncService {
       await this.processBatch(cloud)
       if (this.hasPendingPushes()) return
       await this.pullChanges(cloud)
+      await this.syncBranding(cloud)
     } catch (err) {
       if (err instanceof CloudRateLimitError) {
         this.backoffUntil = Date.now() + err.retryAfterSeconds * 1000
@@ -330,6 +333,40 @@ export class SyncService {
     store.set('last_pull_timestamp', newPullTime)
   }
 
+  // Company branding: retry a pending local push first, otherwise pull the
+  // company-wide branding and apply it to this device's app_settings.
+  private async syncBranding(cloud: CloudApi): Promise<void> {
+    try {
+      if (store.get('branding_push_pending')) {
+        const pushed = await pushBrandingToCloud()
+        if (!pushed) return // keep local edit; don't let a pull overwrite it
+      }
+
+      const { branding } = await cloud.getBranding()
+      if (!branding) return
+      const incoming = JSON.stringify(branding)
+      if (incoming === String(store.get('company_branding_synced') || '')) return
+
+      const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+      let changed = false
+      for (const key of CLOUD_BRANDING_KEYS) {
+        if (!(key in branding)) continue
+        const value = branding[key]
+        if (value === null || value === undefined) continue // never set at company level
+        const next = String(value)
+        if (String(settings[key] ?? '') !== next) {
+          settings[key] = next
+          changed = true
+        }
+      }
+      if (changed) store.set('app_settings', settings)
+      store.set('company_branding_synced', incoming)
+    } catch (err) {
+      if (err instanceof CloudRateLimitError) throw err
+      console.error('[SyncService] Branding sync failed:', err)
+    }
+  }
+
   private getColumns(db: ReturnType<typeof getDb>, table: string): Set<string> {
     if (this.colCache.has(table)) return this.colCache.get(table)!
     const cols = new Set(
@@ -356,20 +393,35 @@ export class SyncService {
     const keys = Object.keys(localRow)
     if (keys.length === 0) return
 
-    // Users table: preserve local-only fields (pin, 2FA) and clear lockout on cloud update.
-    // Cloud schema has no login_attempts/locked_until/pin/two_factor_* columns, so a plain
-    // INSERT OR REPLACE would wipe them. Use upsert instead.
+    // Users table: preserve local-only fields (legacy pin, 2FA) and clear lockout on
+    // cloud update. Cloud schema has no login_attempts/locked_until/pin/two_factor_*
+    // columns, so a plain INSERT OR REPLACE would wipe them. Use upsert instead.
     if (table === 'users') {
-      const cloudUpdateCols = keys.filter(k =>
-        ['name','email','phone','password_hash','pin_hash','role_id',
-         'branch_id','is_active','last_login_at','updated_at'].includes(k)
-      )
+      // A blank credential from the cloud must never overwrite a real local hash
+      // (protects against records damaged by the old password-wipe bug).
+      const cloudUpdateCols = keys.filter(k => {
+        if (!['name','email','phone','password_hash','pin_hash','role_id',
+              'branch_id','is_active','last_login_at','updated_at'].includes(k)) return false
+        if ((k === 'password_hash' || k === 'pin_hash') && !localRow[k]) return false
+        return true
+      })
+      const setClauses = [
+        ...cloudUpdateCols.map(k => `${k}=excluded.${k}`),
+        'login_attempts=0', 'locked_until=NULL',
+      ]
       db.prepare(
         `INSERT INTO users (${keys.join(',')}) VALUES (${keys.map(() => '?').join(',')})
-         ON CONFLICT(id) DO UPDATE SET
-           ${cloudUpdateCols.map(k => `${k}=excluded.${k}`).join(',')},
-           login_attempts=0, locked_until=NULL`
+         ON CONFLICT(id) DO UPDATE SET ${setClauses.join(',')}`
       ).run(...keys.map(k => localRow[k]))
+
+      // Auto-repair: if the cloud copy lost its password hash (old wipe bug) but we
+      // still have a good one locally, push our copy back up.
+      if (!row.password_hash) {
+        const local = db.prepare(`SELECT password_hash FROM users WHERE id = ?`).get(String(row.id)) as { password_hash?: string } | undefined
+        if (local?.password_hash) {
+          void import('./syncQueue').then(({ enqueueUserRow }) => enqueueUserRow(String(row.id))).catch(() => undefined)
+        }
+      }
       return
     }
 
@@ -397,9 +449,13 @@ export function getSyncService(): SyncService {
 }
 
 function normalizeForCloud(payload: Record<string, unknown>): Record<string, unknown> {
-  const localOnlyFields = ['synced_at', 'items', 'reason', 'payment', 'password']
+  // `pin` is the legacy plaintext PIN — never ship it; only pin_hash syncs.
+  const localOnlyFields = ['synced_at', 'items', 'reason', 'payment', 'password', 'pin']
   const result = { ...payload }
   for (const field of localOnlyFields) delete result[field]
+  // Never push empty credentials — they must not blank a real hash in the cloud
+  if (result.password_hash === '' || result.password_hash === null) delete result.password_hash
+  if (result.pin_hash === '' || result.pin_hash === null) delete result.pin_hash
   return result
 }
 

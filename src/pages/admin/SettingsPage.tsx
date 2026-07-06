@@ -438,9 +438,70 @@ function GeneralSettings({ form, f, setForm }: { form: Record<string, any>; f: (
       </Section>
 
       <Section title="Self-Hosted Cloud Sync">
-        <Field label="Cloud API URL"><input value={form.cloud_api_url} onChange={f('cloud_api_url')} className="input font-mono text-sm" placeholder="https://api.example.com" /></Field>
-        <p className="text-xs" style={{ color: 'var(--text-3)' }}>API key is managed by your platform administrator. Contact them to get your API key and paste it during POS device setup.</p>
+        <Field label="Cloud API URL"><LockedApiUrlField value={form.cloud_api_url} onChange={f('cloud_api_url')} /></Field>
+        <p className="text-xs" style={{ color: 'var(--text-3)' }}>The server connection is built into the app and managed by your platform administrator.</p>
       </Section>
+    </div>
+  )
+}
+
+// Cloud API URL is built into the app and hidden — changing it requires the
+// support passcode (platform owner / superadmin only).
+function LockedApiUrlField({ value, onChange }: { value: string; onChange: (e: any) => void }) {
+  const [unlocked, setUnlocked] = useState(false)
+  const [asking, setAsking]     = useState(false)
+  const [passcode, setPasscode] = useState('')
+  const [err, setErr]           = useState('')
+
+  const submit = async () => {
+    try {
+      const res = await window.api?.app?.verifySupportPasscode?.(passcode) as { success?: boolean } | undefined
+      if (res?.success) { setUnlocked(true); setAsking(false); setPasscode(''); setErr('') }
+      else setErr('Incorrect passcode')
+    } catch { setErr('Incorrect passcode') }
+  }
+
+  if (unlocked) {
+    return <input value={value} onChange={onChange} className="input font-mono text-sm" placeholder="https://api.example.com" />
+  }
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          value={value ? '••••••••••••••••' : ''}
+          readOnly
+          className="input font-mono text-sm flex-1"
+          style={{ opacity: 0.6, cursor: 'not-allowed' }}
+          placeholder="Managed by your platform administrator"
+        />
+        <button
+          type="button"
+          onClick={() => { setAsking(v => !v); setPasscode(''); setErr('') }}
+          className="px-3 py-2 rounded-lg text-xs font-medium border"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}
+        >
+          Change
+        </button>
+      </div>
+      {asking && (
+        <div className="flex gap-2 items-center">
+          <input
+            type="password"
+            value={passcode}
+            onChange={e => setPasscode(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && submit()}
+            className="input font-mono text-sm flex-1"
+            placeholder="Support passcode"
+            autoFocus
+          />
+          <button type="button" onClick={submit}
+            className="px-3 py-2 rounded-lg text-xs font-medium text-white"
+            style={{ background: 'var(--brand-primary)' }}>
+            Unlock
+          </button>
+        </div>
+      )}
+      {err && <p className="text-xs text-red-400">{err}</p>}
     </div>
   )
 }
@@ -589,14 +650,7 @@ function SyncSettings({ form, f, check, isActivated }: { form: Record<string, an
         <Check label="Enable Offline Sync" checked={Boolean(form.offline_sync_enabled)} onChange={check('offline_sync_enabled')} />
         <div className="grid grid-cols-2 gap-3 mt-2">
           <Field label="Cloud API URL">
-            <input
-              value={form.cloud_api_url}
-              onChange={f('cloud_api_url')}
-              className="input font-mono text-sm"
-              placeholder="https://api.example.com"
-              readOnly={isActivated && Boolean(form.cloud_api_url)}
-              style={isActivated && form.cloud_api_url ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
-            />
+            <LockedApiUrlField value={form.cloud_api_url} onChange={f('cloud_api_url')} />
           </Field>
           <Field label="Sync Interval (minutes)">
             <input type="number" value={form.sync_interval_minutes} onChange={f('sync_interval_minutes')} className="input" min="1" />

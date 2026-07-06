@@ -29,6 +29,8 @@ async function ensureTenantCompatibility(dbSchema: string) {
     `ALTER TABLE invoices ADD COLUMN agent_commission_pct DECIMAL(6,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE invoices ADD COLUMN agent_commission_amount DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE users MODIFY COLUMN password_hash VARCHAR(255) NOT NULL DEFAULT ''`,
+    `ALTER TABLE branches ADD COLUMN email VARCHAR(255) NULL`,
+    `ALTER TABLE branches ADD COLUMN branch_pin VARCHAR(255) NULL`,
     `CREATE TABLE IF NOT EXISTS suppliers (
        id         CHAR(36)     NOT NULL PRIMARY KEY,
        name       VARCHAR(255) NOT NULL,

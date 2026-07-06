@@ -269,6 +269,7 @@ const api = {
     getActivationInfo:  () => ipcRenderer.invoke('app:getActivationInfo'),
     getVersion:         () => ipcRenderer.invoke('app:getVersion'),
     verifyCompanyKey:   (payload: unknown) => ipcRenderer.invoke('app:verifyCompanyKey', payload),
+    verifySupportPasscode: (passcode: string) => ipcRenderer.invoke('app:verifySupportPasscode', passcode),
     activate:           (payload: unknown) => ipcRenderer.invoke('app:activate', payload),
     deactivate:         () => ipcRenderer.invoke('app:deactivate'),
   },

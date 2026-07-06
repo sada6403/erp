@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS users (
   name          TEXT NOT NULL,
   email         TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
-  pin           TEXT,                       -- 4-6 digit quick login
+  pin           TEXT,                       -- legacy plaintext PIN (migrated to pin_hash, kept for compat)
+  pin_hash      TEXT,                       -- bcrypt hash of the 4-6 digit quick-login PIN (cloud-synced)
   is_active     INTEGER NOT NULL DEFAULT 1,
   last_login_at TEXT,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),

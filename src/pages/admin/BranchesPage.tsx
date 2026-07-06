@@ -181,10 +181,11 @@ function BranchForm({
 }) {
   const isMain = String(branch?.id || '') === 'b1111111-1111-4111-8111-111111111111'
 
+  const hasExistingPin = Boolean(branch?.branch_pin)
   const [form, setForm] = useState({
     name:       String(branch?.name       || ''),
     code:       String(branch?.code       || ''),
-    branch_pin: String(branch?.branch_pin || ''),
+    branch_pin: '', // PINs are stored hashed — blank means "keep current PIN"
     address:    String(branch?.address    || ''),
     phone:      String(branch?.phone      || ''),
     email:      String(branch?.email      || ''),
@@ -202,12 +203,14 @@ function BranchForm({
     }
     setSaving(true)
     try {
-      const payload = {
+      const payload: Record<string, unknown> = {
         ...form,
         code:       form.code.toUpperCase().trim() || null,
         branch_pin: form.branch_pin.trim() || null,
         is_active:  form.is_active ? 1 : 0,
       }
+      // Blank PIN on an existing branch = keep the current (hashed) PIN
+      if (branch && !form.branch_pin.trim()) delete payload.branch_pin
       const res = branch
         ? await window.api.admin.branches.update(branch.id as string, payload)
         : await window.api.admin.branches.create(payload)
@@ -258,7 +261,9 @@ function BranchForm({
             <div>
               <label className="block text-xs font-medium text-slate-300 mb-1">
                 Branch Login PIN
-                <span className="text-red-400 ml-1">*</span>
+                {hasExistingPin
+                  ? <span className="text-slate-500 ml-1">(leave blank to keep current)</span>
+                  : <span className="text-red-400 ml-1">*</span>}
               </label>
               <input
                 value={form.branch_pin}
@@ -267,7 +272,7 @@ function BranchForm({
                   setForm(p => ({ ...p, branch_pin: v }))
                 }}
                 className="input font-mono tracking-widest text-center text-lg"
-                placeholder="e.g. 1001"
+                placeholder={hasExistingPin ? '••••' : 'e.g. 1001'}
                 maxLength={6}
                 inputMode="numeric"
               />

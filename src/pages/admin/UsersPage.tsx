@@ -35,6 +35,7 @@ export default function UsersPage() {
   const [editingUser,  setEditingUser]  = useState<Record<string,unknown>|null>(null)
   const [editingRole,  setEditingRole]  = useState<Role | null>(null)
   const [actionUser,   setActionUser]   = useState<Record<string,unknown>|null>(null)
+  const [pinUser,      setPinUser]      = useState<Record<string,unknown>|null>(null)
   const [hardDeleteUser, setHardDeleteUser] = useState<Record<string,unknown>|null>(null)
   const [tab,          setTab]          = useState<'users' | 'roles'>('users')
   const [search,       setSearch]       = useState('')
@@ -166,6 +167,7 @@ export default function UsersPage() {
           onHardDelete={isGlobalUser ? u => setHardDeleteUser(u) : undefined}
           onToggleActive={toggleActive}
           onManage={u => setActionUser(u)}
+          onChangePin={u => setPinUser(u)}
         />
       ) : (
         <RolesSection
@@ -186,6 +188,14 @@ export default function UsersPage() {
           isGlobalUser={isGlobalUser}
           onClose={() => setActionUser(null)}
           onDone={() => { setActionUser(null); load() }}
+        />
+      )}
+
+      {pinUser && (
+        <ChangePinModal
+          user={pinUser}
+          onClose={() => setPinUser(null)}
+          onDone={() => { setPinUser(null); load() }}
         />
       )}
 
@@ -246,7 +256,7 @@ function TabButton({
 
 // ── Users Table ───────────────────────────────────────────────────────────────
 function UsersTable({
-  users, currentUserId, isGlobalUser, onEdit, onDelete, onHardDelete, onToggleActive, onManage,
+  users, currentUserId, isGlobalUser, onEdit, onDelete, onHardDelete, onToggleActive, onManage, onChangePin,
 }: {
   users: Record<string, unknown>[]
   currentUserId?: string
@@ -256,6 +266,7 @@ function UsersTable({
   onHardDelete?: (u: Record<string, unknown>) => void
   onToggleActive: (u: Record<string, unknown>, active: boolean) => void
   onManage: (u: Record<string, unknown>) => void
+  onChangePin: (u: Record<string, unknown>) => void
 }) {
   const roleColor: Record<string, string> = {
     'Company Admin':   'badge-purple',
@@ -281,6 +292,8 @@ function UsersTable({
             const isSelf       = u.id === currentUserId
             const isPrivileged = PRIVILEGED_ROLE_NAMES.includes(u.role_name as string)
             const canModify    = isGlobalUser || !isPrivileged
+            // Branch Manager can change PINs of own-branch staff AND their own PIN
+            const canChangePin = canModify || isSelf
             const isActive     = Boolean(u.is_active)
 
             return (
@@ -306,7 +319,7 @@ function UsersTable({
                   </span>
                 </td>
                 <td className="table-cell text-slate-400">{(u.branch_name as string) || 'All Branches'}</td>
-                <td className="table-cell font-mono text-slate-400">{u.pin ? '****' : '-'}</td>
+                <td className="table-cell font-mono text-slate-400">{u.has_pin ? '••••' : '-'}</td>
                 <td className="table-cell">
                   <span className={isActive ? 'badge-green' : 'badge-red'}>
                     {isActive ? 'Active' : 'Inactive'}
@@ -332,6 +345,15 @@ function UsersTable({
                         title="Password & Access Management"
                       >
                         <KeyRound size={13} />
+                      </button>
+                    )}
+                    {canChangePin && (
+                      <button
+                        onClick={() => onChangePin(u)}
+                        className="btn-ghost btn-sm p-1.5 text-indigo-400 hover:text-indigo-300"
+                        title="Change PIN"
+                      >
+                        <Lock size={13} />
                       </button>
                     )}
                     {canModify && !isSuperAdmin && !isSelf && (
@@ -517,7 +539,7 @@ function UserForm({
     password:  '',
     role_id:   String(user?.role_id  || ''),
     branch_id: String(user?.branch_id || (!isGlobalUser && callerBranchId ? callerBranchId : '')),
-    pin:       String(user?.pin      || ''),
+    pin:       '', // PINs are stored hashed — blank means "keep current PIN"
     is_active: user?.is_active !== undefined ? user.is_active : 1,
   })
   const [saving, setSaving] = useState(false)
@@ -542,7 +564,7 @@ function UserForm({
       if (!form.email) { toast.error('Email is required for admin accounts'); return }
       if (!user && !form.password) { toast.error('Password is required for admin accounts'); return }
     }
-    if (isPinOnly && !form.pin) {
+    if (isPinOnly && !form.pin && !(user && user.has_pin)) {
       toast.error('PIN is required for staff accounts'); return
     }
 
@@ -633,12 +655,12 @@ function UserForm({
               Staff role — login via PIN only. Email &amp; password not required.
             </div>
             <div className="col-span-2">
-              <label className="label">PIN * (4-6 digits)</label>
+              <label className="label">PIN {user?.has_pin ? '(leave blank to keep current)' : '* (4-6 digits)'}</label>
               <input
                 value={form.pin}
                 onChange={f('pin')}
                 className="input font-mono text-xl tracking-widest"
-                placeholder="e.g. 1234"
+                placeholder={user?.has_pin ? '••••' : 'e.g. 1234'}
                 maxLength={6}
                 inputMode="numeric"
                 pattern="[0-9]*"
@@ -662,12 +684,12 @@ function UserForm({
               <input type="password" value={form.password} onChange={f('password')} className="input" />
             </div>
             <div>
-              <label className="label">PIN (optional)</label>
+              <label className="label">PIN {user?.has_pin ? '(leave blank to keep)' : '(optional)'}</label>
               <input
                 value={form.pin}
                 onChange={f('pin')}
                 className="input font-mono"
-                placeholder="1234"
+                placeholder={user?.has_pin ? '••••' : '1234'}
                 maxLength={6}
                 inputMode="numeric"
               />
@@ -979,6 +1001,82 @@ function UserActionsModal({
             )}
           </div>
         )}
+      </div>
+    </Modal>
+  )
+}
+
+// ── Change PIN Modal ──────────────────────────────────────────────────────────
+// Available to Company Admin for everyone, and to Branch Managers for their
+// own-branch staff and themselves. PINs are stored bcrypt-hashed and sync to
+// every device of the company.
+function ChangePinModal({ user, onClose, onDone }: {
+  user: Record<string, unknown>
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [pin,        setPin]        = useState('')
+  const [confirmPin, setConfirmPin] = useState('')
+  const [saving,     setSaving]     = useState(false)
+
+  const submit = async () => {
+    if (!/^\d{4,6}$/.test(pin)) { toast.error('PIN must be 4-6 digits'); return }
+    if (pin !== confirmPin) { toast.error('PINs do not match'); return }
+    setSaving(true)
+    const res = await window.api.admin.users.update(user.id as string, { pin })
+    setSaving(false)
+    if (res?.success) {
+      toast.success(`PIN updated for ${user.name}. It will work on all POS devices after sync.`)
+      onDone()
+    } else {
+      toast.error(String(res?.error || 'Failed to update PIN'))
+    }
+  }
+
+  return (
+    <Modal
+      title={`Change PIN: ${user.name}`}
+      onClose={onClose}
+      footer={<>
+        <button onClick={onClose} className="btn-secondary">Cancel</button>
+        <button onClick={submit} disabled={saving} className="btn-primary">
+          {saving ? 'Saving…' : 'Update PIN'}
+        </button>
+      </>}
+    >
+      <div className="space-y-4">
+        <div>
+          <label className="label">New PIN * (4-6 digits)</label>
+          <input
+            type="password"
+            value={pin}
+            onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
+            className="input font-mono text-xl tracking-widest"
+            placeholder="••••"
+            maxLength={6}
+            inputMode="numeric"
+            autoFocus
+          />
+        </div>
+        <div>
+          <label className="label">Confirm PIN *</label>
+          <input
+            type="password"
+            value={confirmPin}
+            onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))}
+            onKeyDown={e => e.key === 'Enter' && submit()}
+            className="input font-mono text-xl tracking-widest"
+            placeholder="••••"
+            maxLength={6}
+            inputMode="numeric"
+          />
+          {confirmPin && pin !== confirmPin && (
+            <p className="text-xs text-red-400 mt-1">PINs do not match</p>
+          )}
+        </div>
+        <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+          The PIN is stored securely (hashed) and syncs to every POS device of your company.
+        </p>
       </div>
     </Modal>
   )

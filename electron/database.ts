@@ -115,6 +115,9 @@ function runMigrations(): void {
     ['suppliers', 'state',         "TEXT"],
     ['suppliers', 'country',       "TEXT"],
     ['suppliers', 'zip_code',      "TEXT"],
+    // Hashed quick-login PIN — syncs to the cloud (users.pin_hash), unlike the
+    // legacy plaintext `pin` column which stays local-only.
+    ['users', 'pin_hash', "TEXT"],
   ]
 
   for (const [table, column, definition] of migrations) {
@@ -122,6 +125,49 @@ function runMigrations(): void {
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`)
       console.log(`[DB] Migration: added ${table}.${column}`)
     }
+  }
+
+  // One-time backfill: hash legacy plaintext PINs so they can sync safely.
+  // Each migrated row is also enqueued for cloud sync so PINs created before
+  // this update start working on the company's other devices.
+  {
+    const bcrypt = require('bcryptjs')
+    const { randomUUID } = require('crypto')
+    const enqueue = (table: string, recordId: string, payload: Record<string, unknown>) => {
+      try {
+        db.prepare(`INSERT INTO sync_queue (id, table_name, record_id, operation, payload) VALUES (?,?,?,'UPDATE',?)`)
+          .run(randomUUID(), table, recordId, JSON.stringify(payload))
+      } catch { /* sync_queue not ready — periodic sync will catch up later */ }
+    }
+
+    const legacyUsers = db.prepare(
+      `SELECT id, pin FROM users WHERE pin IS NOT NULL AND pin != '' AND (pin_hash IS NULL OR pin_hash = '')`
+    ).all() as { id: string; pin: string }[]
+    for (const u of legacyUsers) {
+      db.prepare(`UPDATE users SET pin_hash = ?, pin = NULL, updated_at = datetime('now') WHERE id = ?`)
+        .run(bcrypt.hashSync(String(u.pin), 10), u.id)
+      const row = db.prepare(
+        `SELECT id, branch_id, role_id, name, email, password_hash, pin_hash, is_active, last_login_at, created_at, updated_at
+         FROM users WHERE id = ?`
+      ).get(u.id) as Record<string, unknown> | undefined
+      if (row) enqueue('users', u.id, row)
+    }
+    if (legacyUsers.length) console.log(`[DB] Migration: hashed ${legacyUsers.length} plaintext user PIN(s)`)
+
+    // Branch PINs: same treatment (bcrypt hashes start with $2)
+    const legacyBranches = db.prepare(
+      `SELECT id, branch_pin FROM branches WHERE branch_pin IS NOT NULL AND branch_pin != '' AND branch_pin NOT LIKE '$2%'`
+    ).all() as { id: string; branch_pin: string }[]
+    for (const b of legacyBranches) {
+      db.prepare(`UPDATE branches SET branch_pin = ?, updated_at = datetime('now') WHERE id = ?`)
+        .run(bcrypt.hashSync(String(b.branch_pin), 10), b.id)
+      const row = db.prepare(`SELECT * FROM branches WHERE id = ?`).get(b.id) as Record<string, unknown> | undefined
+      if (row) {
+        delete row.synced_at
+        enqueue('branches', b.id, row)
+      }
+    }
+    if (legacyBranches.length) console.log(`[DB] Migration: hashed ${legacyBranches.length} plaintext branch PIN(s)`)
   }
 
   const transferMigrations: [string, string][] = [
@@ -705,10 +751,11 @@ function seedDefaultData() {
 
   // Seed default company admin user (using standard UUID format and company admin role UUID)
   const hash = bcrypt.hashSync('admin123', 10)
+  const pinHash = bcrypt.hashSync('1234', 10)
   db.prepare(`
-    INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, pin)
-    VALUES (?, ?, '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'System Admin', 'admin@pos.local', ?, '1234')
-  `).run('u9999999-9999-4999-8999-999999999999', branchId, hash)
+    INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash)
+    VALUES (?, ?, '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'System Admin', 'admin@pos.local', ?, ?)
+  `).run('u9999999-9999-4999-8999-999999999999', branchId, hash, pinHash)
 
   console.log('[DB] Default data seeded')
 }

@@ -141,6 +141,7 @@ async function autoMigrate() {
     // per-company branding + company activation key
     `ALTER TABLE companies ADD COLUMN brand_color    VARCHAR(7)   NULL`,
     `ALTER TABLE companies ADD COLUMN brand_logo_url VARCHAR(512) NULL`,
+    `ALTER TABLE companies ADD COLUMN branding_json  TEXT         NULL`,
     `ALTER TABLE companies ADD COLUMN company_key    VARCHAR(36)  NULL UNIQUE`,
     `UPDATE companies SET company_key = UUID() WHERE company_key IS NULL OR company_key = ''`,
 

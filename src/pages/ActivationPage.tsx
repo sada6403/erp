@@ -14,9 +14,13 @@ type Step = 'key' | 'branch' | 'activating' | 'done'
 interface Props { onActivated: () => void }
 type VerifyResponse = VerifyResult & { success?: boolean; error?: string }
 
+// Built-in production server — devices activate with only the Company Key.
+// Changing it requires the hidden support unlock (5 taps + support passcode).
+const BUILT_IN_API_URL = 'http://72.61.115.222'
+
 const DEFAULT_API_URL =
   (import.meta.env.VITE_CLOUD_API_URL as string | undefined)?.trim().replace(/\/+$/, '') ||
-  (import.meta.env.DEV ? 'http://localhost:3000' : '')
+  (import.meta.env.DEV ? 'http://localhost:3000' : BUILT_IN_API_URL)
 
 export default function ActivationPage({ onActivated }: Props) {
   const [step, setStep]             = useState<Step>('key')
@@ -24,6 +28,9 @@ export default function ActivationPage({ onActivated }: Props) {
   const [apiUrl, setApiUrl]         = useState(DEFAULT_API_URL)
   const [showServerSettings, setShowServerSettings] = useState(false)
   const [supportTapCount, setSupportTapCount] = useState(0)
+  const [showPasscodePrompt, setShowPasscodePrompt] = useState(false)
+  const [passcodeInput, setPasscodeInput] = useState('')
+  const [passcodeError, setPasscodeError] = useState('')
   const [deviceName, setDeviceName] = useState('')
   const [selectedBranch, setSelectedBranch] = useState<Branch | null>(null)
   const [verifyResult, setVerifyResult]     = useState<VerifyResult | null>(null)
@@ -41,11 +48,31 @@ export default function ActivationPage({ onActivated }: Props) {
   }, [])
 
   function handleSupportUnlock() {
+    if (showServerSettings || showPasscodePrompt) return
     const next = supportTapCount + 1
     setSupportTapCount(next)
     if (next >= 5) {
       setSupportTapCount(0)
-      setShowServerSettings(true)
+      setPasscodeInput('')
+      setPasscodeError('')
+      setShowPasscodePrompt(true)
+    }
+  }
+
+  // Server settings stay hidden behind the support passcode — only the
+  // platform owner (superadmin) can change the Cloud API URL.
+  async function handlePasscodeSubmit() {
+    setPasscodeError('')
+    try {
+      const res = await window.api?.app?.verifySupportPasscode?.(passcodeInput) as { success?: boolean } | undefined
+      if (res?.success) {
+        setShowPasscodePrompt(false)
+        setShowServerSettings(true)
+      } else {
+        setPasscodeError('Incorrect passcode')
+      }
+    } catch {
+      setPasscodeError('Incorrect passcode')
     }
   }
 
@@ -221,6 +248,35 @@ export default function ActivationPage({ onActivated }: Props) {
               </div>
 
               {error && <div className="rounded-xl border border-red-700/50 bg-red-900/20 px-4 py-3 text-red-400 text-sm">{error}</div>}
+
+              {showPasscodePrompt && (
+                <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: '#2a2d3a', background: '#12151d' }}>
+                  <label className="block text-xs font-medium text-gray-400">Support Passcode</label>
+                  <input
+                    type="password"
+                    autoFocus
+                    className="w-full px-4 py-3 rounded-xl font-mono text-sm text-white border outline-none focus:border-emerald-500 transition-colors"
+                    style={{ background: '#16181f', borderColor: '#2a2d3a' }}
+                    placeholder="Enter support passcode"
+                    value={passcodeInput}
+                    onChange={e => setPasscodeInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && handlePasscodeSubmit()}
+                  />
+                  {passcodeError && <p className="text-xs text-red-400">{passcodeError}</p>}
+                  <div className="flex gap-2">
+                    <button type="button" onClick={handlePasscodeSubmit}
+                      className="flex-1 py-2 rounded-lg text-sm font-medium text-white"
+                      style={{ background: '#15803d' }}>
+                      Unlock
+                    </button>
+                    <button type="button" onClick={() => setShowPasscodePrompt(false)}
+                      className="flex-1 py-2 rounded-lg text-sm font-medium text-gray-400 border"
+                      style={{ borderColor: '#2a2d3a' }}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="space-y-4">
                 <div>

@@ -1,9 +1,20 @@
 import { ipcMain } from 'electron'
 import Store from 'electron-store'
 import os from 'os'
-import { randomUUID, createHash } from 'crypto'
+import { randomUUID, createHash, timingSafeEqual } from 'crypto'
 
 const store = new Store()
+
+// Support passcode — unlocks the hidden Cloud API URL settings (activation
+// page + admin settings). Known only to the software owner/superadmin.
+// Change before building a customer release.
+const SUPPORT_PASSCODE = 'NF@2026'
+
+export function verifySupportPasscode(input: string): boolean {
+  const expected = Buffer.from(SUPPORT_PASSCODE)
+  const received = Buffer.from(String(input ?? ''))
+  return expected.length === received.length && timingSafeEqual(expected, received)
+}
 
 function normalizeApiUrl(url: string): string {
   return url.trim().replace(/\/+$/, '') || 'http://localhost:3000'
@@ -55,6 +66,11 @@ export function getDeviceFingerprint(): string {
 export function registerActivationHandlers() {
   ipcMain.handle('app:isActivated', () => {
     return Boolean(store.get('device_activated'))
+  })
+
+  // Gate for the hidden server-settings panels (activation page + settings)
+  ipcMain.handle('app:verifySupportPasscode', (_event, passcode: string) => {
+    return { success: verifySupportPasscode(passcode) }
   })
 
   ipcMain.handle('app:getDeviceInfo', () => ({
@@ -157,9 +173,39 @@ export function registerActivationHandlers() {
         ...current,
         cloud_api_url:   apiUrl,
         cloud_api_key:   data.api_key,
+        company_name:    data.company_name   || current.company_name || '',
         brand_color:     data.brand_color    ?? null,
         brand_logo_url:  data.brand_logo_url ?? null,
       })
+
+      // A cloud branch was selected → hide the local seeded placeholder branch
+      // so it doesn't clutter branch pickers (local-only change, never synced).
+      if (branch_id && branch_id !== 'b1111111-1111-4111-8111-111111111111') {
+        try {
+          const { getDb } = await import('../database')
+          const db = getDb()
+          const { cnt } = db.prepare(
+            `SELECT COUNT(*) as cnt FROM invoices WHERE branch_id = 'b1111111-1111-4111-8111-111111111111'`
+          ).get() as { cnt: number }
+          if (cnt === 0) {
+            db.prepare(`UPDATE branches SET is_active = 0 WHERE id = 'b1111111-1111-4111-8111-111111111111'`).run()
+            // Keep the seeded fallback admin usable under the activated branch
+            db.prepare(`UPDATE users SET branch_id = ? WHERE id = 'u9999999-9999-4999-8999-999999999999' AND branch_id = 'b1111111-1111-4111-8111-111111111111'`)
+              .run(branch_id)
+          }
+        } catch (err) {
+          console.warn('[Activation] Could not deactivate placeholder branch:', err)
+        }
+      }
+
+      // Kick off an immediate full sync so the device shows the company's
+      // existing data (users, branches, products, sales, branding) right away.
+      try {
+        const { getSyncService } = await import('../services/syncService')
+        getSyncService().runSoon()
+      } catch (err) {
+        console.warn('[Activation] Could not trigger initial sync:', err)
+      }
 
       return {
         success:        true,

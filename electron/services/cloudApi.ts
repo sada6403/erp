@@ -56,6 +56,17 @@ export class CloudApi {
     return result.data
   }
 
+  async getBranding(): Promise<{ branding: Record<string, unknown>; updated_at: string | null }> {
+    return this.request('/api/company/branding')
+  }
+
+  async putBranding(branding: Record<string, unknown>): Promise<{ success: boolean }> {
+    return this.request('/api/company/branding', {
+      method: 'PUT',
+      body: JSON.stringify(branding),
+    })
+  }
+
   async uploadImage(filePath: string, fileName: string, contentType: string): Promise<string> {
     const body = fs.readFileSync(filePath)
     const result = await this.request<{ url: string }>(

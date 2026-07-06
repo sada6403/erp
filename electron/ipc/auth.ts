@@ -7,6 +7,7 @@ import crypto from 'crypto'
 import nodemailer from 'nodemailer'
 import { generateSecret, verifyTOTP, generateQrDataUrl } from '../services/totpService'
 import { decryptSecret } from './settings'
+import { enqueueUserRow } from '../services/syncQueue'
 
 const store = new Store()
 
@@ -125,29 +126,47 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   ipcMain.handle('auth:pinLogin', async (_e, { pin, branch_id }) => {
     try {
       const db = getDb()
-      let user: Record<string, unknown> | undefined
+      const pinValue = String(pin ?? '')
 
-      if (branch_id) {
-        // Strict branch isolation — only users assigned to this branch can login
-        user = db.prepare(`
-          SELECT u.*, r.name as role_name, r.permissions as role_permissions,
-                 b.name as branch_name
-          FROM users u
-          LEFT JOIN roles r ON r.id = u.role_id
-          LEFT JOIN branches b ON b.id = u.branch_id
-          WHERE u.pin = ? AND u.is_active = 1 AND u.branch_id = ?
-          LIMIT 1
-        `).get(pin, branch_id) as Record<string, unknown> | undefined
-      } else {
-        user = db.prepare(`
-          SELECT u.*, r.name as role_name, r.permissions as role_permissions,
-                 b.name as branch_name
-          FROM users u
-          LEFT JOIN roles r ON r.id = u.role_id
-          LEFT JOIN branches b ON b.id = u.branch_id
-          WHERE u.pin = ? AND u.is_active = 1
-          LIMIT 1
-        `).get(pin) as Record<string, unknown> | undefined
+      // PINs are stored as bcrypt hashes (pin_hash) so they can sync across
+      // devices. Fetch candidates (branch-scoped when a terminal branch is
+      // set) and compare. Legacy plaintext `pin` values are migrated on match.
+      const candidates = (branch_id
+        ? db.prepare(`
+            SELECT u.*, r.name as role_name, r.permissions as role_permissions,
+                   b.name as branch_name
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            LEFT JOIN branches b ON b.id = u.branch_id
+            WHERE u.is_active = 1 AND u.branch_id = ?
+              AND (u.pin_hash IS NOT NULL OR u.pin IS NOT NULL)
+          `).all(branch_id)
+        : db.prepare(`
+            SELECT u.*, r.name as role_name, r.permissions as role_permissions,
+                   b.name as branch_name
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            LEFT JOIN branches b ON b.id = u.branch_id
+            WHERE u.is_active = 1
+              AND (u.pin_hash IS NOT NULL OR u.pin IS NOT NULL)
+          `).all()) as Record<string, unknown>[]
+
+      let user: Record<string, unknown> | undefined
+      for (const candidate of candidates) {
+        if (candidate.pin_hash && await bcrypt.compare(pinValue, candidate.pin_hash as string)) {
+          user = candidate
+          break
+        }
+        // Legacy plaintext PIN — accept once, then upgrade to a hash
+        if (!candidate.pin_hash && candidate.pin && String(candidate.pin) === pinValue) {
+          const upgraded = await bcrypt.hash(pinValue, 10)
+          db.prepare(`UPDATE users SET pin_hash=?, pin=NULL, updated_at=datetime('now') WHERE id=?`)
+            .run(upgraded, candidate.id)
+          await enqueueUserRow(String(candidate.id))
+          candidate.pin_hash = upgraded
+          user = candidate
+          break
+        }
       }
 
       if (!user) {
@@ -408,6 +427,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       `).run(hash, entry.userId)
       db.prepare(`INSERT INTO audit_logs (id, user_id, action) VALUES (?,?,?)`)
         .run(crypto.randomUUID(), entry.userId, 'PASSWORD_RESET_OTP')
+      await enqueueUserRow(entry.userId)
 
       otpStore.delete(key)
       return { success: true }
@@ -432,6 +452,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       db.prepare(`UPDATE users SET password_hash=?, force_password_change=0, updated_at=datetime('now') WHERE id=?`).run(hash, userId)
       db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action) VALUES (?,?,?,?)`)
         .run(crypto.randomUUID(), userId, user.branch_id, 'PASSWORD_CHANGED')
+      await enqueueUserRow(userId)
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -458,6 +479,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       db.prepare(`UPDATE users SET password_hash=?, force_password_change=0, last_login_at=datetime('now'), updated_at=datetime('now') WHERE id=?`).run(hash, decoded.userId)
       db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action) VALUES (?,?,?,?)`)
         .run(crypto.randomUUID(), decoded.userId, user.branch_id, 'PASSWORD_CHANGED')
+      await enqueueUserRow(decoded.userId)
 
       const perms = JSON.parse(user.role_permissions as string || '{}')
       const payload = {

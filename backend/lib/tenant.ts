@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS branches (
   code        VARCHAR(50)  NOT NULL UNIQUE,
   address     TEXT,
   phone       VARCHAR(50),
+  email       VARCHAR(255),
+  branch_pin  VARCHAR(255),
   manager_id  CHAR(36),
   is_active   BOOLEAN      NOT NULL DEFAULT 1,
   created_at  DATETIME     NOT NULL DEFAULT NOW(),

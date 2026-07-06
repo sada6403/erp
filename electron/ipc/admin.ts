@@ -5,7 +5,7 @@ import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
-import { enqueuSync } from '../services/syncQueue'
+import { enqueuSync, enqueueUserRow } from '../services/syncQueue'
 import Store from 'electron-store'
 
 const store = new Store()
@@ -66,6 +66,29 @@ function calculateInstallment(input: Record<string, unknown>) {
   }
 }
 
+// Branch PINs are stored as bcrypt hashes (synced to the cloud). Legacy
+// plaintext values (pre-hash installs) are still matched by direct equality.
+async function findBranchByPin(
+  pinValue: string,
+  excludeId?: string
+): Promise<Record<string, unknown> | undefined> {
+  if (!pinValue) return undefined
+  const db = getDb()
+  const rows = db.prepare(
+    `SELECT * FROM branches WHERE branch_pin IS NOT NULL AND branch_pin != '' AND is_active = 1`
+  ).all() as Record<string, unknown>[]
+  for (const row of rows) {
+    if (excludeId && String(row.id) === excludeId) continue
+    const stored = String(row.branch_pin)
+    if (stored.startsWith('$2')) {
+      if (await bcrypt.compare(pinValue, stored)) return row
+    } else if (stored === pinValue) {
+      return row
+    }
+  }
+  return undefined
+}
+
 function nextInstallmentNumber(branchId: string) {
   const db = getDb()
   const year = new Date().getFullYear()
@@ -94,26 +117,15 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     try { return { success: true, data: getDb().prepare('SELECT * FROM branches ORDER BY name').all() } }
     catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
-  ipcMain.handle('admin:branches:findByCode', (_e, code: string) => {
+  ipcMain.handle('admin:branches:findByCode', async (_e, code: string) => {
     try {
       const db = getDb()
-      let row: unknown
       const val = code.trim()
-      try {
-        // Prioritise exact code match; fall back to PIN match
-        row = db.prepare(
-          `SELECT * FROM branches WHERE UPPER(code) = UPPER(?) AND is_active = 1 LIMIT 1`
-        ).get(val)
-        if (!row) {
-          row = db.prepare(
-            `SELECT * FROM branches WHERE branch_pin = ? AND is_active = 1 LIMIT 1`
-          ).get(val)
-        }
-      } catch {
-        row = db.prepare(
-          'SELECT * FROM branches WHERE UPPER(code) = UPPER(?) AND is_active = 1 LIMIT 1'
-        ).get(val)
-      }
+      // Prioritise exact code match; fall back to PIN match (PINs are bcrypt-hashed)
+      let row = db.prepare(
+        `SELECT * FROM branches WHERE UPPER(code) = UPPER(?) AND is_active = 1 LIMIT 1`
+      ).get(val) as Record<string, unknown> | undefined
+      if (!row) row = await findBranchByPin(val)
       return { success: true, data: row || null }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -121,36 +133,32 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     try {
       const db = getDb()
       const id = crypto.randomUUID()
-      if (p.branch_pin) {
-        const dup = db.prepare('SELECT id FROM branches WHERE branch_pin = ?').get(p.branch_pin)
+      const rawPin = p.branch_pin ? String(p.branch_pin) : ''
+      if (rawPin) {
+        const dup = await findBranchByPin(rawPin)
         if (dup) return { success: false, error: 'Another branch already uses this PIN. Choose a different PIN.' }
       }
-      const existingCols = new Set(
-        (db.prepare('PRAGMA table_info(branches)').all() as { name: string }[]).map(c => c.name)
-      )
-      if (existingCols.has('branch_pin')) {
-        db.prepare(`INSERT INTO branches (id,name,address,phone,email,code,branch_pin) VALUES (?,?,?,?,?,?,?)`)
-          .run(id, p.name, p.address||null, p.phone||null, p.email||null, p.code||null, p.branch_pin||null)
-      } else {
-        db.prepare(`INSERT INTO branches (id,name,address,phone,email,code) VALUES (?,?,?,?,?,?)`)
-          .run(id, p.name, p.address||null, p.phone||null, p.email||null, p.code||null)
-      }
-      await enqueuSync('branches', id, 'INSERT', { id, ...p })
+      // Store + sync only the bcrypt hash of the branch PIN
+      const pinHash = rawPin ? await bcrypt.hash(rawPin, 10) : null
+      db.prepare(`INSERT INTO branches (id,name,address,phone,email,code,branch_pin) VALUES (?,?,?,?,?,?,?)`)
+        .run(id, p.name, p.address||null, p.phone||null, p.email||null, p.code||null, pinHash)
+      await enqueuSync('branches', id, 'INSERT', { ...p, id, branch_pin: pinHash })
 
       // Auto-create Branch Manager for this branch if a branch_pin was provided
-      if (p.branch_pin) {
+      if (rawPin) {
         const BRANCH_MANAGER_ROLE_ID = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
         const codeSlug = String(p.code || p.name).toUpperCase().replace(/\s+/g, '').slice(0, 10)
         const managerEmail = `manager.${codeSlug.toLowerCase()}@pos.local`
         const existingManager = db.prepare('SELECT id FROM users WHERE email = ?').get(managerEmail)
         if (!existingManager) {
           const userId = crypto.randomUUID()
-          const passwordHash = await bcrypt.hash(String(p.branch_pin), 10)
+          const passwordHash = await bcrypt.hash(rawPin, 10)
+          const managerPinHash = await bcrypt.hash(rawPin, 10)
           db.prepare(`
-            INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin, is_active)
+            INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
             VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-          `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${p.name} Manager`, managerEmail, passwordHash, String(p.branch_pin))
-          await enqueuSync('users', userId, 'INSERT', { id: userId, branch_id: id, role_id: BRANCH_MANAGER_ROLE_ID, name: `${p.name} Manager`, email: managerEmail })
+          `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${p.name} Manager`, managerEmail, passwordHash, managerPinHash)
+          await enqueueUserRow(userId)
         }
       }
 
@@ -160,27 +168,29 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   ipcMain.handle('admin:branches:update', async (_e, id: string, p) => {
     try {
       const db = getDb()
-      if ((p as Record<string,unknown>).branch_pin) {
-        const dup = db.prepare('SELECT id FROM branches WHERE branch_pin = ? AND id != ?').get((p as Record<string,unknown>).branch_pin, id)
+      const payload = { ...(p as Record<string, unknown>) }
+      const rawPin = payload.branch_pin ? String(payload.branch_pin) : ''
+      if (rawPin) {
+        const dup = await findBranchByPin(rawPin, id)
         if (dup) return { success: false, error: 'Another branch already uses this PIN. Choose a different PIN.' }
+        payload.branch_pin = await bcrypt.hash(rawPin, 10)
       }
       const existingCols = new Set(
         (db.prepare('PRAGMA table_info(branches)').all() as { name: string }[]).map(c => c.name)
       )
-      const safe = Object.fromEntries(Object.entries(p as Record<string,unknown>).filter(([k]) => existingCols.has(k)))
+      const safe = Object.fromEntries(Object.entries(payload).filter(([k]) => existingCols.has(k)))
       const fields = Object.keys(safe).map(k => `${k}=@${k}`).join(',')
       if (fields) db.prepare(`UPDATE branches SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...safe, id})
-      await enqueuSync('branches', id, 'UPDATE', { id, ...p })
+      await enqueuSync('branches', id, 'UPDATE', { ...payload, id })
 
       // If a branch_pin was set and no manager user exists yet, auto-create one
-      const pin = (p as Record<string,unknown>).branch_pin as string | undefined
-      if (pin) {
+      if (rawPin) {
         const BRANCH_MANAGER_ROLE_ID = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
         const branch = db.prepare('SELECT name, code FROM branches WHERE id=?').get(id) as { name: string; code: string } | undefined
         if (branch) {
           const existingManager = db.prepare(
             'SELECT id FROM users WHERE branch_id=? AND role_id=?'
-          ).get(id, BRANCH_MANAGER_ROLE_ID)
+          ).get(id, BRANCH_MANAGER_ROLE_ID) as { id: string } | undefined
           if (!existingManager) {
             const userId = crypto.randomUUID()
             const codeSlug = String(branch.code || branch.name).toUpperCase().replace(/\s+/g, '').slice(0, 10).toLowerCase()
@@ -188,16 +198,19 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
             const safeEmail = db.prepare('SELECT id FROM users WHERE email=?').get(managerEmail)
               ? `manager.${codeSlug}.${userId.slice(0,4)}@pos.local`
               : managerEmail
-            const passwordHash = await bcrypt.hash(pin, 10)
+            const passwordHash = await bcrypt.hash(rawPin, 10)
+            const managerPinHash = await bcrypt.hash(rawPin, 10)
             db.prepare(`
-              INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin, is_active)
+              INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
               VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-            `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${branch.name} Manager`, safeEmail, passwordHash, pin)
-            await enqueuSync('users', userId, 'INSERT', { id: userId, branch_id: id, role_id: BRANCH_MANAGER_ROLE_ID, name: `${branch.name} Manager`, email: safeEmail })
+            `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${branch.name} Manager`, safeEmail, passwordHash, managerPinHash)
+            await enqueueUserRow(userId)
           } else {
             // Manager exists — update their PIN to match the new branch PIN
-            db.prepare('UPDATE users SET pin=?, updated_at=datetime(\'now\') WHERE branch_id=? AND role_id=?')
-              .run(pin, id, BRANCH_MANAGER_ROLE_ID)
+            const managerPinHash = await bcrypt.hash(rawPin, 10)
+            db.prepare(`UPDATE users SET pin_hash=?, pin=NULL, updated_at=datetime('now') WHERE branch_id=? AND role_id=?`)
+              .run(managerPinHash, id, BRANCH_MANAGER_ROLE_ID)
+            await enqueueUserRow(existingManager.id)
           }
         }
       }
@@ -277,10 +290,12 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
       // Super Admin / Company Admin → all users
       // Branch Manager (or anyone without global access) → own branch only
+      // PINs are hashed — expose only whether one is set, never the value
       const rows = isGlobal
         ? getDb().prepare(`
-            SELECT u.id, u.name, u.email, u.pin, u.is_active, u.last_login_at,
+            SELECT u.id, u.name, u.email, u.is_active, u.last_login_at,
                    u.role_id, u.branch_id,
+                   CASE WHEN u.pin_hash IS NOT NULL OR u.pin IS NOT NULL THEN 1 ELSE 0 END as has_pin,
                    r.name as role_name, b.name as branch_name
             FROM users u
             LEFT JOIN roles r ON r.id = u.role_id
@@ -288,8 +303,9 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
             ORDER BY u.name
           `).all()
         : getDb().prepare(`
-            SELECT u.id, u.name, u.email, u.pin, u.is_active, u.last_login_at,
+            SELECT u.id, u.name, u.email, u.is_active, u.last_login_at,
                    u.role_id, u.branch_id,
+                   CASE WHEN u.pin_hash IS NOT NULL OR u.pin IS NOT NULL THEN 1 ELSE 0 END as has_pin,
                    r.name as role_name, b.name as branch_name
             FROM users u
             LEFT JOIN roles r ON r.id = u.role_id
@@ -320,29 +336,49 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
       const id = crypto.randomUUID()
       const hash = await bcrypt.hash(p.password, 10)
-      db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin)
+      const pinHash = p.pin ? await bcrypt.hash(String(p.pin), 10) : null
+      db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash)
         VALUES (?,?,?,?,?,?,?)`)
-        .run(id, p.branch_id||null, p.role_id, p.name, p.email, hash, p.pin||null)
-      await enqueuSync('users', id, 'INSERT', { id, ...p, password_hash: hash })
+        .run(id, p.branch_id||null, p.role_id, p.name, p.email, hash, pinHash)
+      await enqueueUserRow(id)
       return { success: true, data: { id } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
   ipcMain.handle('admin:users:update', async (_e, id: string, p) => {
     try {
       const db = getDb()
+
+      // Branch scope: non-global callers (e.g. Branch Manager) can only update
+      // users of their own branch (including themselves).
+      const caller = authUser()
+      const perms  = (caller.permissions as Record<string, unknown>) || {}
+      if (!perms.all) {
+        const target = db.prepare('SELECT branch_id FROM users WHERE id=?').get(id) as { branch_id: string | null } | undefined
+        if (!target) return { success: false, error: 'User not found' }
+        if (!caller.branch_id || target.branch_id !== caller.branch_id) {
+          return { success: false, error: 'Cannot update users from another branch' }
+        }
+        // Branch-scoped callers must not move users to another branch or escalate roles
+        delete p.branch_id
+      }
+
       if (p.password) {
         p.password_hash = await bcrypt.hash(p.password, 10)
         delete p.password
       }
+      // PINs are stored hashed only
+      if (p.pin === '') delete p.pin
+      if (p.pin) {
+        p.pin_hash = await bcrypt.hash(String(p.pin), 10)
+        delete p.pin
+      }
       // Never clear branch_id or role_id with blank string — keep existing value
       if (p.branch_id === '') p.branch_id = null
       if (!p.role_id) delete p.role_id
-      // Never overwrite PIN with blank
-      if (p.pin === '') delete p.pin
       const fields = Object.keys(p).filter(k => k !== 'is_active' || p[k] !== undefined)
         .map(k=>`${k}=@${k}`).join(',')
-      db.prepare(`UPDATE users SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
-      await enqueuSync('users', id, 'UPDATE', { id, ...p })
+      if (fields) db.prepare(`UPDATE users SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
+      await enqueueUserRow(id)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -365,6 +401,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       db.prepare(`UPDATE users SET is_active=0, updated_at=datetime('now') WHERE id=?`).run(id)
       db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id) VALUES (?,?,?,?,?,?)`)
         .run(crypto.randomUUID(), caller.id, caller.branch_id, 'USER_DEACTIVATED', 'users', id)
+      void enqueueUserRow(id)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -417,6 +454,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values) VALUES (?,?,?,?,?,?,?)`)
         .run(crypto.randomUUID(), caller.id, caller.branch_id,
           active ? 'USER_ENABLED' : 'USER_DISABLED', 'users', id, JSON.stringify({ is_active: active }))
+      void enqueueUserRow(id)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -430,6 +468,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       db.prepare(`UPDATE users SET password_hash=?, force_password_change=1, updated_at=datetime('now') WHERE id=?`).run(hash, id)
       db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id) VALUES (?,?,?,?,?,?)`)
         .run(crypto.randomUUID(), caller.id, caller.branch_id, 'PASSWORD_RESET_BY_ADMIN', 'users', id)
+      await enqueueUserRow(id)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -1249,10 +1288,11 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
       // Seed default admin user
       const hash = await bcrypt.hash('admin123', 10)
+      const pinHash = await bcrypt.hash('1234', 10)
       db.prepare(`
-        INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, pin, is_active)
-        VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, '1234', 1)
-      `).run(adminUserId, branchId, companyAdminRoleId, hash)
+        INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
+        VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, ?, 1)
+      `).run(adminUserId, branchId, companyAdminRoleId, hash, pinHash)
 
       // Clear the setup_required flag
       store.delete('setup_required')

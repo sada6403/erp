@@ -104,10 +104,14 @@ export async function applySyncOperation(
       .map(([key, value]) => [key, normalizeValue(value)])
   )
 
-  if (input.table === 'users' && columns.has('password_hash') && !record.password_hash) {
-    record.password_hash = ''
-  }
   if (input.table === 'users') {
+    // Never blank stored credentials: a partial UPDATE (e.g. a PIN or name change)
+    // must not overwrite password_hash/pin_hash with an empty value.
+    if (!record.password_hash) {
+      if (operation === 'INSERT' && columns.has('password_hash')) record.password_hash = ''
+      else delete record.password_hash
+    }
+    if (!record.pin_hash) delete record.pin_hash
     await resolveRoleId(client, record)
   }
 
@@ -137,7 +141,11 @@ export async function applySyncOperation(
 
   if (operation === 'INSERT') {
     const values = keys.map(key => record[key])
-    const updateKeys = keys.filter(key => key !== 'id' && key !== 'created_at')
+    // On upsert of an existing user, an empty credential must not replace a real one.
+    const updateKeys = keys.filter(key =>
+      key !== 'id' && key !== 'created_at'
+      && !(input.table === 'users' && (key === 'password_hash' || key === 'pin_hash') && !record[key])
+    )
 
     // MySQL: ON DUPLICATE KEY UPDATE col = VALUES(col)
     const updateSql = updateKeys.length
