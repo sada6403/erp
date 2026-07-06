@@ -172,6 +172,17 @@ CREATE TABLE IF NOT EXISTS stock_transfers (
   received_quantity INTEGER NOT NULL DEFAULT 0,
   missing_quantity  INTEGER NOT NULL DEFAULT 0,
   damaged_quantity  INTEGER NOT NULL DEFAULT 0,
+  package_count     REAL NOT NULL DEFAULT 0,
+  serial_batch_no   TEXT,
+  item_description  TEXT,
+  issuing_officer_name TEXT,
+  received_by_name  TEXT,
+  received_designation TEXT,
+  received_remarks  TEXT,
+  mismatch_reason_category TEXT,
+  mismatch_details  TEXT,
+  print_count       INTEGER NOT NULL DEFAULT 0,
+  last_printed_at   TEXT,
   notes             TEXT,
   initiated_by      TEXT REFERENCES users(id),
   received_by       TEXT REFERENCES users(id),
@@ -201,6 +212,54 @@ CREATE TABLE IF NOT EXISTS stock_transfer_history (
 CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_transfer ON stock_transfer_history(transfer_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_product ON stock_transfer_history(product_id);
 CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_branches ON stock_transfer_history(from_branch_id, to_branch_id);
+
+CREATE TABLE IF NOT EXISTS stock_transfer_print_logs (
+  id             TEXT PRIMARY KEY,
+  transfer_id    TEXT NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+  printed_by     TEXT REFERENCES users(id),
+  printed_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  print_type     TEXT NOT NULL DEFAULT 'print',
+  copy_no        INTEGER NOT NULL DEFAULT 1,
+  device_name    TEXT,
+  synced_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stock_transfer_print_logs_transfer ON stock_transfer_print_logs(transfer_id);
+
+CREATE TABLE IF NOT EXISTS stock_transfer_receive_logs (
+  id                   TEXT PRIMARY KEY,
+  transfer_id          TEXT NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+  received_by_user     TEXT REFERENCES users(id),
+  received_by_name     TEXT,
+  designation          TEXT,
+  received_quantity    REAL NOT NULL DEFAULT 0,
+  missing_quantity     REAL NOT NULL DEFAULT 0,
+  damaged_quantity     REAL NOT NULL DEFAULT 0,
+  remarks              TEXT,
+  received_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stock_transfer_receive_logs_transfer ON stock_transfer_receive_logs(transfer_id);
+
+CREATE TABLE IF NOT EXISTS stock_transfer_mismatches (
+  id                 TEXT PRIMARY KEY,
+  transfer_id        TEXT NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+  product_id         TEXT REFERENCES products(id),
+  sent_quantity      REAL NOT NULL DEFAULT 0,
+  received_quantity  REAL NOT NULL DEFAULT 0,
+  missing_quantity   REAL NOT NULL DEFAULT 0,
+  damaged_quantity   REAL NOT NULL DEFAULT 0,
+  reason_category    TEXT NOT NULL,
+  detailed_reason    TEXT,
+  reported_by        TEXT REFERENCES users(id),
+  status             TEXT NOT NULL DEFAULT 'under_admin_review',
+  admin_reason       TEXT,
+  resolved_by        TEXT REFERENCES users(id),
+  resolved_at        TEXT,
+  created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at          TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_stock_transfer_mismatches_transfer ON stock_transfer_mismatches(transfer_id);
 
 -- Customer orders remain independent from invoices so quotations, deposits,
 -- fulfillment, transfers and delivery can be tracked before final billing.

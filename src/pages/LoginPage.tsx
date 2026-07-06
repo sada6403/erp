@@ -138,6 +138,7 @@ export default function LoginPage() {
 
   // Branding + settings
   const [branding,  setBranding]  = useState<Record<string, unknown>>({})
+  const [logoFailed, setLogoFailed] = useState(false)
   const [licenseOk, setLicenseOk] = useState(true)
   const [deviceId,  setDeviceId]  = useState('POS-001')
   const [version, setVersion]      = useState('')
@@ -212,6 +213,21 @@ export default function LoginPage() {
   useEffect(() => { if (user) navigate(redirectByRole(getPerms(user)), { replace: true }) }, [user, navigate])
   useEffect(() => { if (mode === 'email') emailRef.current?.focus() }, [mode])
   useEffect(() => { if (showBranchInput) setTimeout(() => branchCodeRef.current?.focus(), 50) }, [showBranchInput])
+
+  useEffect(() => {
+    if (!terminalBranch || !window.api?.auth?.loginOptions) return
+    window.api.auth.loginOptions({ branch_id: terminalBranch.id }).then((res: {
+      success: boolean
+      data?: { users: number; pin_users: number; admin_email?: string }
+    }) => {
+      if (!res.success || !res.data?.users) return
+      if (res.data.pin_users === 0) {
+        if (res.data.admin_email && !email) setEmail(res.data.admin_email)
+        setMode('email')
+        toast('No PIN users found for this branch. Use admin email login.', { icon: 'ℹ️' })
+      }
+    }).catch(() => {})
+  }, [terminalBranch, email])
 
   // ── Handlers ──
   const handleSubmit = async (e: React.FormEvent) => {
@@ -476,8 +492,8 @@ export default function LoginPage() {
           <div className="flex items-center gap-3 pb-3" style={{ borderBottom: '1px solid #0f1623' }}>
             <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0"
               style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
-              {brandLogo
-                ? <img src={brandLogo} alt="" className="w-full h-full object-cover" />
+              {brandLogo && !logoFailed
+                ? <img src={brandLogo} alt="" className="w-full h-full object-cover" onError={() => setLogoFailed(true)} />
                 : <ShoppingBag size={17} className="text-white" />}
             </div>
             <div className="flex-1 min-w-0">
@@ -666,7 +682,7 @@ export default function LoginPage() {
               <div className="flex items-center justify-between pt-0.5">
                 <span className="text-xs font-mono" style={{ color: '#0f172a' }}>v{version} · {deviceId}</span>
                 <button onClick={() => { setMode('email'); setLoginState('idle') }}
-                  className="flex items-center gap-1 text-xs" style={{ color: '#1e3a5f' }}>
+                  className="flex items-center gap-1 text-xs font-semibold" style={{ color: '#818cf8' }}>
                   <Mail size={10} /> Admin
                 </button>
               </div>

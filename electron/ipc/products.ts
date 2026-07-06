@@ -9,6 +9,7 @@ import Store from 'electron-store'
 import { CloudApi } from '../services/cloudApi'
 import { uploadFile as s3UploadFile } from '../services/s3Service'
 import type { S3Config } from '../services/s3Service'
+import { decryptSecret } from './settings'
 
 const store = new Store()
 
@@ -363,7 +364,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       // 2. Try Cloud API (self-hosted Next.js) upload
       const cloudUrl = String(settings?.cloud_api_url || '').trim()
-      const cloudKey = String(settings?.cloud_api_key || '').trim()
+      const cloudKey = decryptSecret(settings?.cloud_api_key).trim()
       if (cloudUrl && cloudKey) {
         try {
           const publicUrl = await new CloudApi({ baseUrl: cloudUrl, apiKey: cloudKey })

@@ -17,7 +17,10 @@ export function verifySupportPasscode(input: string): boolean {
 }
 
 function normalizeApiUrl(url: string): string {
-  return url.trim().replace(/\/+$/, '') || 'http://localhost:3000'
+  return url.trim().replace(/\/+$/, '') ||
+    process.env.VITE_CLOUD_API_URL?.trim().replace(/\/+$/, '') ||
+    process.env.CLOUD_API_URL?.trim().replace(/\/+$/, '') ||
+    'http://72.61.115.222:4001'
 }
 
 function htmlSummary(text: string): string {

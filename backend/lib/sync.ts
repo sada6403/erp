@@ -8,6 +8,9 @@ export const ALLOWED_TABLES = new Set([
   'invoices', 'invoice_items', 'payments', 'installments', 'installment_payments',
   'installment_plans', 'installment_schedule', 'installment_reminders',
   'deliveries', 'audit_logs', 'customer_orders', 'customer_order_items',
+  'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches',
+  'branch_transfer_logs', 'branch_transfer_prints',
+  'stock_requests', 'stock_request_items',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {

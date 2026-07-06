@@ -540,6 +540,9 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
   const [fromBranch, setFromBranch] = useState(defaultFromBranchId)
   const [toBranch, setToBranch]     = useState(defaultToBranchId)
   const [qty, setQty]               = useState(1)
+  const [packageCount, setPackageCount] = useState(0)
+  const [serialBatch, setSerialBatch] = useState('')
+  const [description, setDescription] = useState('')
   const [notes, setNotes]           = useState('')
   const [availability, setAvailability] = useState<Record<string, unknown>[]>([])
   const [saving, setSaving]         = useState(false)
@@ -572,6 +575,9 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
       from_branch_id: fromBranch,
       to_branch_id: toBranch,
       quantity: qty,
+      package_count: packageCount,
+      serial_batch_no: serialBatch,
+      item_description: description,
       notes: notes || `Stock request from branch`,
     })
     setSaving(false)
@@ -672,6 +678,23 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
               Requested quantity is higher than current source stock ({available}). It can be submitted, but approval will need enough stock.
             </p>
           )}
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="label">Package Count</label>
+            <input type="number" min={0} value={packageCount} onChange={e => setPackageCount(Number(e.target.value))}
+              className="input" />
+          </div>
+          <div>
+            <label className="label">Serial / Batch No</label>
+            <input value={serialBatch} onChange={e => setSerialBatch(e.target.value)}
+              className="input" placeholder="Optional" />
+          </div>
+        </div>
+        <div>
+          <label className="label">Description</label>
+          <input value={description} onChange={e => setDescription(e.target.value)}
+            className="input" placeholder="Optional product description / remarks" />
         </div>
         <div>
           <label className="label">Notes</label>

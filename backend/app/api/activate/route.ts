@@ -59,17 +59,35 @@ export async function POST(req: NextRequest) {
 
       // Check if this device is already registered (re-activation)
       let existingDevice: Record<string, unknown> | null = null
+      let deviceRegisteredElsewhere: Record<string, unknown> | null = null
       try {
         const { rows: ed } = await step('find existing device', () =>
           pool.query(
-            `SELECT * FROM pos_devices WHERE device_id = ? AND company_id = ?`,
-            [device_id, co.company_id]
+            `SELECT pd.*, c.name as company_name, c.id as registered_company_id
+             FROM pos_devices pd
+             JOIN companies c ON c.id = pd.company_id
+             WHERE pd.device_id = ?
+             LIMIT 1`,
+            [device_id]
           )
         )
-        if (ed.length) existingDevice = ed[0] as Record<string, unknown>
+        if (ed.length) {
+          const device = ed[0] as Record<string, unknown>
+          if (String(device.registered_company_id) === String(co.company_id)) {
+            existingDevice = device
+          } else {
+            deviceRegisteredElsewhere = device
+          }
+        }
       } catch { /* table may not exist */ }
 
       if (!existingDevice) {
+        if (deviceRegisteredElsewhere) {
+          return NextResponse.json({
+            error: `This device is already registered under ${deviceRegisteredElsewhere.company_name || 'another company'}. Reset or deactivate that device in SuperAdmin before activating it for this company.`,
+          }, { status: 409 })
+        }
+
         // Check device limit
         const maxDevices = Number(co.max_pos_devices ?? 2)
         let activeCount = 0

@@ -16,7 +16,7 @@ type VerifyResponse = VerifyResult & { success?: boolean; error?: string }
 
 // Built-in production server — devices activate with only the Company Key.
 // Changing it requires the hidden support unlock (5 taps + support passcode).
-const BUILT_IN_API_URL = 'http://72.61.115.222'
+const BUILT_IN_API_URL = 'http://72.61.115.222:4001'
 
 const DEFAULT_API_URL =
   (import.meta.env.VITE_CLOUD_API_URL as string | undefined)?.trim().replace(/\/+$/, '') ||
@@ -43,8 +43,13 @@ export default function ActivationPage({ onActivated }: Props) {
     window.api.app.getDeviceInfo().then((info: Record<string, string>) => {
       setDeviceName(info.device_name ?? '')
     })
-    const saved = localStorage.getItem('activation_api_url')?.trim()
-    if (saved && !DEFAULT_API_URL) setApiUrl(saved)
+    const saved = localStorage.getItem('activation_api_url')?.trim().replace(/\/+$/, '')
+    if (saved && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(saved)) {
+      setApiUrl(saved)
+    } else if (saved) {
+      localStorage.setItem('activation_api_url', DEFAULT_API_URL)
+      setApiUrl(DEFAULT_API_URL)
+    }
   }, [])
 
   function handleSupportUnlock() {
@@ -93,12 +98,12 @@ export default function ActivationPage({ onActivated }: Props) {
           company_key: companyKey.trim(),
           cloud_api_url: serverUrl,
         }) as VerifyResponse
-        if (!data.success) { setError(data.error ?? 'Verification failed'); setLoading(false); return }
+        if (!data.success) { setError(`${data.error ?? 'Verification failed'} (Server: ${serverUrl})`); setLoading(false); return }
       } else {
         const url = `${serverUrl}/api/activate/verify?company_key=${encodeURIComponent(companyKey.trim())}`
         const res = await fetch(url)
         data = await res.json() as VerifyResponse
-        if (!res.ok) { setError(data.error ?? 'Verification failed'); setLoading(false); return }
+        if (!res.ok) { setError(`${data.error ?? 'Verification failed'} (Server: ${serverUrl})`); setLoading(false); return }
       }
       if (data.device_slots_left <= 0) {
         setError(`Device limit reached (${data.active_devices}/${data.max_devices}). Please upgrade your subscription.`)

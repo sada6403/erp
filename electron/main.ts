@@ -23,6 +23,7 @@ import { registerReportHandlers } from './ipc/reports'
 import { registerCommunicationHandlers, startReminderScheduler } from './ipc/communications'
 import { registerLoyaltyHandlers } from './ipc/loyalty'
 import { registerBatchHandlers } from './ipc/batches'
+import { registerBranchTransferHandlers } from './ipc/branchTransfers'
 import { registerBackupHandlers } from './ipc/backup'
 import { registerMonitorHandlers } from './ipc/monitor'
 import { registerLicenseHandlers } from './ipc/license'
@@ -144,6 +145,7 @@ async function bootstrap() {
   startReminderScheduler()
   registerLoyaltyHandlers()
   registerBatchHandlers()
+  registerBranchTransferHandlers(ipcMain)
   registerBackupHandlers()
   registerMonitorHandlers()
   registerLicenseHandlers(ipcMain)
@@ -151,6 +153,9 @@ async function bootstrap() {
   startLicenseChecks()
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
+  ipcMain.handle('update:check',    () => isDev ? null : autoUpdater.checkForUpdates())
+  ipcMain.handle('update:download', () => isDev ? null : autoUpdater.downloadUpdate())
+  ipcMain.handle('update:install',  () => { if (!isDev) autoUpdater.quitAndInstall(false, true) })
 
   createWindow()
 
@@ -171,10 +176,6 @@ async function bootstrap() {
     autoUpdater.on('error', (err) => {
       mainWindow?.webContents.send('update:error', err.message)
     })
-
-    ipcMain.handle('update:check',    () => autoUpdater.checkForUpdates())
-    ipcMain.handle('update:download', () => autoUpdater.downloadUpdate())
-    ipcMain.handle('update:install',  () => { autoUpdater.quitAndInstall(false, true) })
 
     // Check after 8s so the app fully loads first
     setTimeout(() => { autoUpdater.checkForUpdates().catch(() => {}) }, 8000)
