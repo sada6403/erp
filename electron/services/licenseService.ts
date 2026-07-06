@@ -1,5 +1,6 @@
 import Store from 'electron-store'
 import { net } from 'electron'
+import { decryptSecret } from '../ipc/settings'
 
 const store = new Store()
 const LICENSE_KEY = 'license_data'
@@ -37,7 +38,7 @@ export function isAppLocked(): boolean {
 export async function fetchAndCacheLicense(): Promise<LicenseData | null> {
   const settings = (store.get('app_settings') as Record<string, unknown>) ?? {}
   const apiUrl = String(settings.cloud_api_url ?? '').trim()
-  const apiKey = String(settings.cloud_api_key ?? '').trim()
+  const apiKey = decryptSecret(settings.cloud_api_key).trim()
 
   if (!apiUrl || !apiKey) return null
 

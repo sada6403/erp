@@ -60,6 +60,8 @@ function runMigrations(): void {
     ['products',             'branch_id',   "TEXT"],
     ['branches',             'code',        "TEXT"],
     ['branches',             'branch_pin',  "TEXT"],
+    ['users',                'pin_hash',    "TEXT"],
+    ['branch_transfers',     'approved_by', "TEXT"],
     // Bill type system
     ['invoices', 'bill_type',    "TEXT NOT NULL DEFAULT 'RETAIL'"],
     ['invoices', 'valid_until',  "TEXT"],
@@ -75,6 +77,17 @@ function runMigrations(): void {
     ['stock_transfers', 'discrepancy_note', "TEXT"],
     ['stock_transfers', 'rejected_by',      "TEXT"],
     ['stock_transfers', 'discrepancy_by',   "TEXT"],
+    ['stock_transfers', 'package_count',             "REAL NOT NULL DEFAULT 0"],
+    ['stock_transfers', 'serial_batch_no',           "TEXT"],
+    ['stock_transfers', 'item_description',          "TEXT"],
+    ['stock_transfers', 'issuing_officer_name',      "TEXT"],
+    ['stock_transfers', 'received_by_name',          "TEXT"],
+    ['stock_transfers', 'received_designation',      "TEXT"],
+    ['stock_transfers', 'received_remarks',          "TEXT"],
+    ['stock_transfers', 'mismatch_reason_category',  "TEXT"],
+    ['stock_transfers', 'mismatch_details',          "TEXT"],
+    ['stock_transfers', 'print_count',               "INTEGER NOT NULL DEFAULT 0"],
+    ['stock_transfers', 'last_printed_at',           "TEXT"],
     // Product extended fields
     ['products', 'sort_name',           "TEXT"],
     ['products', 'isbn',                "TEXT"],
@@ -164,6 +177,140 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_transfer ON stock_transfer_history(transfer_id);
     CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_product ON stock_transfer_history(product_id);
     CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_branches ON stock_transfer_history(from_branch_id, to_branch_id);
+
+    CREATE TABLE IF NOT EXISTS stock_transfer_print_logs (
+      id             TEXT PRIMARY KEY,
+      transfer_id    TEXT NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+      printed_by     TEXT REFERENCES users(id),
+      printed_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      print_type     TEXT NOT NULL DEFAULT 'print',
+      copy_no        INTEGER NOT NULL DEFAULT 1,
+      device_name    TEXT,
+      synced_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_transfer_print_logs_transfer ON stock_transfer_print_logs(transfer_id);
+
+    CREATE TABLE IF NOT EXISTS stock_transfer_receive_logs (
+      id                   TEXT PRIMARY KEY,
+      transfer_id          TEXT NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+      received_by_user     TEXT REFERENCES users(id),
+      received_by_name     TEXT,
+      designation          TEXT,
+      received_quantity    REAL NOT NULL DEFAULT 0,
+      missing_quantity     REAL NOT NULL DEFAULT 0,
+      damaged_quantity     REAL NOT NULL DEFAULT 0,
+      remarks              TEXT,
+      received_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at            TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_transfer_receive_logs_transfer ON stock_transfer_receive_logs(transfer_id);
+
+    CREATE TABLE IF NOT EXISTS stock_transfer_mismatches (
+      id                 TEXT PRIMARY KEY,
+      transfer_id        TEXT NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
+      product_id         TEXT REFERENCES products(id),
+      sent_quantity      REAL NOT NULL DEFAULT 0,
+      received_quantity  REAL NOT NULL DEFAULT 0,
+      missing_quantity   REAL NOT NULL DEFAULT 0,
+      damaged_quantity   REAL NOT NULL DEFAULT 0,
+      reason_category    TEXT NOT NULL,
+      detailed_reason    TEXT,
+      reported_by        TEXT REFERENCES users(id),
+      status             TEXT NOT NULL DEFAULT 'under_admin_review',
+      admin_reason       TEXT,
+      resolved_by        TEXT REFERENCES users(id),
+      resolved_at        TEXT,
+      created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at          TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_stock_transfer_mismatches_transfer ON stock_transfer_mismatches(transfer_id);
+
+    CREATE TABLE IF NOT EXISTS branch_transfers (
+      id                   TEXT PRIMARY KEY,
+      transfer_number      TEXT NOT NULL UNIQUE,
+      from_branch_id       TEXT NOT NULL,
+      to_branch_id         TEXT NOT NULL,
+      status               TEXT NOT NULL DEFAULT 'draft',
+      driver_name          TEXT,
+      vehicle_number       TEXT,
+      driver_phone         TEXT,
+      issuing_officer_name TEXT,
+      dispatch_at          TEXT,
+      expected_delivery_at TEXT,
+      actual_delivery_at   TEXT,
+      notes                TEXT,
+      created_by           TEXT,
+      approved_by          TEXT,
+      received_by          TEXT,
+      received_by_name     TEXT,
+      received_designation TEXT,
+      created_at           TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at           TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at            TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_bt_from ON branch_transfers(from_branch_id);
+    CREATE INDEX IF NOT EXISTS idx_bt_to ON branch_transfers(to_branch_id);
+    CREATE INDEX IF NOT EXISTS idx_bt_status ON branch_transfers(status);
+
+    CREATE TABLE IF NOT EXISTS branch_transfer_items (
+      id               TEXT PRIMARY KEY,
+      transfer_id      TEXT NOT NULL REFERENCES branch_transfers(id) ON DELETE CASCADE,
+      product_id       TEXT NOT NULL,
+      quantity         REAL NOT NULL DEFAULT 0,
+      unit             TEXT,
+      package_count    REAL NOT NULL DEFAULT 0,
+      serial_batch_no  TEXT,
+      description      TEXT,
+      received_qty     REAL NOT NULL DEFAULT 0,
+      damaged_qty      REAL NOT NULL DEFAULT 0,
+      missing_qty      REAL NOT NULL DEFAULT 0,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_bti_transfer ON branch_transfer_items(transfer_id);
+
+    CREATE TABLE IF NOT EXISTS branch_transfer_mismatches (
+      id               TEXT PRIMARY KEY,
+      transfer_id      TEXT NOT NULL REFERENCES branch_transfers(id) ON DELETE CASCADE,
+      item_id          TEXT NOT NULL REFERENCES branch_transfer_items(id) ON DELETE CASCADE,
+      missing_qty      REAL NOT NULL DEFAULT 0,
+      damaged_qty      REAL NOT NULL DEFAULT 0,
+      reason_category  TEXT NOT NULL,
+      detailed_reason  TEXT,
+      status           TEXT NOT NULL DEFAULT 'under_admin_review',
+      reported_by      TEXT,
+      resolved_by      TEXT,
+      admin_reason     TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_btm_transfer ON branch_transfer_mismatches(transfer_id);
+
+    CREATE TABLE IF NOT EXISTS branch_transfer_logs (
+      id               TEXT PRIMARY KEY,
+      transfer_id      TEXT NOT NULL REFERENCES branch_transfers(id) ON DELETE CASCADE,
+      user_id          TEXT,
+      action           TEXT NOT NULL,
+      old_values       TEXT,
+      new_values       TEXT,
+      notes            TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_btl_transfer ON branch_transfer_logs(transfer_id);
+
+    CREATE TABLE IF NOT EXISTS branch_transfer_prints (
+      id               TEXT PRIMARY KEY,
+      transfer_id      TEXT NOT NULL REFERENCES branch_transfers(id) ON DELETE CASCADE,
+      printed_by       TEXT,
+      print_type       TEXT NOT NULL DEFAULT 'print',
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_btp_transfer ON branch_transfer_prints(transfer_id);
   `)
 
   db.exec(`

@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
 import { useKeyboard } from '@/hooks/useKeyboard'
@@ -68,6 +69,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [redeemPoints, setRedeemPoints] = useState(0)
   const [earnedPoints, setEarnedPoints] = useState(0)
   const receivedRef = useRef<HTMLInputElement>(null)
+  const navigate    = useNavigate()
+  const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null)
 
   useEffect(() => {
     receivedRef.current?.focus()
@@ -313,6 +316,15 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       }
 
       const data = res.data as { id: string; invoice_number: string }
+
+      // ── Installment: skip success screen and go straight to plan creation ──
+      if (method === 'installment') {
+        setCreatedInvoiceId(data.id)
+        cart.clear()
+        onSuccess()
+        navigate(`/admin/installments?invoice_id=${data.id}&invoice_number=${encodeURIComponent(data.invoice_number || invoiceNumber)}&amount=${cart.total}`)
+        return
+      }
 
       // Loyalty: redeem points first, then earn on net amount
       if (cart.customer?.id) {

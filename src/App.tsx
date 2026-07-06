@@ -31,6 +31,9 @@ import CashRegisterPage from '@/pages/admin/CashRegisterPage'
 import StockRequestsPage from '@/pages/admin/StockRequestsPage'
 import StockTransfersPage from '@/pages/admin/StockTransfersPage'
 import TrackTransferPage from '@/pages/admin/TrackTransferPage'
+import BranchTransfersPage from '@/pages/admin/BranchTransfersPage'
+import BranchTransferForm from '@/pages/admin/BranchTransferForm'
+import BranchTransferView from '@/pages/admin/BranchTransferView'
 import BatchesPage from '@/pages/admin/BatchesPage'
 import BackupPage from '@/pages/admin/BackupPage'
 import SecurityPage from '@/pages/admin/SecurityPage'
@@ -136,6 +139,10 @@ export default function App() {
         <Route path="/admin/stock-requests" element={<StockRequestsPage />} />
         <Route path="/admin/stock-transfers" element={<StockTransfersPage />} />
         <Route path="/admin/track-transfer" element={<TrackTransferPage />} />
+        <Route path="/admin/track-transfer" element={<TrackTransferPage />} />
+        <Route path="/admin/branch-transfers" element={<BranchTransfersPage />} />
+        <Route path="/admin/branch-transfers/new" element={<BranchTransferForm />} />
+        <Route path="/admin/branch-transfers/:id" element={<BranchTransferView />} />
         <Route path="/admin/backup"         element={<RequireSuperAdmin><BackupPage /></RequireSuperAdmin>} />
         <Route path="/admin/security"       element={<SecurityPage />} />
         <Route path="/admin/system-health"  element={<RequireSuperAdmin><SystemHealthPage /></RequireSuperAdmin>} />

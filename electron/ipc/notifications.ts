@@ -255,6 +255,72 @@ export function registerNotificationHandlers() {
             tf
           )
         }
+        
+        // Multi-item branch transfers notifications
+        const incomingMulti = db.prepare(`
+          SELECT bt.id, bt.transfer_number, bt.status,
+                 fb.name AS from_branch_name, tb.name AS to_branch_name
+          FROM branch_transfers bt
+          LEFT JOIN branches fb ON fb.id = bt.from_branch_id
+          LEFT JOIN branches tb ON tb.id = bt.to_branch_id
+          WHERE bt.from_branch_id = ?
+            AND bt.status = 'pending_approval'
+          ORDER BY bt.created_at DESC
+          LIMIT 20
+        `).all(branchId) as Record<string, unknown>[]
+        for (const tf of incomingMulti) {
+          createUniqueTransferNotification(
+            'multi_incoming_request',
+            String(tf.id),
+            'New branch transfer request',
+            `${tf.to_branch_name || 'A branch'} requested stock from your branch.`,
+            tf
+          )
+        }
+
+        const updatesMulti = db.prepare(`
+          SELECT bt.id, bt.transfer_number, bt.status,
+                 fb.name AS from_branch_name, tb.name AS to_branch_name
+          FROM branch_transfers bt
+          LEFT JOIN branches fb ON fb.id = bt.from_branch_id
+          LEFT JOIN branches tb ON tb.id = bt.to_branch_id
+          WHERE bt.to_branch_id = ?
+            AND bt.status IN ('approved','rejected','dispatched','in_transit','received','partially_received','discrepancy','cancelled')
+          ORDER BY bt.updated_at DESC
+          LIMIT 30
+        `).all(branchId) as Record<string, unknown>[]
+        for (const tf of updatesMulti) {
+          const status = String(tf.status).replace(/_/g, ' ')
+          createUniqueTransferNotification(
+            `multi_status_${tf.status}`,
+            String(tf.id),
+            `Transfer request ${status}`,
+            `${tf.from_branch_name || 'Source branch'} marked transfer ${tf.transfer_number} as ${status}.`,
+            tf
+          )
+        }
+
+        const sourceUpdatesMulti = db.prepare(`
+          SELECT bt.id, bt.transfer_number, bt.status,
+                 fb.name AS from_branch_name, tb.name AS to_branch_name
+          FROM branch_transfers bt
+          LEFT JOIN branches fb ON fb.id = bt.from_branch_id
+          LEFT JOIN branches tb ON tb.id = bt.to_branch_id
+          WHERE bt.from_branch_id = ?
+            AND bt.status IN ('received','partially_received','discrepancy','cancelled')
+          ORDER BY bt.updated_at DESC
+          LIMIT 30
+        `).all(branchId) as Record<string, unknown>[]
+        for (const tf of sourceUpdatesMulti) {
+          const status = String(tf.status).replace(/_/g, ' ')
+          createUniqueTransferNotification(
+            `multi_source_status_${tf.status}`,
+            String(tf.id),
+            `Transfer ${status}`,
+            `${tf.to_branch_name || 'Destination branch'} confirmed receipt of transfer ${tf.transfer_number} as ${status}.`,
+            tf
+          )
+        }
       }
 
       return { success: true }

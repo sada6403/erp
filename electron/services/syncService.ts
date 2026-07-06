@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
 import { CloudApi, CloudRateLimitError } from './cloudApi'
+import { decryptSecret } from '../ipc/settings'
 
 const store = new Store()
 const BATCH_SIZE = 10
@@ -42,7 +43,7 @@ export class SyncService {
   private getCloudApi(): CloudApi | null {
     const settings = store.get('app_settings') as Record<string, unknown> | undefined
     const baseUrl = String(settings?.cloud_api_url || '').trim()
-    const apiKey = String(settings?.cloud_api_key || '').trim()
+    const apiKey = decryptSecret(settings?.cloud_api_key).trim()
     if (!baseUrl || !apiKey) return null
     return new CloudApi({ baseUrl, apiKey })
   }
@@ -59,6 +60,11 @@ export class SyncService {
 
       this.resetStaleProcessing()
       this.resetFailedForAutoRetry()
+      if (this.needsBootstrapPull()) {
+        this.ensureLocalSystemRoles()
+        store.delete('last_pull_timestamp')
+        await this.pullChanges(cloud)
+      }
       await this.processBatch(cloud)
       if (this.hasPendingPushes()) return
       await this.pullChanges(cloud)
@@ -158,6 +164,33 @@ export class SyncService {
     try { return this.hasPendingPushes() } catch { return false }
   }
 
+  private needsBootstrapPull(): boolean {
+    try {
+      const db = getDb()
+      const row = db.prepare(`SELECT COUNT(*) as c FROM users WHERE is_active=1`).get() as { c: number }
+      return row.c === 0
+    } catch {
+      return false
+    }
+  }
+
+  private ensureLocalSystemRoles(): void {
+    try {
+      const db = getDb()
+      db.prepare(`
+        INSERT OR IGNORE INTO roles (id, name, permissions)
+        VALUES
+          ('3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'Company Admin', '{"all":true}'),
+          ('4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e', 'Branch Manager', '{"pos":true,"inventory":true,"reports":true,"customers":true,"employees":true}'),
+          ('5c8d0e1f-3a4b-6c5d-0e1f-3a4b5c8d0e1f', 'Cashier', '{"pos":true,"customers":true}'),
+          ('6d9e1f2a-4b5c-7d6e-1f2a-4b5c6d9e1f2a', 'Warehouse Staff', '{"inventory":true,"transfers":true}'),
+          ('7e0f2a3b-5c6d-8e7f-2a3b-5c6d7e0f2a3b', 'Delivery Staff', '{"deliveries":true}')
+      `).run()
+    } catch {
+      // Cloud sync can continue; insertFiltered will surface any real schema issue.
+    }
+  }
+
   private async uploadOfflineImage(cloud: CloudApi, localUrl: string): Promise<string | null> {
     try {
       const fileName = localUrl.replace('app-img://', '')
@@ -234,11 +267,13 @@ export class SyncService {
     const newPullTime = new Date().toISOString()
 
     const globalTables = [
-      'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers',
-      'products', 'stocks', 'stock_movements', 'customers', 'deliveries',
+      'branches', 'roles', 'users', 'categories', 'suppliers',
+      'products', 'stocks', 'stock_transfers', 'stock_movements', 'customers', 'deliveries',
       'purchase_orders', 'purchase_items',
       'installments', 'installment_plans', 'installment_schedule',
-      'installment_reminders', 'stock_transfers', 'customer_orders', 'customer_order_items',
+      'installment_reminders', 'customer_orders', 'customer_order_items',
+      'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches', 
+      'branch_transfer_logs', 'branch_transfer_prints'
     ]
 
     let pulledInstallmentIds: string[] = []
@@ -265,12 +300,16 @@ export class SyncService {
         WHERE table_name = ? AND status IN ('pending', 'processing')
       `).all(table) as { record_id: string }[]).map(row => row.record_id)
 
-      db.transaction(() => {
-        for (const row of data) {
-          if (pendingIds.includes(String(row.id))) continue
-          this.insertFiltered(db, table, row)
-        }
-      })()
+      try {
+        db.transaction(() => {
+          for (const row of data) {
+            if (pendingIds.includes(String(row.id))) continue
+            this.insertFiltered(db, table, row)
+          }
+        })()
+      } catch (err) {
+        console.error(`[SyncService] Transaction execution failed for table ${table}:`, err)
+      }
     }
 
     // Pull invoices + child records
@@ -356,10 +395,80 @@ export class SyncService {
     const keys = Object.keys(localRow)
     if (keys.length === 0) return
 
+    if (table === 'categories' && localRow.parent_id) {
+      const parentId = String(localRow.parent_id)
+      const exists = db.prepare(`SELECT id FROM categories WHERE id = ? LIMIT 1`).get(parentId)
+      if (!exists) localRow.parent_id = null
+    }
+
+    if (table === 'stock_movements') {
+      if (localRow.created_by) {
+        const userId = String(localRow.created_by)
+        const exists = db.prepare(`SELECT id FROM users WHERE id = ? LIMIT 1`).get(userId)
+        if (!exists) {
+          const fallback = db.prepare(`
+            SELECT id FROM users
+            WHERE is_active = 1
+            ORDER BY
+              CASE
+                WHEN lower(email) LIKE '%admin%' THEN 0
+                WHEN lower(name) LIKE '%admin%' THEN 1
+                ELSE 2
+              END,
+              created_at ASC
+            LIMIT 1
+          `).get() as { id?: string } | undefined
+          localRow.created_by = fallback?.id ?? null
+        }
+      }
+
+      if (localRow.reference_transfer_id) {
+        const transferId = String(localRow.reference_transfer_id)
+        const exists = db.prepare(`SELECT id FROM stock_transfers WHERE id = ? LIMIT 1`).get(transferId)
+        if (!exists) localRow.reference_transfer_id = null
+      }
+    }
+
     // Users table: preserve local-only fields (pin, 2FA) and clear lockout on cloud update.
     // Cloud schema has no login_attempts/locked_until/pin/two_factor_* columns, so a plain
     // INSERT OR REPLACE would wipe them. Use upsert instead.
     if (table === 'users') {
+      if (localRow.role_id) {
+        const roleId = String(localRow.role_id)
+        const exists = db.prepare(`SELECT id FROM roles WHERE id = ? LIMIT 1`).get(roleId)
+        if (!exists) {
+          const email = String(localRow.email || '').toLowerCase()
+          const name = String(localRow.name || '').toLowerCase()
+          const fallbackRoleName = email.includes('admin') || name.includes('admin')
+            ? 'Company Admin'
+            : email.includes('manager') || name.includes('manager')
+              ? 'Branch Manager'
+              : 'Cashier'
+          const fallback = db.prepare(`SELECT id FROM roles WHERE name = ? LIMIT 1`).get(fallbackRoleName) as { id?: string } | undefined
+          if (fallback?.id) localRow.role_id = fallback.id
+        }
+      }
+      if (localRow.branch_id) {
+        const branchId = String(localRow.branch_id)
+        const exists = db.prepare(`SELECT id FROM branches WHERE id = ? LIMIT 1`).get(branchId)
+        if (!exists) {
+          const fallback = db.prepare(`
+            SELECT id
+            FROM branches
+            WHERE is_active = 1
+            ORDER BY
+              CASE
+                WHEN code = 'MAIN' THEN 0
+                WHEN lower(name) LIKE '%main%' THEN 1
+                WHEN lower(name) LIKE '%head%' THEN 2
+                ELSE 3
+              END,
+              created_at ASC
+            LIMIT 1
+          `).get() as { id?: string } | undefined
+          localRow.branch_id = fallback?.id ?? null
+        }
+      }
       const cloudUpdateCols = keys.filter(k =>
         ['name','email','phone','password_hash','pin_hash','role_id',
          'branch_id','is_active','last_login_at','updated_at'].includes(k)
@@ -373,10 +482,16 @@ export class SyncService {
       return
     }
 
-    db.prepare(
-      `INSERT OR REPLACE INTO ${table} (${keys.join(',')})
-       VALUES (${keys.map(() => '?').join(',')})`
-    ).run(...keys.map(key => localRow[key]))
+    try {
+      db.prepare(
+        `INSERT OR REPLACE INTO ${table} (${keys.join(',')})
+         VALUES (${keys.map(() => '?').join(',')})`
+      ).run(...keys.map(key => localRow[key]))
+    } catch (err) {
+      console.error(`[SyncService] Insert Error in table ${table}:`, err)
+      console.error(`[SyncService] Problematic row:`, localRow)
+      throw err
+    }
   }
 
   private async checkOnline(cloud: CloudApi): Promise<boolean> {

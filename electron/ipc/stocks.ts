@@ -70,6 +70,30 @@ function insertTransferHistory(
   return record
 }
 
+function auditTransferAction(
+  db: ReturnType<typeof getDb>,
+  action: string,
+  transferId: string,
+  user: Record<string, unknown> | undefined,
+  branchId: unknown,
+  oldValue: Record<string, unknown> | null,
+  newValue: Record<string, unknown>,
+  reason?: string | null,
+) {
+  db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,old_values,new_values)
+    VALUES (?,?,?,?,?,?,?,?)`)
+    .run(
+      crypto.randomUUID(),
+      user?.id || null,
+      branchId || null,
+      action,
+      'stock_transfers',
+      transferId,
+      oldValue ? JSON.stringify(oldValue) : null,
+      JSON.stringify({ ...newValue, reason: reason || null })
+    )
+}
+
 export function registerStockHandlers(ipcMain: IpcMain) {
   ipcMain.handle('stocks:list', (_e, branchId?: string) => {
     try {
@@ -182,28 +206,22 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         notes: payload.notes || null, initiated_by: user?.id || null,
         driver_name: payload.driver_name || null, driver_phone: payload.driver_phone || null,
         vehicle_number: payload.vehicle_number || null,
+        package_count: Number(payload.package_count || 0),
+        serial_batch_no: payload.serial_batch_no || null,
+        item_description: payload.item_description || null,
+        issuing_officer_name: payload.issuing_officer_name || null,
         expected_delivery_at: payload.expected_delivery_at || null,
       }
       db.transaction(() => {
         db.prepare(`INSERT INTO stock_transfers
           (id,transfer_number,product_id,from_branch_id,to_branch_id,from_warehouse_id,
            to_warehouse_id,quantity,status,notes,initiated_by,driver_name,driver_phone,
-           vehicle_number,expected_delivery_at)
+           vehicle_number,package_count,serial_batch_no,item_description,issuing_officer_name,expected_delivery_at)
           VALUES (@id,@transfer_number,@product_id,@from_branch_id,@to_branch_id,@from_warehouse_id,
            @to_warehouse_id,@quantity,@status,@notes,@initiated_by,@driver_name,@driver_phone,
-           @vehicle_number,@expected_delivery_at)`).run(record)
+           @vehicle_number,@package_count,@serial_batch_no,@item_description,@issuing_officer_name,@expected_delivery_at)`).run(record)
         insertTransferHistory(db, record, 'Pending', user?.id, record.notes)
-        db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-          VALUES (?,?,?,?,?,?,?)`)
-          .run(
-            crypto.randomUUID(),
-            user?.id,
-            record.to_branch_id,
-            'TRANSFER_REQUEST_CREATED',
-            'stock_transfers',
-            id,
-            JSON.stringify(record)
-          )
+        auditTransferAction(db, 'TRANSFER_REQUEST_CREATED', id, user, record.to_branch_id, null, record, String(record.notes || ''))
       })()
       const product = db.prepare('SELECT name FROM products WHERE id=?').get(payload.product_id) as { name?: string } | undefined
       const fromBranch = db.prepare('SELECT name FROM branches WHERE id=?').get(payload.from_branch_id) as { name?: string } | undefined
@@ -223,6 +241,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const db = getDb()
       let sql = `
         SELECT st.*, p.name as product_name, p.sku,
+               p.barcode, p.unit,
                fb.name as from_branch_name, tb.name as to_branch_name,
                iu.name as initiated_by_name, au.name as approved_by_name,
                ru.name as received_by_name
@@ -243,6 +262,88 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       sql += ' ORDER BY st.initiated_at DESC LIMIT 200'
       const rows = db.prepare(sql).all(...params)
       return { success: true, data: rows }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('stocks:getTransfer', (_e, id: string) => {
+    try {
+      const db = getDb()
+      const transfer = db.prepare(`
+        SELECT st.*, p.name as product_name, p.sku, p.barcode, p.unit,
+               fb.name as from_branch_name, fb.address as from_branch_address,
+               tb.name as to_branch_name, tb.address as to_branch_address,
+               iu.name as initiated_by_name, au.name as approved_by_name,
+               ru.name as received_by_user_name
+        FROM stock_transfers st
+        LEFT JOIN products p ON p.id = st.product_id
+        LEFT JOIN branches fb ON fb.id = st.from_branch_id
+        LEFT JOIN branches tb ON tb.id = st.to_branch_id
+        LEFT JOIN users iu ON iu.id = st.initiated_by
+        LEFT JOIN users au ON au.id = st.approved_by
+        LEFT JOIN users ru ON ru.id = st.received_by
+        WHERE st.id=?
+      `).get(id) as Record<string, unknown> | undefined
+      if (!transfer) return { success: false, error: 'Transfer not found' }
+      const printLogs = db.prepare(`
+        SELECT pl.*, u.name as printed_by_name
+        FROM stock_transfer_print_logs pl
+        LEFT JOIN users u ON u.id = pl.printed_by
+        WHERE pl.transfer_id=?
+        ORDER BY pl.printed_at DESC
+      `).all(id)
+      const receiveLogs = db.prepare(`
+        SELECT rl.*, u.name as received_by_user_name
+        FROM stock_transfer_receive_logs rl
+        LEFT JOIN users u ON u.id = rl.received_by_user
+        WHERE rl.transfer_id=?
+        ORDER BY rl.received_at DESC
+      `).all(id)
+      const mismatches = db.prepare(`
+        SELECT m.*, p.name as product_name, u.name as reported_by_name
+        FROM stock_transfer_mismatches m
+        LEFT JOIN products p ON p.id = m.product_id
+        LEFT JOIN users u ON u.id = m.reported_by
+        WHERE m.transfer_id=?
+        ORDER BY m.created_at DESC
+      `).all(id)
+      const history = db.prepare(`
+        SELECT h.*, u.name as created_by_name
+        FROM stock_transfer_history h
+        LEFT JOIN users u ON u.id = h.created_by
+        WHERE h.transfer_id=?
+        ORDER BY h.created_at DESC
+      `).all(id)
+      return { success: true, data: { ...transfer, printLogs, receiveLogs, mismatches, history } }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('stocks:logTransferPrint', async (_e, id: string, payload: Record<string, unknown> = {}) => {
+    try {
+      const db = getDb()
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id=?').get(id) as Record<string, unknown> | undefined
+      if (!transfer) throw new Error('Transfer not found')
+      const copyNo = Number(transfer.print_count || 0) + 1
+      const log = {
+        id: crypto.randomUUID(),
+        transfer_id: id,
+        printed_by: user?.id || null,
+        print_type: payload.print_type || (copyNo > 1 ? 'reprint' : 'print'),
+        copy_no: copyNo,
+        device_name: payload.device_name || null,
+      }
+      db.transaction(() => {
+        db.prepare(`
+          INSERT INTO stock_transfer_print_logs (id, transfer_id, printed_by, print_type, copy_no, device_name)
+          VALUES (@id, @transfer_id, @printed_by, @print_type, @copy_no, @device_name)
+        `).run(log)
+        db.prepare(`UPDATE stock_transfers SET print_count=?, last_printed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
+          .run(copyNo, id)
+        insertTransferHistory(db, transfer, copyNo > 1 ? 'Reprinted' : 'Printed', user?.id, `Delivery note copy ${copyNo}`)
+        auditTransferAction(db, copyNo > 1 ? 'TRANSFER_REPRINTED' : 'TRANSFER_PRINTED', id, user, transfer.from_branch_id, null, log)
+      })()
+      await enqueuSync('stock_transfers', id, 'UPDATE', { id, print_count: copyNo })
+      return { success: true, data: log }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
@@ -308,8 +409,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         pending_approval:   ['approved', 'rejected', 'cancelled', 'received', 'partially_received'],
         approved:           ['ready_for_dispatch', 'dispatched', 'received', 'partially_received', 'cancelled'],
         ready_for_dispatch: ['dispatched', 'received', 'partially_received', 'cancelled'],
-        dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy'],
-        in_transit:         ['received', 'partially_received', 'discrepancy'],
+        dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy', 'mismatch_reported'],
+        in_transit:         ['received', 'partially_received', 'discrepancy', 'mismatch_reported'],
+        mismatch_reported:  ['under_admin_review', 'cancelled'],
+        under_admin_review: ['received', 'partially_received', 'cancelled', 'corrected'],
       }
       const allowed = transitions[String(transfer.status)]
       if (!allowed?.includes(status)) {
@@ -323,11 +426,6 @@ export function registerStockHandlers(ipcMain: IpcMain) {
          ['pending', 'pending_approval'].includes(String(transfer.status)))
       if (isApprovalAction) {
         const cperms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
-          || (user?.permissions as Record<string, unknown>) || {}
-        if (!cperms.all && !cperms.employees) {
-          throw new Error('Only a Branch Manager or Admin can approve transfer requests')
-        }
-      }
 
       // Maker-checker: the person who initiated cannot approve
       if (status === 'approved') {
@@ -349,13 +447,14 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         throw new Error('A reject_reason is required when rejecting a transfer')
       }
 
-      // Discrepancy requires a note
-      if (status === 'discrepancy' && !payload.discrepancy_note) {
+              created_by: (user?.id as string) || null,
+            }))
         throw new Error('A discrepancy_note is required when flagging a discrepancy')
       }
 
       const now = new Date().toISOString()
-      const patch: Record<string, unknown> = { status }
+      const effectiveStatus = status === 'mismatch_reported' ? 'under_admin_review' : status
+      const patch: Record<string, unknown> = { status: effectiveStatus }
       const movementRecords: Record<string, unknown>[] = []
       const qty = Number(transfer.quantity)
 
@@ -363,21 +462,18 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const sourceDeducted = ['approved', 'ready_for_dispatch', 'dispatched', 'in_transit'].includes(String(transfer.status))
 
       if (status === 'approved') {
-        patch.approved_by = user?.id || null
+  patch.approved_by = user?.id || null
       }
       if (status === 'rejected') {
         patch.rejected_by   = user?.id || null
-        patch.reject_reason = payload.reject_reason
       }
-      if (status === 'ready_for_dispatch') {
-        patch.released_by = user?.id || null
-      }
-      if (status === 'dispatched' || status === 'in_transit') {
+      if (status === 'in_transit') {
         patch.dispatch_at = transfer.dispatch_at || now
-        if (payload.driver_name)          patch.driver_name          = payload.driver_name
-        if (payload.driver_phone)         patch.driver_phone         = payload.driver_phone
-        if (payload.vehicle_number)       patch.vehicle_number       = payload.vehicle_number
+        if (payload.driver_name) patch.driver_name = payload.driver_name
+        if (payload.driver_phone) patch.driver_phone = payload.driver_phone
+        if (payload.vehicle_number) patch.vehicle_number = payload.vehicle_number
         if (payload.expected_delivery_at) patch.expected_delivery_at = payload.expected_delivery_at
+      }
       }
       if (status === 'received' || status === 'partially_received') {
         const received = status === 'received' ? qty : Number(payload.received_quantity || 0)
@@ -388,8 +484,12 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         patch.received_quantity  = received
         patch.damaged_quantity   = damaged
         patch.missing_quantity   = qty - received - damaged
-        patch.actual_delivery_at = now
         patch.received_by        = user?.id || null
+        patch.received_at        = now
+        patch.approved_by        = patch.approved_by ?? user?.id ?? null
+        if (payload.received_by_name) patch.received_by_name = payload.received_by_name
+        if (payload.received_designation) patch.received_designation = payload.received_designation
+        if (payload.received_remarks || payload.notes) patch.received_remarks = payload.received_remarks || payload.notes
       }
       if (status === 'discrepancy') {
         patch.discrepancy_note = payload.discrepancy_note
@@ -401,8 +501,15 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           patch.damaged_quantity   = damaged
           patch.missing_quantity   = qty - received - damaged
           patch.actual_delivery_at = now
+          patch.received_at        = now
           patch.received_by        = user?.id || null
         }
+      }
+      if (status === 'mismatch_reported') {
+        patch.discrepancy_note = payload.detailed_reason || payload.discrepancy_note || null
+        patch.discrepancy_by = user?.id || null
+        patch.mismatch_reason_category = payload.reason_category || null
+        patch.mismatch_details = payload.detailed_reason || null
       }
 
       // Does this step credit the destination branch? (goods arrive)
@@ -410,9 +517,34 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         (status === 'discrepancy' && patch.received_quantity !== undefined)
 
       db.transaction(() => {
-        // 1. APPROVE → goods leave source: deduct source stock, mark in-transit.
-        if (status === 'approved') {
-          const changed = db.prepare(`UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
+        // Dispatch reserves stock in transit by deducting source branch only.
+        const alreadyDeducted = db.prepare(`
+          SELECT id FROM stock_movements
+          WHERE reference_transfer_id=? AND movement_type='TRANSFER'
+          LIMIT 1
+        `).get(id)
+        if (status === 'dispatched' && !alreadyDeducted) {
+          const qty = Number(transfer.quantity)
+          const changed = db.prepare(`
+            UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
+            WHERE product_id=? AND branch_id=? AND quantity>=?`)
+            .run(qty, transfer.product_id, transfer.from_branch_id, qty)
+          if (!changed.changes) throw new Error('Insufficient source stock at confirmation time')
+          movementRecords.push(insertStockMovement(db, {
+            product_id: String(transfer.product_id),
+            from_branch_id: String(transfer.from_branch_id),
+            to_branch_id: String(transfer.to_branch_id),
+            quantity: qty,
+            movement_type: 'TRANSFER',
+            reference_transfer_id: id,
+            notes: `Transfer confirmed - source deducted: ${transfer.transfer_number || id}`,
+              created_by: (user?.id as string) || null,
+            }))
+        }
+        if ((status === 'received' || status === 'partially_received') && !alreadyDeducted) {
+          const qty = Number(transfer.quantity)
+          const changed = db.prepare(`
+            UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
             WHERE product_id=? AND branch_id=? AND quantity>=?`)
             .run(qty, transfer.product_id, transfer.from_branch_id, qty)
           if (!changed.changes) throw new Error('Insufficient source stock at approval time')
@@ -425,16 +557,24 @@ export function registerStockHandlers(ipcMain: IpcMain) {
             created_by: (user?.id as string) || null,
           }))
         }
+        // Restore source stock if rejected after dispatching (defensive: shouldn't happen with transitions, but safe)
+        // Note: rejections happen before dispatch, so no stock restore needed here
 
-        // 2. RECEIVE / partial / discrepancy → goods arrive: credit destination
-        //    with the actually-received qty (missing goods stay lost in transit).
-        if (creditsDestination) {
-          // Quick accept straight from pending: goods never left source — deduct now.
-          if (!sourceDeducted) {
-            const changed = db.prepare(`UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
-              WHERE product_id=? AND branch_id=? AND quantity>=?`)
-              .run(qty, transfer.product_id, transfer.from_branch_id, qty)
-            if (!changed.changes) throw new Error('Insufficient source stock')
+        // Credit destination stock only when receiver confirms.
+        if (status === 'received' || status === 'partially_received') {
+          const received = Number(patch.received_quantity ?? transfer.quantity)
+          const damaged  = Number(patch.damaged_quantity || 0)
+          const dest = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
+            .get(transfer.product_id, transfer.to_branch_id) as { id: string } | undefined
+          if (dest) {
+            db.prepare(`UPDATE stocks SET quantity=quantity+?, damaged_qty=damaged_qty+?,
+              updated_at=datetime('now') WHERE id=?`).run(received, damaged, dest.id)
+          } else {
+            db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty)
+              VALUES (?,?,?,?,?)`)
+              .run(crypto.randomUUID(), transfer.product_id, transfer.to_branch_id, received, damaged)
+          }
+          if (received > 0) {
             movementRecords.push(insertStockMovement(db, {
               product_id: String(transfer.product_id),
               from_branch_id: String(transfer.from_branch_id),
@@ -487,6 +627,25 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           }))
         }
 
+        if (status === 'received' || status === 'partially_received') {
+          db.prepare(`
+            INSERT INTO stock_transfer_receive_logs (
+              id, transfer_id, received_by_user, received_by_name, designation,
+              received_quantity, missing_quantity, damaged_quantity, remarks
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            crypto.randomUUID(),
+            id,
+            user?.id || null,
+            patch.received_by_name || null,
+            patch.received_designation || null,
+            Number(patch.received_quantity || 0),
+            Number(patch.missing_quantity || 0),
+            Number(patch.damaged_quantity || 0),
+            patch.received_remarks || payload.notes || null
+          )
+        }
+
         const fields = Object.keys(patch).map(k => `${k}=@${k}`).join(',')
         db.prepare(`UPDATE stock_transfers SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
           .run({ id, ...patch })
@@ -505,33 +664,35 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         insertTransferHistory(
           db,
           { ...transfer, ...patch },
-          historyLabel[status] || status.replace(/_/g, ' '),
+          (effectiveStatus === 'received' || effectiveStatus === 'partially_received') ? 'Completed' : effectiveStatus.replace(/_/g, ' '),
           user?.id,
           String(payload.notes || payload.reject_reason || payload.discrepancy_note || '')
         )
 
         // Audit log
-        db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-          VALUES (?,?,?,?,?,?,?)`)
-          .run(
-            crypto.randomUUID(),
-            user?.id, transfer.from_branch_id,
-            `TRANSFER_${status.toUpperCase()}`,
-            'stock_transfers', id,
-            JSON.stringify({ from_status: transfer.status, to_status: status, ...patch })
-          )
+        auditTransferAction(
+          db,
+          `TRANSFER_${effectiveStatus.toUpperCase()}`,
+          id,
+          user,
+          transfer.from_branch_id,
+          transfer,
+          { from_status: transfer.status, to_status: effectiveStatus, ...patch },
+          String(payload.notes || payload.reject_reason || payload.discrepancy_note || '')
+        )
       })()
 
       await enqueuSync('stock_transfers', id, 'UPDATE', { id, ...patch })
 
-      // Sync whichever branch stock actually changed
-      const changedBranches = new Set<string>()
-      if (status === 'approved' || (creditsDestination && !sourceDeducted) || (status === 'cancelled' && sourceDeducted)) changedBranches.add(String(transfer.from_branch_id))
-      if (creditsDestination) changedBranches.add(String(transfer.to_branch_id))
-      for (const bId of changedBranches) {
-        const s = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
-          .get(transfer.product_id, bId) as Record<string, unknown> | undefined
-        if (s) await enqueuSync('stocks', String(s.id), 'UPDATE', s)
+      if (status === 'dispatched' || status === 'received' || status === 'partially_received') {
+        const source = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
+          .get(transfer.product_id, transfer.from_branch_id) as Record<string, unknown>
+        if (source) await enqueuSync('stocks', String(source.id), 'UPDATE', source)
+      }
+      if (status === 'received' || status === 'partially_received') {
+        const destination = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
+          .get(transfer.product_id, transfer.to_branch_id) as Record<string, unknown>
+        if (destination) await enqueuSync('stocks', String(destination.id), 'UPDATE', destination)
       }
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
@@ -602,6 +763,66 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       `).all(t.id)
       return { success: true, data: { transfer: t, history } }
     } catch (err) { return { success: false, error: (err as Error).message } }
+
+  ipcMain.handle('stocks:reportMismatch', async (_e, id: string, payload: Record<string, unknown> = {}) => {
+    try {
+      const db = getDb()
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id=?').get(id) as Record<string, unknown> | undefined
+      if (!transfer) throw new Error('Transfer not found')
+      if (!payload.reason_category) throw new Error('Reason category is required')
+      const sentQty = Number(transfer.quantity || 0)
+      const receivedQty = Number(payload.received_quantity || 0)
+      const damagedQty = Number(payload.damaged_quantity || 0)
+      const missingQty = Math.max(0, Number(payload.missing_quantity ?? sentQty - receivedQty - damagedQty))
+      const mismatch = {
+        id: crypto.randomUUID(),
+        transfer_id: id,
+        product_id: transfer.product_id || null,
+        sent_quantity: sentQty,
+        received_quantity: receivedQty,
+        missing_quantity: missingQty,
+        damaged_quantity: damagedQty,
+        reason_category: payload.reason_category,
+        detailed_reason: payload.detailed_reason || null,
+        reported_by: user?.id || null,
+      }
+      db.transaction(() => {
+        db.prepare(`
+          INSERT INTO stock_transfer_mismatches (
+            id, transfer_id, product_id, sent_quantity, received_quantity,
+            missing_quantity, damaged_quantity, reason_category, detailed_reason, reported_by
+          ) VALUES (
+            @id, @transfer_id, @product_id, @sent_quantity, @received_quantity,
+            @missing_quantity, @damaged_quantity, @reason_category, @detailed_reason, @reported_by
+          )
+        `).run(mismatch)
+        db.prepare(`
+          UPDATE stock_transfers
+          SET status='under_admin_review',
+              discrepancy_note=@detailed_reason,
+              discrepancy_by=@reported_by,
+              mismatch_reason_category=@reason_category,
+              mismatch_details=@detailed_reason,
+              received_quantity=@received_quantity,
+              missing_quantity=@missing_quantity,
+              damaged_quantity=@damaged_quantity,
+              updated_at=datetime('now')
+          WHERE id=@transfer_id
+        `).run(mismatch)
+        insertTransferHistory(db, { ...transfer, ...mismatch }, 'Mismatch Reported', user?.id, String(payload.detailed_reason || payload.reason_category))
+        auditTransferAction(db, 'TRANSFER_MISMATCH_REPORTED', id, user, transfer.to_branch_id, transfer, mismatch, String(payload.detailed_reason || ''))
+      })()
+      await enqueuSync('stock_transfers', id, 'UPDATE', { status: 'under_admin_review', ...mismatch, id })
+      const product = db.prepare('SELECT name FROM products WHERE id=?').get(transfer.product_id) as { name?: string } | undefined
+      createNotification(
+        'transfer_request',
+        'Transfer mismatch reported',
+        `${Number(transfer.quantity)} x ${product?.name || 'product'} has a receiving mismatch and needs admin review.`,
+        { event: 'mismatch_reported', transfer_id: id, transfer_number: transfer.transfer_number, status: 'under_admin_review' }
+      )
+      return { success: true, data: mismatch }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Multi-branch summary for admin overview

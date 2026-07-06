@@ -14,6 +14,13 @@ import NotificationPanel from './NotificationPanel'
 import { setSystemTheme } from '@/lib/systemTheme'
 import ThemeToggle from '@/components/shared/ThemeToggle'
 
+const MASKED_SECRET = '********'
+
+function canUseRendererApiKey(value: unknown): value is string {
+  const key = String(value || '').trim()
+  return Boolean(key) && key !== MASKED_SECRET && !key.startsWith('safe:')
+}
+
 function useTheme() {
   const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
   useEffect(() => {
@@ -75,6 +82,9 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/stock-transfers',  label: 'Stock Transfers', perm: 'inventory' },
       { to: '/admin/track-transfer',  label: 'Track Transfer',  perm: 'inventory' },
+    { to: '/admin/stock-transfers',  label: 'Stock Transfers', perm: 'inventory' },
+    { to: '/admin/track-transfer',  label: 'Track Transfer',  perm: 'inventory' },
+      { to: '/admin/branch-transfers',  label: 'Branch Transfers', perm: 'inventory' },
       { to: '/admin/stock-requests',  label: 'Stock Requests',  perm: 'inventory' },
     ]
   },
@@ -126,6 +136,18 @@ function canSeeItem(item: NavItem, permissions: Record<string, unknown>, isAdmin
   return !item.perm || Boolean(permissions[item.perm])
 }
 
+const SIDEBAR_OPEN_KEY = 'sidebar_group_open'
+
+function getSavedGroupStates(): Record<string, boolean> {
+  try { return JSON.parse(localStorage.getItem(SIDEBAR_OPEN_KEY) || '{}') } catch { return {} }
+}
+function saveGroupState(label: string, open: boolean) {
+  try {
+    const prev = getSavedGroupStates()
+    localStorage.setItem(SIDEBAR_OPEN_KEY, JSON.stringify({ ...prev, [label]: open }))
+  } catch {}
+}
+
 function SidebarGroup({
   group, permissions, isAdmin, collapsed, enabledModules
 }: {
@@ -137,21 +159,34 @@ function SidebarGroup({
 }) {
   const location = useLocation()
   const Icon = group.icon
+  const label = group.label
   const visibleItems = group.items.filter(item => canSeeItem(item, permissions, isAdmin))
   const groupActive = visibleItems.some(item =>
     location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
   )
-  const [open, setOpen] = useState(groupActive)
+  const [open, setOpen] = useState(() => {
+    const saved = getSavedGroupStates()
+    return label in saved ? saved[label] : groupActive
+  })
 
   useEffect(() => {
-    if (groupActive) setOpen(true)
-  }, [groupActive])
+    if (groupActive && !open) {
+      setOpen(true)
+      saveGroupState(label, true)
+    }
+  }, [groupActive]) // intentionally only auto-open, never auto-close
 
   if (!isAdmin && group.adminOnly) return null
   if (!isAdmin && group.perm && !permissions[group.perm] && !visibleItems.length) return null
   if (!visibleItems.length) return null
   // Module gating: enabledModules null = offline/unknown = show all
   if (group.module && enabledModules && !enabledModules.includes(group.module)) return null
+
+  const toggleOpen = () => {
+    const next = !open
+    setOpen(next)
+    saveGroupState(label, next)
+  }
 
   if (collapsed) {
     return (
@@ -192,7 +227,7 @@ function SidebarGroup({
   return (
     <div>
       <button
-        onClick={() => setOpen(o => !o)}
+        onClick={toggleOpen}
         className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors duration-150 hover:bg-[var(--bg-soft)]"
         style={{
           color: groupActive ? 'var(--text-1)' : open ? 'var(--brand-primary)' : 'var(--text-2)',
@@ -260,11 +295,13 @@ function SidebarLink({ to, icon: Icon, label, collapsed, end = false }: {
 }
 
 export default function AppLayout() {
+
   const { user, logout } = useAuthStore()
   const { status, triggerSync } = useSyncStatus()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [branding, setBranding] = useState<Record<string, unknown>>({})
+  const [logoFailed, setLogoFailed] = useState(false)
   const [subStatus, setSubStatus] = useState<string | null>(null)
   const [subEndsAt, setSubEndsAt] = useState<string | null>(null)
   const [isLocked, setIsLocked] = useState(false)
@@ -293,7 +330,7 @@ export default function AppLayout() {
         // Fetch fresh brand from backend so superadmin color changes take effect
         const apiUrl = d.cloud_api_url as string
         const apiKey = d.cloud_api_key as string
-        if (apiUrl && apiKey) {
+        if (apiUrl && canUseRendererApiKey(apiKey)) {
           try {
             const resp = await fetch(`${apiUrl}/api/brand`, { headers: { 'x-api-key': apiKey } })
             if (resp.status === 401) {
@@ -396,8 +433,8 @@ export default function AppLayout() {
       >
         <button onClick={() => setSidebarOpen(o => !o)} className="flex items-center gap-2 flex-shrink-0">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center overflow-hidden">
-            {branding.company_logo_url
-              ? <img src={String(branding.company_logo_url)} alt="" className="w-full h-full object-cover" />
+            {branding.company_logo_url && !logoFailed
+              ? <img src={String(branding.company_logo_url)} alt="" className="w-full h-full object-cover" onError={() => setLogoFailed(true)} />
               : <ShoppingBag size={16} className="text-white" />}
           </div>
           <span className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{String(branding.company_name || 'MyPOS')}</span>
@@ -461,24 +498,30 @@ export default function AppLayout() {
             borderRight: '1px solid var(--border)',
           }}
         >
-          {!sidebarOpen ? (
-            <div className="px-2 py-3 space-y-1">
-              {(isAdmin || Boolean(permissions.reports)) && <SidebarLink to="/admin" end icon={LayoutDashboard} label="Dashboard" collapsed />}
-              {NAV_GROUPS.map(group => <SidebarGroup key={group.label} group={group} permissions={permissions} isAdmin={isAdmin} collapsed enabledModules={enabledModules} />)}
-              {isAdmin && <SidebarLink to="/admin/settings" icon={Settings} label="Settings" collapsed />}
+          {/* Single stable nav tree — collapsed prop changes only styling/visibility, never unmounts */}
+          {sidebarOpen && (
+            <div className="px-3 pt-4 pb-2">
+              <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-3)' }}>Menu</p>
             </div>
-          ) : (
-            <>
-              <div className="px-3 pt-4 pb-2">
-                <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-3)' }}>Menu</p>
-              </div>
-              <nav className="flex-1 overflow-y-auto py-1 px-2 space-y-0.5">
-                {(isAdmin || Boolean(permissions.reports)) && <SidebarLink to="/admin" end icon={LayoutDashboard} label="Dashboard" collapsed={false} />}
-                {NAV_GROUPS.map(group => <SidebarGroup key={group.label} group={group} permissions={permissions} isAdmin={isAdmin} collapsed={false} enabledModules={enabledModules} />)}
-                {isAdmin && <SidebarLink to="/admin/settings" icon={Settings} label="Settings" collapsed={false} />}
-              </nav>
-            </>
           )}
+          <nav className={`flex-1 overflow-y-auto space-y-0.5 px-2 ${sidebarOpen ? 'py-1' : 'py-3'}`}>
+            {(isAdmin || Boolean(permissions.reports)) && (
+              <SidebarLink to="/admin" end icon={LayoutDashboard} label="Dashboard" collapsed={!sidebarOpen} />
+            )}
+            {NAV_GROUPS.map(group => (
+              <SidebarGroup
+                key={group.label}
+                group={group}
+                permissions={permissions}
+                isAdmin={isAdmin}
+                collapsed={!sidebarOpen}
+                enabledModules={enabledModules}
+              />
+            ))}
+            {isAdmin && (
+              <SidebarLink to="/admin/settings" icon={Settings} label="Settings" collapsed={!sidebarOpen} />
+            )}
+          </nav>
         </aside>
 
         <main className="relative flex-1 overflow-hidden flex flex-col">

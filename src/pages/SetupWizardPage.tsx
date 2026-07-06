@@ -1,10 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ShieldOff, Eye, EyeOff, CheckCircle2, WifiOff, AlertCircle, Settings, HardDrive } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type View = 'contact' | 'configure' | 'connecting' | 'syncing' | 'done' | 'no_users'
+
+const DEFAULT_CLOUD_API_URL = (
+  import.meta.env.VITE_CLOUD_API_URL?.trim().replace(/\/+$/, '') ||
+  'http://72.61.115.222:4001'
+)
+const MASKED_SECRET = '********'
+
+function normalizeUrl(value: string) {
+  return value.trim().replace(/\/+$/, '')
+}
+
+function isStoredSecretPlaceholder(value: string) {
+  return value === MASKED_SECRET || value.startsWith('safe:')
+}
 
 export default function SetupWizardPage() {
   const navigate = useNavigate()
@@ -16,6 +30,77 @@ export default function SetupWizardPage() {
   const [error, setError] = useState('')
   // Secret tap counter — tap the icon 5 times to reveal configure form
   const [tapCount, setTapCount] = useState(0)
+  const autoConnectStarted = useRef(false)
+
+  async function finishSetupFromSavedSettings(url: string, companyNameHint = '') {
+    setError('')
+    setView('connecting')
+
+    try {
+      const api = (window as unknown as { api: {
+        settings: { update: (p: unknown) => Promise<unknown> }
+        sync: { trigger: () => Promise<void> }
+        admin: { isSetupRequired: () => Promise<boolean> }
+      } }).api
+
+      await api.settings.update({ cloud_api_url: url || DEFAULT_CLOUD_API_URL })
+
+      setCompanyName(companyNameHint)
+      setView('syncing')
+      await api.sync.trigger()
+
+      const stillEmpty = await api.admin.isSetupRequired()
+      if (stillEmpty) {
+        setView('no_users')
+        return
+      }
+
+      setView('done')
+      setTimeout(() => navigate('/login', { replace: true }), 1200)
+    } catch (err) {
+      setView('configure')
+      setError('Saved cloud settings found, but sync failed: ' + String(err))
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadSavedCloudConfig() {
+      try {
+        const api = (window as unknown as { api?: {
+          settings?: {
+            get: () => Promise<{ success: boolean; data?: Record<string, unknown> }>
+            update: (p: unknown) => Promise<unknown>
+          }
+          app?: { getActivationInfo: () => Promise<{ company_name?: string }> }
+        } }).api
+        const settingsRes = await api?.settings?.get?.()
+        const settings = settingsRes?.success ? settingsRes.data ?? {} : {}
+        const savedUrl = normalizeUrl(String(settings.cloud_api_url || '')) || DEFAULT_CLOUD_API_URL
+        const savedKey = String(settings.cloud_api_key || '').trim()
+
+        if (cancelled) return
+        setApiUrl(savedUrl)
+        if (savedKey) setApiKey(savedKey)
+
+        if (savedKey && !autoConnectStarted.current) {
+          autoConnectStarted.current = true
+          const activationInfo = await api?.app?.getActivationInfo?.().catch(() => undefined)
+          if (!cancelled) {
+            await finishSetupFromSavedSettings(savedUrl, activationInfo?.company_name || '')
+          }
+        } else if (savedUrl) {
+          await api?.settings?.update?.({ cloud_api_url: savedUrl })
+        }
+      } catch {
+        if (!cancelled) setApiUrl(DEFAULT_CLOUD_API_URL)
+      }
+    }
+
+    loadSavedCloudConfig()
+    return () => { cancelled = true }
+  }, [])
 
   function handleIconTap() {
     const next = tapCount + 1
@@ -30,11 +115,16 @@ export default function SetupWizardPage() {
     e.preventDefault()
     setError('')
 
-    const url = apiUrl.trim().replace(/\/$/, '')
+    const url = normalizeUrl(apiUrl)
     const key = apiKey.trim()
 
     if (!url || !key) {
       setError('Both fields are required.')
+      return
+    }
+
+    if (isStoredSecretPlaceholder(key)) {
+      await finishSetupFromSavedSettings(url)
       return
     }
 
@@ -170,8 +260,11 @@ export default function SetupWizardPage() {
               Ask your administrator to create your account, then try again.
             </p>
           </div>
-          <button className="btn-primary w-full py-2.5" onClick={() => { setView('contact'); setError('') }}>
-            Back
+          <button
+            className="btn-primary w-full py-2.5"
+            onClick={() => finishSetupFromSavedSettings(apiUrl || DEFAULT_CLOUD_API_URL, companyName)}
+          >
+            Retry Sync
           </button>
         </div>
       </div>

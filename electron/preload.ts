@@ -8,6 +8,7 @@ const api = {
     logout:  ()                 => ipcRenderer.invoke('auth:logout'),
     whoami:  ()                 => ipcRenderer.invoke('auth:whoami'),
     pinLogin:(payload: unknown) => ipcRenderer.invoke('auth:pinLogin', payload),
+    loginOptions:(payload: unknown) => ipcRenderer.invoke('auth:loginOptions', payload),
     changePassword:             (payload: unknown) => ipcRenderer.invoke('auth:changePassword', payload),
     completeForcePasswordChange:(payload: unknown) => ipcRenderer.invoke('auth:completeForcePasswordChange', payload),
     forgotPassword:             (email: string)    => ipcRenderer.invoke('auth:forgotPassword', { email }),
@@ -72,6 +73,9 @@ const api = {
     get:          (productId: string)  => ipcRenderer.invoke('stocks:get', productId),
     transfer:     (payload: unknown)   => ipcRenderer.invoke('stocks:transfer', payload),
     listTransfers:(filters?: unknown)  => ipcRenderer.invoke('stocks:listTransfers', filters),
+    getTransfer:  (id: string)         => ipcRenderer.invoke('stocks:getTransfer', id),
+    logTransferPrint:(id: string, payload?: unknown) => ipcRenderer.invoke('stocks:logTransferPrint', id, payload),
+    reportMismatch:(id: string, payload?: unknown) => ipcRenderer.invoke('stocks:reportMismatch', id, payload),
     lowStock:     (branchId?: string)  => ipcRenderer.invoke('stocks:lowStock', branchId),
     adjust:       (payload: unknown)   => ipcRenderer.invoke('stocks:adjust', payload),
     movements:    (filters?: unknown)  => ipcRenderer.invoke('stocks:movements', filters),
@@ -81,6 +85,18 @@ const api = {
     trackTransfer:(query: string) => ipcRenderer.invoke('stocks:trackTransfer', query),
     branchSummary: ()                   => ipcRenderer.invoke('stocks:branchSummary'),
     branchDetail:  (branchId: string)   => ipcRenderer.invoke('stocks:branchDetail', branchId),
+  },
+
+  // Branch Transfers
+  branchTransfers: {
+    create:         (payload: unknown) => ipcRenderer.invoke('branchTransfers:create', payload),
+    list:           (filters?: unknown) => ipcRenderer.invoke('branchTransfers:list', filters),
+    getById:        (id: string) => ipcRenderer.invoke('branchTransfers:getById', id),
+    updateStatus:   (id: string, status: string, payload?: unknown) => ipcRenderer.invoke('branchTransfers:updateStatus', id, status, payload),
+    receive:        (id: string, payload: unknown) => ipcRenderer.invoke('branchTransfers:receive', id, payload),
+    reportMismatch: (id: string, payload: unknown) => ipcRenderer.invoke('branchTransfers:reportMismatch', id, payload),
+    resolveMismatch: (id: string, payload: unknown) => ipcRenderer.invoke('branchTransfers:resolveMismatch', id, payload),
+    logPrint:       (id: string) => ipcRenderer.invoke('branchTransfers:logPrint', id),
   },
 
   stockCounts: {

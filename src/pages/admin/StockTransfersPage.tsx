@@ -5,20 +5,22 @@ import { useAuthStore } from '@/store/authStore'
 import {
   ArrowRightLeft, Check, X, Truck, RefreshCw,
   CheckCircle, XCircle, ChevronDown, ChevronUp, AlertTriangle,
-  Printer, Search, Clock
+  Printer, Search, Clock, FileText
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type TransferStatus =
   | 'pending_approval' | 'approved' | 'ready_for_dispatch'
   | 'dispatched' | 'in_transit' | 'received'
-  | 'partially_received' | 'discrepancy' | 'rejected' | 'cancelled'
+  | 'partially_received' | 'discrepancy' | 'under_admin_review' | 'corrected' | 'rejected' | 'cancelled'
 
 interface Transfer {
   id: string
   transfer_number: string
   product_name: string
   sku: string
+  barcode?: string | null
+  unit?: string | null
   product_id: string
   from_branch_id: string
   to_branch_id: string
@@ -38,14 +40,24 @@ interface Transfer {
   driver_name: string | null
   driver_phone: string | null
   vehicle_number: string | null
+  issuing_officer_name: string | null
+  package_count: number
+  serial_batch_no: string | null
+  item_description: string | null
   dispatch_at: string | null
   expected_delivery_at: string | null
   actual_delivery_at: string | null
   received_by: string | null
   received_by_name: string | null
+  received_designation: string | null
+  received_remarks: string | null
   notes: string | null
   reject_reason: string | null
   discrepancy_note: string | null
+  mismatch_reason_category: string | null
+  mismatch_details: string | null
+  print_count: number
+  last_printed_at: string | null
 }
 
 const STATUS_CFG: Record<string, { label: string; cls: string }> = {
@@ -57,11 +69,13 @@ const STATUS_CFG: Record<string, { label: string; cls: string }> = {
   received:           { label: 'Received',            cls: 'bg-green-500/20 text-green-600'  },
   partially_received: { label: 'Partial',             cls: 'bg-teal-500/20 text-teal-600'   },
   discrepancy:        { label: 'Discrepancy',         cls: 'bg-red-500/20 text-red-600'    },
+  under_admin_review: { label: 'Admin Review',        cls: 'bg-red-500/20 text-red-600'    },
+  corrected:          { label: 'Corrected',           cls: 'bg-indigo-500/20 text-indigo-600' },
   rejected:           { label: 'Rejected',            cls: 'bg-red-500/20 text-red-600'    },
   cancelled:          { label: 'Cancelled',           cls: 'bg-gray-500/20 text-gray-500'  },
 }
 
-const DONE = ['received', 'partially_received', 'discrepancy', 'rejected', 'cancelled']
+const DONE = ['received', 'partially_received', 'discrepancy', 'under_admin_review', 'rejected', 'cancelled']
 
 function StatusBadge({ status }: { status: string }) {
   const c = STATUS_CFG[status] ?? { label: status, cls: 'bg-gray-500/20 text-gray-500' }
@@ -90,7 +104,7 @@ function ApproveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
   const submit = async () => {
     setLoading(true)
     const res = await window.api.stocks.updateTransfer(t.id, 'approved', {})
-    if (res.success) { toast.success('Approved — stock deducted from source & now in transit'); onDone() }
+    if (res.success) { toast.success('Transfer approved. Dispatch will move stock to in-transit.'); onDone() }
     else toast.error(res.error || 'Failed')
     setLoading(false)
   }
@@ -150,7 +164,7 @@ function RejectModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void;
 // ─── Dispatch Modal ───────────────────────────────────────────────────────────
 function DispatchModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void; onDone: () => void }) {
   const [loading, setLoading] = useState(false)
-  const [form, setForm] = useState({ driver_name: '', driver_phone: '', vehicle_number: '', expected_delivery_at: '' })
+  const [form, setForm] = useState({ driver_name: '', driver_phone: '', vehicle_number: '', expected_delivery_at: '', issuing_officer_name: '' })
   const f = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }))
   const submit = async () => {
@@ -192,6 +206,10 @@ function DispatchModal({ t, onClose, onDone }: { t: Transfer; onClose: () => voi
             <label className="text-xs font-medium" style={{ color: 'var(--text-2)' }}>Expected Delivery</label>
             <input className="input mt-1 w-full" type="datetime-local" value={form.expected_delivery_at} onChange={f('expected_delivery_at')} />
           </div>
+          <div className="col-span-2">
+            <label className="text-xs font-medium" style={{ color: 'var(--text-2)' }}>Issuing Officer Name</label>
+            <input className="input mt-1 w-full" value={form.issuing_officer_name} onChange={f('issuing_officer_name')} placeholder="Officer issuing the delivery note" />
+          </div>
         </div>
       </div>
     </Modal>
@@ -203,16 +221,24 @@ function ReceiveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
   const [loading, setLoading] = useState(false)
   const [received, setReceived] = useState(t.quantity)
   const [damaged, setDamaged] = useState(0)
+  const [receivedByName, setReceivedByName] = useState('')
+  const [designation, setDesignation] = useState('')
   const [notes, setNotes] = useState('')
   const missing = Math.max(0, t.quantity - received - damaged)
 
   const submit = async () => {
     if (received + damaged > t.quantity) { toast.error('Received + Damaged cannot exceed dispatched quantity'); return }
     if (received < 0 || damaged < 0) { toast.error('Quantities cannot be negative'); return }
+    if (!receivedByName.trim()) { toast.error('Received by name required'); return }
     setLoading(true)
     const status = received >= t.quantity ? 'received' : 'partially_received'
     const res = await window.api.stocks.updateTransfer(t.id, status, {
-      received_quantity: received, damaged_quantity: damaged, notes
+      received_quantity: received,
+      damaged_quantity: damaged,
+      received_by_name: receivedByName,
+      received_designation: designation,
+      received_remarks: notes,
+      notes,
     })
     if (res.success) { toast.success('Stock received at destination branch'); onDone() }
     else toast.error(res.error || 'Failed')
@@ -256,6 +282,16 @@ function ReceiveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
               onChange={e => setDamaged(Math.max(0, Number(e.target.value)))} />
           </div>
         </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-xs font-medium" style={{ color: 'var(--text-2)' }}>Received By <span className="text-red-500">*</span></label>
+            <input className="input mt-1 w-full" value={receivedByName} onChange={e => setReceivedByName(e.target.value)} placeholder="Receiver name" />
+          </div>
+          <div>
+            <label className="text-xs font-medium" style={{ color: 'var(--text-2)' }}>Designation</label>
+            <input className="input mt-1 w-full" value={designation} onChange={e => setDesignation(e.target.value)} placeholder="Store keeper / Manager" />
+          </div>
+        </div>
         {missing > 0 && (
           <div className="p-2 rounded-lg bg-yellow-500/10 text-yellow-600 text-xs flex items-center gap-2">
             <AlertTriangle size={12} /> {missing} unit{missing > 1 ? 's' : ''} missing — will be recorded
@@ -272,12 +308,132 @@ function ReceiveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
 }
 
 // ─── Transfer Card ────────────────────────────────────────────────────────────
+function deliveryNoteHtml(t: Transfer) {
+  return `<!doctype html><html><head><title>Delivery Note ${t.transfer_number}</title>
+  <style>
+    @page { size: A4; margin: 12mm; }
+    body { font-family: Arial, sans-serif; color:#111827; font-size:12px; }
+    .top { display:flex; justify-content:space-between; gap:16px; border-bottom:2px solid #111827; padding-bottom:10px; }
+    h1 { margin:0; font-size:20px; letter-spacing:.04em; }
+    h2 { margin:2px 0 0; font-size:13px; font-weight:600; color:#475569; }
+    .meta { display:grid; grid-template-columns:1fr 1fr; gap:6px 24px; margin:14px 0; }
+    .box { border:1px solid #111827; padding:8px; min-height:34px; }
+    .label { font-size:10px; text-transform:uppercase; color:#64748b; display:block; margin-bottom:2px; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th,td { border:1px solid #111827; padding:6px; vertical-align:top; }
+    th { background:#f1f5f9; font-size:11px; text-transform:uppercase; }
+    .num { text-align:right; }
+    .remarks { min-height:52px; }
+    .sign { display:grid; grid-template-columns:1fr 1fr 1fr; gap:18px; margin-top:34px; }
+    .line { border-top:1px dotted #111827; padding-top:6px; min-height:44px; }
+    .footer { margin-top:18px; font-size:10px; color:#64748b; display:flex; justify-content:space-between; }
+  </style></head><body>
+    <div class="top"><div><h1>DELIVERY NOTE / ISSUE NOTE</h1><h2>Branch Stock Transfer</h2></div><div style="text-align:right"><strong>${t.transfer_number}</strong><br/>${new Date().toLocaleString()}</div></div>
+    <div class="meta">
+      <div class="box"><span class="label">Issuing Store Name</span>${t.from_branch_name || ''}</div>
+      <div class="box"><span class="label">Receiving Store Name</span>${t.to_branch_name || ''}</div>
+      <div class="box"><span class="label">Driver Name / Phone</span>${t.driver_name || ''}${t.driver_phone ? ` / ${t.driver_phone}` : ''}</div>
+      <div class="box"><span class="label">Vehicle No</span>${t.vehicle_number || ''}</div>
+      <div class="box"><span class="label">Issuing Officer</span>${t.issuing_officer_name || t.initiated_by_name || ''}</div>
+      <div class="box"><span class="label">Dispatch Date</span>${fmt(t.dispatch_at) || fmt(t.initiated_at)}</div>
+    </div>
+    <table>
+      <thead><tr><th>No</th><th>Product / SKU</th><th>Description</th><th>Qty</th><th>Unit</th><th>No. of Packages</th><th>Serial / Batch</th></tr></thead>
+      <tbody><tr><td>1</td><td>${t.product_name || ''}<br/><small>${t.sku || ''}${t.barcode ? ` / ${t.barcode}` : ''}</small></td><td>${t.item_description || ''}</td><td class="num">${Number(t.quantity || 0)}</td><td>${t.unit || 'Nos'}</td><td class="num">${Number(t.package_count || 0) || ''}</td><td>${t.serial_batch_no || ''}</td></tr></tbody>
+      <tfoot><tr><th colspan="3" class="num">Total Quantity</th><th class="num">${Number(t.quantity || 0)}</th><th colspan="3"></th></tr></tfoot>
+    </table>
+    <div class="box remarks" style="margin-top:12px"><span class="label">Remarks</span>${t.notes || ''}</div>
+    <div class="sign">
+      <div class="line"><strong>Name & Signature of Issuing Officer</strong><br/>Designation:<br/>Date:</div>
+      <div class="line"><strong>Name & Signature of Driver / Officer Taking Over</strong><br/>Designation:<br/>Date:</div>
+      <div class="line"><strong>Name & Signature of Receiving Officer</strong><br/>Designation:<br/>Date:</div>
+    </div>
+    <div class="footer"><span>Printed copy must be signed manually and retained by both branches.</span><span>Print count: ${Number(t.print_count || 0) + 1}</span></div>
+  </body></html>`
+}
+
+function DeliveryNoteModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void; onDone: () => void }) {
+  const doPrint = async () => {
+    await window.api.stocks.logTransferPrint(t.id, { print_type: Number(t.print_count || 0) > 0 ? 'reprint' : 'print' })
+    const win = window.open('', '_blank', 'width=900,height=700')
+    if (!win) { toast.error('Popup blocked'); return }
+    win.document.open()
+    win.document.write(deliveryNoteHtml(t))
+    win.document.close()
+    win.focus()
+    setTimeout(() => win.print(), 300)
+    toast.success('Delivery note print logged')
+    onDone()
+  }
+  return (
+    <Modal title={`Delivery Note - ${t.transfer_number}`} onClose={onClose}
+      footer={<><button className="btn-secondary" onClick={onClose}>Close</button>
+        <button className="btn-secondary flex items-center gap-1.5" onClick={doPrint}><FileText size={14} /> Download PDF</button>
+        <button className="btn-primary flex items-center gap-1.5" onClick={doPrint}><Printer size={14} /> {Number(t.print_count || 0) > 0 ? 'Reprint' : 'Print'}</button></>}>
+      <div className="space-y-3">
+        <div className="p-3 rounded-lg" style={{ background: 'var(--bg-soft)' }}>
+          <p className="font-semibold" style={{ color: 'var(--text-1)' }}>{t.from_branch_name} -&gt; {t.to_branch_name}</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>{t.product_name} - {t.quantity} {t.unit || 'units'} - Printed {Number(t.print_count || 0)} time(s)</p>
+        </div>
+        <iframe title="Delivery note preview" className="w-full h-[520px] rounded-lg border" style={{ borderColor: 'var(--border)' }} srcDoc={deliveryNoteHtml(t)} />
+      </div>
+    </Modal>
+  )
+}
+
+function MismatchModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void; onDone: () => void }) {
+  const [received, setReceived] = useState(Math.max(0, t.received_quantity || 0))
+  const [damaged, setDamaged] = useState(0)
+  const [reason, setReason] = useState('Missing item')
+  const [details, setDetails] = useState('')
+  const [loading, setLoading] = useState(false)
+  const missing = Math.max(0, t.quantity - received - damaged)
+  const submit = async () => {
+    if (!details.trim()) { toast.error('Detailed reason required'); return }
+    setLoading(true)
+    const res = await window.api.stocks.reportMismatch(t.id, {
+      received_quantity: received,
+      damaged_quantity: damaged,
+      missing_quantity: missing,
+      reason_category: reason,
+      detailed_reason: details,
+    })
+    if (res.success) { toast.success('Mismatch reported for admin review'); onDone() }
+    else toast.error(res.error || 'Failed')
+    setLoading(false)
+  }
+  return (
+    <Modal title="Report Transfer Mismatch" onClose={onClose}
+      footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm font-semibold disabled:opacity-50" onClick={submit} disabled={loading}>Submit Complaint</button></>}>
+      <div className="space-y-4">
+        <div className="grid grid-cols-3 gap-3">
+          <Detail label="Sent Qty" value={`${t.quantity}`} />
+          <div><label className="label">Received Qty</label><input className="input" type="number" min={0} value={received} onChange={e => setReceived(Number(e.target.value))} /></div>
+          <div><label className="label">Damaged Qty</label><input className="input" type="number" min={0} value={damaged} onChange={e => setDamaged(Number(e.target.value))} /></div>
+        </div>
+        <div className="p-2 rounded-lg bg-yellow-500/10 text-yellow-600 text-xs">Missing quantity: <strong>{missing}</strong></div>
+        <div>
+          <label className="label">Reason Category</label>
+          <select className="input" value={reason} onChange={e => setReason(e.target.value)}>
+            {['Missing item','Extra item','Wrong product','Damaged product','Wrong serial number','Wrong unit','Other'].map(r => <option key={r}>{r}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className="label">Detailed Reason *</label>
+          <textarea className="input h-24 resize-none" value={details} onChange={e => setDetails(e.target.value)} placeholder="Explain what was received wrongly..." />
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
 function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefresh, onModalToggle }: {
   t: Transfer; userId: string; isAdmin: boolean; myBranchId: string; canApproveRole: boolean; onRefresh: () => void
   onModalToggle?: (open: boolean) => void
 }) {
   const [expanded, setExpanded] = useState(false)
-  const [modal, setModal] = useState<'approve' | 'reject' | 'dispatch' | 'receive' | null>(null)
+  const [modal, setModal] = useState<'approve' | 'reject' | 'dispatch' | 'receive' | 'print' | 'mismatch' | null>(null)
 
   // Tell the page to pause its 12s auto-refresh while a modal is open here
   useEffect(() => {
@@ -307,6 +463,9 @@ function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefres
   const canDispatch = ['approved', 'ready_for_dispatch'].includes(t.status) &&
     (isAdmin || t.from_branch_id === myBranchId)
   const canReceive  = ['approved', 'dispatched', 'in_transit'].includes(t.status) &&
+    (isAdmin || t.to_branch_id === myBranchId)
+  const canPrint    = ['dispatched', 'in_transit', 'received', 'partially_received', 'discrepancy', 'under_admin_review'].includes(t.status)
+  const canMismatch = ['dispatched', 'in_transit'].includes(t.status) &&
     (isAdmin || t.to_branch_id === myBranchId)
   const isDone      = DONE.includes(t.status)
 
@@ -365,6 +524,12 @@ function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefres
                     <CheckCircle size={12} /> Receive
                   </button>
                 )}
+                {canMismatch && (
+                  <button className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600 hover:bg-red-500 text-white flex items-center gap-1"
+                    onClick={() => setModal('mismatch')}>
+                    <AlertTriangle size={12} /> Mismatch
+                  </button>
+                )}
               </div>
             )}
             <div className="flex items-center gap-1">
@@ -376,6 +541,21 @@ function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefres
                 {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </button>
             </div>
+            {canPrint && (
+              <button className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white flex items-center gap-1"
+                onClick={() => setModal('print')}>
+                <Printer size={12} /> {Number(t.print_count || 0) > 0 ? 'Reprint Delivery Note' : 'Print Delivery Note'}
+              </button>
+            )}
+            {canPrint && (
+              <button className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white flex items-center gap-1"
+                onClick={() => setModal('print')}>
+                <Printer size={12} /> {Number(t.print_count || 0) > 0 ? 'Reprint Delivery Note' : 'Print Delivery Note'}
+              </button>
+            )}
+            <button className="btn-ghost btn-sm p-1.5" onClick={() => setExpanded(e => !e)}>
+              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+            </button>
           </div>
         </div>
 
@@ -436,6 +616,8 @@ function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefres
       {modal === 'reject'   && <RejectModal   t={t} onClose={() => setModal(null)} onDone={close} />}
       {modal === 'dispatch' && <DispatchModal t={t} onClose={() => setModal(null)} onDone={close} />}
       {modal === 'receive'  && <ReceiveModal  t={t} onClose={() => setModal(null)} onDone={close} />}
+      {modal === 'print'    && <DeliveryNoteModal t={t} onClose={() => setModal(null)} onDone={close} />}
+      {modal === 'mismatch' && <MismatchModal t={t} onClose={() => setModal(null)} onDone={close} />}
     </>
   )
 }
@@ -623,3 +805,4 @@ export default function StockTransfersPage() {
     </div>
   )
 }
+

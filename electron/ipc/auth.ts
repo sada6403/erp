@@ -24,21 +24,63 @@ function getJwtSecret(): string {
 const JWT_SECRET = getJwtSecret()
 
 export function registerAuthHandlers(ipcMain: IpcMain) {
+  ipcMain.handle('auth:loginOptions', async (_e, payload?: { branch_id?: string }) => {
+    try {
+      const db = getDb()
+      const branchId = String(payload?.branch_id || '').trim()
+      const users = branchId
+        ? db.prepare(`
+            SELECT u.id, u.name, u.email, u.pin, u.pin_hash, u.branch_id, r.name as role_name
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            WHERE u.is_active = 1 AND (u.branch_id = ? OR u.branch_id IS NULL)
+          `).all(branchId) as Record<string, unknown>[]
+        : db.prepare(`
+            SELECT u.id, u.name, u.email, u.pin, u.pin_hash, u.branch_id, r.name as role_name
+            FROM users u
+            LEFT JOIN roles r ON r.id = u.role_id
+            WHERE u.is_active = 1
+          `).all() as Record<string, unknown>[]
+
+      const pinUsers = users.filter(user => 
+        String(user.pin || '').trim().length > 0 ||
+        String(user.pin_hash || '').trim().length > 0
+      )
+      const admin = users.find(user => {
+        const roleName = String(user.role_name || '').toLowerCase()
+        const email = String(user.email || '').toLowerCase()
+        return roleName.includes('admin') || email.includes('admin')
+      }) || users[0]
+
+      return {
+        success: true,
+        data: {
+          users: users.length,
+          pin_users: pinUsers.length,
+          admin_email: admin?.email ? String(admin.email) : '',
+        },
+      }
+    } catch (err: unknown) {
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
   ipcMain.handle('auth:login', async (_e, { email, password }) => {
     try {
       const db = getDb()
+      const normalizedEmail = String(email || '').trim().toLowerCase()
       const user = db.prepare(`
         SELECT u.*, r.name as role_name, r.permissions as role_permissions,
                b.name as branch_name
         FROM users u
         LEFT JOIN roles r ON r.id = u.role_id
         LEFT JOIN branches b ON b.id = u.branch_id
-        WHERE u.email = ?
-      `).get(email) as Record<string, unknown> | undefined
+        WHERE LOWER(u.email) = ?
+      `).get(normalizedEmail) as Record<string, unknown> | undefined
 
       if (!user) {
         db.prepare(`INSERT INTO audit_logs (id, action, new_values) VALUES (?,?,?)`)
-          .run(crypto.randomUUID(), 'LOGIN_FAILED', JSON.stringify({ email, reason: 'User not found' }))
+          .run(crypto.randomUUID(), 'LOGIN_FAILED', JSON.stringify({ email: normalizedEmail, reason: 'User not found' }))
         return { success: false, error: 'Invalid credentials' }
       }
 
@@ -56,7 +98,11 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
         db.prepare(`UPDATE users SET login_attempts=0, locked_until=NULL WHERE id=?`).run(user.id)
       }
 
-      const valid = await bcrypt.compare(password, user.password_hash as string)
+      if (!user.password_hash) {
+        return { success: false, error: 'Password is not set for this account. Ask admin to set a password or PIN.' }
+      }
+
+      const valid = await bcrypt.compare(String(password || ''), user.password_hash as string)
       if (!valid) {
         const attempts = (Number(user.login_attempts) || 0) + 1
         const locked = attempts >= 5
@@ -125,34 +171,48 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   ipcMain.handle('auth:pinLogin', async (_e, { pin, branch_id }) => {
     try {
       const db = getDb()
-      let user: Record<string, unknown> | undefined
+      let users: Record<string, unknown>[] = []
 
       if (branch_id) {
-        // Strict branch isolation — only users assigned to this branch can login
-        user = db.prepare(`
+        // Strict branch isolation — only active users assigned to this branch can login
+        users = db.prepare(`
           SELECT u.*, r.name as role_name, r.permissions as role_permissions,
                  b.name as branch_name
           FROM users u
           LEFT JOIN roles r ON r.id = u.role_id
           LEFT JOIN branches b ON b.id = u.branch_id
-          WHERE u.pin = ? AND u.is_active = 1 AND u.branch_id = ?
-          LIMIT 1
-        `).get(pin, branch_id) as Record<string, unknown> | undefined
+          WHERE u.is_active = 1 AND u.branch_id = ?
+        `).all(branch_id) as Record<string, unknown>[]
       } else {
-        user = db.prepare(`
+        users = db.prepare(`
           SELECT u.*, r.name as role_name, r.permissions as role_permissions,
                  b.name as branch_name
           FROM users u
           LEFT JOIN roles r ON r.id = u.role_id
           LEFT JOIN branches b ON b.id = u.branch_id
-          WHERE u.pin = ? AND u.is_active = 1
-          LIMIT 1
-        `).get(pin) as Record<string, unknown> | undefined
+          WHERE u.is_active = 1
+        `).all() as Record<string, unknown>[]
       }
 
-      if (!user) {
+      let matchedUser: Record<string, unknown> | undefined
+      for (const u of users) {
+        if (u.pin_hash) {
+          const match = await bcrypt.compare(String(pin), String(u.pin_hash))
+          if (match) {
+            matchedUser = u
+            break
+          }
+        } else if (u.pin && String(u.pin).trim() === String(pin).trim()) {
+          matchedUser = u
+          break
+        }
+      }
+
+      if (!matchedUser) {
         return { success: false, error: 'Invalid PIN' }
       }
+
+      const user = matchedUser
 
       const perms = JSON.parse(user.role_permissions as string || '{}')
       const payload = {

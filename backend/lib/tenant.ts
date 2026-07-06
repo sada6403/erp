@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS roles (
   name        VARCHAR(100) NOT NULL UNIQUE,
   permissions JSON         NOT NULL,
   is_system   BOOLEAN      NOT NULL DEFAULT 0,
-  created_at  DATETIME     NOT NULL DEFAULT NOW()
+  created_at  DATETIME     NOT NULL DEFAULT NOW(),
+  updated_at  DATETIME     NOT NULL DEFAULT NOW() ON UPDATE NOW()
 );
 
 CREATE TABLE IF NOT EXISTS users (
@@ -283,34 +284,46 @@ CREATE TABLE IF NOT EXISTS customers (
 );
 
 CREATE TABLE IF NOT EXISTS invoices (
-  id             CHAR(36)      NOT NULL PRIMARY KEY,
-  invoice_no     VARCHAR(50)   NOT NULL UNIQUE,
-  branch_id      CHAR(36)      NOT NULL,
-  customer_id    CHAR(36),
-  cashier_id     CHAR(36),
-  subtotal       DECIMAL(12,2) NOT NULL DEFAULT 0,
-  discount       DECIMAL(12,2) NOT NULL DEFAULT 0,
-  tax            DECIMAL(12,2) NOT NULL DEFAULT 0,
-  total          DECIMAL(12,2) NOT NULL DEFAULT 0,
-  paid           DECIMAL(12,2) NOT NULL DEFAULT 0,
-  change_due     DECIMAL(12,2) NOT NULL DEFAULT 0,
-  payment_method VARCHAR(50)   NOT NULL DEFAULT 'cash',
-  status         VARCHAR(20)   NOT NULL DEFAULT 'completed',
-  notes          TEXT,
-  created_at     DATETIME      NOT NULL DEFAULT NOW()
+  id              CHAR(36)      NOT NULL PRIMARY KEY,
+  invoice_number  VARCHAR(64)   NOT NULL UNIQUE,
+  branch_id       CHAR(36)      NOT NULL,
+  customer_id     CHAR(36),
+  cashier_id      CHAR(36)      NOT NULL,
+  status          VARCHAR(32)   NOT NULL DEFAULT 'draft',
+  subtotal        DECIMAL(14,2) NOT NULL DEFAULT 0,
+  discount_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+  tax_amount      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  total_amount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+  paid_amount     DECIMAL(14,2) NOT NULL DEFAULT 0,
+  due_amount      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  agent_code      VARCHAR(255),
+  agent_name      VARCHAR(255),
+  agent_commission_pct    DECIMAL(6,2) NOT NULL DEFAULT 0,
+  agent_commission_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+  bill_type       VARCHAR(32),
+  valid_until     DATETIME,
+  due_date        DATETIME,
+  approved_by     CHAR(36),
+  notes           TEXT,
+  created_at      DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at      DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at       DATETIME
 );
 
 CREATE TABLE IF NOT EXISTS invoice_items (
-  id          CHAR(36)      NOT NULL PRIMARY KEY,
-  invoice_id  CHAR(36)      NOT NULL,
-  product_id  CHAR(36)      NOT NULL,
-  name        VARCHAR(255)  NOT NULL,
-  sku         VARCHAR(100)  NOT NULL,
-  qty         DECIMAL(12,2) NOT NULL,
-  unit_price  DECIMAL(12,2) NOT NULL,
-  discount    DECIMAL(12,2) NOT NULL DEFAULT 0,
-  tax_rate    DECIMAL(5,2)  NOT NULL DEFAULT 0,
-  total       DECIMAL(12,2) NOT NULL,
+  id              CHAR(36)      NOT NULL PRIMARY KEY,
+  invoice_id      CHAR(36)      NOT NULL,
+  product_id      CHAR(36)      NOT NULL,
+  quantity        DECIMAL(12,2) NOT NULL DEFAULT 0,
+  unit_price      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  discount_pct    DECIMAL(6,2)  NOT NULL DEFAULT 0,
+  discount_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+  tax_rate        DECIMAL(6,2)  NOT NULL DEFAULT 0,
+  tax_amount      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  line_total      DECIMAL(14,2) NOT NULL DEFAULT 0,
+  created_at      DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at      DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at       DATETIME,
   FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
 );
 
@@ -401,6 +414,115 @@ CREATE TABLE IF NOT EXISTS sync_queue (
   status     VARCHAR(20) NOT NULL DEFAULT 'pending',
   created_at DATETIME    NOT NULL DEFAULT NOW(),
   synced_at  DATETIME
+);
+
+CREATE TABLE IF NOT EXISTS branch_transfers (
+  id                   CHAR(36)      NOT NULL PRIMARY KEY,
+  transfer_number      VARCHAR(64)   NOT NULL UNIQUE,
+  from_branch_id       CHAR(36)      NOT NULL,
+  to_branch_id         CHAR(36)      NOT NULL,
+  status               VARCHAR(32)   NOT NULL DEFAULT 'draft',
+  driver_name          VARCHAR(255)  NULL,
+  vehicle_number       VARCHAR(64)   NULL,
+  driver_phone         VARCHAR(50)   NULL,
+  issuing_officer_name VARCHAR(255)  NULL,
+  dispatch_at          DATETIME      NULL,
+  expected_delivery_at DATETIME      NULL,
+  actual_delivery_at   DATETIME      NULL,
+  notes                TEXT          NULL,
+  created_by           CHAR(36)      NULL,
+  received_by          CHAR(36)      NULL,
+  received_by_name     VARCHAR(255)  NULL,
+  received_designation VARCHAR(255)  NULL,
+  created_at           DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at           DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at            DATETIME      NULL,
+  INDEX idx_bt_from (from_branch_id),
+  INDEX idx_bt_to (to_branch_id),
+  INDEX idx_bt_status (status),
+  INDEX idx_bt_updated (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS branch_transfer_items (
+  id               CHAR(36)      NOT NULL PRIMARY KEY,
+  transfer_id      CHAR(36)      NOT NULL,
+  product_id       CHAR(36)      NOT NULL,
+  quantity         DECIMAL(12,2) NOT NULL DEFAULT 0,
+  unit             VARCHAR(32)   NULL,
+  package_count    DECIMAL(12,2) NOT NULL DEFAULT 0,
+  serial_batch_no  VARCHAR(255)  NULL,
+  description      TEXT          NULL,
+  received_qty     DECIMAL(12,2) NOT NULL DEFAULT 0,
+  damaged_qty      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  missing_qty      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  created_at       DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at       DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at        DATETIME      NULL,
+  INDEX idx_bti_transfer (transfer_id),
+  INDEX idx_bti_product (product_id),
+  INDEX idx_bti_updated (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS branch_transfer_mismatches (
+  id               CHAR(36)      NOT NULL PRIMARY KEY,
+  transfer_id      CHAR(36)      NOT NULL,
+  item_id          CHAR(36)      NOT NULL,
+  missing_qty      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  damaged_qty      DECIMAL(12,2) NOT NULL DEFAULT 0,
+  reason_category  VARCHAR(64)   NOT NULL,
+  detailed_reason  TEXT          NULL,
+  status           VARCHAR(32)   NOT NULL DEFAULT 'under_admin_review',
+  reported_by      CHAR(36)      NULL,
+  resolved_by      CHAR(36)      NULL,
+  admin_reason     TEXT          NULL,
+  created_at       DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at       DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at        DATETIME      NULL,
+  INDEX idx_btm_transfer (transfer_id),
+  INDEX idx_btm_updated (updated_at)
+);
+
+CREATE TABLE IF NOT EXISTS branch_transfer_logs (
+  id               CHAR(36)      NOT NULL PRIMARY KEY,
+  transfer_id      CHAR(36)      NOT NULL,
+  user_id          CHAR(36)      NULL,
+  action           VARCHAR(100)  NOT NULL,
+  old_values       JSON          NULL,
+  new_values       JSON          NULL,
+  notes            TEXT          NULL,
+  created_at       DATETIME      NOT NULL DEFAULT NOW(),
+  synced_at        DATETIME      NULL,
+  INDEX idx_btl_transfer (transfer_id)
+);
+
+CREATE TABLE IF NOT EXISTS branch_transfer_prints (
+  id               CHAR(36)      NOT NULL PRIMARY KEY,
+  transfer_id      CHAR(36)      NOT NULL,
+  printed_by       CHAR(36)      NULL,
+  print_type       VARCHAR(32)   NOT NULL DEFAULT 'print',
+  created_at       DATETIME      NOT NULL DEFAULT NOW(),
+  synced_at        DATETIME      NULL,
+  INDEX idx_btp_transfer (transfer_id)
+);
+
+CREATE TABLE IF NOT EXISTS deliveries (
+  id            CHAR(36)     NOT NULL PRIMARY KEY,
+  invoice_id    CHAR(36)     NOT NULL,
+  customer_id   CHAR(36)     NOT NULL,
+  branch_id     CHAR(36)     NOT NULL,
+  address       TEXT         NOT NULL,
+  assigned_to   CHAR(36)     NULL,
+  status        VARCHAR(32)  NOT NULL DEFAULT 'pending',
+  scheduled_at  DATETIME     NULL,
+  dispatched_at DATETIME     NULL,
+  delivered_at  DATETIME     NULL,
+  notes         TEXT         NULL,
+  created_at    DATETIME     NOT NULL DEFAULT NOW(),
+  updated_at    DATETIME     NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  synced_at     DATETIME     NULL,
+  INDEX idx_deliveries_branch (branch_id, status),
+  INDEX idx_deliveries_invoice (invoice_id),
+  INDEX idx_deliveries_updated (updated_at)
 );
 `
 

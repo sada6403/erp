@@ -2,6 +2,7 @@ import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import Store from 'electron-store'
 import { CloudApi } from '../services/cloudApi'
+import { decryptSecret } from './settings'
 
 const store = new Store()
 
@@ -41,7 +42,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     try {
       const { getSyncService } = await import('../services/syncService')
       const service = getSyncService()
-      service.runSoon()
+      await service.runOnce()
       return { success: true }
     } catch (err: unknown) {
       return { success: false, error: (err as Error).message }
@@ -65,7 +66,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     const steps: { step: string; ok: boolean; detail: string }[] = []
     const settings = store.get('app_settings') as Record<string, unknown> | undefined
     const url = String(settings?.cloud_api_url || '').trim()
-    const key = String(settings?.cloud_api_key || '').trim()
+    const key = decryptSecret(settings?.cloud_api_key).trim()
 
     steps.push({
       step: 'Cloud API Config',

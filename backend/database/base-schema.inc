@@ -195,8 +195,7 @@ CREATE TABLE IF NOT EXISTS invoices (
   branch_id       TEXT NOT NULL REFERENCES branches(id),
   customer_id     TEXT REFERENCES customers(id) ON DELETE SET NULL,
   cashier_id      TEXT NOT NULL REFERENCES users(id),
-  status          TEXT NOT NULL DEFAULT 'draft'
-                  CHECK (status IN ('draft','held','completed','returned','cancelled')),
+  status          TEXT NOT NULL DEFAULT 'draft',
   subtotal        NUMERIC(14,2) NOT NULL DEFAULT 0,
   discount_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
   tax_amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
@@ -207,9 +206,14 @@ CREATE TABLE IF NOT EXISTS invoices (
   agent_name      TEXT,
   agent_commission_pct    NUMERIC(6,2) NOT NULL DEFAULT 0,
   agent_commission_amount NUMERIC(14,2) NOT NULL DEFAULT 0,
+  bill_type       TEXT,
+  valid_until     TIMESTAMPTZ,
+  due_date        TIMESTAMPTZ,
+  approved_by     TEXT,
   notes           TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  synced_at       TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_invoices_branch_date ON invoices(branch_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_invoices_number      ON invoices(invoice_number);
@@ -227,7 +231,9 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   tax_rate        NUMERIC(5,2)  NOT NULL DEFAULT 0,
   tax_amount      NUMERIC(14,2) NOT NULL DEFAULT 0,
   line_total      NUMERIC(14,2) NOT NULL,
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  synced_at       TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_items_invoice ON invoice_items(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_invoice_items_product ON invoice_items(product_id);
