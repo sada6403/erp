@@ -28,8 +28,8 @@ export async function GET(request: NextRequest) {
 
     // ?direct=1  → stream the file
     if (request.nextUrl.searchParams.get('direct') === '1') {
-      const { createReadStream } = await import('fs')
-      const { Readable } = await import('stream')
+      const { createReadStream } = await import('node:fs')
+      const { Readable } = await import('node:stream')
       const stream = createReadStream(filePath)
       const webStream = Readable.toWeb(stream) as ReadableStream
 
