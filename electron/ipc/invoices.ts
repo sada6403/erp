@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
+import { redeemCouponInTransaction, reverseCouponForInvoice, type CouponRedemptionResult } from './coupons'
 
 const store = new Store()
 
@@ -77,6 +78,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const id = crypto.randomUUID()
       const invoiceNumber = getNextBillNumber(branchId, billType)
       const movementRecords: Record<string, unknown>[] = []
+      let couponResult: CouponRedemptionResult | null = null
       const agentCode = String(payload.agent_code || '').trim() || null
       const agentName = String(payload.agent_name || '').trim() || null
       const agentCommissionPct = Math.max(0, Math.min(100, Number(payload.agent_commission_pct || 0)))
@@ -110,6 +112,20 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         if (payload.approved_by && payload.approved_by === (user?.id as string)) {
           return { success: false, error: 'Creator cannot approve a credit bill. Another manager must approve.' }
         }
+      }
+
+      // --- Coupon validation (balance-type gift voucher) ---
+      // The redemption itself runs INSIDE the invoice transaction below, so a
+      // failed sale never spends coupon balance. Renderer-supplied 'coupon'
+      // payment lines are rejected — the payments row is inserted by the main
+      // process only (prevents double-counting).
+      const couponRequest = payload.coupon as { code?: string; amount?: number } | undefined
+      if (couponRequest && billType !== 'RETAIL') {
+        return { success: false, error: 'Coupons can only be redeemed on retail bills' }
+      }
+      const rendererPaymentLines = Array.isArray(payload.payments) ? payload.payments : (payload.payment ? [payload.payment] : [])
+      if (rendererPaymentLines.some((p: Record<string, unknown>) => String(p?.method || '').toLowerCase() === 'coupon')) {
+        return { success: false, error: 'Coupon payments must be sent via the coupon field, not as a payment line' }
       }
 
       const insertInvoice = db.transaction(() => {
@@ -215,6 +231,18 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           }
         }
 
+        // Redeem coupon inside the same transaction — throws roll the sale back
+        if (couponRequest?.code && Number(couponRequest.amount || 0) > 0) {
+          couponResult = redeemCouponInTransaction(db, {
+            code: String(couponRequest.code),
+            amount: Number(couponRequest.amount),
+            invoiceId: id,
+            customerId: (payload.customer_id as string) || null,
+            branchId,
+            userId: (user?.id as string) || null,
+          })
+        }
+
         // Credit bill: update credit_ledger and customer outstanding
         if (billType === 'CREDIT') {
           const dueAmt = payload.total_amount - (payload.paid_amount || 0)
@@ -264,6 +292,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       })
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
+      // (cast: TS cannot see the assignment inside the transaction closure)
+      const redeemed = couponResult as CouponRedemptionResult | null
+      if (redeemed) {
+        await enqueuSync('coupons', redeemed.couponId, 'UPDATE', redeemed.couponRow)
+        await enqueuSync('coupon_redemptions', redeemed.redemptionId, 'INSERT', redeemed.redemptionRow)
       }
 
       return { success: true, data: { id, invoice_number: invoiceNumber, bill_type: billType } }
@@ -490,6 +524,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (!invoice) return { success: false, error: 'Invoice not found' }
       if (invoice.locked_at) return { success: false, error: 'Invoice is locked for day-end. Contact admin.' }
       const movementRecords: Record<string, unknown>[] = []
+      let couponReversals: CouponRedemptionResult[] = []
 
       const cancel = db.transaction(() => {
         // Restore stock for RETAIL and CREDIT bills (not QUOTATION — stock was never deducted)
@@ -528,6 +563,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           db.prepare(`UPDATE credit_ledger SET status='cancelled', updated_at=datetime('now') WHERE invoice_id=?`).run(id)
         }
 
+        // Restore coupon balance for any redemptions on this invoice
+        if (invoice.status !== 'cancelled') {
+          couponReversals = reverseCouponForInvoice(db, id, (user?.id as string) || null)
+        }
+
         db.prepare(`UPDATE invoices SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
 
         db.prepare(`
@@ -543,6 +583,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       await enqueuSync('invoices', id, 'UPDATE', { id, status: 'cancelled' })
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
+      for (const reversal of couponReversals) {
+        await enqueuSync('coupons', reversal.couponId, 'UPDATE', reversal.couponRow)
+        await enqueuSync('coupon_redemptions', reversal.redemptionId, 'INSERT', reversal.redemptionRow)
       }
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }

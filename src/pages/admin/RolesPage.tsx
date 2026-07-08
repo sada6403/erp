@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, Trash2, Shield, ShieldCheck, Lock, ShoppingBag, Package, Users, Truck, Receipt, BarChart3, UserCog, GitBranch, ArrowLeftRight, Settings, Check, X } from 'lucide-react'
+import { Plus, Edit2, Trash2, Shield, ShieldCheck, Lock, ShoppingBag, Package, Users, Truck, Receipt, BarChart3, UserCog, GitBranch, ArrowLeftRight, Settings, Check, X, Ticket } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -58,6 +58,14 @@ const MODULES = [
     actions: [
       { key: 'transfers_create',  label: 'Create Transfer' },
       { key: 'transfers_approve', label: 'Approve' },
+    ]
+  },
+  {
+    key: 'coupons', label: 'Coupons', icon: Ticket, group: 'Management',
+    actions: [
+      { key: 'coupons_create',  label: 'Issue Coupons' },
+      { key: 'coupons_void',    label: 'Void Coupons' },
+      { key: 'coupons_reports', label: 'Coupon Reports' },
     ]
   },
   {

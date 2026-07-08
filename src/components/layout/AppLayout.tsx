@@ -6,7 +6,7 @@ import {
   Truck, Settings, LogOut, Wifi, WifiOff, AlertCircle, UserCog,
   FileText, ShoppingCart, Receipt, Sun, Moon, ChevronDown,
   ChevronRight, ShoppingBag, Menu, Building2, Shield, HardDrive,
-  Activity, Download, RefreshCw, type LucideIcon
+  Activity, Download, RefreshCw, Ticket, type LucideIcon
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
@@ -82,8 +82,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/stock-transfers',  label: 'Stock Transfers', perm: 'inventory' },
       { to: '/admin/track-transfer',  label: 'Track Transfer',  perm: 'inventory' },
-    { to: '/admin/stock-transfers',  label: 'Stock Transfers', perm: 'inventory' },
-    { to: '/admin/track-transfer',  label: 'Track Transfer',  perm: 'inventory' },
       { to: '/admin/branch-transfers',  label: 'Branch Transfers', perm: 'inventory' },
       { to: '/admin/stock-requests',  label: 'Stock Requests',  perm: 'inventory' },
     ]
@@ -96,6 +94,14 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/admin/credit-bills', label: 'Credit Bills', perm: 'reports' },
       { to: '/admin/returns', label: 'Returns & Refunds', perm: 'pos' },
       { to: '/admin/cash-register', label: 'Cash Register', perm: 'pos' },
+    ]
+  },
+  {
+    // No `module` key — coupons work offline and are not gated by cloud modules
+    label: 'Coupons', icon: Ticket, perm: 'coupons',
+    items: [
+      { to: '/admin/coupons', label: 'Coupon Management', perm: 'coupons' },
+      { to: '/admin/coupon-reports', label: 'Coupon Reports', perm: 'coupons' },
     ]
   },
   { label: 'Deliveries', icon: Truck, perm: 'deliveries', module: 'deliveries', items: [{ to: '/admin/deliveries', label: 'Deliveries', perm: 'deliveries' }] },

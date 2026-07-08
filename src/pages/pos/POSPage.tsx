@@ -42,6 +42,7 @@ export default function POSPage() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [showPayment, setShowPayment]   = useState(false)
   const [showCustomer, setShowCustomer] = useState(false)
+  const [couponPeek, setCouponPeek]     = useState<Record<string, unknown> | null>(null)
   const [showHeld, setShowHeld]         = useState(false)
   const [showHelp, setShowHelp]         = useState(false)
   const [invoiceNumber, setInvoiceNumber] = useState<string>('')
@@ -267,6 +268,17 @@ export default function POSPage() {
       handleProductSelect(product)
       setSearchQuery('')
       searchRef.current?.focus()
+      return
+    }
+    // Gift coupon scanned at the POS — show issued-to / balance / expiry
+    if (/^CPN-/i.test(code)) {
+      const cres = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> } }
+      if (cres.success && cres.data?.coupon) {
+        setCouponPeek({ ...cres.data.coupon, __valid: cres.data.valid, __reason: cres.data.reason || null })
+        setSearchQuery('')
+        return
+      }
+      toast.error('Coupon not found')
       return
     }
     toast.error('Barcode not found')
@@ -499,6 +511,32 @@ export default function POSPage() {
       )}
       {showHeld && <HeldInvoicesModal onClose={() => setShowHeld(false)} />}
       {showHelp && <KeyboardHelpOverlay onClose={() => setShowHelp(false)} />}
+      {couponPeek && (
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={() => { setCouponPeek(null); searchRef.current?.focus() }}>
+          <div className="bg-surface-800 rounded-2xl p-6 w-full max-w-sm border border-slate-700" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-bold" style={{ color: 'var(--text-1)' }}>Gift Coupon</h3>
+              <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${couponPeek.__valid ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                {couponPeek.__valid ? 'Valid' : String(couponPeek.status || 'invalid')}
+              </span>
+            </div>
+            <p className="font-mono text-sm mb-3" style={{ color: 'var(--text-2)' }}>{String(couponPeek.code)}</p>
+            <div className="space-y-1.5 text-sm" style={{ color: 'var(--text-2)' }}>
+              <div className="flex justify-between"><span style={{ color: 'var(--text-3)' }}>Issued to</span><span>{String(couponPeek.customer_name || 'Bearer')}</span></div>
+              <div className="flex justify-between"><span style={{ color: 'var(--text-3)' }}>Value</span><span>Rs.{Number(couponPeek.initial_value || 0).toFixed(2)}</span></div>
+              <div className="flex justify-between font-semibold"><span style={{ color: 'var(--text-3)' }}>Balance</span><span className="text-green-400">Rs.{Number(couponPeek.balance || 0).toFixed(2)}</span></div>
+              <div className="flex justify-between"><span style={{ color: 'var(--text-3)' }}>Valid until</span><span>{couponPeek.valid_until ? String(couponPeek.valid_until).slice(0, 10) : 'No expiry'}</span></div>
+            </div>
+            {!couponPeek.__valid && couponPeek.__reason ? (
+              <p className="text-xs text-red-400 mt-3">{String(couponPeek.__reason)}</p>
+            ) : (
+              <p className="text-xs mt-3" style={{ color: 'var(--text-3)' }}>Apply this coupon in the payment screen (F4) — Gift Coupon section.</p>
+            )}
+            <button onClick={() => { setCouponPeek(null); searchRef.current?.focus() }} className="btn-primary w-full mt-4">Close</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

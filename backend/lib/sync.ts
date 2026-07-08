@@ -11,6 +11,7 @@ export const ALLOWED_TABLES = new Set([
   'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches',
   'branch_transfer_logs', 'branch_transfer_prints',
   'stock_requests', 'stock_request_items',
+  'coupons', 'coupon_redemptions',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {

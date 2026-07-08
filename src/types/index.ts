@@ -173,7 +173,7 @@ export interface Invoice {
   payments?: Payment[]
 }
 
-export type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'installment' | 'gift_voucher'
+export type PaymentMethod = 'cash' | 'card' | 'bank_transfer' | 'installment' | 'gift_voucher' | 'coupon'
 
 export interface Payment {
   id: string

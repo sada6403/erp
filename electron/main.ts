@@ -22,6 +22,7 @@ import { registerNotificationHandlers } from './ipc/notifications'
 import { registerReportHandlers } from './ipc/reports'
 import { registerCommunicationHandlers, startReminderScheduler } from './ipc/communications'
 import { registerLoyaltyHandlers } from './ipc/loyalty'
+import { registerCouponHandlers } from './ipc/coupons'
 import { registerBatchHandlers } from './ipc/batches'
 import { registerBranchTransferHandlers } from './ipc/branchTransfers'
 import { registerBackupHandlers } from './ipc/backup'
@@ -144,6 +145,7 @@ async function bootstrap() {
   registerCommunicationHandlers()
   startReminderScheduler()
   registerLoyaltyHandlers()
+  registerCouponHandlers()
   registerBatchHandlers()
   registerBranchTransferHandlers(ipcMain)
   registerBackupHandlers()

@@ -183,7 +183,7 @@ export class SyncService {
         INSERT OR IGNORE INTO roles (id, name, permissions)
         VALUES
           ('3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'Company Admin', '{"all":true}'),
-          ('4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e', 'Branch Manager', '{"pos":true,"inventory":true,"reports":true,"customers":true,"employees":true}'),
+          ('4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e', 'Branch Manager', '{"pos":true,"inventory":true,"reports":true,"customers":true,"employees":true,"coupons":true,"coupons_create":true,"coupons_reports":true}'),
           ('5c8d0e1f-3a4b-6c5d-0e1f-3a4b5c8d0e1f', 'Cashier', '{"pos":true,"customers":true}'),
           ('6d9e1f2a-4b5c-7d6e-1f2a-4b5c6d9e1f2a', 'Warehouse Staff', '{"inventory":true,"transfers":true}'),
           ('7e0f2a3b-5c6d-8e7f-2a3b-5c6d7e0f2a3b', 'Delivery Staff', '{"deliveries":true}')
@@ -274,8 +274,9 @@ export class SyncService {
       'purchase_orders', 'purchase_items',
       'installments', 'installment_plans', 'installment_schedule',
       'installment_reminders', 'customer_orders', 'customer_order_items',
-      'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches', 
-      'branch_transfer_logs', 'branch_transfer_prints'
+      'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches',
+      'branch_transfer_logs', 'branch_transfer_prints',
+      'coupons', 'coupon_redemptions',
     ]
 
     let pulledInstallmentIds: string[] = []

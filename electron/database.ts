@@ -875,6 +875,66 @@ function runMigrations(): void {
   if (!hasColumn('stock_transfers', 'discrepancy_by')) {
     db.exec(`ALTER TABLE stock_transfers ADD COLUMN discrepancy_by TEXT`)
   }
+
+  // ── Coupons: balance-type gift vouchers (cloud-synced) ─────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS coupons (
+      id            TEXT PRIMARY KEY,
+      code          TEXT NOT NULL UNIQUE,
+      name          TEXT NOT NULL,
+      customer_id   TEXT REFERENCES customers(id),
+      branch_id     TEXT REFERENCES branches(id),
+      initial_value REAL NOT NULL,
+      balance       REAL NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','used_up','expired','void')),
+      valid_from    TEXT NOT NULL,
+      valid_until   TEXT,
+      issued_by     TEXT REFERENCES users(id),
+      notes         TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_coupons_code     ON coupons(code);
+    CREATE INDEX IF NOT EXISTS idx_coupons_customer ON coupons(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_coupons_branch   ON coupons(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_coupons_status   ON coupons(status);
+
+    CREATE TABLE IF NOT EXISTS coupon_redemptions (
+      id            TEXT PRIMARY KEY,
+      coupon_id     TEXT NOT NULL REFERENCES coupons(id),
+      invoice_id    TEXT REFERENCES invoices(id),
+      customer_id   TEXT,
+      branch_id     TEXT,
+      amount        REAL NOT NULL,
+      balance_after REAL NOT NULL,
+      type          TEXT NOT NULL DEFAULT 'redeem' CHECK (type IN ('redeem','reversal')),
+      redeemed_by   TEXT REFERENCES users(id),
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_coupon  ON coupon_redemptions(coupon_id);
+    CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_invoice ON coupon_redemptions(invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_branch  ON coupon_redemptions(branch_id);
+  `)
+
+  // Grant coupon permissions to the system Branch Manager role (idempotent)
+  try {
+    const bm = db.prepare(`SELECT id, permissions FROM roles WHERE id = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'`)
+      .get() as { id: string; permissions: string } | undefined
+    if (bm) {
+      const perms = JSON.parse(bm.permissions || '{}') as Record<string, boolean>
+      if (!perms.coupons) {
+        perms.coupons = true
+        perms.coupons_create = true
+        perms.coupons_reports = true
+        db.prepare(`UPDATE roles SET permissions = ?, updated_at = datetime('now') WHERE id = ?`)
+          .run(JSON.stringify(perms), bm.id)
+        console.log('[DB] Migration: granted coupon permissions to Branch Manager role')
+      }
+    }
+  } catch { /* roles table not ready — seed covers fresh installs */ }
 }
 
 function seedDefaultData() {

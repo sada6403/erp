@@ -6,7 +6,7 @@ import { useKeyboard } from '@/hooks/useKeyboard'
 import type { BillType } from '@/store/cartStore'
 import {
   X, CreditCard, Banknote, Building2, Calendar, Printer, CheckCircle2,
-  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Gift, Keyboard, Handshake, UserPlus
+  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Gift, Keyboard, Handshake, UserPlus, Ticket
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { PaymentMethod } from '@/types'
@@ -68,6 +68,11 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [usePoints, setUsePoints]       = useState(false)
   const [redeemPoints, setRedeemPoints] = useState(0)
   const [earnedPoints, setEarnedPoints] = useState(0)
+  // Coupon (balance-type gift coupon — validated against the coupons module)
+  const [couponCode, setCouponCode]     = useState('')
+  const [couponInfo, setCouponInfo]     = useState<Record<string, unknown> | null>(null)
+  const [couponAmount, setCouponAmount] = useState('0')
+  const [couponChecking, setCouponChecking] = useState(false)
   const receivedRef = useRef<HTMLInputElement>(null)
   const navigate    = useNavigate()
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null)
@@ -131,15 +136,49 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const maxRedeemablePoints = loyaltyBalance ? Math.min(loyaltyBalance.points, Math.floor(cart.total / (Number(loyaltyCfg?.redeem_value ?? 10) / Number(loyaltyCfg?.redeem_points ?? 100)))) : 0
   const loyaltyDiscount     = usePoints && redeemPoints > 0 ? (redeemPoints / Number(loyaltyCfg?.redeem_points ?? 100)) * Number(loyaltyCfg?.redeem_value ?? 10) : 0
   const totalAfterLoyalty   = Math.max(0, cart.total - loyaltyDiscount)
+
+  // Coupon applies with cash/card/bank payments on retail bills only
+  const couponEligible = billType === 'RETAIL' && method !== 'gift_voucher' && method !== 'installment'
+  const couponBalance  = couponInfo ? Number(couponInfo.balance || 0) : 0
+  const couponApplied  = couponEligible && couponInfo
+    ? Number(Math.min(Math.max(0, parseFloat(couponAmount) || 0), couponBalance, totalAfterLoyalty).toFixed(2))
+    : 0
+  const totalAfterCoupon = Math.max(0, Number((totalAfterLoyalty - couponApplied).toFixed(2)))
+  const cartCustomerId = (cart.customer as Record<string, unknown> | null)?.id
+  const couponCustomerMismatch = Boolean(
+    couponInfo?.customer_id && cartCustomerId && String(couponInfo.customer_id) !== String(cartCustomerId)
+  )
+
+  const validateCoupon = async () => {
+    const code = couponCode.trim()
+    if (!code) return
+    setCouponChecking(true)
+    try {
+      const res = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> }; error?: string }
+      if (!res.success) { toast.error(res.error || 'Could not check coupon'); return }
+      if (!res.data?.valid || !res.data.coupon) {
+        setCouponInfo(null)
+        toast.error(res.data?.reason || 'Coupon is not valid')
+        return
+      }
+      setCouponInfo(res.data.coupon)
+      const balance = Number(res.data.coupon.balance || 0)
+      setCouponAmount(String(Math.min(balance, totalAfterLoyalty).toFixed(2)))
+      toast.success(`Coupon OK — balance Rs.${balance.toFixed(2)}`)
+    } finally { setCouponChecking(false) }
+  }
+
+  const clearCoupon = () => { setCouponInfo(null); setCouponCode(''); setCouponAmount('0') }
   const agentCommissionPct  = Math.max(0, Math.min(100, parseFloat(agentPct) || 0))
   const agentCommissionAmount = (agentCode.trim() || agentName.trim()) && agentCommissionPct > 0
     ? (totalAfterLoyalty * agentCommissionPct) / 100
     : 0
 
   useEffect(() => {
-    if (method === 'cash' || method === 'gift_voucher') setReceived(String(totalAfterLoyalty.toFixed(2)))
+    if (method === 'gift_voucher') setReceived(String(totalAfterLoyalty.toFixed(2)))
+    else if (method === 'cash') setReceived(String(totalAfterCoupon.toFixed(2)))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method, cart.total, loyaltyDiscount])
+  }, [method, cart.total, loyaltyDiscount, couponApplied])
 
   const receivedAmount      = parseFloat(received) || 0
   const voucherApplied      = method === 'gift_voucher' ? Math.min(Math.max(0, receivedAmount), totalAfterLoyalty) : 0
@@ -149,10 +188,10 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     ? 0
     : method === 'gift_voucher'
       ? voucherApplied + balanceReceivedAmount
-      : receivedAmount
+      : receivedAmount + couponApplied
   const change = method === 'gift_voucher'
     ? Math.max(0, balanceReceivedAmount - voucherBalance)
-    : Math.max(0, receivedAmount - totalAfterLoyalty)
+    : Math.max(0, receivedAmount - totalAfterCoupon)
 
   useEffect(() => {
     if (method === 'gift_voucher') setBalanceReceived(voucherBalance.toFixed(2))
@@ -191,15 +230,22 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     paid_amount:       method === 'installment' ? Number(downPayment || 0) : effectivePaidAmount,
     change_amount:     change,
     payment_method:    isCredit ? 'credit' : method === 'installment' ? 'installment'
-                        : (method === 'gift_voucher' && voucherBalance > 0 ? 'split' : method),
+                        : (method === 'gift_voucher' && voucherBalance > 0) || (couponApplied > 0 && receivedAmount > 0) ? 'split'
+                        : couponApplied > 0 && totalAfterCoupon <= 0 ? 'coupon'
+                        : method,
     payment_reference: method === 'installment'
       ? `Down payment — balance Rs.${Math.max(0, cart.total - Number(downPayment || 0)).toFixed(2)}`
       : method === 'gift_voucher' && voucherBalance > 0
         ? `Voucher ${reference}${balanceReference ? ` / ${balanceReference}` : ''}`
         : reference,
+    // Print payload only — the coupon line is display-only here; the real
+    // payments row is inserted by the main process during invoices:create.
     payments:          method === 'installment'
       ? [{ method: 'installment', amount: Number(downPayment || 0), reference: `Balance Rs.${Math.max(0, cart.total - Number(downPayment || 0)).toFixed(2)}` }]
-      : buildPayments(),
+      : [
+          ...(couponApplied > 0 ? [{ method: 'coupon' as PaymentMethod, amount: couponApplied, reference: String(couponInfo?.code || couponCode) }] : []),
+          ...(buildPayments() || []),
+        ],
     agent_code:        agentCode.trim() || undefined,
     agent_name:        agentName.trim() || undefined,
     agent_commission_pct: agentCommissionPct,
@@ -221,7 +267,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       try {
         const settings = await window.api.settings.get()
         const branchId = user?.branch?.id || (settings.data as { branch_id?: string } | undefined)?.branch_id
-        const cust = cart.customer as Record<string, string>
+        const cust = cart.customer as unknown as Record<string, string>
         const res = await window.api.admin.installments.createSale({
           branch_id:      branchId,
           customer_id:    cust.id,
@@ -246,7 +292,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       return
     }
 
-    if (isRetail && method !== 'installment' && method !== 'gift_voucher' && receivedAmount < totalAfterLoyalty) {
+    if (isRetail && method !== 'installment' && method !== 'gift_voucher' && receivedAmount < totalAfterCoupon) {
       toast.error('Insufficient payment amount')
       receivedRef.current?.focus()
       receivedRef.current?.select()
@@ -308,6 +354,11 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
           ? { method, amount: receivedAmount, reference }
           : undefined,
         payments: buildPayments(),
+        // Balance-type coupon: the main process validates + redeems this inside
+        // the invoice transaction and inserts the payments row itself.
+        coupon: couponApplied > 0 && couponInfo
+          ? { code: String(couponInfo.code), amount: couponApplied }
+          : undefined,
       })
 
       if (!res.success) {
@@ -348,7 +399,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   }, [loading, isRetail, isCredit, isQuotation, method, receivedAmount, reference, voucherApplied, voucherBalance,
       balanceReceivedAmount, balanceMethod, balanceReference, cart, billType, validUntil, dueDate,
       effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentCommissionPct, agentCommissionAmount,
-      planId, downPayment, plans])
+      planId, downPayment, plans, couponApplied, couponInfo, totalAfterCoupon])
 
   const handlePrint = useCallback(async (design: 'dot' | 'thermal' | 'a4' = printDesign) => {
     if (!receiptPayload) return
@@ -529,11 +580,16 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               {isQuotation ? 'Quoted Amount' : isCredit ? 'Credit Amount' : 'Total Amount'}
             </p>
             <p className="text-4xl font-bold" style={{ color: 'var(--text-1)' }}>
-              Rs.{totalAfterLoyalty.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              Rs.{(couponApplied > 0 ? totalAfterCoupon : totalAfterLoyalty).toLocaleString(undefined, { maximumFractionDigits: 2 })}
             </p>
             {loyaltyDiscount > 0 && (
               <p className="text-xs mt-1 text-green-400">
                 Rs.{loyaltyDiscount.toFixed(2)} loyalty discount applied
+              </p>
+            )}
+            {couponApplied > 0 && (
+              <p className="text-xs mt-1 text-indigo-400">
+                Rs.{couponApplied.toFixed(2)} paid by coupon {String(couponInfo?.code || '')}
               </p>
             )}
           </div>
@@ -626,6 +682,66 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
             </div>
           )}
 
+          {/* Gift Coupon redemption (balance-type, scan or type CPN-…) */}
+          {isRetail && couponEligible && (
+            <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)', background: 'color-mix(in srgb, #6366f1 6%, transparent)' }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Ticket size={15} className="text-indigo-400" />
+                <p className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>Gift Coupon</p>
+                {couponInfo && (
+                  <button onClick={clearCoupon} className="text-xs text-red-400 underline ml-auto">Remove</button>
+                )}
+              </div>
+              {!couponInfo ? (
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={couponCode}
+                    onChange={e => setCouponCode(e.target.value.toUpperCase())}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); validateCoupon() } }}
+                    className="input py-1.5 text-sm font-mono flex-1"
+                    placeholder="Scan or type CPN-…"
+                  />
+                  <button onClick={validateCoupon} disabled={couponChecking || !couponCode.trim()}
+                    className="btn-secondary btn-sm px-3 disabled:opacity-40">
+                    {couponChecking ? 'Checking…' : 'Apply'}
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-mono" style={{ color: 'var(--text-2)' }}>{String(couponInfo.code)}</span>
+                    <span style={{ color: 'var(--text-3)' }}>
+                      Issued to <b style={{ color: 'var(--text-2)' }}>{String(couponInfo.customer_name || 'Bearer')}</b>
+                      {couponInfo.valid_until ? ` · valid till ${String(couponInfo.valid_until).slice(0, 10)}` : ''}
+                    </span>
+                  </div>
+                  {couponCustomerMismatch && (
+                    <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-2.5 py-1.5 text-xs text-amber-300">
+                      ⚠ This coupon was issued to {String(couponInfo.customer_name)} — different from the bill customer.
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="number"
+                      value={couponAmount}
+                      onChange={e => setCouponAmount(e.target.value)}
+                      className="input py-1 text-sm w-32"
+                      min={0}
+                      max={Math.min(couponBalance, totalAfterLoyalty)}
+                      step="0.01"
+                    />
+                    <span className="text-xs" style={{ color: 'var(--text-3)' }}>
+                      of Rs.{couponBalance.toFixed(2)} balance — applying Rs.{couponApplied.toFixed(2)}
+                    </span>
+                    <button onClick={() => setCouponAmount(String(Math.min(couponBalance, totalAfterLoyalty).toFixed(2)))}
+                      className="text-xs text-indigo-400 underline ml-auto">Max</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* QUOTATION: valid until */}
           {isQuotation && (
             <div>
@@ -706,7 +822,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                       }
                     }}
                     className="input text-2xl font-bold text-center h-14"
-                    min={method === 'gift_voucher' ? 0 : cart.total}
+                    min={method === 'gift_voucher' ? 0 : totalAfterCoupon}
                     step="0.01"
                     autoFocus
                   />

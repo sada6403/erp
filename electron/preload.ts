@@ -174,6 +174,7 @@ const api = {
     printReceipt: (payload: unknown) => ipcRenderer.invoke('printer:printReceipt', payload),
     printInvoice: (payload: unknown) => ipcRenderer.invoke('printer:printInvoice', payload),
     printTransfer:(payload: unknown) => ipcRenderer.invoke('printer:printTransfer', payload),
+    printCoupon:  (payload: unknown) => ipcRenderer.invoke('printer:printCoupon', payload),
     emailInvoice: (payload: unknown) => ipcRenderer.invoke('printer:emailInvoice', payload),
     test:         ()                 => ipcRenderer.invoke('printer:test'),
     listDevices:  ()                 => ipcRenderer.invoke('printer:listDevices'),
@@ -224,6 +225,16 @@ const api = {
     redeem:     (payload: unknown)   => ipcRenderer.invoke('loyalty:redeem', payload),
     adjust:     (payload: unknown)   => ipcRenderer.invoke('loyalty:adjust', payload),
     history:    (customerId: string) => ipcRenderer.invoke('loyalty:history', customerId),
+  },
+
+  // Coupons (balance-type gift vouchers)
+  coupons: {
+    create:   (payload: unknown)              => ipcRenderer.invoke('coupons:create', payload),
+    list:     (filters?: unknown)             => ipcRenderer.invoke('coupons:list', filters),
+    get:      (idOrCode: string)              => ipcRenderer.invoke('coupons:get', idOrCode),
+    validate: (code: string)                  => ipcRenderer.invoke('coupons:validate', code),
+    void:     (id: string, reason?: string)   => ipcRenderer.invoke('coupons:void', id, reason),
+    reports:  (filters?: unknown)             => ipcRenderer.invoke('coupons:reports', filters),
   },
 
   // Batch / Serial / Expiry Tracking

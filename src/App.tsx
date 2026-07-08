@@ -35,6 +35,8 @@ import BranchTransfersPage from '@/pages/admin/BranchTransfersPage'
 import BranchTransferForm from '@/pages/admin/BranchTransferForm'
 import BranchTransferView from '@/pages/admin/BranchTransferView'
 import BatchesPage from '@/pages/admin/BatchesPage'
+import CouponsPage from '@/pages/admin/CouponsPage'
+import CouponReportsPage from '@/pages/admin/CouponReportsPage'
 import BackupPage from '@/pages/admin/BackupPage'
 import SecurityPage from '@/pages/admin/SecurityPage'
 import SystemHealthPage from '@/pages/admin/SystemHealthPage'
@@ -148,6 +150,8 @@ export default function App() {
         <Route path="/admin/system-health"  element={<RequireSuperAdmin><SystemHealthPage /></RequireSuperAdmin>} />
         <Route path="/admin/transactions"   element={<TransactionReportPage />} />
         <Route path="/admin/reports"        element={<AdvancedReportsPage />} />
+        <Route path="/admin/coupons"        element={<CouponsPage />} />
+        <Route path="/admin/coupon-reports" element={<CouponReportsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>

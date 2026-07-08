@@ -109,6 +109,15 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
+  ipcMain.handle('printer:printCoupon', async (_e, payload: Record<string, unknown>) => {
+    try {
+      const settings = store.get('app_settings') as Record<string, unknown> || {}
+      const html = await buildCouponHtml(payload, settings)
+      await printHtml(html, 'a4', 'A4')
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
   ipcMain.handle('printer:emailInvoice', async (_e, payload: InvoicePayload) => {
     try {
       const settings = store.get('app_settings') as Record<string, unknown> || {}
@@ -293,6 +302,60 @@ async function buildInstallmentCardHtml(t: Record<string, unknown>, settings: Re
         <tbody>${rows}</tbody>
       </table>
       <div class="foot">Keep this card safe and bring it on each payment. Present the QR to verify your plan. Payments are only valid when signed &amp; receipted by ${company}.</div>
+    </div>
+  </body></html>`
+}
+
+// Gift coupon card — printed once at issue time, reprintable from the admin
+// page. The QR encodes ONLY the coupon code so a keyboard-wedge scanner types
+// `CPN-…` + Enter straight into the POS.
+async function buildCouponHtml(c: Record<string, unknown>, settings: Record<string, unknown>): Promise<string> {
+  const company = esc((settings.company_name as string) || 'Nature Plantation')
+  const cur = String(settings.currency_symbol || 'Rs.')
+  const money = (n: unknown) => `${cur}${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const code = String(c.code || '')
+
+  let qrSvg = ''
+  try { qrSvg = await QRCode.toString(code, { type: 'svg', margin: 1, errorCorrectionLevel: 'M' }) } catch { /* ignore */ }
+
+  const validUntil = c.valid_until ? String(c.valid_until).slice(0, 10) : 'No expiry'
+
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+    *{box-sizing:border-box}
+    body{font-family:Arial,Helvetica,sans-serif;color:#111;margin:26px}
+    .card{max-width:640px;margin:auto;border:2px solid #111;border-radius:12px;overflow:hidden}
+    .top{display:flex;justify-content:space-between;align-items:center;background:#111;color:#fff;padding:14px 20px}
+    .top .co{font-size:20px;font-weight:800}
+    .top .ti{font-size:11px;letter-spacing:3px;text-transform:uppercase;opacity:.85}
+    .qr{width:120px;height:120px;background:#fff;padding:6px;border-radius:8px}
+    .qr svg{width:100%;height:100%;display:block}
+    .codebox{padding:16px 20px;text-align:center;border-bottom:1px solid #ccc;background:#fafafa}
+    .code{font-family:'Courier New',monospace;font-size:24px;font-weight:800;letter-spacing:2px}
+    .info{display:flex;justify-content:space-between;gap:24px;padding:16px 20px}
+    .info .col{font-size:13px;line-height:2}
+    .info b{display:inline-block;min-width:100px;color:#444}
+    .value{font-size:22px;font-weight:800}
+    .foot{padding:12px 20px;font-size:10px;color:#666;border-top:1px solid #ccc}
+  </style></head><body>
+    <div class="card">
+      <div class="top">
+        <div><div class="co">${company}</div><div class="ti">Gift Coupon</div></div>
+        ${qrSvg ? `<div class="qr">${qrSvg}</div>` : ''}
+      </div>
+      <div class="codebox"><div class="code">${esc(code)}</div></div>
+      <div class="info">
+        <div class="col">
+          <div><b>Issued To</b> ${esc(String(c.customer_name || 'Bearer'))}</div>
+          <div><b>Coupon</b> ${esc(String(c.name || ''))}</div>
+          <div><b>Branch</b> ${esc(String(c.branch_name || '—'))}</div>
+        </div>
+        <div class="col">
+          <div><b>Value</b> <span class="value">${money(c.initial_value)}</span></div>
+          <div><b>Balance</b> ${money(c.balance)}</div>
+          <div><b>Valid Until</b> ${esc(validUntil)}</div>
+        </div>
+      </div>
+      <div class="foot">Present this card or QR code at any ${company} counter. The balance can be used across multiple purchases until exhausted or expired. Not exchangeable for cash.</div>
     </div>
   </body></html>`
 }
@@ -499,6 +562,7 @@ async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string
     bank_transfer: 'Bank Transfer',
     installment: 'Installment',
     gift_voucher: 'Gift Voucher',
+    coupon: 'Coupon',
     split: 'Split Payment'
   }
   const payments = (payload.payments || []).filter(p => Number(p.amount) > 0)
@@ -514,7 +578,7 @@ async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string
           <span class="pv">${fmt(payment.amount)}</span>
         </div>
         ${payment.reference
-          ? `<div class="prow pref"><span class="pl">${payment.method === 'gift_voucher' ? 'Voucher No.' : 'Reference'}</span><span class="pv">${esc(payment.reference)}</span></div>`
+          ? `<div class="prow pref"><span class="pl">${payment.method === 'gift_voucher' ? 'Voucher No.' : payment.method === 'coupon' ? 'Coupon No.' : 'Reference'}</span><span class="pv">${esc(payment.reference)}</span></div>`
           : ''}`).join('')
 
   return `<!DOCTYPE html>
@@ -760,6 +824,7 @@ function buildEmailBody(payload: InvoicePayload, settings: Record<string, unknow
     bank_transfer: 'Bank Transfer',
     installment: 'Installment',
     gift_voucher: 'Gift Voucher',
+    coupon: 'Coupon',
     split: 'Split Payment'
   }
   const payments = (payload.payments || []).filter(p => Number(p.amount) > 0)

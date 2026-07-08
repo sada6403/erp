@@ -531,7 +531,7 @@ CREATE TABLE IF NOT EXISTS deliveries (
 const DEFAULT_ROLES_SQL = `
 INSERT IGNORE INTO roles (id, name, permissions, is_system) VALUES
   (UUID(), 'Company Admin',   '{"all":true}', 1),
-  (UUID(), 'Branch Manager',  '{"pos":true,"inventory":true,"reports":true,"customers":true,"employees":true}', 1),
+  (UUID(), 'Branch Manager',  '{"pos":true,"inventory":true,"reports":true,"customers":true,"employees":true,"coupons":true,"coupons_create":true,"coupons_reports":true}', 1),
   (UUID(), 'Cashier',         '{"pos":true,"customers":true}', 1),
   (UUID(), 'Warehouse Staff', '{"inventory":true,"transfers":true}', 1),
   (UUID(), 'Delivery Staff',  '{"deliveries":true}', 1);
