@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
+import { useAuthStore } from '@/store/authStore'
 import {
   CreditCard, AlertCircle, ChevronDown, ChevronUp, Phone, Calendar,
   CheckCircle2, Clock, XCircle, TrendingUp, Users, DollarSign, Plus,
@@ -292,9 +293,20 @@ export default function InstallmentsPage() {
   const [paying, setPaying] = useState<Inst | null>(null)
   const [receipt, setReceipt] = useState<ReceiptData | null>(null)
   const [summaryStats, setSummaryStats] = useState({ active: 0, overdue: 0, completed: 0, totalDue: 0 })
+  const [branches, setBranches] = useState<{ id: string; name: string }[]>([])
+  const { user } = useAuthStore()
+  const perms = ((user as unknown as Record<string, unknown> | null)?.role as Record<string, unknown> | undefined)?.permissions
+    || (user as unknown as Record<string, unknown> | null)?.permissions
+    || {}
+  const isAdmin = Boolean((perms as Record<string, unknown>).all)
+  const [branchId, setBranchId] = useState(isAdmin ? '' : String((user as unknown as Record<string, unknown> | null)?.branch_id || ''))
+  const branchScopeLabel = isAdmin
+    ? (branchId ? (branches.find(b => b.id === branchId)?.name || 'Selected Branch') : 'All Branches')
+    : (String((user as unknown as Record<string, unknown> | null)?.branch_name || 'My Branch'))
 
   const loadStats = useCallback(async () => {
-    const res = await window.api.admin.installments.list({})
+    const filters = branchId ? { branch_id: branchId } : {}
+    const res = await window.api.admin.installments.list(filters)
     if (!res.success) return
     const list = res.data as Inst[]
     setSummaryStats({
@@ -303,7 +315,16 @@ export default function InstallmentsPage() {
       completed: list.filter(i => i.status === 'completed').length,
       totalDue:  list.reduce((s, i) => s + Number(i.due_amount || 0), 0),
     })
-  }, [])
+  }, [branchId])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    window.api.admin.branches.list().then((r: { success: boolean; data?: unknown }) => {
+      if (r.success && Array.isArray(r.data)) {
+        setBranches((r.data as { id: string; name: string }[]).filter(b => Boolean(b.id)))
+      }
+    })
+  }, [isAdmin])
 
   useEffect(() => { loadStats() }, [loadStats])
 
@@ -323,14 +344,25 @@ export default function InstallmentsPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <PageHeader title="Installment Management" subtitle="Full installment lifecycle management" />
+      <PageHeader
+        title="Installment Management"
+        subtitle={`Full installment lifecycle management · ${branchScopeLabel}`}
+      />
 
       {/* Stats bar */}
-      <div className="grid grid-cols-4 gap-3 px-6 py-3 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+      <div className="flex items-center gap-3 px-6 py-3 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+        {isAdmin && (
+          <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input w-56 text-xs">
+            <option value="">All Branches</option>
+            {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
+        <div className="grid grid-cols-4 gap-3 flex-1">
         <StatTile icon={<Users size={15} />}       label="Active Plans"   value={summaryStats.active}        color="text-green-500" />
         <StatTile icon={<AlertCircle size={15} />} label="Overdue"        value={summaryStats.overdue}       color="text-red-500"   />
         <StatTile icon={<CheckCircle2 size={15} />}label="Completed"      value={summaryStats.completed}     color="text-blue-500"  />
         <StatTile icon={<DollarSign size={15} />}  label="Total Outstanding" value={fmt(summaryStats.totalDue)} color="text-orange-500" />
+        </div>
       </div>
 
       {/* Tab bar */}
@@ -348,11 +380,11 @@ export default function InstallmentsPage() {
       </div>
 
       {/* Tab content */}
-      {tab === 'accounts'  && <AccountsTab  onPay={setPaying} onStatsChange={loadStats} />}
-      {tab === 'new-sale'  && <NewSaleTab   onSuccess={() => { setTab('accounts'); loadStats() }} />}
+      {tab === 'accounts'  && <AccountsTab  branchId={branchId} onPay={setPaying} onStatsChange={loadStats} />}
+      {tab === 'new-sale'  && <NewSaleTab   branchId={branchId} branchLabel={branchScopeLabel} onSuccess={() => { setTab('accounts'); loadStats() }} />}
       {tab === 'plans'     && <PlansTab />}
-      {tab === 'transfers' && <BankTransfersTab onStatsChange={loadStats} />}
-      {tab === 'reports'   && <ReportsTab />}
+      {tab === 'transfers' && <BankTransfersTab branchId={branchId} onStatsChange={loadStats} />}
+      {tab === 'reports'   && <ReportsTab branchId={branchId} />}
 
       {/* Payment modal */}
       {paying && (
@@ -385,7 +417,7 @@ function StatTile({ icon, label, value, color }: { icon: React.ReactNode; label:
 }
 
 // ─── Accounts Tab ────────────────────────────────────────────────────────────
-function AccountsTab({ onPay, onStatsChange }: { onPay: (i: Inst) => void; onStatsChange: () => void }) {
+function AccountsTab({ branchId, onPay, onStatsChange }: { branchId: string; onPay: (i: Inst) => void; onStatsChange: () => void }) {
   const [list, setList]           = useState<Inst[]>([])
   const [filter, setFilter]       = useState('')
   const [search, setSearch]       = useState('')
@@ -395,10 +427,14 @@ function AccountsTab({ onPay, onStatsChange }: { onPay: (i: Inst) => void; onSta
 
   const load = useCallback(async () => {
     const res = await window.api.admin.installments.list(
-      Object.assign(filter ? { status: filter } : {}, search ? { search } : {})
+      Object.assign(
+        branchId ? { branch_id: branchId } : {},
+        filter ? { status: filter } : {},
+        search ? { search } : {}
+      )
     )
     if (res.success) setList(res.data as Inst[])
-  }, [filter, search])
+  }, [branchId, filter, search])
 
   useEffect(() => { load() }, [load])
 
@@ -451,7 +487,7 @@ function AccountsTab({ onPay, onStatsChange }: { onPay: (i: Inst) => void; onSta
         <table className="w-full">
           <thead className="sticky top-0 z-10" style={{ background: 'var(--bg-page)' }}>
             <tr>
-              {['Customer', 'Contract / Invoice', 'Down Paid', 'Monthly EMI', 'Progress', 'Next Due', 'Outstanding', 'Status', ''].map(h => (
+              {['Customer', 'Branch', 'Contract / Invoice', 'Down Paid', 'Monthly EMI', 'Progress', 'Next Due', 'Outstanding', 'Status', ''].map(h => (
                 <th key={h} className="table-header">{h}</th>
               ))}
             </tr>
@@ -479,6 +515,11 @@ function AccountsTab({ onPay, onStatsChange }: { onPay: (i: Inst) => void; onSta
                         <Phone size={9} />{inst.customer_phone as string}
                       </div>
                     )}
+                  </td>
+                  <td className="table-cell">
+                    <span className="text-xs px-2 py-1 rounded-lg" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+                      {inst.branch_name as string || '—'}
+                    </span>
                   </td>
                   <td className="table-cell">
                     <div className="font-mono text-xs text-blue-500">{inst.contract_number as string}</div>
@@ -540,7 +581,7 @@ function AccountsTab({ onPay, onStatsChange }: { onPay: (i: Inst) => void; onSta
 
                 isExp && (
                   <tr key={`${inst.id as string}-det`}>
-                    <td colSpan={9} className="p-0">
+                    <td colSpan={10} className="p-0">
                       <div className="px-6 py-4 border-b" style={{ background: 'var(--bg-soft)', borderColor: 'var(--border)' }}>
                         {detailLoading
                           ? <p className="text-sm py-6 text-center" style={{ color: 'var(--text-3)' }}>Loading…</p>
@@ -719,7 +760,7 @@ function DetailPanel({ detail, onPayNow, onRefresh }: {
 }
 
 // ─── New Sale Tab ────────────────────────────────────────────────────────────
-function NewSaleTab({ onSuccess }: { onSuccess: () => void }) {
+function NewSaleTab({ branchId, branchLabel, onSuccess }: { branchId: string; branchLabel: string; onSuccess: () => void }) {
   // Customer
   const [custQuery, setCustQuery]   = useState('')
   const [custResults, setCustResults] = useState<CustomerRow[]>([])
@@ -825,6 +866,7 @@ function NewSaleTab({ onSuccess }: { onSuccess: () => void }) {
 
     setSubmitting(true)
     const payload = {
+      branch_id:       branchId || undefined,
       customer_id:      isNewCust ? '' : (customer?.id || ''),
       customer_name:    custName,
       customer_phone:   isNewCust ? newCust.phone : (customer?.phone || ''),
@@ -856,6 +898,15 @@ function NewSaleTab({ onSuccess }: { onSuccess: () => void }) {
   return (
     <div className="flex-1 overflow-auto px-6 py-4">
       <div className="grid grid-cols-3 gap-5 max-w-6xl mx-auto">
+        <div className="col-span-3 flex items-center justify-between rounded-lg border px-4 py-2" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <div>
+            <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Installment Branch</p>
+            <p className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{branchLabel}</p>
+          </div>
+          <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+            Account will be saved to this branch
+          </span>
+        </div>
 
         {/* Col 1: Customer */}
         <div className="space-y-3">
@@ -1287,15 +1338,15 @@ function PlanFormModal({ initial, onClose, onSave }: {
 }
 
 // ─── Bank Transfers Tab ──────────────────────────────────────────────────────
-function BankTransfersTab({ onStatsChange }: { onStatsChange: () => void }) {
+function BankTransfersTab({ branchId, onStatsChange }: { branchId: string; onStatsChange: () => void }) {
   const [transfers, setTransfers] = useState<Inst[]>([])
   const [verifying, setVerifying] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null)
   const [notes, setNotes]         = useState('')
 
   const load = useCallback(async () => {
-    const r = await window.api.admin.installments.pendingTransfers()
+    const r = await window.api.admin.installments.pendingTransfers(branchId ? { branch_id: branchId } : {})
     if (r.success) setTransfers(r.data as Inst[])
-  }, [])
+  }, [branchId])
 
   useEffect(() => { load() }, [load])
 
@@ -1320,7 +1371,12 @@ function BankTransfersTab({ onStatsChange }: { onStatsChange: () => void }) {
             {transfers.length} payment{transfers.length !== 1 ? 's' : ''} awaiting admin approval
           </p>
         </div>
-        <button onClick={load} className="btn-secondary gap-1.5 text-xs"><RefreshCw size={12} /> Refresh</button>
+        <div className="flex items-center gap-2">
+          <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+            {branchId ? 'Branch scoped' : 'All branches'}
+          </span>
+          <button onClick={load} className="btn-secondary gap-1.5 text-xs"><RefreshCw size={12} /> Refresh</button>
+        </div>
       </div>
 
       {transfers.length === 0 ? (
@@ -1423,17 +1479,17 @@ function BankTransfersTab({ onStatsChange }: { onStatsChange: () => void }) {
 }
 
 // ─── Reports Tab ─────────────────────────────────────────────────────────────
-function ReportsTab() {
+function ReportsTab({ branchId }: { branchId: string }) {
   const [data, setData] = useState<Record<string, unknown> | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     setLoading(true)
-    window.api.admin.installments.reports({}).then((r: { success: boolean; data?: unknown }) => {
+    window.api.admin.installments.reports(branchId ? { branch_id: branchId } : {}).then((r: { success: boolean; data?: unknown }) => {
       if (r.success) setData(r.data as Record<string, unknown>)
       setLoading(false)
     })
-  }, [])
+  }, [branchId])
 
   if (loading) return (
     <div className="flex items-center justify-center flex-1">
@@ -1446,11 +1502,20 @@ function ReportsTab() {
   const overdue   = data.overdue   as { count: number; amount: number }
   const collections = data.collections as { month: string; amount: number; count: number }[]
   const performance = data.performance as { branch_name: string; cashier_name: string; collected: number; payments: number }[]
+  const pendingVerification = Number(data.pendingVerification || 0)
+  const aging = data.agingBuckets as {
+    days_1_7: number
+    days_8_15: number
+    days_15_plus: number
+    amt_1_7: number
+    amt_8_15: number
+    amt_15_plus: number
+  }
 
   return (
     <div className="flex-1 overflow-auto px-6 py-4 space-y-5">
       {/* Summary cards */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="card">
           <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Active Accounts</p>
           <p className="text-3xl font-black mt-1 text-green-500">{data.active as number}</p>
@@ -1464,6 +1529,25 @@ function ReportsTab() {
           <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Total Outstanding</p>
           <p className="text-3xl font-black mt-1 text-orange-500">{fmt(data.outstanding)}</p>
         </div>
+        <div className="card">
+          <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Pending Verification</p>
+          <p className="text-3xl font-black mt-1 text-yellow-500">{pendingVerification}</p>
+          <p className="text-xs text-yellow-400 mt-0.5">Bank transfers waiting for approval</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        {[
+          { label: '1-7 Days Overdue', count: aging?.days_1_7 || 0, amount: aging?.amt_1_7 || 0, tone: 'text-yellow-500' },
+          { label: '8-15 Days Overdue', count: aging?.days_8_15 || 0, amount: aging?.amt_8_15 || 0, tone: 'text-orange-500' },
+          { label: '15+ Days Overdue', count: aging?.days_15_plus || 0, amount: aging?.amt_15_plus || 0, tone: 'text-red-500' },
+        ].map(card => (
+          <div key={card.label} className="card">
+            <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>{card.label}</p>
+            <p className={`text-2xl font-black mt-1 ${card.tone}`}>{card.count}</p>
+            <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>{fmt(card.amount)} outstanding</p>
+          </div>
+        ))}
       </div>
 
       <div className="grid grid-cols-2 gap-5">

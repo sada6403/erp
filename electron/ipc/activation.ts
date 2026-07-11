@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import Store from 'electron-store'
 import os from 'os'
 import { randomUUID, createHash, timingSafeEqual } from 'crypto'
+import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
 
 const store = new Store()
 
@@ -37,6 +38,25 @@ function parseJson(text: string): Record<string, unknown> | null {
     return JSON.parse(text) as Record<string, unknown>
   } catch {
     return null
+  }
+}
+
+function activationSessionShape(extra: Record<string, unknown> = {}) {
+  const cached = getCachedLicense()
+  return {
+    portal: 'admin' as const,
+    scope: { level: 'owner' as const, branchId: null, subBranchId: null },
+    branch_id: null,
+    sub_branch_id: null,
+    device_id: getOrCreateDeviceId(),
+    licenseId: (store.get('device_license_key') as string | undefined) ?? null,
+    enabledModules: getEnabledModules() ?? cached?.modules ?? [],
+    enabledFeatures: [],
+    limits: {
+      maxUsers: getMaxUsers(),
+      maxBranches: getMaxBranches(),
+    },
+    ...extra,
   }
 }
 
@@ -110,7 +130,7 @@ export function registerActivationHandlers() {
         return { success: false, error: String(data.error ?? 'Verification failed') }
       }
 
-      return { success: true, ...data }
+      return { success: true, ...activationSessionShape(), ...data }
     } catch (err) {
       return { success: false, error: (err as Error).message || 'Cannot reach the backend. Check the Cloud API URL.' }
     }
@@ -214,9 +234,13 @@ export function registerActivationHandlers() {
         success:        true,
         company_name:   data.company_name,
         device_name,
-        branch_id:      data.branch_id      ?? null,
         brand_color:    data.brand_color    ?? null,
         brand_logo_url: data.brand_logo_url ?? null,
+        ...activationSessionShape({
+          company_id: data.company_id ?? null,
+          licenseId: data.api_key ?? null,
+          branch_id: data.branch_id ?? null,
+        }),
       }
     } catch (err) {
       return { success: false, error: (err as Error).message }

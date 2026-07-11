@@ -3,6 +3,7 @@ import type { Product } from '@/types'
 import { Package, AlertCircle, MapPin, ArrowRightLeft, Check } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
+import { resolveImageSrc } from '@/lib/imageUrl'
 
 interface Props {
   categoryId: string | null
@@ -292,8 +293,8 @@ function ProductCard({ product, isFocused, onFocus, onSelect, onCheckBranches }:
     >
       {/* Product image / icon */}
       <div className="pos-product-media w-full aspect-[4/3] rounded-lg flex items-center justify-center mb-3 overflow-hidden border">
-        {product.image_url ? (
-          <img src={product.image_url} alt={product.name}
+        {resolveImageSrc(product.image_url) ? (
+          <img src={resolveImageSrc(product.image_url)} alt={product.name}
             className="w-full h-full object-cover rounded-lg" />
         ) : (
           <Package size={32} style={{ color: 'var(--text-3)' }} />

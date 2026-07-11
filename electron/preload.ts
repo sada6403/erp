@@ -35,6 +35,8 @@ const api = {
     selectAndUploadImage: ()        => ipcRenderer.invoke('products:selectAndUploadImage'),
     importExcel:          ()        => ipcRenderer.invoke('products:importExcel'),
     exportCsv:            ()        => ipcRenderer.invoke('products:exportCsv'),
+    normalizeCatalog:     ()        => ipcRenderer.invoke('products:normalizeCatalog'),
+    catalogAudit:         ()        => ipcRenderer.invoke('products:catalogAudit'),
     permanentDelete:      (id: string, reason: string) => ipcRenderer.invoke('products:permanentDelete', id, reason),
   },
 
@@ -210,6 +212,7 @@ const api = {
   settings: {
     get:    ()               => ipcRenderer.invoke('settings:get'),
     update: (payload: unknown) => ipcRenderer.invoke('settings:update', payload),
+    refreshBranding: ()      => ipcRenderer.invoke('settings:refreshBranding'),
     revealSecret: (key: string) => ipcRenderer.invoke('settings:revealSecret', key),
     s3Test: ()               => ipcRenderer.invoke('settings:s3Test'),
   },

@@ -10,6 +10,7 @@ import { CloudApi } from '../services/cloudApi'
 import { uploadFile as s3UploadFile } from '../services/s3Service'
 import type { S3Config } from '../services/s3Service'
 import { decryptSecret } from './settings'
+import { buildSku, categoryCodeFromName, normalizeCategoryPath, titleCase } from '../lib/catalog'
 
 const store = new Store()
 
@@ -100,15 +101,16 @@ async function ensureCategoryPath(
       categoryId = existing.id
     } else {
       categoryId = crypto.randomUUID()
+      const normalized = titleCase(part)
       db.prepare(`
-        INSERT INTO categories (id, parent_id, name, sort_order, is_active)
-        VALUES (?, ?, ?, 0, 1)
-      `).run(categoryId, parentId, part)
+        INSERT INTO categories (id, parent_id, name, short_code, sort_order, is_active)
+        VALUES (?, ?, ?, ?, 0, 1)
+      `).run(categoryId, parentId, normalized, categoryCodeFromName(normalized))
       syncOps.push({
         table: 'categories',
         id: categoryId,
         operation: 'INSERT',
-        data: { id: categoryId, parent_id: parentId, name: part, sort_order: 0, is_active: 1 },
+        data: { id: categoryId, parent_id: parentId, name: normalized, short_code: categoryCodeFromName(normalized), sort_order: 0, is_active: 1 },
       })
     }
 
@@ -228,15 +230,19 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const authUser = getAuthUser()
       // Super admin creates global products (branch_id = NULL); branch users tag to their branch
       const branch_id = isSuperAdmin(authUser) ? null : (authUser?.branch_id as string || null)
+      const category = payload?.category_id
+        ? db.prepare('SELECT name FROM categories WHERE id=?').get(payload.category_id) as { name?: string } | undefined
+        : undefined
+      const sku = buildSku(db, (payload as Record<string, unknown>)?.brand || '', category?.name || (payload as Record<string, unknown>)?.name || '', (payload as Record<string, unknown>)?.sku)
 
       db.prepare(`
         INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
           image_url, unit, cost_price, selling_price, tax_rate, min_stock_level)
         VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
           @image_url, @unit, @cost_price, @selling_price, @tax_rate, @min_stock_level)
-      `).run({ id, branch_id, ...payload })
+      `).run({ id, branch_id, ...payload, sku })
 
-      await enqueuSync('products', id, 'INSERT', { id, branch_id, ...payload })
+      await enqueuSync('products', id, 'INSERT', { id, branch_id, ...payload, sku })
       return { success: true, data: { id } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -244,11 +250,18 @@ export function registerProductHandlers(ipcMain: IpcMain) {
   ipcMain.handle('products:update', async (_e, id: string, payload) => {
     try {
       const db = getDb()
-      const fields = Object.keys(payload).map(k => `${k} = @${k}`).join(', ')
+      const nextPayload = { ...(payload as Record<string, unknown>) }
+      if (!String(nextPayload.sku || '').trim()) {
+        const category = nextPayload.category_id
+          ? db.prepare('SELECT name FROM categories WHERE id=?').get(nextPayload.category_id) as { name?: string } | undefined
+          : undefined
+        nextPayload.sku = buildSku(db, nextPayload.brand || '', category?.name || nextPayload.name || '', nextPayload.sku)
+      }
+      const fields = Object.keys(nextPayload).map(k => `${k} = @${k}`).join(', ')
       db.prepare(`UPDATE products SET ${fields}, updated_at = datetime('now') WHERE id = @id`)
-        .run({ ...payload, id })
+        .run({ ...nextPayload, id })
 
-      await enqueuSync('products', id, 'UPDATE', { id, ...payload })
+      await enqueuSync('products', id, 'UPDATE', { id, ...nextPayload })
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -442,10 +455,10 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             const inherited = parent || row
             const sku = getColumn(row, 'SKU')
             const name = getColumn(row, 'Name') || sku
-            if (!name || !sku) { skipped++; continue }
+            if (!name) { skipped++; continue }
 
             const wooType = getColumn(row, 'Type').toLowerCase()
-            const categoryValue = getColumn(row, 'Categories') || getColumn(inherited, 'Categories')
+            const categoryValue = normalizeCategoryPath(getColumn(row, 'Categories') || getColumn(inherited, 'Categories'))
             const categoryPaths = splitCategoryPaths(categoryValue)
             const categoryId = categoryPaths.length ? await ensureCategoryPath(db, categoryPaths[0], syncOps) : null
             const supplierName = getColumn(row, 'Supplier', 'Vendor')
@@ -459,16 +472,17 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             const weight = parseNumber(getColumn(row, 'Weight (kg)', 'Weight'))
             const minStock = parseInteger(getColumn(row, 'Low stock amount')) || 5
 
-            const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(sku) as { id: string } | undefined
+            const finalSku = buildSku(db, brand, categoryPaths[0]?.join(' > ') || name, sku)
+            const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(finalSku) as { id: string } | undefined
             const sameName = !existing
               ? db.prepare('SELECT id, sku FROM products WHERE lower(name) = lower(?) AND is_active = 1 ORDER BY updated_at DESC LIMIT 1').get(name) as { id: string; sku: string } | undefined
               : undefined
             const target = existing || sameName
 
-            if (sameName && sameName.sku !== sku) {
-              const skuConflict = db.prepare('SELECT id FROM products WHERE sku = ? AND id <> ?').get(sku, sameName.id) as { id: string } | undefined
+            if (sameName && sameName.sku !== finalSku) {
+              const skuConflict = db.prepare('SELECT id FROM products WHERE sku = ? AND id <> ?').get(finalSku, sameName.id) as { id: string } | undefined
               if (skuConflict) {
-                errors.push(`Row ${i + 2}: SKU ${sku} already exists on another product`)
+                errors.push(`Row ${i + 2}: SKU ${finalSku} already exists on another product`)
                 skipped++
                 continue
               }
@@ -479,7 +493,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
               id: productId,
               branch_id: importBranchId,
               name,
-              sku,
+              sku: finalSku,
               barcode,
               category_id: categoryId,
               supplier_id: supplierId,
@@ -516,19 +530,19 @@ export function registerProductHandlers(ipcMain: IpcMain) {
               if (productHasWeight) updateFields.push('weight=@weight')
               if (productHasProductType) updateFields.push('product_type=@product_type')
               if (productHasNotForSale) updateFields.push('not_for_sale=@not_for_sale')
-              db.prepare(`UPDATE products SET ${updateFields.join(', ')}, updated_at=datetime('now') WHERE id=@id`).run(payload)
+              db.prepare(`UPDATE products SET ${updateFields.join(', ')}, updated_at=datetime('now') WHERE id=@id`).run({ ...payload, sku: finalSku })
               syncOps.push({ table: 'products', id: productId, operation: 'UPDATE', data: payload })
               updated++
             } else {
               db.prepare(`INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
                 image_url, unit, cost_price, selling_price, tax_rate, min_stock_level)
                 VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
-                @image_url, @unit, @cost_price, @selling_price, @tax_rate, @min_stock_level)`).run(payload)
+                @image_url, @unit, @cost_price, @selling_price, @tax_rate, @min_stock_level)`).run({ ...payload, sku: finalSku })
               if (productHasBrand && brand) db.prepare('UPDATE products SET brand=? WHERE id=?').run(brand, productId)
               if (productHasWeight) db.prepare('UPDATE products SET weight=? WHERE id=?').run(weight, productId)
               if (productHasProductType) db.prepare('UPDATE products SET product_type=? WHERE id=?').run(payload.product_type, productId)
               if (productHasNotForSale) db.prepare('UPDATE products SET not_for_sale=? WHERE id=?').run(payload.not_for_sale, productId)
-              syncOps.push({ table: 'products', id: productId, operation: 'INSERT', data: { ...payload, is_active: true } })
+              syncOps.push({ table: 'products', id: productId, operation: 'INSERT', data: { ...payload, sku: finalSku, is_active: true } })
               created++
             }
 
@@ -608,8 +622,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
           if (!name) { skipped++; continue }
 
-          const autoSku = sku || `SKU-${Date.now()}-${i}`
-          const categoryId = categoryName ? (catMap.get(categoryName.toLowerCase()) || null) : null
+          const normalizedCategory = normalizeCategoryPath(categoryName)
+          const autoSku = buildSku(db, '', normalizedCategory || categoryName || name, sku)
+          const categoryId = normalizedCategory ? (catMap.get(titleCase(normalizedCategory).toLowerCase()) || null) : null
           const supplierId  = supplierName ? (supMap.get(supplierName.toLowerCase()) || null) : null
 
           // Determine branch ownership for imported products
@@ -617,7 +632,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
 
           // Upsert by SKU
-          const existing = sku ? db.prepare('SELECT id FROM products WHERE sku = ?').get(autoSku) as { id: string } | undefined : undefined
+          const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(autoSku) as { id: string } | undefined
           const productId = existing ? existing.id : crypto.randomUUID()
 
           if (existing) {
@@ -658,6 +673,121 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true, data: { imported, skipped, errors } }
+    } catch (err: unknown) {
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('products:normalizeCatalog', async () => {
+    try {
+      const db = getDb()
+      const syncOps: { table: string; id: string; operation: 'INSERT' | 'UPDATE'; data: Record<string, unknown> }[] = []
+      let categoriesUpdated = 0
+      let productsUpdated = 0
+
+      const categories = db.prepare('SELECT * FROM categories ORDER BY parent_id, sort_order, name').all() as Record<string, unknown>[]
+      for (const cat of categories) {
+        const name = titleCase(cat.name)
+        const shortCode = String(cat.short_code || '').trim() || categoryCodeFromName(name)
+        const patch: Record<string, unknown> = {}
+        if (name !== cat.name) patch.name = name
+        if (shortCode !== cat.short_code) patch.short_code = shortCode
+        if (Object.keys(patch).length) {
+          db.prepare(`UPDATE categories SET ${Object.keys(patch).map(k => `${k}=@${k}`).join(', ')}, updated_at=datetime('now') WHERE id=@id`)
+            .run({ ...patch, id: cat.id })
+          syncOps.push({ table: 'categories', id: String(cat.id), operation: 'UPDATE', data: { id: cat.id, ...patch } })
+          categoriesUpdated++
+        }
+      }
+
+      const products = db.prepare(`
+        SELECT p.*, c.name AS category_name
+        FROM products p
+        LEFT JOIN categories c ON c.id = p.category_id
+        WHERE p.is_active = 1
+        ORDER BY p.name
+      `).all() as Record<string, unknown>[]
+
+      const seen = new Set<string>()
+      for (const product of products) {
+        const categoryName = String(product.category_name || '').trim()
+        const brand = String(product.brand || '').trim()
+        const sku = String(product.sku || '').trim()
+        const generated = buildSku(db, brand, categoryName || String(product.name || ''), sku)
+        let nextSku = generated
+        let suffix = 2
+        while (seen.has(nextSku) || db.prepare('SELECT id FROM products WHERE sku=? AND id<>?').get(nextSku, product.id)) {
+          nextSku = `${generated}-${suffix++}`
+        }
+        seen.add(nextSku)
+        if (nextSku !== sku) {
+          db.prepare('UPDATE products SET sku=?, updated_at=datetime("now") WHERE id=?').run(nextSku, product.id)
+          syncOps.push({ table: 'products', id: String(product.id), operation: 'UPDATE', data: { id: product.id, sku: nextSku } })
+          productsUpdated++
+        } else {
+          seen.add(sku)
+        }
+      }
+
+      for (const op of syncOps) {
+        await enqueuSync(op.table, op.id, op.operation, op.data)
+      }
+
+      return { success: true, data: { categoriesUpdated, productsUpdated } }
+    } catch (err: unknown) {
+      return { success: false, error: (err as Error).message }
+    }
+  })
+
+  ipcMain.handle('products:catalogAudit', async () => {
+    try {
+      const db = getDb()
+      const missingSku = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM products
+        WHERE is_active = 1 AND (sku IS NULL OR TRIM(sku) = '')
+      `).get() as { count: number }
+
+      const duplicateSkuGroups = db.prepare(`
+        SELECT COUNT(*) AS count FROM (
+          SELECT sku
+          FROM products
+          WHERE is_active = 1 AND sku IS NOT NULL AND TRIM(sku) != ''
+          GROUP BY sku
+          HAVING COUNT(*) > 1
+        )
+      `).get() as { count: number }
+
+      const duplicateSkuProducts = db.prepare(`
+        SELECT COALESCE(SUM(cnt - 1), 0) AS count FROM (
+          SELECT COUNT(*) AS cnt
+          FROM products
+          WHERE is_active = 1 AND sku IS NOT NULL AND TRIM(sku) != ''
+          GROUP BY sku
+          HAVING COUNT(*) > 1
+        )
+      `).get() as { count: number }
+
+      const categories = db.prepare('SELECT name, short_code, parent_id FROM categories WHERE is_active = 1').all() as Record<string, unknown>[]
+      const titleCase = (value: unknown) => String(value ?? '').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean)
+        .map(part => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()).join(' ')
+      const nonNormalizedCategories = categories.filter(cat => String(cat.name || '') !== titleCase(cat.name)).length
+      const missingShortCodes = categories.filter(cat => !String(cat.short_code || '').trim()).length
+      const rootCategories = categories.filter(cat => !cat.parent_id).length
+
+      return {
+        success: true,
+        data: {
+          totalProducts: (db.prepare('SELECT COUNT(*) AS count FROM products WHERE is_active = 1').get() as { count: number }).count,
+          missingSku: missingSku.count,
+          duplicateSkuGroups: duplicateSkuGroups.count,
+          duplicateSkuProducts: duplicateSkuProducts.count,
+          totalCategories: categories.length,
+          rootCategories,
+          missingShortCodes,
+          nonNormalizedCategories,
+        },
+      }
     } catch (err: unknown) {
       return { success: false, error: (err as Error).message }
     }

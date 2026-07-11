@@ -4,21 +4,15 @@ import { useAuthStore } from '@/store/authStore'
 import { useSyncStatus } from '@/hooks/useSyncStatus'
 import {
   ShoppingBag, Lock, Mail, GitBranch, ArrowRight, X, Delete,
-  WifiOff, RefreshCw, Shield, CheckCircle, AlertTriangle,
-  Building2, Eye, EyeOff, Zap,
+  WifiOff, RefreshCw, Shield, CheckCircle, AlertTriangle, Search,
+  Building2, Eye, EyeOff, Zap, Phone, MessageCircleMore,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { getLandingRoute } from '@/lib/sessionRouting'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-function getPerms(u: unknown): Record<string, unknown> {
-  const user = u as Record<string, unknown>
-  return (user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>
-    || user?.permissions as Record<string, unknown>
-    || {}
-}
-function redirectByRole(perms: Record<string, unknown>) {
-  if (perms.all || perms.reports || perms.employees || perms.inventory) return '/admin'
-  return '/pos'
+function redirectBySession(u: unknown) {
+  return getLandingRoute(u as Parameters<typeof getLandingRoute>[0])
 }
 
 const TERMINAL_BRANCH_KEY = 'pos_terminal_branch'
@@ -152,7 +146,9 @@ export default function LoginPage() {
   const [branchCode, setBranchCode]           = useState('')
   const [branchSearching, setBranchSearching] = useState(false)
   const [branchList, setBranchList]           = useState<{ id: string; name: string; code: string; branch_pin: string }[]>([])
+  const [branchQuery, setBranchQuery]         = useState('')
   const [showBranchList, setShowBranchList]   = useState(false)
+  const [branchListLoading, setBranchListLoading] = useState(false)
 
   // PIN animation states
   const [pinShake, setPinShake]     = useState(false)
@@ -167,13 +163,18 @@ export default function LoginPage() {
 
   const brandName = String(branding.company_name   || 'Enterprise POS')
   const brandLogo = String(branding.login_logo_url || branding.company_logo_url || '')
+  const supportPhone = String(branding.company_phone || '')
+  const supportEmail = String(branding.company_email || '')
 
   // ── Effects ──
   useEffect(() => {
     if (!window.api) return
-    window.api.settings.get().then((res: { success: boolean; data?: unknown }) => {
+    const loadBranding = async () => {
+      await window.api.settings.refreshBranding?.().catch(() => undefined)
+      const res = await window.api.settings.get() as { success: boolean; data?: unknown }
       if (res.success && res.data) setBranding(res.data as Record<string, unknown>)
-    })
+    }
+    loadBranding()
     window.api.license?.status?.().then((r: { active?: boolean }) => {
       setLicenseOk(r?.active !== false)
     }).catch(() => {})
@@ -181,6 +182,12 @@ export default function LoginPage() {
       if (r?.deviceId) setDeviceId(r.deviceId.slice(0, 12).toUpperCase())
     }).catch(() => {})
     window.api.app?.getVersion?.().then((v: string) => setVersion(v)).catch(() => {})
+    const brandingTimer = window.setInterval(() => { loadBranding().catch(() => undefined) }, 30_000)
+    const offSettingsUpdated = window.api.on?.('settings:updated', () => { loadBranding().catch(() => undefined) })
+    return () => {
+      window.clearInterval(brandingTimer)
+      offSettingsUpdated?.()
+    }
   }, [])
 
   useEffect(() => {
@@ -210,7 +217,7 @@ export default function LoginPage() {
     }
   }, [])
 
-  useEffect(() => { if (user) navigate(redirectByRole(getPerms(user)), { replace: true }) }, [user, navigate])
+  useEffect(() => { if (user) navigate(redirectBySession(user), { replace: true }) }, [user, navigate])
   useEffect(() => { if (mode === 'email') emailRef.current?.focus() }, [mode])
   useEffect(() => { if (showBranchInput) setTimeout(() => branchCodeRef.current?.focus(), 50) }, [showBranchInput])
 
@@ -248,17 +255,10 @@ export default function LoginPage() {
       }
       if (result.success && result.data) {
         await init()
-        const u = useAuthStore.getState().user as Record<string, unknown> | null
-        const perms = getPerms(u)
-        if (!(perms.all || perms.reports || perms.employees || perms.settings || perms.branches)) {
-          await window.api.auth.logout()
-          setLoginState('error'); setMode('pin')
-          toast.error('Email login is for admin accounts only. Use your PIN.')
-          setTimeout(() => setLoginState('idle'), 2000); return
-        }
         setLoginState('success')
+        const u = useAuthStore.getState().user as Record<string, unknown> | null
         if (u) saveRecentUser({ id: String(u.id), name: String(u.name), roleName: String((u.role as Record<string,unknown>)?.name || 'Admin') })
-        setTimeout(() => navigate(redirectByRole(perms), { replace: true }), 400)
+        setTimeout(() => navigate(redirectBySession(u), { replace: true }), 400)
       } else {
         setLoginState('error')
         const errMsg = result.error || 'Login failed'
@@ -291,7 +291,7 @@ export default function LoginPage() {
       if (result.success && result.data) {
         setLoginState('success'); await init()
         const u = useAuthStore.getState().user as Record<string, unknown> | null
-        toast.success('Password changed!'); setTimeout(() => navigate(redirectByRole(getPerms(u)), { replace: true }), 400)
+        toast.success('Password changed!'); setTimeout(() => navigate(redirectBySession(u), { replace: true }), 400)
       } else {
         setLoginState('error'); toast.error(result.error || 'Failed to change password')
         setTimeout(() => setLoginState('idle'), 1500)
@@ -309,7 +309,7 @@ export default function LoginPage() {
       }
       if (result.success && result.data) {
         setLoginState('success'); await init()
-        navigate(redirectByRole(getPerms(result.data.user)), { replace: true })
+        navigate(redirectBySession(result.data.user), { replace: true })
       } else {
         setLoginState('error'); toast.error(result.error || 'Invalid code')
         setOtpCode(''); setTimeout(() => setLoginState('idle'), 1500)
@@ -340,12 +340,27 @@ export default function LoginPage() {
 
   const loadBranchList = async () => {
     if (!window.api) return
-    const res = await window.api.admin.branches.list()
-    if (res.success && res.data) {
-      const active = (res.data as { id: string; name: string; code: string; branch_pin: string; is_active: number }[])
-        .filter(b => b.is_active)
-      setBranchList(active)
-      setShowBranchList(true)
+    setBranchListLoading(true)
+    setBranchQuery('')
+    try {
+      const res = await window.api.admin.branches.list()
+      if (res.success && res.data) {
+        const all = (res.data as { id: string; name: string; code?: string; branch_pin?: string; is_active?: number | boolean }[])
+        const active = all.filter(b => b.is_active === undefined || Boolean(b.is_active))
+        const mapped = (active.length > 0 ? active : all).map(b => ({
+          id: String(b.id),
+          name: String(b.name || 'Branch'),
+          code: String(b.code || ''),
+          branch_pin: String(b.branch_pin || ''),
+        }))
+        setBranchList(mapped)
+        setShowBranchList(true)
+        if (all.length === 0) toast.error('No branches found. Create a branch first.')
+        return
+      }
+      toast.error(res.error || 'Could not load branches')
+    } finally {
+      setBranchListLoading(false)
     }
   }
 
@@ -355,6 +370,16 @@ export default function LoginPage() {
     setShowBranchList(false); setShowBranchInput(false); setBranchCode('')
     toast.success(`Branch → ${branch.name}`)
   }
+
+  const visibleBranchList = branchList.filter(b => {
+    const q = branchQuery.trim().toLowerCase()
+    if (!q) return true
+    return (
+      b.name.toLowerCase().includes(q) ||
+      b.code.toLowerCase().includes(q) ||
+      b.id.toLowerCase().includes(q)
+    )
+  })
 
   const handleForgotRequest = async (e: React.FormEvent) => {
     e.preventDefault(); setForgotLoading(true)
@@ -393,7 +418,7 @@ export default function LoginPage() {
       setLoginState('success'); setPinSuccess(true)
       const u = useAuthStore.getState().user as Record<string, unknown> | null
       if (u) saveRecentUser({ id: String(u.id), name: String(u.name), roleName: String((u.role as Record<string,unknown>)?.name || 'Staff') })
-      setTimeout(() => navigate(redirectByRole(getPerms(useAuthStore.getState().user)), { replace: true }), 600)
+      setTimeout(() => navigate(redirectBySession(useAuthStore.getState().user), { replace: true }), 600)
     } else {
       setLoginState('error'); setPinShake(true)
       setTimeout(() => { setPinShake(false); setLoginState('idle') }, 600)
@@ -538,6 +563,13 @@ export default function LoginPage() {
                     style={{ background: 'linear-gradient(135deg, #4f46e5, #6d28d9)' }}>
                     {branchSearching ? <RefreshCw size={14} className="animate-spin" /> : <ArrowRight size={14} />}
                   </button>
+                  <button onClick={loadBranchList}
+                    disabled={branchListLoading}
+                    className="px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 flex-shrink-0"
+                    style={{ background: '#0d1117', color: '#c7d2fe', border: '1px solid #1e293b', opacity: branchListLoading ? 0.7 : 1 }}>
+                    <GitBranch size={13} />
+                    {branchListLoading ? 'Loading…' : 'Browse'}
+                  </button>
                   <button onClick={() => { setShowBranchInput(false); setBranchCode('') }}
                     className="px-3 py-2.5 rounded-xl flex-shrink-0"
                     style={{ background: '#0d1117', color: '#475569', border: '1px solid #1e293b' }}>
@@ -580,28 +612,51 @@ export default function LoginPage() {
 
               {/* Branch list dropdown */}
               {showBranchList && (
-                <div className="rounded-xl overflow-hidden" style={{ border: '1px solid rgba(99,102,241,0.3)', background: '#0a0e18' }}>
-                  <div className="flex items-center justify-between px-3 py-2" style={{ borderBottom: '1px solid #0f1623' }}>
-                    <span className="text-xs font-semibold" style={{ color: '#818cf8' }}>Select Branch</span>
-                    <button onClick={() => setShowBranchList(false)} style={{ color: '#334155' }}>
-                      <X size={13} />
-                    </button>
-                  </div>
-                  <div className="max-h-36 overflow-y-auto">
-                    {branchList.length === 0 ? (
-                      <p className="text-xs text-center py-4" style={{ color: '#475569' }}>No active branches found</p>
-                    ) : branchList.map(b => (
-                      <button key={b.id} onClick={() => pickBranchFromList(b)}
-                        className="w-full flex items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-indigo-600/10"
-                        style={{ borderBottom: '1px solid #0f1623' }}>
-                        <GitBranch size={11} style={{ color: '#4f46e5', flexShrink: 0 }} />
-                        <span className="text-sm text-white truncate flex-1">{b.name}</span>
-                        {b.code && (
-                          <span className="text-xs font-mono px-1.5 py-0.5 rounded flex-shrink-0"
-                            style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{b.code}</span>
-                        )}
+                <div className="fixed inset-0 z-[70] flex items-center justify-center px-4" style={{ background: 'rgba(2,6,23,0.72)' }}>
+                  <div className="w-full max-w-md rounded-2xl overflow-hidden shadow-2xl"
+                    style={{ border: '1px solid rgba(99,102,241,0.3)', background: '#0a0e18' }}>
+                    <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #0f1623' }}>
+                      <div>
+                        <p className="text-sm font-semibold" style={{ color: '#e0e7ff' }}>Select Branch</p>
+                        <p className="text-xs" style={{ color: '#64748b' }}>Choose a branch to continue login</p>
+                      </div>
+                      <button onClick={() => setShowBranchList(false)} style={{ color: '#334155' }}>
+                        <X size={14} />
                       </button>
-                    ))}
+                    </div>
+                    <div className="px-4 pt-3">
+                      <div className="relative">
+                        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: '#475569' }} />
+                        <input
+                          value={branchQuery}
+                          onChange={e => setBranchQuery(e.target.value)}
+                          className="w-full rounded-xl text-sm text-white outline-none pl-9 pr-3 py-2.5"
+                          style={{ background: '#0d1117', border: '1px solid #1e293b' }}
+                          placeholder="Search branch name or code"
+                        />
+                      </div>
+                    </div>
+                    <div className="max-h-[60vh] overflow-y-auto">
+                      {branchListLoading ? (
+                        <p className="text-sm text-center py-6" style={{ color: '#64748b' }}>Loading branches…</p>
+                      ) : visibleBranchList.length === 0 ? (
+                        <p className="text-sm text-center py-6" style={{ color: '#64748b' }}>No branches found</p>
+                      ) : visibleBranchList.map(b => (
+                        <button key={b.id} onClick={() => pickBranchFromList(b)}
+                          className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-indigo-600/10"
+                          style={{ borderBottom: '1px solid #0f1623' }}>
+                          <GitBranch size={12} style={{ color: '#4f46e5', flexShrink: 0 }} />
+                          <div className="min-w-0 flex-1">
+                            <span className="block text-sm text-white truncate">{b.name}</span>
+                            <span className="block text-[11px] text-slate-500 font-mono truncate">{b.id}</span>
+                          </div>
+                          {b.code && (
+                            <span className="text-xs font-mono px-1.5 py-0.5 rounded flex-shrink-0"
+                              style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{b.code}</span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               )}
@@ -653,19 +708,26 @@ export default function LoginPage() {
                   </div>
                 </div>
               ) : (
-                <div className="text-center py-4 rounded-xl"
+                <div className="relative text-center py-4 rounded-xl"
                   style={{ background: 'rgba(99,102,241,0.05)', border: '1px dashed rgba(99,102,241,0.2)' }}>
                   <GitBranch size={18} className="mx-auto mb-1.5" style={{ color: '#4f46e5' }} />
                   <p className="text-xs font-semibold" style={{ color: '#818cf8' }}>Select your branch first</p>
                   <p className="text-xs mt-0.5 mb-2.5" style={{ color: '#475569' }}>
                     Enter your branch code or PIN above
                   </p>
-                  <button
-                    onClick={loadBranchList}
-                    className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
-                    style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)' }}>
-                    Browse all branches
-                  </button>
+                  <div className="flex items-center justify-center gap-2">
+                    <button
+                      onClick={loadBranchList}
+                      disabled={branchListLoading}
+                      className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5"
+                      style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', opacity: branchListLoading ? 0.7 : 1 }}>
+                      <GitBranch size={12} />
+                      {branchListLoading ? 'Loading…' : 'Browse all branches'}
+                    </button>
+                    <span className="text-[11px] px-2 py-1 rounded-lg" style={{ background: '#0d1117', color: '#64748b', border: '1px solid #1e293b' }}>
+                      {branchList.length} branches
+                    </span>
+                  </div>
                 </div>
               )}
 
@@ -686,6 +748,27 @@ export default function LoginPage() {
                   <Mail size={10} /> Admin
                 </button>
               </div>
+
+              {(supportPhone || supportEmail) && (
+                <div className="mt-2 rounded-xl px-3 py-2" style={{ background: '#0d1117', border: '1px solid #1e293b' }}>
+                  <p className="text-[11px] font-semibold mb-1.5" style={{ color: '#94a3b8' }}>Need help or password reset?</p>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    {supportPhone && (
+                      <a href={`tel:${supportPhone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(99,102,241,0.12)', color: '#c7d2fe' }}>
+                        <Phone size={11} /> {supportPhone}
+                      </a>
+                    )}
+                    {supportEmail && (
+                      <a href={`mailto:${supportEmail}`} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(16,185,129,0.10)', color: '#a7f3d0' }}>
+                        <MessageCircleMore size={11} /> {supportEmail}
+                      </a>
+                    )}
+                  </div>
+                  <p className="text-[11px] mt-1.5" style={{ color: '#64748b' }}>
+                    If you forgot your password, use Admin Login → Forgot Password or contact your administrator.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

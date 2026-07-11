@@ -7,6 +7,7 @@ import fs from 'fs'
 import path from 'path'
 import { enqueuSync, enqueueUserRow } from '../services/syncQueue'
 import Store from 'electron-store'
+import { categoryCodeFromName, titleCase } from '../lib/catalog'
 
 const store = new Store()
 
@@ -555,18 +556,26 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   ipcMain.handle('admin:categories:create', async (_e, p) => {
     try {
       const id = crypto.randomUUID()
-      getDb().prepare(`INSERT INTO categories (id,parent_id,name,description,sort_order)
-        VALUES (?,?,?,?,?)`)
-        .run(id, p.parent_id||null, p.name, p.description||null, p.sort_order||0)
+      const name = titleCase(p.name)
+      const shortCode = String(p.short_code || '').trim() || categoryCodeFromName(name)
+      getDb().prepare(`INSERT INTO categories (id,parent_id,name,description,sort_order,short_code)
+        VALUES (?,?,?,?,?,?)`)
+        .run(id, p.parent_id||null, name, p.description||null, p.sort_order||0, shortCode)
       await enqueuSync('categories', id, 'INSERT', { id, ...p })
       return { success: true, data: { id } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
   ipcMain.handle('admin:categories:update', async (_e, id: string, p) => {
     try {
-      const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
-      getDb().prepare(`UPDATE categories SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
-      await enqueuSync('categories', id, 'UPDATE', { id, ...p })
+      const payload = { ...(p as Record<string, unknown>) }
+      if (payload.name !== undefined) payload.name = titleCase(payload.name)
+      if (payload.short_code !== undefined) {
+        payload.short_code = String(payload.short_code || '').trim() || categoryCodeFromName(payload.name || '')
+      }
+      if (payload.parent_id === '') payload.parent_id = null
+      const fields = Object.keys(payload).map(k=>`${k}=@${k}`).join(',')
+      getDb().prepare(`UPDATE categories SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...payload,id})
+      await enqueuSync('categories', id, 'UPDATE', { id, ...payload })
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -1035,6 +1044,30 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const active = db.prepare(`SELECT COUNT(*) AS count FROM installments inst WHERE status IN ('active','overdue')${branchWhere}`).get(...params) as { count: number }
       const overdue = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(due_amount),0) AS amount FROM installments inst WHERE status='overdue'${branchWhere}`).get(...params) as { count: number; amount: number }
       const outstanding = db.prepare(`SELECT COALESCE(SUM(due_amount),0) AS amount FROM installments inst WHERE status IN ('active','overdue')${branchWhere}`).get(...params) as { amount: number }
+      const pendingVerification = db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM installment_payments ip
+        JOIN installments inst ON inst.id = ip.installment_id
+        WHERE ip.status='pending_verification'${branchWhere.replace(/inst\./g, 'inst.')}
+      `).get(...params) as { count: number }
+      const agingBuckets = db.prepare(`
+        SELECT
+          SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 1 AND 7 THEN 1 ELSE 0 END) AS days_1_7,
+          SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 8 AND 15 THEN 1 ELSE 0 END) AS days_8_15,
+          SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) > 15 THEN 1 ELSE 0 END) AS days_15_plus,
+          COALESCE(SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 1 AND 7 THEN inst.due_amount ELSE 0 END), 0) AS amt_1_7,
+          COALESCE(SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 8 AND 15 THEN inst.due_amount ELSE 0 END), 0) AS amt_8_15,
+          COALESCE(SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) > 15 THEN inst.due_amount ELSE 0 END), 0) AS amt_15_plus
+        FROM installments inst
+        WHERE inst.status = 'overdue'${branchWhere}
+      `).get(...params) as {
+        days_1_7: number
+        days_8_15: number
+        days_15_plus: number
+        amt_1_7: number
+        amt_8_15: number
+        amt_15_plus: number
+      }
       const collections = db.prepare(`
         SELECT substr(ip.paid_at,1,7) AS month, COALESCE(SUM(ip.amount),0) AS amount, COUNT(*) AS count
         FROM installment_payments ip
@@ -1051,7 +1084,18 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         WHERE ip.status='approved'${branchWhere}
         GROUP BY b.name, u.name ORDER BY collected DESC LIMIT 20
       `).all(...params)
-      return { success: true, data: { active: active.count, overdue, outstanding: outstanding.amount, collections, performance } }
+      return {
+        success: true,
+        data: {
+          active: active.count,
+          overdue,
+          outstanding: outstanding.amount,
+          pendingVerification: pendingVerification.count,
+          agingBuckets,
+          collections,
+          performance,
+        },
+      }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 

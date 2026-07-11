@@ -169,6 +169,141 @@ async function autoMigrate() {
        CONSTRAINT fk_cm_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
      )`,
 
+    `CREATE TABLE IF NOT EXISTS modules (
+       id         VARCHAR(36)  NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       module_key VARCHAR(64)  NOT NULL UNIQUE,
+       module_name VARCHAR(128) NOT NULL,
+       description TEXT        NULL,
+       sort_order  INT         NOT NULL DEFAULT 0,
+       is_active   TINYINT(1)  NOT NULL DEFAULT 1,
+       created_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at  DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS features (
+       id           VARCHAR(36)  NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       feature_key  VARCHAR(128) NOT NULL UNIQUE,
+       feature_name  VARCHAR(128) NOT NULL,
+       module_key    VARCHAR(64)  NOT NULL,
+       description   TEXT         NULL,
+       sort_order    INT          NOT NULL DEFAULT 0,
+       is_active     TINYINT(1)   NOT NULL DEFAULT 1,
+       created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS plans (
+       id           VARCHAR(36)  NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       plan_key     VARCHAR(64)  NOT NULL UNIQUE,
+       plan_name    VARCHAR(128) NOT NULL,
+       description  TEXT         NULL,
+       monthly_price DECIMAL(12,2) NOT NULL DEFAULT 0,
+       annual_price  DECIMAL(12,2) NOT NULL DEFAULT 0,
+       validity_days INT         NOT NULL DEFAULT 30,
+       is_active    TINYINT(1)   NOT NULL DEFAULT 1,
+       created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS plan_modules (
+       id         VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       plan_id    VARCHAR(36) NOT NULL,
+       module_key VARCHAR(64) NOT NULL,
+       is_enabled TINYINT(1)  NOT NULL DEFAULT 1,
+       created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       UNIQUE KEY uq_plan_module (plan_id, module_key),
+       CONSTRAINT fk_plan_modules_plan FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE CASCADE
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS plan_features (
+       id           VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       plan_id      VARCHAR(36) NOT NULL,
+       feature_key  VARCHAR(128) NOT NULL,
+       is_enabled   TINYINT(1)  NOT NULL DEFAULT 1,
+       created_at   DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       UNIQUE KEY uq_plan_feature (plan_id, feature_key),
+       CONSTRAINT fk_plan_features_plan FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE CASCADE
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS company_feature_overrides (
+       id          VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       company_id  VARCHAR(36) NOT NULL,
+       feature_key VARCHAR(128) NOT NULL,
+       is_enabled  TINYINT(1)  NOT NULL DEFAULT 1,
+       enabled_by  VARCHAR(36) NULL,
+       enabled_at  DATETIME    NULL,
+       UNIQUE KEY uq_company_feature (company_id, feature_key),
+       CONSTRAINT fk_cfo_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS company_module_overrides (
+       id         VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       company_id VARCHAR(36) NOT NULL,
+       module_key VARCHAR(64) NOT NULL,
+       is_enabled TINYINT(1)  NOT NULL DEFAULT 1,
+       enabled_by VARCHAR(36) NULL,
+       enabled_at DATETIME    NULL,
+       UNIQUE KEY uq_company_module_override (company_id, module_key),
+       CONSTRAINT fk_cmo_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS company_limits (
+       id             VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       company_id     VARCHAR(36) NOT NULL UNIQUE,
+       max_users      INT NOT NULL DEFAULT 0,
+       max_branches   INT NOT NULL DEFAULT 0,
+       max_pos_devices INT NOT NULL DEFAULT 0,
+       max_storage_gb INT NOT NULL DEFAULT 0,
+       updated_by     VARCHAR(36) NULL,
+       updated_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       CONSTRAINT fk_cl_company FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS licenses (
+       id           VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       company_id   VARCHAR(36) NOT NULL,
+       license_key  VARCHAR(255) NOT NULL UNIQUE,
+       status       VARCHAR(20)  NOT NULL DEFAULT 'active',
+       plan_id      VARCHAR(36)  NULL,
+       issued_to    VARCHAR(255) NULL,
+       issued_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       expires_at   DATETIME     NULL,
+       revoked_at   DATETIME     NULL,
+       device_id    VARCHAR(255) NULL,
+       notes        TEXT         NULL,
+       created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       INDEX idx_license_company (company_id),
+       INDEX idx_license_status (status)
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS feature_usage (
+       id           VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       company_id   VARCHAR(36) NOT NULL,
+       user_id      VARCHAR(36) NULL,
+       device_id    VARCHAR(255) NULL,
+       feature_key  VARCHAR(128) NOT NULL,
+       usage_count  INT NOT NULL DEFAULT 0,
+       last_used_at  DATETIME NULL,
+       created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       UNIQUE KEY uq_feature_usage (company_id, feature_key, device_id)
+     )`,
+
+    `CREATE TABLE IF NOT EXISTS subscription_history (
+       id           VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       company_id   VARCHAR(36) NOT NULL,
+       plan_id      VARCHAR(36) NULL,
+       status       VARCHAR(20) NOT NULL,
+       starts_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       ends_at      DATETIME NULL,
+       changed_by   VARCHAR(36) NULL,
+       notes        TEXT NULL,
+       created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       INDEX idx_sub_history_company (company_id)
+     )`,
+
     `CREATE TABLE IF NOT EXISTS pos_devices (
        id              VARCHAR(36)   NOT NULL PRIMARY KEY DEFAULT (UUID()),
        company_id      VARCHAR(36)   NOT NULL,

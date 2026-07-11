@@ -48,6 +48,16 @@ export async function POST(req: NextRequest) {
       portal:     result.payload.portal,
       company_id: result.payload.company_id,
       role:       result.payload.role,
+      role_id:    result.payload.role_id,
+      branch_id:  result.payload.branch_id ?? null,
+      sub_branch_id: result.payload.sub_branch_id ?? null,
+      scope:      result.payload.scope,
+      permissions: result.payload.permissions,
+      enabledModules: result.payload.enabledModules ?? [],
+      enabledFeatures: result.payload.enabledFeatures ?? [],
+      limits:     result.payload.limits ?? {},
+      licenseId:  result.payload.licenseId ?? null,
+      deviceId:   result.payload.deviceId ?? null,
     },
   })
 }

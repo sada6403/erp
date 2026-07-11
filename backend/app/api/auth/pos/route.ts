@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { pool, tenantPool } from '@/lib/db'
 import { signAccessToken, issueRefreshToken } from '@/lib/jwt'
+import { resolveEntitlements } from '@/lib/entitlements'
 
 // POST /api/auth/pos
 // Called by the Electron POS app when a cashier logs in.
@@ -71,6 +72,15 @@ export async function POST(req: NextRequest) {
   }
 
   const u = rows[0] as Record<string, unknown>
+  const roleName = String(u.role_name || '').trim().toLowerCase()
+  const branchId = u.branch_id ? String(u.branch_id) : null
+
+  if (roleName === 'company admin' || roleName === 'owner' || roleName === 'super admin' || roleName === 'branch manager') {
+    return NextResponse.json({ error: 'This account must log in through the admin portal' }, { status: 403 })
+  }
+  if (!branchId) {
+    return NextResponse.json({ error: 'This account must be assigned to a branch before POS login' }, { status: 403 })
+  }
 
   let authenticated = false
   if (password) {
@@ -86,6 +96,8 @@ export async function POST(req: NextRequest) {
   await company.tp.query(`UPDATE users SET last_login_at = NOW() WHERE id = ?`, [u.id])
 
   const perms = typeof u.permissions === 'string' ? JSON.parse(u.permissions as string) : u.permissions
+  const entitlements = await resolveEntitlements({ companyId: company.id, roleName: String(u.role_name || ''), branchId, deviceId: null })
+  const enabledFeatures = entitlements.enabledFeatures
   const payload = {
     sub:        u.id as string,
     portal:     'pos' as const,
@@ -93,7 +105,16 @@ export async function POST(req: NextRequest) {
     name:       u.name as string,
     email:      u.email as string,
     role:       u.role_name as string,
+    role_id:    u.role_id ? String(u.role_id) : undefined,
+    branch_id:  branchId,
+    sub_branch_id: branchId,
+    scope:      { level: 'subBranch' as const, branchId, subBranchId: branchId },
     permissions: perms as Record<string, unknown>,
+    enabledModules: entitlements.enabledModules,
+    enabledFeatures,
+    limits: entitlements.limits,
+    licenseId: entitlements.licenseId,
+    deviceId: entitlements.deviceId,
   }
 
   const meta = {
@@ -112,10 +133,20 @@ export async function POST(req: NextRequest) {
       name:        u.name,
       email:       u.email,
       role:        u.role_name,
+      role_id:     u.role_id ?? null,
       branch_name: u.branch_name,
-      branch_id:   u.branch_id,
+      branch_id:   branchId,
+      sub_branch_id: branchId,
       portal:      'pos',
+      scope:       { level: 'subBranch', branchId, subBranchId: branchId },
       company: { id: company.id, name: company.name, slug: company.slug },
+      company_id: company.id,
+      permissions: perms as Record<string, unknown>,
+      enabledModules: entitlements.enabledModules,
+      enabledFeatures,
+      limits: entitlements.limits,
+      licenseId: entitlements.licenseId,
+      deviceId: entitlements.deviceId,
     },
   })
 }

@@ -8,6 +8,7 @@ import nodemailer from 'nodemailer'
 import { generateSecret, verifyTOTP, generateQrDataUrl } from '../services/totpService'
 import { decryptSecret } from './settings'
 import { enqueueUserRow } from '../services/syncQueue'
+import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
 
 const store = new Store()
 
@@ -23,6 +24,119 @@ function getJwtSecret(): string {
   return secret
 }
 const JWT_SECRET = getJwtSecret()
+
+type AuthScope = {
+  level: 'owner' | 'branch' | 'subBranch'
+  branchId: string | null
+  subBranchId: string | null
+}
+
+function readPermissions(user: Record<string, unknown>): Record<string, boolean> {
+  try {
+    const roleObj = user.role as Record<string, unknown> | undefined
+    const raw = user.role_permissions ?? user.permissions ?? roleObj?.permissions ?? {}
+    return typeof raw === 'string' ? JSON.parse(raw) as Record<string, boolean> : (raw as Record<string, boolean>)
+  } catch {
+    return {}
+  }
+}
+
+function resolveSessionScope(user: Record<string, unknown>): { portal: 'admin' | 'pos'; scope: AuthScope } {
+  const roleObj = user.role as Record<string, unknown> | undefined
+  const roleName = String(user.role_name || roleObj?.name || '').trim().toLowerCase()
+  const branchId = user.branch_id ? String(user.branch_id) : null
+  const isOwner = roleName === 'company admin' || roleName === 'owner' || roleName === 'super admin'
+    || Boolean((readPermissions(user)).all)
+  const isBranchManager = roleName === 'branch manager'
+  const isCashier = roleName === 'cashier'
+
+  if (isOwner) {
+    return { portal: 'admin', scope: { level: 'owner', branchId: null, subBranchId: null } }
+  }
+
+  if (isBranchManager) {
+    if (!branchId) throw new Error('Branch Manager account must be assigned to a branch before login')
+    return { portal: 'admin', scope: { level: 'branch', branchId, subBranchId: null } }
+  }
+
+  if (isCashier) {
+    if (!branchId) throw new Error('Cashier account must be assigned to a branch before login')
+    return { portal: 'pos', scope: { level: 'subBranch', branchId, subBranchId: branchId } }
+  }
+
+  if (!branchId) {
+    throw new Error('Account must be assigned to a branch before login')
+  }
+
+  return { portal: 'pos', scope: { level: 'subBranch', branchId, subBranchId: branchId } }
+}
+
+function resolveSessionMeta(user: Record<string, unknown>) {
+  const roleObj = user.role as Record<string, unknown> | undefined
+  const permissions = readPermissions(user)
+  const enabledFeatures = Object.entries(permissions)
+    .filter(([, value]) => Boolean(value))
+    .map(([key]) => key)
+  const cachedLicense = getCachedLicense()
+  return {
+    enabledModules: getEnabledModules() ?? cachedLicense?.modules ?? [],
+    enabledFeatures,
+    limits: {
+      maxUsers: getMaxUsers(),
+      maxBranches: getMaxBranches(),
+    },
+    licenseId: (store.get('device_license_key') as string | undefined)
+      ?? (store.get('device_company_key') as string | undefined)
+      ?? null,
+    deviceId: (store.get('device_id') as string | undefined) ?? null,
+    permissions,
+  }
+}
+
+function buildAuthUserPayload(user: Record<string, unknown>, company?: { id: string; name: string; slug?: string }) {
+  const { portal, scope } = resolveSessionScope(user)
+  const meta = resolveSessionMeta(user)
+  const roleObj = user.role as Record<string, unknown> | undefined
+
+  return {
+    id: String(user.id),
+    name: String(user.name || ''),
+    email: String(user.email || ''),
+    company_id: company?.id ?? null,
+    portal,
+    role_id: user.role_id ? String(user.role_id) : undefined,
+    role: {
+      id: String(user.role_id || ''),
+      name: String(user.role_name || (roleObj?.name as string | undefined) || 'User'),
+      permissions: meta.permissions,
+      created_at: '',
+    },
+    branch: user.branch_id ? { id: String(user.branch_id), name: String(user.branch_name || ''), is_active: true, created_at: '', updated_at: '' } : undefined,
+    branch_id: user.branch_id ? String(user.branch_id) : null,
+    sub_branch_id: null,
+    permissions: meta.permissions,
+    enabledModules: meta.enabledModules,
+    enabledFeatures: meta.enabledFeatures,
+    limits: meta.limits,
+    licenseId: meta.licenseId,
+    deviceId: meta.deviceId,
+    scope,
+    company: company ? { id: company.id, name: company.name, slug: company.slug } : undefined,
+  }
+}
+
+function loadCurrentAuthUser(userId: string): Record<string, unknown> | undefined {
+  const db = getDb()
+  return db.prepare(`
+      SELECT u.*, r.name as role_name, r.permissions as role_permissions,
+             b.name as branch_name
+      FROM users u
+      LEFT JOIN roles r ON r.id = u.role_id
+      LEFT JOIN branches b ON b.id = u.branch_id
+      WHERE u.id = ?
+      LIMIT 1
+    `).get(userId) as Record<string, unknown> | undefined
+}
 
 export function registerAuthHandlers(ipcMain: IpcMain) {
   ipcMain.handle('auth:loginOptions', async (_e, payload?: { branch_id?: string }) => {
@@ -146,18 +260,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action) VALUES (?,?,?,?)`)
         .run(crypto.randomUUID(), user.id, user.branch_id, 'LOGIN')
 
-      const perms = JSON.parse(user.role_permissions as string || '{}')
-      const payload = {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        // Nested role object — matches AuthUser type used in frontend
-        role: { id: user.role_id, name: user.role_name, permissions: perms },
-        branch: user.branch_id ? { id: user.branch_id, name: user.branch_name } : null,
-        // Flat fields kept for IPC handler compatibility
-        branch_id: user.branch_id,
-        permissions: perms,
-      }
+      const payload = buildAuthUserPayload(user as Record<string, unknown>)
 
       const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '12h' })
       store.set('auth_token', token)
@@ -222,16 +325,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       const user = matchedUser
 
-      const perms = JSON.parse(user.role_permissions as string || '{}')
-      const payload = {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role: { id: user.role_id, name: user.role_name, permissions: perms },
-        branch: user.branch_id ? { id: user.branch_id, name: user.branch_name } : null,
-        branch_id: user.branch_id,
-        permissions: perms,
-      }
+      const payload = buildAuthUserPayload(user as Record<string, unknown>)
 
       const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '12h' })
       store.set('auth_token', token)
@@ -249,14 +343,22 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
     if (!token || !user) return { success: true, data: null }
 
     try {
-      jwt.verify(token, JWT_SECRET)
+      const decoded = jwt.verify(token, JWT_SECRET) as { id?: string }
       // Migrate old sessions where role was stored as a plain string
       if (typeof user.role === 'string') {
         store.delete('auth_token')
         store.delete('auth_user')
         return { success: true, data: null } // force re-login
       }
-      return { success: true, data: user }
+      const fresh = decoded?.id ? loadCurrentAuthUser(decoded.id) : undefined
+      if (!fresh || !fresh.is_active) {
+        store.delete('auth_token')
+        store.delete('auth_user')
+        return { success: true, data: null }
+      }
+      const payload = buildAuthUserPayload(fresh as Record<string, unknown>)
+      store.set('auth_user', payload)
+      return { success: true, data: payload }
     } catch {
       store.delete('auth_token')
       store.delete('auth_user')
@@ -294,13 +396,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action) VALUES (?,?,?,?)`)
         .run(crypto.randomUUID(), user.id, user.branch_id, 'LOGIN_2FA')
 
-      const perms = JSON.parse(user.role_permissions as string || '{}')
-      const payload = {
-        id: user.id, name: user.name, email: user.email,
-        role: { id: user.role_id, name: user.role_name, permissions: perms },
-        branch: user.branch_id ? { id: user.branch_id, name: user.branch_name } : null,
-        branch_id: user.branch_id, permissions: perms,
-      }
+      const payload = buildAuthUserPayload(user as Record<string, unknown>)
       const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '12h' })
       store.set('auth_token', token)
       store.set('auth_user', payload)
@@ -530,13 +626,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
         .run(crypto.randomUUID(), decoded.userId, user.branch_id, 'PASSWORD_CHANGED')
       await enqueueUserRow(decoded.userId)
 
-      const perms = JSON.parse(user.role_permissions as string || '{}')
-      const payload = {
-        id: user.id, name: user.name, email: user.email,
-        role: { id: user.role_id, name: user.role_name, permissions: perms },
-        branch: user.branch_id ? { id: user.branch_id, name: user.branch_name } : null,
-        branch_id: user.branch_id, permissions: perms,
-      }
+      const payload = buildAuthUserPayload(user as Record<string, unknown>)
       const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '12h' })
       store.set('auth_token', token)
       store.set('auth_user', payload)

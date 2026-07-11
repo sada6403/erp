@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { pool } from '@/lib/db'
+import { FEATURE_DEFINITIONS } from '@/lib/catalog'
+import { randomUUID } from 'crypto'
 
 type Params = { params: Promise<{ id: string }> }
 
@@ -44,6 +46,22 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   vals.push(packageId)
   await pool.query(`UPDATE packages SET ${setClauses.join(', ')} WHERE id = ?`, vals)
+
+  if (features !== undefined) {
+    const featureMap = new Map<string, boolean>()
+    for (const def of FEATURE_DEFINITIONS) {
+      const raw = (features as Record<string, unknown>)[def.key]
+      featureMap.set(def.key, raw === undefined ? true : Boolean(raw))
+    }
+    await pool.query(`DELETE FROM plan_features WHERE plan_id = ?`, [packageId])
+    for (const def of FEATURE_DEFINITIONS) {
+      await pool.query(
+        `INSERT INTO plan_features (id, plan_id, feature_key, is_enabled, created_at)
+         VALUES (?, ?, ?, ?, NOW())`,
+        [randomUUID(), packageId, def.key, featureMap.get(def.key) ? 1 : 0]
+      )
+    }
+  }
 
   await auditLog({
     portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,

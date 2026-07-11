@@ -455,6 +455,42 @@ export function registerReportHandlers() {
         ...(filters.dateTo ? [filters.dateTo] : []),
       ])
 
+      const transferHistory = safeAll(db, `
+        SELECT
+          st.transfer_number,
+          st.status,
+          st.quantity,
+          st.initiated_at,
+          st.dispatch_at,
+          st.actual_delivery_at,
+          st.expected_delivery_at,
+          p.name as product_name,
+          p.sku,
+          fb.name as from_branch_name,
+          tb.name as to_branch_name,
+          iu.name as initiated_by_name,
+          au.name as approved_by_name,
+          ru.name as received_by_name
+        FROM stock_transfers st
+        LEFT JOIN products p ON p.id = st.product_id
+        LEFT JOIN branches fb ON fb.id = st.from_branch_id
+        LEFT JOIN branches tb ON tb.id = st.to_branch_id
+        LEFT JOIN users iu ON iu.id = st.initiated_by
+        LEFT JOIN users au ON au.id = st.approved_by
+        LEFT JOIN users ru ON ru.id = st.received_by
+        ${filters.dateFrom || filters.dateTo
+          ? `WHERE ${[
+              ...(filters.dateFrom ? ['date(st.initiated_at) >= date(?)'] : []),
+              ...(filters.dateTo ? ['date(st.initiated_at) <= date(?)'] : []),
+            ].join(' AND ')}`
+          : ''}
+        ORDER BY st.initiated_at DESC
+        LIMIT 500
+      `, [
+        ...(filters.dateFrom ? [filters.dateFrom] : []),
+        ...(filters.dateTo ? [filters.dateTo] : []),
+      ])
+
       auditReport('REPORT_VIEW_ADVANCED', { filters, generated_at: new Date().toISOString() })
       return {
         success: true,
@@ -470,6 +506,7 @@ export function registerReportHandlers() {
           stockMovements,
           lowStock,
           expenses: expenseRows,
+          transferHistory,
           installmentSummary,
           installmentCustomers,
           paidInstallmentHistory,

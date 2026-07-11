@@ -122,6 +122,24 @@ export const modules = {
     ),
 }
 
+// â”€â”€â”€ Company Features â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export const features = {
+  catalog: () => request<unknown[]>('/api/superadmin/features'),
+  list:    (companyId: string) => request<unknown[]>(`/api/superadmin/companies/${companyId}/features`),
+  toggle:   (companyId: string, feature_key: string, is_enabled: boolean) =>
+    request<{ ok: boolean; feature_key: string; is_enabled: boolean }>(
+      `/api/superadmin/companies/${companyId}/features`,
+      { method: 'PATCH', body: JSON.stringify({ feature_key, is_enabled }) }
+    ),
+}
+
+// â”€â”€â”€ Company Limits â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+export const companyLimits = {
+  get:   (companyId: string) => request<Record<string, unknown>>(`/api/superadmin/companies/${companyId}/limits`),
+  update:(companyId: string, body: unknown) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/limits`, { method: 'PATCH', body: JSON.stringify(body) }),
+}
+
 // ─── Email ────────────────────────────────────────────────────────────────────
 export const email = {
   test:         (to: string) => request<{ ok: boolean }>('/api/superadmin/email-test', { method: 'POST', body: JSON.stringify({ to }) }),

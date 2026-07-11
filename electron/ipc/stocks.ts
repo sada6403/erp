@@ -119,12 +119,24 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const user = store.get('auth_user') as Record<string, unknown>
       const bid = branchId || user?.branch_id || 'b1111111-1111-4111-8111-111111111111'
       const rows = db.prepare(`
-        SELECT s.*, p.name as product_name, p.sku, p.min_stock_level
-        FROM stocks s
-        LEFT JOIN products p ON p.id = s.product_id
-        WHERE s.branch_id = ? AND s.quantity <= p.min_stock_level
-        ORDER BY s.quantity ASC
-      `).all(bid)
+        SELECT
+          COALESCE(s.id, '') AS id,
+          p.id AS product_id,
+          ? AS branch_id,
+          COALESCE(s.quantity, 0) AS quantity,
+          COALESCE(s.damaged_qty, 0) AS damaged_qty,
+          p.name AS product_name,
+          p.sku,
+          p.min_stock_level
+        FROM products p
+        LEFT JOIN stocks s
+          ON s.product_id = p.id
+         AND s.branch_id = ?
+        WHERE p.is_active = 1
+          AND (p.branch_id = ? OR p.branch_id IS NULL)
+          AND COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 0)
+        ORDER BY COALESCE(s.quantity, 0) ASC, p.name
+      `).all(bid, bid, bid)
       return { success: true, data: rows }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -382,10 +394,22 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   ipcMain.handle('stocks:availability', (_e, productId: string) => {
     try {
       const rows = getDb().prepare(`
-        SELECT s.id, s.product_id, s.branch_id, b.name branch_name, b.address branch_address,
-          s.quantity, s.damaged_qty, MAX(s.quantity - s.damaged_qty, 0) available_quantity
-        FROM stocks s JOIN branches b ON b.id=s.branch_id
-        WHERE s.product_id=? AND b.is_active=1 ORDER BY available_quantity DESC
+        SELECT
+          COALESCE(s.id, '') AS id,
+          p.id AS product_id,
+          b.id AS branch_id,
+          b.name AS branch_name,
+          b.address AS branch_address,
+          COALESCE(s.quantity, 0) AS quantity,
+          COALESCE(s.damaged_qty, 0) AS damaged_qty,
+          MAX(COALESCE(s.quantity, 0) - COALESCE(s.damaged_qty, 0), 0) AS available_quantity
+        FROM branches b
+        CROSS JOIN products p
+        LEFT JOIN stocks s
+          ON s.branch_id = b.id
+         AND s.product_id = p.id
+        WHERE p.id = ? AND b.is_active = 1
+        ORDER BY available_quantity DESC, b.name
       `).all(productId)
       return { success: true, data: rows }
     } catch (err) { return { success: false, error: (err as Error).message } }
@@ -813,22 +837,63 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     try {
       const db = getDb()
       const rows = db.prepare(`
-        SELECT b.id, b.name, b.code, b.address, b.is_active,
-          COUNT(DISTINCT s.product_id)  AS product_count,
-          COALESCE(SUM(s.quantity), 0)  AS total_units,
-          COALESCE(SUM(s.quantity * COALESCE(p.cost_price, 0)), 0) AS total_value,
-          COUNT(CASE WHEN s.quantity > 0 AND s.quantity <= p.min_stock_level
-                     AND p.min_stock_level > 0 THEN 1 END) AS low_stock_count,
-          COUNT(CASE WHEN s.quantity = 0 THEN 1 END) AS out_of_stock_count,
+        SELECT
+          b.id, b.name, b.code, b.address, b.is_active,
+          (
+            SELECT COUNT(DISTINCT p.id)
+            FROM products p
+            WHERE p.is_active = 1
+              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+          ) AS product_count,
+          (
+            SELECT COALESCE(SUM(COALESCE(s.quantity, 0)), 0)
+            FROM products p
+            LEFT JOIN stocks s
+              ON s.product_id = p.id
+             AND s.branch_id = b.id
+            WHERE p.is_active = 1
+              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+          ) AS total_units,
+          (
+            SELECT COALESCE(SUM(COALESCE(s.quantity, 0) * COALESCE(p.cost_price, 0)), 0)
+            FROM products p
+            LEFT JOIN stocks s
+              ON s.product_id = p.id
+             AND s.branch_id = b.id
+            WHERE p.is_active = 1
+              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+          ) AS total_value,
+          (
+            SELECT COUNT(DISTINCT CASE
+              WHEN COALESCE(s.quantity, 0) > 0
+               AND COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 0)
+               AND COALESCE(p.min_stock_level, 0) > 0
+              THEN p.id
+            END)
+            FROM products p
+            LEFT JOIN stocks s
+              ON s.product_id = p.id
+             AND s.branch_id = b.id
+            WHERE p.is_active = 1
+              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+          ) AS low_stock_count,
+          (
+            SELECT COUNT(DISTINCT CASE
+              WHEN COALESCE(s.quantity, 0) = 0 THEN p.id
+            END)
+            FROM products p
+            LEFT JOIN stocks s
+              ON s.product_id = p.id
+             AND s.branch_id = b.id
+            WHERE p.is_active = 1
+              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+          ) AS out_of_stock_count,
           (SELECT COUNT(*) FROM stock_transfers st
            WHERE st.to_branch_id = b.id AND st.status = 'pending_approval') AS pending_requests,
           (SELECT COUNT(*) FROM stock_transfers st
            WHERE st.to_branch_id = b.id AND st.status IN ('approved','dispatched','in_transit')) AS in_transit_count
         FROM branches b
-        LEFT JOIN stocks     s ON s.branch_id = b.id
-        LEFT JOIN products   p ON p.id = s.product_id AND p.is_active = 1
         WHERE b.is_active = 1
-        GROUP BY b.id
         ORDER BY b.name
       `).all()
       return { success: true, data: rows }
@@ -840,25 +905,32 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     try {
       const db = getDb()
       const rows = db.prepare(`
-        SELECT s.id, s.product_id, s.quantity, s.damaged_qty,
+        SELECT
+          COALESCE(s.id, '') AS id,
+          p.id AS product_id,
+          COALESCE(s.quantity, 0) AS quantity,
+          COALESCE(s.damaged_qty, 0) AS damaged_qty,
           p.name AS product_name, p.sku, p.image_url, p.unit,
           p.min_stock_level, p.selling_price, p.cost_price,
           p.category_id, cat.name AS category_name,
           CASE
-            WHEN s.quantity = 0 THEN 'out'
-            WHEN s.quantity <= p.min_stock_level AND p.min_stock_level > 0 THEN 'low'
+            WHEN COALESCE(s.quantity, 0) = 0 THEN 'out'
+            WHEN COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 0) AND COALESCE(p.min_stock_level, 0) > 0 THEN 'low'
             ELSE 'ok'
           END AS stock_status
-        FROM stocks s
-        JOIN products p   ON p.id = s.product_id AND p.is_active = 1
+        FROM products p
+        LEFT JOIN stocks s
+          ON s.product_id = p.id
+         AND s.branch_id = ?
         LEFT JOIN categories cat ON cat.id = p.category_id
-        WHERE s.branch_id = ?
+        WHERE p.is_active = 1
+          AND (p.branch_id = ? OR p.branch_id IS NULL)
         ORDER BY
-          CASE WHEN s.quantity = 0 THEN 0
-               WHEN s.quantity <= p.min_stock_level THEN 1
+          CASE WHEN COALESCE(s.quantity, 0) = 0 THEN 0
+               WHEN COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 0) THEN 1
                ELSE 2 END,
           p.name
-      `).all(branchId)
+      `).all(branchId, branchId)
       return { success: true, data: rows }
     } catch (err) { return { success: false, error: (err as Error).message } }
   })

@@ -1,6 +1,6 @@
 import React, { useEffect, useState, FormEvent } from 'react'
-import { companies as api, packages as pkgApi, modules as modulesApi, devices as devicesApi, impersonate as impersonateApi, settings as settingsApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound } from 'lucide-react'
+import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, impersonate as impersonateApi, settings as settingsApi, audit as auditApi } from '../lib/api'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo } from 'lucide-react'
 
 type Company = Record<string, string>
 type Pkg = { id: string; name: string }
@@ -25,6 +25,7 @@ export default function CompaniesPage() {
   const [showImpersonate, setShowImpersonate] = useState<Company | null>(null)
   const [showApiKey, setShowApiKey] = useState<Company | null>(null)
   const [showModules, setShowModules] = useState<Company | null>(null)
+  const [showCapabilities, setShowCapabilities] = useState<Company | null>(null)
   const [showDevices, setShowDevices] = useState<Company | null>(null)
   const [showBranding, setShowBranding] = useState<Company | null>(null)
   const [showCompanyKey, setShowCompanyKey] = useState<Company | null>(null)
@@ -151,6 +152,10 @@ export default function CompaniesPage() {
                       onClick={() => setShowModules(c)}>
                       <LayoutGrid className="w-3.5 h-3.5" />
                     </button>
+                    <button title="Capabilities (features / limits / license)" className="p-1.5 rounded hover:bg-slate-900/40 text-slate-300"
+                      onClick={() => setShowCapabilities(c)}>
+                      <Settings2 className="w-3.5 h-3.5" />
+                    </button>
                     <button title="POS API Key (for Electron app)" className="p-1.5 rounded hover:bg-purple-900/40 text-purple-400"
                       onClick={() => setShowApiKey(c)}>
                       <Key className="w-3.5 h-3.5" />
@@ -213,6 +218,7 @@ export default function CompaniesPage() {
 
       {showApiKey && <ApiKeyModal company={showApiKey} onClose={() => setShowApiKey(null)} onRegenerated={load} />}
       {showModules && <ModulesModal company={showModules} onClose={() => setShowModules(null)} />}
+      {showCapabilities && <CompanyCapabilitiesModal company={showCapabilities} onClose={() => setShowCapabilities(null)} onSaved={load} />}
       {showDevices && <DevicesModal company={showDevices} onClose={() => setShowDevices(null)} />}
       {showBranding && <BrandingModal company={showBranding} onClose={() => setShowBranding(null)} onSaved={load} />}
       {showCompanyKey && <CompanyKeyModal company={showCompanyKey} onClose={() => setShowCompanyKey(null)} onUpdated={load} />}
@@ -1027,6 +1033,339 @@ function ImpersonateModal({ company, onClose }: { company: Company; onClose: () 
   )
 }
 
+// ─── Company Capabilities Modal ───────────────────────────────────────────────
+type FeatureRow = {
+  feature_key: string
+  feature_name: string
+  module_key: string
+  group: string
+  description: string
+  sort_order: number
+  is_active: number
+  from_package?: boolean
+  has_override?: boolean
+  is_enabled?: boolean
+}
+
+function CompanyCapabilitiesModal({ company, onClose, onSaved }: {
+  company: Company; onClose: () => void; onSaved: () => void
+}) {
+  type Tab = 'overview' | 'modules' | 'features' | 'limits' | 'devices' | 'branding' | 'license' | 'audit'
+  const [tab, setTab] = useState<Tab>('overview')
+  const [modules, setModules] = useState<Record<string, unknown>[]>([])
+  const [features, setFeatures] = useState<FeatureRow[]>([])
+  const [limits, setLimits] = useState<Record<string, unknown> | null>(null)
+  const [audit, setAudit] = useState<Record<string, unknown>[]>([])
+  const [devices, setDevices] = useState<Record<string, unknown>[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState<string | null>(null)
+  const [error, setError] = useState('')
+  const [brandColor, setBrandColor] = useState(String(company.brand_color || '#2563eb'))
+  const [brandLogoUrl, setBrandLogoUrl] = useState(String(company.brand_logo_url || ''))
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([
+      modulesApi.list(company.id).catch(() => []),
+      featuresApi.list(company.id).catch(() => []),
+      limitsApi.get(company.id).catch(() => null),
+      devicesApi.list(company.id).catch(() => []),
+      auditApi.list({ company_id: company.id, limit: '20', page: '1' }).then(r => (r as { rows: Record<string, unknown>[] }).rows).catch(() => []),
+    ]).then(([moduleRows, featureRows, limitRows, deviceRows, auditRows]) => {
+      setModules(moduleRows as Record<string, unknown>[])
+      setFeatures(featureRows as FeatureRow[])
+      setLimits(limitRows as Record<string, unknown> | null)
+      setDevices(deviceRows as Record<string, unknown>[])
+      setAudit(auditRows as Record<string, unknown>[])
+      setError('')
+    }).catch(err => setError(err instanceof Error ? err.message : 'Failed to load capability data'))
+      .finally(() => setLoading(false))
+  }, [company.id])
+
+  async function toggleFeature(row: FeatureRow) {
+    const current = Boolean(row.is_enabled)
+    setSaving(row.feature_key)
+    try {
+      await featuresApi.toggle(company.id, row.feature_key, !current)
+      setFeatures(prev => prev.map(item => item.feature_key === row.feature_key ? { ...item, is_enabled: !current, has_override: true } : item))
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update feature')
+    }
+    setSaving(null)
+  }
+
+  async function toggleModule(row: Record<string, unknown>) {
+    const key = String(row.module_key || '')
+    const current = Boolean(row.is_enabled)
+    setSaving(key)
+    try {
+      await modulesApi.toggle(company.id, key, !current)
+      setModules(prev => prev.map(item => String(item.module_key) === key ? { ...item, is_enabled: !current, has_override: true } : item))
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update module')
+    }
+    setSaving(null)
+  }
+
+  async function saveBranding() {
+    setSaving('branding')
+    try {
+      await api.update(company.id, { brandColor, brandLogoUrl })
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save branding')
+    }
+    setSaving(null)
+  }
+
+  async function saveLimits() {
+    if (!limits) return
+    setSaving('limits')
+    try {
+      await limitsApi.update(company.id, {
+        max_users: Number(limits.max_users ?? limits.maxUsers ?? company.max_users ?? 5),
+        max_branches: Number(limits.max_branches ?? limits.maxBranches ?? company.max_branches ?? 1),
+        max_pos_devices: Number(limits.max_pos_devices ?? limits.maxPosDevices ?? company.max_pos_devices ?? 2),
+        max_storage_gb: Number(limits.max_storage_gb ?? limits.maxStorageGb ?? company.max_storage_gb ?? 5),
+      })
+      onSaved()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save limits')
+    }
+    setSaving(null)
+  }
+
+  const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
+    { key: 'overview', label: 'Overview', icon: <BadgeInfo className="w-3.5 h-3.5" /> },
+    { key: 'modules', label: 'Modules', icon: <LayoutGrid className="w-3.5 h-3.5" /> },
+    { key: 'features', label: 'Features', icon: <FileText className="w-3.5 h-3.5" /> },
+    { key: 'limits', label: 'Limits', icon: <Sliders className="w-3.5 h-3.5" /> },
+    { key: 'devices', label: 'Devices', icon: <Monitor className="w-3.5 h-3.5" /> },
+    { key: 'branding', label: 'Branding', icon: <Palette className="w-3.5 h-3.5" /> },
+    { key: 'license', label: 'License', icon: <Key className="w-3.5 h-3.5" /> },
+    { key: 'audit', label: 'Audit', icon: <ShieldCheck className="w-3.5 h-3.5" /> },
+  ]
+
+  const moduleRows = modules as Array<Record<string, unknown>>
+  const groupedFeatures = features.reduce<Record<string, FeatureRow[]>>((acc, row) => {
+    acc[row.group] = acc[row.group] ?? []
+    acc[row.group].push(row)
+    return acc
+  }, {})
+  const limitsSummary = limits ?? {
+    max_users: company.max_users,
+    max_branches: company.max_branches,
+    max_pos_devices: company.max_pos_devices,
+    max_storage_gb: company.max_storage_gb,
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-5xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <Settings2 className="w-4 h-4 text-slate-300" />
+            <h2 className="font-semibold text-white">Capabilities — {company.name}</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">×</button>
+        </div>
+
+        <div className="flex flex-wrap gap-1 px-5 pt-4 border-b border-gray-800">
+          {tabs.map(t => (
+            <button
+              key={t.key}
+              onClick={() => { setTab(t.key); setError('') }}
+              className={`flex items-center gap-1.5 px-3 py-2 text-sm rounded-t-lg border-b-2 -mb-px transition-colors ${
+                tab === t.key ? 'border-indigo-500 text-indigo-400' : 'border-transparent text-gray-500 hover:text-white'
+              }`}>
+              {t.icon}{t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {error && <div className="bg-red-900/30 border border-red-700/50 rounded px-4 py-2 text-red-400 text-sm">{error}</div>}
+          {loading && <div className="text-sm text-gray-500">Loading company data…</div>}
+
+          {tab === 'overview' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {[
+                { label: 'Modules', value: moduleRows.filter(row => Boolean(row.is_enabled)).length },
+                { label: 'Features', value: features.filter(row => Boolean(row.is_enabled)).length },
+                { label: 'Devices', value: devices.length },
+                { label: 'Audit Events', value: audit.length },
+                { label: 'Max Branches', value: String(limitsSummary.max_branches ?? company.max_branches ?? 1) },
+                { label: 'Max Users', value: String(limitsSummary.max_users ?? company.max_users ?? 5) },
+              ].map(item => (
+                <div key={item.label} className="card">
+                  <p className="text-xs text-gray-500">{item.label}</p>
+                  <p className="text-2xl font-bold text-white mt-1">{String(item.value)}</p>
+                </div>
+              ))}
+              <div className="card xl:col-span-3 space-y-2">
+                <p className="text-sm font-semibold text-white">Branch / User / Sync / Printer / Notifications</p>
+                <p className="text-sm text-gray-400">
+                  These operational records are managed inside the tenant app. Use this screen to control the company-wide
+                  module set, per-feature permissions, limits, branding, devices, and license state.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {tab === 'modules' && (
+            <div className="space-y-2">
+              {moduleRows.map(row => (
+                <div key={String(row.module_key)} className="flex items-center justify-between px-4 py-3 rounded-lg border border-gray-800 bg-gray-800/30">
+                  <div>
+                    <p className="text-sm font-medium text-white">{String(row.module_name ?? row.module_key)}</p>
+                    <p className="text-xs text-gray-500">{String(row.module_key)}</p>
+                  </div>
+                  <button
+                    onClick={() => toggleModule(row)}
+                    disabled={saving === String(row.module_key)}
+                    className={`relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors ${Boolean(row.is_enabled) ? 'bg-indigo-600' : 'bg-gray-700'}`}>
+                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${Boolean(row.is_enabled) ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'features' && (
+            <div className="space-y-4">
+              {Object.entries(groupedFeatures).sort(([a], [b]) => a.localeCompare(b)).map(([group, items]) => (
+                <div key={group}>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-gray-500 mb-2">{group}</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    {items.map(row => (
+                      <button
+                        key={row.feature_key}
+                        onClick={() => toggleFeature(row)}
+                        className="text-left rounded-lg border border-gray-800 bg-gray-800/30 px-4 py-3 hover:border-gray-700 transition-colors">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-white">{row.feature_name}</p>
+                            <p className="text-xs text-gray-500">{row.description}</p>
+                          </div>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${row.is_enabled ? 'bg-green-900/30 text-green-300' : 'bg-gray-800 text-gray-500'}`}>
+                            {row.is_enabled ? 'On' : 'Off'}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'limits' && (
+            <div className="space-y-4 max-w-2xl">
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { key: 'max_branches', label: 'Max Branches' },
+                  { key: 'max_users', label: 'Max Users' },
+                  { key: 'max_pos_devices', label: 'Max POS Devices' },
+                  { key: 'max_storage_gb', label: 'Storage (GB)' },
+                ].map(field => (
+                  <div key={field.key}>
+                    <label className="label">{field.label}</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      value={String((limitsSummary as Record<string, unknown>)[field.key] ?? 0)}
+                      onChange={e => setLimits(prev => ({ ...(prev ?? {}), [field.key]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+              <button className="btn-primary" onClick={saveLimits} disabled={saving === 'limits'}>
+                {saving === 'limits' ? 'Saving…' : 'Save Limits'}
+              </button>
+            </div>
+          )}
+
+          {tab === 'devices' && (
+            <div className="space-y-2">
+              {devices.map((dev, idx) => (
+                <div key={String(dev.id ?? idx)} className="flex items-center justify-between px-4 py-3 rounded-lg border border-gray-800 bg-gray-800/30">
+                  <div>
+                    <p className="text-sm font-medium text-white">{String(dev.device_name ?? 'Device')}</p>
+                    <p className="text-xs text-gray-500">{String(dev.status ?? 'pending')} · {String(dev.license_key ?? '')}</p>
+                  </div>
+                  <span className="badge-yellow">{String(dev.status ?? 'pending')}</span>
+                </div>
+              ))}
+              {devices.length === 0 && <p className="text-sm text-gray-500">No device records found for this company.</p>}
+            </div>
+          )}
+
+          {tab === 'branding' && (
+            <div className="space-y-4 max-w-2xl">
+              <div>
+                <label className="label">Brand Color</label>
+                <div className="flex items-center gap-3">
+                  <input type="color" className="w-10 h-10 rounded border border-gray-700 bg-transparent" value={brandColor} onChange={e => setBrandColor(e.target.value)} />
+                  <input className="input flex-1" value={brandColor} onChange={e => setBrandColor(e.target.value)} />
+                </div>
+              </div>
+              <div>
+                <label className="label">Logo URL</label>
+                <input className="input" value={brandLogoUrl} onChange={e => setBrandLogoUrl(e.target.value)} />
+              </div>
+              <button className="btn-primary" onClick={saveBranding} disabled={saving === 'branding'}>
+                {saving === 'branding' ? 'Saving…' : 'Save Branding'}
+              </button>
+            </div>
+          )}
+
+          {tab === 'license' && (
+            <div className="space-y-3 max-w-2xl">
+              <div className="card space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Company Key</span>
+                  <span className="text-white font-mono">{String(company.company_key || '—')}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Current Package</span>
+                  <span className="text-white">{String(company.package_name || '—')}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-400">Subscription</span>
+                  <span className="text-white">{company.sub_ends_at ? new Date(String(company.sub_ends_at)).toLocaleDateString() : '—'}</span>
+                </div>
+              </div>
+              <p className="text-sm text-gray-500">
+                License keys and device activation are handled in the Devices view and the company activation key modal.
+              </p>
+            </div>
+          )}
+
+          {tab === 'audit' && (
+            <div className="space-y-2">
+              {audit.map((row, idx) => (
+                <div key={String(row.id ?? idx)} className="rounded-lg border border-gray-800 bg-gray-800/30 px-4 py-3">
+                  <p className="text-sm text-white">{String(row.action ?? 'event')}</p>
+                  <p className="text-xs text-gray-500">{String(row.actor_name ?? 'system')} · {String(row.created_at ?? '')}</p>
+                </div>
+              ))}
+              {audit.length === 0 && <p className="text-sm text-gray-500">No audit records available.</p>}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-800 flex justify-between items-center">
+          <p className="text-xs text-gray-500">Changes apply immediately to new logins and sync sessions.</p>
+          <button className="btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Edit Company Modal ───────────────────────────────────────────────────────
 function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
   company: Company; pkgs: Pkg[]; onClose: () => void; onSaved: () => void
@@ -1090,6 +1429,14 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
       }
 
       await api.update(company.id, body)
+      if (tab === 'limits') {
+        await limitsApi.update(company.id, {
+          max_users: Number(limits.maxUsers),
+          max_branches: Number(limits.maxBranches),
+          max_pos_devices: Number(limits.maxPosDevices),
+          max_storage_gb: Number(limits.maxStorageGb),
+        })
+      }
       setSaved(true)
       onSaved()
       setTimeout(() => setSaved(false), 1500)

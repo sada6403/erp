@@ -1,4 +1,5 @@
 import type { IpcMain } from 'electron'
+import { BrowserWindow } from 'electron'
 import Store from 'electron-store'
 import { app, safeStorage } from 'electron'
 import crypto from 'crypto'
@@ -210,6 +211,16 @@ function getCloudApiFromSettings(): CloudApi | null {
   return new CloudApi({ baseUrl, apiKey })
 }
 
+function broadcastSettingsUpdated(reason: string, extra: Record<string, unknown> = {}) {
+  for (const win of BrowserWindow.getAllWindows()) {
+    try {
+      win.webContents.send('settings:updated', { reason, ...extra })
+    } catch {
+      // ignore
+    }
+  }
+}
+
 // Upload a local app-img:// logo so other devices can load it, then return
 // the public URL (or null when the upload isn't possible right now).
 async function publishLocalImage(cloud: CloudApi, localUrl: string): Promise<string | null> {
@@ -256,10 +267,42 @@ export async function pushBrandingToCloud(): Promise<boolean> {
     await cloud.putBranding(branding)
     store.set('company_branding_synced', JSON.stringify(branding))
     store.delete('branding_push_pending')
+    broadcastSettingsUpdated('branding-pushed', { branding })
     return true
   } catch (err) {
     console.error('[Settings] Branding push failed:', err)
     return false
+  }
+}
+
+export async function refreshBrandingFromCloud(): Promise<{ success: boolean; branding?: Record<string, unknown>; error?: string }> {
+  const cloud = getCloudApiFromSettings()
+  if (!cloud) return { success: false, error: 'Cloud branding is not configured' }
+
+  try {
+    const res = await cloud.getBranding()
+    const branding = (res.branding || {}) as Record<string, unknown>
+    const current = (store.get('app_settings') as Record<string, unknown>) || {}
+    const next = { ...current }
+    let changed = false
+
+    for (const key of CLOUD_BRANDING_KEYS) {
+      const value = branding[key]
+      if (value !== undefined && next[key] !== value) {
+        next[key] = value === null ? null : String(value)
+        changed = true
+      }
+    }
+
+    if (changed) {
+      store.set('app_settings', next)
+      store.set('company_branding_synced', JSON.stringify(branding))
+      broadcastSettingsUpdated('branding-refreshed', { branding })
+    }
+
+    return { success: true, branding }
+  } catch (err) {
+    return { success: false, error: (err as Error).message }
   }
 }
 
@@ -305,8 +348,19 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
           void pushBrandingToCloud()
         }
       }
+      broadcastSettingsUpdated('settings-updated', { keys: payloadKeys })
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('settings:refreshBranding', async () => {
+    try {
+      const result = await refreshBrandingFromCloud()
+      if (!result.success) return result
+      return { success: true, data: normalizeForFrontend((store.get('app_settings') as Record<string, unknown>) || {}) }
+    } catch (err: unknown) {
+      return { success: false, error: (err as Error).message }
+    }
   })
 
   ipcMain.handle('settings:revealSecret', (_e, key: string) => {

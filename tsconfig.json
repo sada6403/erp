@@ -20,5 +20,5 @@
       "@electron/*": ["./electron/*"]
     }
   },
-  "include": ["src", "electron"]
+  "include": ["src", "electron", "vitest.config.ts", "playwright.config.ts"]
 }

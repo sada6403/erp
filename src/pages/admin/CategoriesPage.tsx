@@ -8,6 +8,7 @@ type Category = {
   id: string
   parent_id: string | null
   name: string
+  short_code?: string | null
   description: string | null
   sort_order: number
   is_active: number
@@ -64,7 +65,7 @@ export default function CategoriesPage() {
         <table className="w-full">
           <thead className="sticky top-0 bg-surface-900 z-10">
             <tr>
-              {['Category', 'Parent', 'Description', 'Sort', 'Status', ''].map(h => (
+              {['Category', 'Code', 'Parent', 'Description', 'Sort', 'Status', ''].map(h => (
                 <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
               ))}
             </tr>
@@ -75,7 +76,10 @@ export default function CategoriesPage() {
                 <td className="table-cell font-medium">
                   <span className="flex items-center gap-1" style={{ paddingLeft: depth * 20 }}>
                     {depth > 0 && <ChevronRight size={12} className="text-slate-600 flex-shrink-0" />}
-                    {cat.name}
+                    <span>{cat.name}</span>
+                    <span className="font-mono text-[10px] px-1.5 py-0.5 rounded-full" style={{ background: 'var(--bg-soft)', color: 'var(--text-3)' }}>
+                      {cat.short_code || '—'}
+                    </span>
                   </span>
                 </td>
                 <td className="table-cell text-slate-400 text-sm">

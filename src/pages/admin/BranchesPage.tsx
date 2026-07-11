@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, GitBranch, CheckCircle, XCircle, Trash2, AlertTriangle } from 'lucide-react'
+import { Plus, Edit2, GitBranch, CheckCircle, XCircle, Trash2, AlertTriangle, Copy } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -17,19 +17,23 @@ export default function BranchesPage() {
   const isAdmin = Boolean(perms.all)
 
   const [branches, setBranches] = useState<Record<string,unknown>[]>([])
+  const [users, setUsers] = useState<Record<string,unknown>[]>([])
   const [showForm,   setShowForm]   = useState(false)
   const [editing,    setEditing]    = useState<Record<string,unknown> | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Record<string,unknown> | null>(null)
   const [deleting, setDeleting] = useState(false)
 
   const load = async () => {
-    const res = await window.api.admin.branches.list()
-    if (res.success) {
-      const data = res.data as Record<string,unknown>[]
+    const [branchRes, userRes] = await Promise.all([
+      window.api.admin.branches.list(),
+      window.api.admin.users.list(),
+    ])
+    if (branchRes.success) {
+      const data = branchRes.data as Record<string,unknown>[]
       setBranches(data)
-      return data
     }
-    return null
+    if (userRes.success) setUsers(userRes.data as Record<string,unknown>[])
+    return branchRes.success ? branchRes.data as Record<string,unknown>[] : null
   }
 
   useEffect(() => { load() }, [])
@@ -111,12 +115,23 @@ export default function BranchesPage() {
               <div className="flex items-center gap-2 mb-1">
                 <h3 className="font-bold" style={{ color: 'var(--text-1)' }}>{b.name as string}</h3>
                 {b.code
-                  ? <span className="px-1.5 py-0.5 bg-brand-600/20 text-brand-300 text-xs font-mono rounded">{String(b.code)}</span>
+                  ? <button
+                      type="button"
+                      onClick={async () => { await navigator.clipboard.writeText(String(b.code)); toast.success('Branch code copied') }}
+                      className="inline-flex items-center gap-1 px-1.5 py-0.5 bg-brand-600/20 text-brand-300 text-xs font-mono rounded"
+                      title="Copy branch code"
+                    >
+                      {String(b.code)}
+                      <Copy size={10} />
+                    </button>
                   : null}
                 {isMain(b) && (
                   <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 text-xs rounded">Head Office</span>
                 )}
               </div>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                Manager: {String(b.manager_name || 'Unassigned')}
+              </p>
               <p className="text-xs" style={{ color: 'var(--text-3)' }}>{b.address as string || 'No address'}</p>
               <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                 {`${String(b.phone ?? '')}${b.email ? ` · ${String(b.email)}` : ''}`}
@@ -129,6 +144,7 @@ export default function BranchesPage() {
       {showForm && (
         <BranchForm
           branch={editing}
+          users={users}
           onClose={() => setShowForm(false)}
           onSave={() => { setShowForm(false); load() }}
         />
@@ -173,9 +189,10 @@ export default function BranchesPage() {
 }
 
 function BranchForm({
-  branch, onClose, onSave,
+  branch, users, onClose, onSave,
 }: {
   branch: Record<string,unknown> | null
+  users: Record<string,unknown>[]
   onClose: () => void
   onSave: () => void
 }) {
@@ -189,11 +206,12 @@ function BranchForm({
     address:    String(branch?.address    || ''),
     phone:      String(branch?.phone      || ''),
     email:      String(branch?.email      || ''),
+    manager_id: String(branch?.manager_id || ''),
     is_active:  branch ? Boolean(branch.is_active ?? true) : true,
   })
   const [saving, setSaving] = useState(false)
 
-  const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+  const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }))
 
   const save = async () => {
@@ -203,12 +221,13 @@ function BranchForm({
     }
     setSaving(true)
     try {
-      const payload: Record<string, unknown> = {
-        ...form,
-        code:       form.code.toUpperCase().trim() || null,
-        branch_pin: form.branch_pin.trim() || null,
-        is_active:  form.is_active ? 1 : 0,
-      }
+        const payload: Record<string, unknown> = {
+          ...form,
+          code:       form.code.toUpperCase().trim() || null,
+          branch_pin: form.branch_pin.trim() || null,
+          manager_id: form.manager_id || null,
+          is_active:  form.is_active ? 1 : 0,
+        }
       // Blank PIN on an existing branch = keep the current (hashed) PIN
       if (branch && !form.branch_pin.trim()) delete payload.branch_pin
       const res = branch
@@ -254,6 +273,23 @@ function BranchForm({
               maxLength={10}
             />
           </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Branch Manager</label>
+          <select value={form.manager_id} onChange={f('manager_id')} className="input">
+            <option value="">Unassigned</option>
+            {users
+              .filter(u => Boolean(u.is_active))
+              .map(u => (
+                <option key={String(u.id)} value={String(u.id)}>
+                  {String(u.name || 'User')} · {String(u.role_name || 'Staff')}
+                </option>
+              ))}
+          </select>
+          <p className="text-[11px] mt-1" style={{ color: 'var(--text-3)' }}>
+            This user will be treated as the branch contact/owner for branch-level workflows.
+          </p>
         </div>
 
         <div className="rounded-lg p-3 border border-slate-700 bg-slate-800/40">

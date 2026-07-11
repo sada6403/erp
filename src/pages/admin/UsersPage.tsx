@@ -158,8 +158,9 @@ export default function UsersPage() {
       </div>
 
       {tab === 'users' ? (
-        <UsersTable
+      <UsersTable
           users={filteredUsers}
+          branches={branches}
           currentUserId={currentUser?.id as string | undefined}
           isGlobalUser={isGlobalUser}
           onEdit={u => { setEditingUser(u); setShowUserForm(true) }}
@@ -256,9 +257,10 @@ function TabButton({
 
 // ── Users Table ───────────────────────────────────────────────────────────────
 function UsersTable({
-  users, currentUserId, isGlobalUser, onEdit, onDelete, onHardDelete, onToggleActive, onManage, onChangePin,
+  users, branches, currentUserId, isGlobalUser, onEdit, onDelete, onHardDelete, onToggleActive, onManage, onChangePin,
 }: {
   users: Record<string, unknown>[]
+  branches: Record<string, unknown>[]
   currentUserId?: string
   isGlobalUser: boolean
   onEdit: (u: Record<string, unknown>) => void
@@ -288,6 +290,7 @@ function UsersTable({
         </thead>
         <tbody>
           {users.map(u => {
+            const branch = branches.find(b => String(b.id) === String(u.branch_id)) as Record<string, unknown> | undefined
             const isSuperAdmin = u.id === SUPER_ADMIN_ID
             const isSelf       = u.id === currentUserId
             const isPrivileged = PRIVILEGED_ROLE_NAMES.includes(u.role_name as string)
@@ -318,7 +321,16 @@ function UsersTable({
                     {u.role_name as string}
                   </span>
                 </td>
-                <td className="table-cell text-slate-400">{(u.branch_name as string) || 'All Branches'}</td>
+                <td className="table-cell text-slate-400">
+                  <div className="flex flex-col gap-1">
+                    <span>{(u.branch_name as string) || 'All Branches'}</span>
+                    {String(branch?.code || '').trim() && (
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded w-fit" style={{ background: 'var(--bg-soft)', color: 'var(--brand-primary)' }}>
+                        {String(branch?.code as string)}
+                      </span>
+                    )}
+                  </div>
+                </td>
                 <td className="table-cell font-mono text-slate-400">{u.has_pin ? '••••' : '-'}</td>
                 <td className="table-cell">
                   <span className={isActive ? 'badge-green' : 'badge-red'}>
@@ -404,7 +416,7 @@ function UsersTable({
             )
           })}
           {users.length === 0 && (
-            <tr><td colSpan={8} className="text-center py-16 text-slate-500">No users found</td></tr>
+          <tr><td colSpan={8} className="text-center py-16 text-slate-500">No users found</td></tr>
           )}
         </tbody>
       </table>

@@ -5,12 +5,33 @@ import { withTenant } from '@/lib/tenant'
 import { signAccessToken, issueRefreshToken } from '@/lib/jwt'
 import { auditLog } from '@/lib/rbac'
 import { authLimiter } from '@/lib/rateLimit'
+import { resolveEntitlements } from '@/lib/entitlements'
 
 function meta(req: NextRequest) {
   return {
     ip: req.headers.get('x-forwarded-for')?.split(',')[0] ?? undefined,
     userAgent: req.headers.get('user-agent') ?? undefined,
   }
+}
+
+function parsePermissions(value: unknown): Record<string, boolean> {
+  if (!value) return {}
+  if (typeof value === 'string') {
+    try { return JSON.parse(value) as Record<string, boolean> } catch { return {} }
+  }
+  return value as Record<string, boolean>
+}
+
+function resolveScope(roleName: string, branchId: string | null) {
+  const normalized = roleName.trim().toLowerCase()
+  if (normalized === 'company admin' || normalized === 'owner' || normalized === 'super admin') {
+    return { portal: 'admin' as const, scope: { level: 'owner' as const, branchId: null, subBranchId: null } }
+  }
+  if (normalized === 'branch manager') {
+    if (!branchId) throw new Error('Branch Manager account must be assigned to a branch before login')
+    return { portal: 'admin' as const, scope: { level: 'branch' as const, branchId, subBranchId: null } }
+  }
+  throw new Error('This account cannot use the admin portal')
 }
 
 export async function POST(req: NextRequest) {
@@ -54,11 +75,24 @@ export async function POST(req: NextRequest) {
   })
 
   const u = user as Record<string, unknown>
-  const perms = typeof u.permissions === 'string' ? JSON.parse(u.permissions as string) : u.permissions
+  const perms = parsePermissions(u.permissions)
+  const { portal, scope } = resolveScope(String(u.role_name || ''), u.branch_id ? String(u.branch_id) : null)
+  const entitlements = await resolveEntitlements({ companyId: company.id, roleName: String(u.role_name || ''), branchId: u.branch_id ? String(u.branch_id) : null })
   const payload = {
-    sub: u.id as string, portal: 'admin' as const, company_id: company.id,
+    sub: u.id as string, portal,
+    company_id: company.id,
     name: u.name as string, email: u.email as string,
-    role: u.role_name as string, permissions: perms as Record<string, unknown>,
+    role: u.role_name as string,
+    role_id: u.role_id ? String(u.role_id) : undefined,
+    branch_id: scope.branchId,
+    sub_branch_id: null,
+    scope,
+    permissions: perms as Record<string, unknown>,
+    enabledModules: entitlements.enabledModules,
+    enabledFeatures: entitlements.enabledFeatures,
+    limits: entitlements.limits,
+    licenseId: entitlements.licenseId,
+    deviceId: entitlements.deviceId,
   }
 
   const m = meta(req)
@@ -70,7 +104,24 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     accessToken, refreshToken,
-    user: { id: u.id, name: u.name, email: u.email, role: u.role_name, portal: 'admin',
-            company: { id: company.id, name: company.name, slug: company_slug } },
+    user: {
+      id: u.id,
+      name: u.name,
+      email: u.email,
+      role: u.role_name,
+      role_id: u.role_id ?? null,
+      portal,
+      company: { id: company.id, name: company.name, slug: company_slug },
+      company_id: company.id,
+      branch_id: null,
+      sub_branch_id: null,
+      scope,
+      permissions: perms,
+      enabledModules: entitlements.enabledModules,
+      enabledFeatures: entitlements.enabledFeatures,
+      limits: entitlements.limits,
+      licenseId: entitlements.licenseId,
+      deviceId: entitlements.deviceId,
+    },
   })
 }

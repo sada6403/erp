@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { resolveCompany, AccountStatusError } from '@/lib/auth'
 import { assertTable, quoteIdentifier } from '@/lib/sync'
 import { syncLimiter } from '@/lib/rateLimit'
+import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -21,6 +22,11 @@ export async function GET(request: NextRequest) {
   }
   if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const entitlements = await resolveEntitlements({ companyId: company.id })
+  if (!assertFeature({ company_id: company.id, portal: 'admin', permissions: {} }, 'sync.cloud', entitlements)) {
+    return NextResponse.json({ error: 'Feature disabled: sync.cloud' }, { status: 403 })
   }
 
   try {

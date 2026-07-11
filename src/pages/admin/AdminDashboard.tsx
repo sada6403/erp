@@ -5,6 +5,7 @@ import PageHeader from '@/components/shared/PageHeader'
 import StatCard from '@/components/shared/StatCard'
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
+import { getSessionProfile } from '@/lib/sessionRouting'
 
 interface RevenueData { today: { revenue: number; invoices: number }; month: { revenue: number; invoices: number }; outstanding: { total: number } }
 interface SalesData { date: string; total_revenue: number; total_invoices: number }
@@ -33,6 +34,12 @@ export default function AdminDashboard() {
   const u = user as unknown as Record<string, unknown>
   const perms = ((u?.role as Record<string, unknown>)?.permissions ?? u?.permissions ?? {}) as Record<string, unknown>
   const isAdmin    = Boolean(perms.all)
+  const scopeLevel = String((u?.scope as Record<string, unknown> | undefined)?.level || '')
+  const branchScoped = scopeLevel === 'branch' || scopeLevel === 'subBranch'
+  const profile = getSessionProfile(user)
+  const isCashier = profile.kind === 'cashier'
+  const isAccountant = profile.kind === 'accountant'
+  const isStockRole = profile.kind === 'storeKeeper'
   // Only Admin or Branch Manager may approve transfer requests — cashiers cannot.
   const canApproveRole = Boolean(perms.all || perms.employees)
   const myBranchId = String(u?.branch_id ?? '')
@@ -96,8 +103,24 @@ export default function AdminDashboard() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
-        title="Dashboard"
-        subtitle="Branch performance overview"
+        title={
+          profile.kind === 'cashier'
+            ? 'Billing Dashboard'
+            : profile.kind === 'accountant'
+              ? 'Accounts Dashboard'
+              : profile.kind === 'storeKeeper'
+                ? 'Stock Dashboard'
+                : 'Dashboard'
+        }
+        subtitle={
+          profile.kind === 'cashier'
+            ? 'Fast sale flow, receipt actions, and branch context'
+            : profile.kind === 'accountant'
+              ? 'Collections, dues, expenses, and branch totals'
+              : profile.kind === 'storeKeeper'
+                ? 'Stock levels, transfers, and restock alerts'
+                : 'Branch performance overview'
+        }
         actions={
           <button onClick={load} disabled={loading} className="btn-secondary btn-sm gap-1.5">
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
@@ -107,10 +130,10 @@ export default function AdminDashboard() {
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Stats */}
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-          <StatCard label="Today's Revenue" value={`Rs.${(revenue?.today?.revenue || 0).toLocaleString()}`} sub={`${revenue?.today?.invoices || 0} invoices`} icon={TrendingUp} color="green" />
-          <StatCard label="Monthly Revenue" value={`Rs.${(revenue?.month?.revenue || 0).toLocaleString()}`} sub={`${revenue?.month?.invoices || 0} invoices`} icon={ShoppingBag} color="brand" />
-          <StatCard label="Outstanding Due" value={`Rs.${(revenue?.outstanding?.total || 0).toLocaleString()}`} sub="Unpaid balances" icon={CreditCard} color="yellow" />
-          <StatCard label="Low Stock Alerts" value={lowStock.length} sub="Items need restocking" icon={AlertCircle} color="red" />
+          {!isStockRole && <StatCard label="Today's Revenue" value={`Rs.${(revenue?.today?.revenue || 0).toLocaleString()}`} sub={`${revenue?.today?.invoices || 0} invoices`} icon={TrendingUp} color="green" />}
+          <StatCard label={isCashier ? 'Today’s Bills' : 'Monthly Revenue'} value={`Rs.${(revenue?.month?.revenue || 0).toLocaleString()}`} sub={`${revenue?.month?.invoices || 0} invoices`} icon={ShoppingBag} color="brand" />
+          {!isCashier && <StatCard label="Outstanding Due" value={`Rs.${(revenue?.outstanding?.total || 0).toLocaleString()}`} sub="Unpaid balances" icon={CreditCard} color="yellow" />}
+          {!isCashier && <StatCard label="Low Stock Alerts" value={lowStock.length} sub="Items need restocking" icon={AlertCircle} color="red" />}
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -120,7 +143,9 @@ export default function AdminDashboard() {
                 <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Enterprise Control Center</h3>
                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Branch operations, approvals, stock health, and cashier activity</p>
               </div>
-              <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white" style={{ background: 'var(--brand-primary)' }}>Head Office View</span>
+              <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white" style={{ background: 'var(--brand-primary)' }}>
+                {branchScoped ? 'Branch View' : 'Head Office View'}
+              </span>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
               {[
@@ -141,49 +166,53 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          <div className="card">
-            <h3 className="font-semibold text-sm mb-4 flex items-center gap-2" style={{ color: 'var(--text-1)' }}>
-              <Truck size={15} style={{ color: 'var(--brand-primary)' }} /> Branch Workflow
-            </h3>
-            <div className="space-y-3">
-              {['Stock requests', 'Manager approvals', 'Warehouse receiving', 'Cashier billing'].map((step, i) => (
-                <div key={step} className="flex items-center gap-3">
-                  <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: 'var(--brand-primary)', opacity: 0.85 }}>{i + 1}</span>
-                  <span className="text-sm" style={{ color: 'var(--text-2)' }}>{step}</span>
-                </div>
-              ))}
+          {!isCashier && (
+            <div className="card">
+              <h3 className="font-semibold text-sm mb-4 flex items-center gap-2" style={{ color: 'var(--text-1)' }}>
+                <Truck size={15} style={{ color: 'var(--brand-primary)' }} /> Branch Workflow
+              </h3>
+              <div className="space-y-3">
+                {['Stock requests', 'Manager approvals', 'Warehouse receiving', 'Cashier billing'].map((step, i) => (
+                  <div key={step} className="flex items-center gap-3">
+                    <span className="w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: 'var(--brand-primary)', opacity: 0.85 }}>{i + 1}</span>
+                    <span className="text-sm" style={{ color: 'var(--text-2)' }}>{step}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Charts */}
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-          <div className="card">
-            <h3 className="font-semibold mb-4 text-sm" style={{ color: 'var(--text-1)' }}>Revenue - Last 14 Days</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <LineChart data={salesData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
-                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} formatter={(v) => [`Rs.${Number(v).toLocaleString()}`, 'Revenue']} />
-                <Line type="monotone" dataKey="total_revenue" stroke={brandColor} strokeWidth={2} dot={false} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+        {!isCashier && (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="card">
+              <h3 className="font-semibold mb-4 text-sm" style={{ color: 'var(--text-1)' }}>Revenue - Last 14 Days</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={salesData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={v => `${(v/1000).toFixed(0)}k`} />
+                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} formatter={(v) => [`Rs.${Number(v).toLocaleString()}`, 'Revenue']} />
+                  <Line type="monotone" dataKey="total_revenue" stroke={brandColor} strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
 
-          <div className="card">
-            <h3 className="font-semibold mb-4 text-sm" style={{ color: 'var(--text-1)' }}>Daily Invoices</h3>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={salesData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
-                <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
-                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} />
-                <Bar dataKey="total_invoices" fill={brandColor} radius={[4,4,0,0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="card">
+              <h3 className="font-semibold mb-4 text-sm" style={{ color: 'var(--text-1)' }}>Daily Invoices</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={salesData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
+                  <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} />
+                  <Bar dataKey="total_invoices" fill={brandColor} radius={[4,4,0,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           {/* Top products */}
@@ -208,30 +237,32 @@ export default function AdminDashboard() {
           </div>
 
           {/* Low stock */}
-          <div className="card">
-            <h3 className="font-semibold mb-4 text-sm flex items-center gap-2" style={{ color: 'var(--text-1)' }}>
-              <AlertCircle size={14} className="text-red-400" /> Low Stock Alerts
-            </h3>
-            <div className="space-y-2">
-              {lowStock.slice(0, 8).map((s) => (
-                <div key={s.id as string} className="flex items-center justify-between">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm truncate" style={{ color: 'var(--text-1)' }}>{s.product_name as string}</p>
-                    <p className="text-xs text-slate-500 font-mono">{s.sku as string}</p>
+          {!isCashier && (
+            <div className="card">
+              <h3 className="font-semibold mb-4 text-sm flex items-center gap-2" style={{ color: 'var(--text-1)' }}>
+                <AlertCircle size={14} className="text-red-400" /> Low Stock Alerts
+              </h3>
+              <div className="space-y-2">
+                {lowStock.slice(0, 8).map((s) => (
+                  <div key={s.id as string} className="flex items-center justify-between">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm truncate" style={{ color: 'var(--text-1)' }}>{s.product_name as string}</p>
+                      <p className="text-xs text-slate-500 font-mono">{s.sku as string}</p>
+                    </div>
+                    <div className="text-right ml-4 flex-shrink-0">
+                      <span className={`badge-red text-xs`}>{s.quantity as number} left</span>
+                      <p className="text-xs text-slate-500">Min: {s.min_stock_level as number}</p>
+                    </div>
                   </div>
-                  <div className="text-right ml-4 flex-shrink-0">
-                    <span className={`badge-red text-xs`}>{s.quantity as number} left</span>
-                    <p className="text-xs text-slate-500">Min: {s.min_stock_level as number}</p>
-                  </div>
-                </div>
-              ))}
-              {lowStock.length === 0 && <p className="text-sm" style={{ color: 'var(--text-3)' }}>All stock levels OK</p>}
+                ))}
+                {lowStock.length === 0 && <p className="text-sm" style={{ color: 'var(--text-3)' }}>All stock levels OK</p>}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* ── Pending Transfer Requests ─────────────────────────────────────── */}
-        {(pendingTx.length > 0 || isAdmin) && (
+        {!isCashier && (pendingTx.length > 0 || isAdmin) && (
           <div className="card">
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-sm flex items-center gap-2" style={{ color: 'var(--text-1)' }}>

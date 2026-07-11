@@ -8,11 +8,12 @@ import {
   ChevronRight, ShoppingBag, Menu, Building2, Shield, HardDrive,
   Activity, Download, RefreshCw, Ticket, type LucideIcon
 } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
 import NotificationPanel from './NotificationPanel'
 import { setSystemTheme } from '@/lib/systemTheme'
 import ThemeToggle from '@/components/shared/ThemeToggle'
+import { getHomeLabel, getLandingRoute, getSessionProfile, type SessionRoleKind } from '@/lib/sessionRouting'
 
 const MASKED_SECRET = '********'
 
@@ -63,6 +64,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/admin/products', label: 'List Products', perm: 'inventory' },
       { to: '/admin/categories', label: 'Categories', perm: 'inventory' },
       { to: '/admin/inventory', label: 'Inventory', perm: 'inventory' },
+      { to: '/admin/stock-intelligence', label: 'Stock Intelligence', perm: 'inventory' },
       { to: '/admin/stock-lookup', label: 'Stock Lookup', perm: 'inventory' },
       { to: '/admin/stock-count', label: 'Stock Count', perm: 'inventory' },
       { to: '/admin/batches',     label: 'Batch / Expiry', perm: 'inventory' },
@@ -124,6 +126,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/admin/branches', label: 'Branches', perm: 'branches' },
       { to: '/admin/audit-logs', label: 'Audit Logs', perm: 'branches' },
       { to: '/admin/sync', label: 'Sync Monitor', adminOnly: true },
+      { to: '/admin/operations', label: 'Operations Hub', perm: 'branches' },
     ]
   },
   {
@@ -142,7 +145,20 @@ function canSeeItem(item: NavItem, permissions: Record<string, unknown>, isAdmin
   return !item.perm || Boolean(permissions[item.perm])
 }
 
+function canSeeGroup(group: NavGroup, kind: SessionRoleKind) {
+  const label = group.label
+  if (kind === 'owner') return true
+  if (kind === 'cashier') return ['Sell', 'Customers', 'Customer Management', 'Coupons', 'Deliveries'].includes(label)
+  if (kind === 'accountant') return ['Customer Management', 'Expenses', 'Reports', 'Branches'].includes(label)
+  if (kind === 'storeKeeper') return ['Products', 'Purchase Orders', 'Supplier Management', 'Stock Transfers', 'Branches'].includes(label)
+  if (kind === 'branchManager' || kind === 'subBranchManager') {
+    return ['Products', 'Purchase Orders', 'Supplier Management', 'Customer Management', 'Stock Transfers', 'Sell', 'Coupons', 'Deliveries', 'Expenses', 'Reports', 'Employee Management', 'Branches'].includes(label)
+  }
+  return true
+}
+
 const SIDEBAR_OPEN_KEY = 'sidebar_group_open'
+const SIDEBAR_SCROLL_KEY = 'sidebar_scroll_top'
 
 function getSavedGroupStates(): Record<string, boolean> {
   try { return JSON.parse(localStorage.getItem(SIDEBAR_OPEN_KEY) || '{}') } catch { return {} }
@@ -154,14 +170,22 @@ function saveGroupState(label: string, open: boolean) {
   } catch {}
 }
 
+function getSavedSidebarScroll(): number {
+  try { return Number(sessionStorage.getItem(SIDEBAR_SCROLL_KEY) || '0') || 0 } catch { return 0 }
+}
+function saveSidebarScroll(top: number) {
+  try { sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(Math.max(0, top))) } catch {}
+}
+
 function SidebarGroup({
-  group, permissions, isAdmin, collapsed, enabledModules
+  group, permissions, isAdmin, collapsed, enabledModules, kind
 }: {
   group: NavGroup
   permissions: Record<string, unknown>
   isAdmin: boolean
   collapsed: boolean
   enabledModules: string[] | null
+  kind: SessionRoleKind
 }) {
   const location = useLocation()
   const Icon = group.icon
@@ -183,6 +207,7 @@ function SidebarGroup({
   }, [groupActive]) // intentionally only auto-open, never auto-close
 
   if (!isAdmin && group.adminOnly) return null
+  if (!canSeeGroup(group, kind)) return null
   if (!isAdmin && group.perm && !permissions[group.perm] && !visibleItems.length) return null
   if (!visibleItems.length) return null
   // Module gating: enabledModules null = offline/unknown = show all
@@ -313,10 +338,15 @@ export default function AppLayout() {
   const [isLocked, setIsLocked] = useState(false)
   const [lockReason, setLockReason] = useState<'suspended' | 'cancelled' | null>(null)
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null)
+  const sidebarNavRef = useRef<HTMLElement | null>(null)
+  const location = useLocation()
 
   const permissions = (user?.role?.permissions ||
     (user as unknown as Record<string, unknown>)?.permissions) as Record<string, unknown> || {}
   const isAdmin = Boolean(permissions.all)
+  const profile = getSessionProfile(user)
+  const homeRoute = getLandingRoute(user)
+  const homeLabel = getHomeLabel(profile.kind)
   const roleName = user?.role?.name || 'System User'
 
   useEffect(() => {
@@ -326,6 +356,7 @@ export default function AppLayout() {
     }
 
     const loadBranding = async () => {
+      await window.api.settings.refreshBranding?.().catch(() => undefined)
       const res = await window.api.settings.get() as { success: boolean; data?: unknown }
       if (res.success && res.data) {
         const d = res.data as Record<string, unknown>
@@ -367,6 +398,7 @@ export default function AppLayout() {
     }
 
     loadBranding()
+    const brandingTimer = window.setInterval(() => { loadBranding().catch(() => undefined) }, 30_000)
     // Load cached license immediately for module gating (before async brand fetch)
     window.api.license.status().then((r: { success: boolean; data: { is_locked?: boolean; modules?: string[] } | null }) => {
       if (r.success && r.data) {
@@ -375,8 +407,26 @@ export default function AppLayout() {
       }
     })
     window.addEventListener('themechange', loadBranding)
-    return () => window.removeEventListener('themechange', loadBranding)
+    const offSettingsUpdated = window.api.on?.('settings:updated', () => { loadBranding().catch(() => undefined) })
+    return () => {
+      window.clearInterval(brandingTimer)
+      window.removeEventListener('themechange', loadBranding)
+      offSettingsUpdated?.()
+    }
   }, [])
+
+  useEffect(() => {
+    const node = sidebarNavRef.current
+    if (!node) return
+    const top = getSavedSidebarScroll()
+    node.scrollTop = top
+    const onBeforeUnload = () => saveSidebarScroll(node.scrollTop)
+    window.addEventListener('beforeunload', onBeforeUnload)
+    return () => {
+      saveSidebarScroll(node.scrollTop)
+      window.removeEventListener('beforeunload', onBeforeUnload)
+    }
+  }, [location.pathname, sidebarOpen])
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
@@ -455,9 +505,19 @@ export default function AppLayout() {
         <div className="flex-1" />
         <Clock />
 
-        <NavLink to="/pos" className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 transition-colors">
-          POS
-        </NavLink>
+        {(isAdmin || Boolean(permissions.pos)) && (
+          <NavLink
+            to="/pos"
+            className={({ isActive }) =>
+              `inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white transition-colors ${
+                isActive ? 'bg-blue-500' : 'bg-blue-600 hover:bg-blue-700'
+              }`
+            }
+          >
+            <ShoppingBag size={14} />
+            POS Billing
+          </NavLink>
+        )}
 
         <ThemeToggle />
 
@@ -510,9 +570,19 @@ export default function AppLayout() {
               <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: 'var(--text-3)' }}>Menu</p>
             </div>
           )}
-          <nav className={`flex-1 overflow-y-auto space-y-0.5 px-2 ${sidebarOpen ? 'py-1' : 'py-3'}`}>
-            {(isAdmin || Boolean(permissions.reports)) && (
-              <SidebarLink to="/admin" end icon={LayoutDashboard} label="Dashboard" collapsed={!sidebarOpen} />
+          <nav
+            ref={sidebarNavRef}
+            onScroll={e => saveSidebarScroll((e.currentTarget as HTMLElement).scrollTop)}
+            className={`flex-1 overflow-y-auto space-y-0.5 px-2 ${sidebarOpen ? 'py-1' : 'py-3'}`}
+          >
+            {profile.kind !== 'cashier' && (
+              <SidebarLink
+                to={homeRoute}
+                end={profile.kind === 'owner'}
+                icon={LayoutDashboard}
+                label={homeLabel}
+                collapsed={!sidebarOpen}
+              />
             )}
             {NAV_GROUPS.map(group => (
               <SidebarGroup
@@ -522,9 +592,10 @@ export default function AppLayout() {
                 isAdmin={isAdmin}
                 collapsed={!sidebarOpen}
                 enabledModules={enabledModules}
+                kind={profile.kind}
               />
             ))}
-            {isAdmin && (
+            {profile.kind === 'owner' && (
               <SidebarLink to="/admin/settings" icon={Settings} label="Settings" collapsed={!sidebarOpen} />
             )}
           </nav>

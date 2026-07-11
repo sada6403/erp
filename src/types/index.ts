@@ -309,8 +309,24 @@ export interface AuthUser {
   id: string
   name: string
   email: string
+  company_id?: string | null
+  portal?: 'superadmin' | 'admin' | 'pos'
+  role_id?: string
   role: Role
   branch?: Branch
+  branch_id?: string | null
+  sub_branch_id?: string | null
+  permissions?: Record<string, boolean>
+  enabledModules?: string[]
+  enabledFeatures?: string[]
+  limits?: Record<string, number>
+  licenseId?: string | null
+  deviceId?: string | null
+  scope?: {
+    level: 'owner' | 'branch' | 'subBranch'
+    branchId?: string | null
+    subBranchId?: string | null
+  }
 }
 
 export interface LoginCredentials {

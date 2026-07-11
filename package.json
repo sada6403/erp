@@ -7,16 +7,29 @@
   "license": "MIT",
   "scripts": {
     "predev": "node scripts/kill-dev.js",
-    "dev": "concurrently \"vite --port 5173 --strictPort\" \"npm:electron-start\"",
+    "dev": "concurrently \"node scripts/vite-dev.mjs\" \"npm:electron-start\"",
+    "build:web": "node scripts/vite-build.mjs",
+    "preview:web": "node scripts/vite-preview.mjs",
     "electron-start": "tsc -p tsconfig.electron.json && wait-on tcp:5173 && node electron-launcher.js",
     "preview-web": "node ./node_modules/vite/bin/vite.js --port 5173",
-    "build": "tsc -p tsconfig.electron.json && vite build && electron-builder",
-    "build:win": "tsc -p tsconfig.electron.json && vite build && electron-builder --win",
-    "preview": "vite preview",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p tsconfig.electron.json && npm run build:web && electron-builder",
+    "build:win": "tsc -p tsconfig.electron.json && npm run build:web && electron-builder --win",
+    "preview": "npm run preview:web",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "vitest run --project=unit",
+    "test:integration": "vitest run --project=integration",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/bcryptjs": "^2.4.6",
     "@types/better-sqlite3": "^7.6.13",
     "@types/jsonwebtoken": "^9.0.10",
@@ -24,17 +37,20 @@
     "@types/react": "^18.2.56",
     "@types/react-dom": "^18.2.19",
     "@vitejs/plugin-react": "^4.2.1",
+    "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.17",
     "concurrently": "^8.2.2",
     "cross-env": "^7.0.3",
     "electron": "^33.4.11",
     "electron-builder": "^24.13.3",
+    "happy-dom": "^15.11.7",
     "postcss": "^8.4.35",
     "tailwindcss": "^3.4.1",
     "typescript": "^5.3.3",
     "vite": "^5.1.4",
     "vite-plugin-electron": "^0.28.4",
     "vite-plugin-electron-renderer": "^0.14.5",
+    "vitest": "^2.1.9",
     "wait-on": "^7.2.0"
   },
   "dependencies": {
@@ -63,7 +79,7 @@
     "appId": "com.enterprise.pos-erp",
     "productName": "Enterprise POS ERP",
     "directories": {
-      "output": "C:\\pos-erp-release"
+      "output": "release"
     },
     "asar": true,
     "asarUnpack": [

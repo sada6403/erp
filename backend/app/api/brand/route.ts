@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { pool } from '@/lib/db'
+import { resolveEntitlements } from '@/lib/entitlements'
 
 export async function GET(req: NextRequest) {
   try {
@@ -34,10 +35,7 @@ export async function GET(req: NextRequest) {
       (c.sub_status as string) ?? 'active'
     )
 
-    const enabledModules = await getEnabledModules(
-      String(c.company_id),
-      c.package_id ? String(c.package_id) : null
-    )
+    const entitlements = await resolveEntitlements({ companyId: String(c.company_id) })
 
     return NextResponse.json({
       company_name:    c.name,
@@ -52,7 +50,10 @@ export async function GET(req: NextRequest) {
       lock_reason:    c.company_status === 'cancelled' ? 'cancelled' : (c.company_status === 'suspended' ? 'suspended' : null),
       max_users:      Number(c.max_users    ?? 10),
       max_branches:   Number(c.max_branches ?? 3),
-      modules:        enabledModules,
+      modules:        entitlements.enabledModules,
+      features:       entitlements.enabledFeatures,
+      limits:         entitlements.limits,
+      license_id:     entitlements.licenseId,
     })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })

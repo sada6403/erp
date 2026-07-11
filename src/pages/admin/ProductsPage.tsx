@@ -4,12 +4,22 @@ import Modal from '@/components/shared/Modal'
 import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
-  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle
+  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
 type UOMRow = { id?: string; uom_name: string; conversion_factor: number; is_base: boolean; wastage: number }
+type CatalogAudit = {
+  totalProducts: number
+  missingSku: number
+  duplicateSkuGroups: number
+  duplicateSkuProducts: number
+  totalCategories: number
+  rootCategories: number
+  missingShortCodes: number
+  nonNormalizedCategories: number
+}
 
 export default function ProductsPage() {
   const [products, setProducts]     = useState<Product[]>([])
@@ -24,6 +34,10 @@ export default function ProductsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting]     = useState(false)
+  const [showNormalizeConfirm, setShowNormalizeConfirm] = useState(false)
+  const [normalizing, setNormalizing] = useState(false)
+  const [audit, setAudit] = useState<CatalogAudit | null>(null)
+  const [auditLoading, setAuditLoading] = useState(false)
   const { user: currentUser } = useAuthStore()
   const isCompanyAdmin = Boolean((currentUser?.role?.permissions as Record<string,boolean>)?.all)
 
@@ -40,7 +54,34 @@ export default function ProductsPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  const loadAudit = async () => {
+    setAuditLoading(true)
+    try {
+      const res = await window.api.products.catalogAudit() as { success: boolean; data?: CatalogAudit; error?: string }
+      if (res.success && res.data) setAudit(res.data)
+    } finally {
+      setAuditLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load()
+    loadAudit()
+  }, [])
+
+  const categoryPath = (categoryId: string) => {
+    const chain: string[] = []
+    const visited = new Set<string>()
+    let current = categoryId
+    while (current && !visited.has(current)) {
+      visited.add(current)
+      const cat = categories.find(c => c.id === current)
+      if (!cat) break
+      chain.unshift(cat.name)
+      current = cat.parent_id || ''
+    }
+    return chain.join(' > ')
+  }
 
   const brands = [...new Set(products.map(p => (p as unknown as Record<string,unknown>).brand as string).filter(Boolean))]
 
@@ -70,6 +111,7 @@ export default function ProductsPage() {
       : ''
     toast.success(`Imported ${data.imported} products${detail}${data.skipped ? `, skipped ${data.skipped}` : ''}`)
     load()
+    loadAudit()
   }
 
   const handleExportCsv = async () => {
@@ -77,6 +119,23 @@ export default function ProductsPage() {
     if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Export failed'); return }
     const data = res.data as { exported: number; path: string }
     toast.success(`Exported ${data.exported} products to CSV`)
+  }
+
+  const handleNormalizeCatalog = async () => {
+    setNormalizing(true)
+    try {
+      const res = await window.api.products.normalizeCatalog() as { success: boolean; error?: string; data?: { categoriesUpdated?: number; productsUpdated?: number } }
+      if (!res.success) {
+        toast.error(res.error || 'Catalog normalization failed')
+        return
+      }
+      toast.success(`Catalog normalized: ${res.data?.categoriesUpdated || 0} categories, ${res.data?.productsUpdated || 0} products updated`)
+      load()
+      loadAudit()
+      setShowNormalizeConfirm(false)
+    } finally {
+      setNormalizing(false)
+    }
   }
 
   const toggleActive = async (p: Product) => {
@@ -119,12 +178,40 @@ export default function ProductsPage() {
             <button onClick={handleExportCsv} className="btn-secondary btn-sm gap-1.5">
               <Download size={14} /> Export CSV
             </button>
+            <button onClick={() => setShowNormalizeConfirm(true)} className="btn-secondary btn-sm gap-1.5">
+              <RefreshCw size={14} /> Normalize Catalog
+            </button>
             <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn-primary btn-sm gap-1.5">
               <Plus size={14} /> Add Product
             </button>
           </div>
         }
       />
+
+      <div className="px-6 pt-4">
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          {[
+            { label: 'Missing SKU', value: audit?.missingSku ?? 0, tone: (audit?.missingSku ?? 0) > 0 ? 'text-red-500' : 'text-green-500' },
+            { label: 'Duplicate SKU Groups', value: audit?.duplicateSkuGroups ?? 0, tone: (audit?.duplicateSkuGroups ?? 0) > 0 ? 'text-amber-500' : 'text-green-500' },
+            { label: 'Category Short Codes', value: `${audit?.totalCategories ?? 0} / ${audit?.missingShortCodes ?? 0}`, tone: 'text-slate-100' },
+            { label: 'Unnormalized Categories', value: audit?.nonNormalizedCategories ?? 0, tone: (audit?.nonNormalizedCategories ?? 0) > 0 ? 'text-amber-500' : 'text-green-500' },
+          ].map(card => (
+            <div key={card.label} className="rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
+              <p className="text-xs uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>{card.label}</p>
+              <p className={`text-2xl font-bold mt-1 ${card.tone}`}>{card.value}</p>
+            </div>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 mt-3">
+          <button onClick={loadAudit} disabled={auditLoading} className="btn-secondary btn-sm gap-1.5">
+            <RefreshCw size={14} className={auditLoading ? 'animate-spin' : ''} />
+            Refresh Audit
+          </button>
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+            Audit is read-only. Normalize only after reviewing the counts.
+          </p>
+        </div>
+      </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-2 px-6 py-3 border-b border-slate-800 flex-shrink-0">
@@ -229,6 +316,27 @@ export default function ProductsPage() {
           onSave={() => { setShowForm(false); load() }}
           onCategoryCreated={load}
         />
+      )}
+
+      {showNormalizeConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+          <div className="card w-full max-w-md">
+            <h3 className="font-bold text-lg mb-2" style={{ color: 'var(--text-1)' }}>Normalize catalog</h3>
+            <p className="text-sm mb-4" style={{ color: 'var(--text-3)' }}>
+              This will title-case category names, fill category short codes, and backfill missing product SKUs using the brand + category + sequence rule.
+            </p>
+            <div className="rounded-lg p-3 mb-4 text-xs" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+              It updates existing records in place. Run it only after checking the current catalog.
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setShowNormalizeConfirm(false)} className="btn-secondary">Cancel</button>
+              <button onClick={handleNormalizeCatalog} disabled={normalizing} className="btn-primary gap-1.5">
+                <RefreshCw size={14} className={normalizing ? 'animate-spin' : ''} />
+                {normalizing ? 'Normalizing...' : 'Normalize'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Permanent Delete Confirmation Modal */}
@@ -435,7 +543,7 @@ function ProductForm({ product, categories, suppliers, onClose, onSave, onCatego
   )
 
   const save = async () => {
-    if (!form.name || !form.sku) { toast.error('Product name and SKU are required'); return }
+    if (!form.name) { toast.error('Product name is required'); return }
     setSaving(true)
     try {
       const branchId = user?.branch?.id || 'b1111111-1111-4111-8111-111111111111'
@@ -470,6 +578,20 @@ function ProductForm({ product, categories, suppliers, onClose, onSave, onCatego
 
   const check = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(p => ({ ...p, [k]: e.target.checked }))
+
+  const categoryPath = (categoryId: string) => {
+    const chain: string[] = []
+    const visited = new Set<string>()
+    let current = categoryId
+    while (current && !visited.has(current)) {
+      visited.add(current)
+      const cat = localCategories.find(c => c.id === current)
+      if (!cat) break
+      chain.unshift(cat.name)
+      current = cat.parent_id || ''
+    }
+    return chain.join(' > ')
+  }
 
   return (
     <>
@@ -510,7 +632,7 @@ function ProductForm({ product, categories, suppliers, onClose, onSave, onCatego
                 <div className="flex gap-1.5">
                   <select value={form.category_id} onChange={f('category_id')} className="input flex-1">
                     <option value="">Select category</option>
-                    {localCategories.filter(c => c.is_active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {localCategories.filter(c => c.is_active).map(c => <option key={c.id} value={c.id}>{categoryPath(c.id) || c.name}</option>)}
                   </select>
                   <button onClick={() => setShowAddCategory(true)} className="btn-primary btn-sm w-9 flex items-center justify-center flex-shrink-0" title="Add category">
                     <Plus size={14} />

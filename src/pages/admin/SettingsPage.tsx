@@ -11,7 +11,7 @@ import toast from 'react-hot-toast'
 import { applySystemTheme } from '@/lib/systemTheme'
 import { useAuthStore } from '@/store/authStore'
 
-type Tab = 'general' | 'branding' | 'security' | 'sync' | 'barcode' | 'invoice' | 'communications' | 'loyalty' | 's3' | 'danger'
+type Tab = 'general' | 'branding' | 'security' | 'sync' | 'barcode' | 'invoice' | 'communications' | 'loyalty' | 'printer' | 'notifications' | 'license' | 's3' | 'danger'
 type InvoiceDesignId = 'dot' | 'thermal' | 'a4'
 
 const INVOICE_DESIGNS: { id: InvoiceDesignId; label: string; paper: string; description: string }[] = [
@@ -182,11 +182,47 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [isActivated, setIsActivated] = useState(false)
+  const [licenseInfo, setLicenseInfo] = useState<any>(null)
+  const [printers, setPrinters] = useState<any[]>([])
+  const [notifications, setNotifications] = useState<any[]>([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [opsLoading, setOpsLoading] = useState(false)
   const [showClearAll, setShowClearAll] = useState(false)
   const [clearConfirmText, setClearConfirmText] = useState('')
   const [clearing, setClearing] = useState(false)
   const { logout } = useAuthStore()
   const navigate = useNavigate()
+
+  const refreshOpsState = async () => {
+    setOpsLoading(true)
+    try {
+      const [licenseRes, printerRes, notificationsRes, unreadRes] = await Promise.all([
+        window.api.license.status(),
+        window.api.printer.listDevices(),
+        window.api.notifications.getAll(),
+        window.api.notifications.getUnreadCount(),
+      ])
+
+      setLicenseInfo((licenseRes as { success?: boolean; data?: any })?.data ?? licenseRes ?? null)
+      setPrinters(
+        Array.isArray(printerRes)
+          ? printerRes
+          : ((printerRes as { success?: boolean; data?: any[] })?.data ?? [])
+      )
+      setNotifications(
+        Array.isArray(notificationsRes)
+          ? notificationsRes
+          : ((notificationsRes as { success?: boolean; data?: any[] })?.data ?? [])
+      )
+      setUnreadCount(
+        typeof unreadRes === 'number'
+          ? unreadRes
+          : Number((unreadRes as { data?: number })?.data ?? 0)
+      )
+    } finally {
+      setOpsLoading(false)
+    }
+  }
 
   useEffect(() => {
     Promise.all([
@@ -197,6 +233,8 @@ export default function SettingsPage() {
       setIsActivated(Boolean(activated))
       setLoading(false)
     })
+
+    refreshOpsState().catch(() => setOpsLoading(false))
   }, [])
 
   const save = async () => {
@@ -255,6 +293,9 @@ export default function SettingsPage() {
         <TabButton active={tab === 'invoice'} onClick={() => setTab('invoice')} icon={ReceiptText} label="Invoice Layout" />
         <TabButton active={tab === 'communications'} onClick={() => setTab('communications')} icon={Mail} label="Communications" />
         <TabButton active={tab === 'loyalty'} onClick={() => setTab('loyalty')} icon={Phone} label="Loyalty" />
+        <TabButton active={tab === 'printer'} onClick={() => setTab('printer')} icon={Printer} label="Printers" />
+        <TabButton active={tab === 'notifications'} onClick={() => setTab('notifications')} icon={MessageSquare} label="Notifications" />
+        <TabButton active={tab === 'license'} onClick={() => setTab('license')} icon={Shield} label="License" />
         <TabButton active={tab === 's3'} onClick={() => setTab('s3')} icon={Cloud} label="S3 Storage" />
         <TabButton active={tab === 'danger'} onClick={() => setTab('danger')} icon={AlertTriangle} label="Danger Zone" labelClass="text-red-400" />
       </div>
@@ -268,6 +309,9 @@ export default function SettingsPage() {
         {tab === 'invoice' && <InvoiceDesigner form={form} f={f} check={check} />}
         {tab === 'communications' && <CommunicationsSettings form={form} f={f} check={check} />}
         {tab === 'loyalty'        && <LoyaltySettings />}
+        {tab === 'printer'        && <PrinterSettings printers={printers} loading={opsLoading} onRefresh={refreshOpsState} />}
+        {tab === 'notifications'   && <NotificationsSettings notifications={notifications} unreadCount={unreadCount} loading={opsLoading} onRefresh={refreshOpsState} />}
+        {tab === 'license'         && <LicenseSettings licenseInfo={licenseInfo} loading={opsLoading} onRefresh={refreshOpsState} />}
         {tab === 's3'             && <S3Settings form={form} f={f} check={check} />}
         {tab === 'danger' && (
           <div className="max-w-xl space-y-4">
@@ -1396,6 +1440,189 @@ function CommunicationsSettings({ form, f, check }: {
           >
             📦 Send Low Stock Alert Now
           </button>
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+function PrinterSettings({
+  printers,
+  loading,
+  onRefresh,
+}: {
+  printers: any[]
+  loading: boolean
+  onRefresh: () => Promise<void>
+}) {
+  const [testing, setTesting] = useState(false)
+
+  const runTest = async () => {
+    setTesting(true)
+    try {
+      const res = await window.api.printer.test() as { success: boolean; error?: string }
+      if (res.success) toast.success('Printer test sent')
+      else toast.error(res.error || 'Printer test failed')
+    } finally {
+      setTesting(false)
+    }
+  }
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <Section title="Printers">
+        <p className="text-xs -mt-1 mb-3" style={{ color: 'var(--text-3)' }}>
+          Installed printer devices detected by the desktop app.
+        </p>
+        <div className="flex gap-2 mb-4">
+          <button onClick={() => onRefresh()} disabled={loading} className="btn-secondary btn-sm gap-1.5">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+          <button onClick={runTest} disabled={testing} className="btn-primary btn-sm gap-1.5">
+            <Printer size={14} />
+            {testing ? 'Testing...' : 'Print Test'}
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {printers.length === 0 ? (
+            <div className="rounded-lg border p-4 text-sm" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+              No printers detected.
+            </div>
+          ) : printers.map((printer, index) => {
+            const name = printer?.name || printer?.deviceName || printer?.displayName || `Printer ${index + 1}`
+            const status = printer?.status || printer?.state || 'Available'
+            return (
+              <div key={`${name}-${index}`} className="rounded-lg border px-4 py-3 flex items-center justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{name}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-3)' }}>{status}</p>
+                </div>
+                <span className="text-xs px-2 py-1 rounded-full" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+                  Detected
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+function NotificationsSettings({
+  notifications,
+  unreadCount,
+  loading,
+  onRefresh,
+}: {
+  notifications: any[]
+  unreadCount: number
+  loading: boolean
+  onRefresh: () => Promise<void>
+}) {
+  const markRead = async (id: string) => {
+    await window.api.notifications.markRead(id)
+    await onRefresh()
+  }
+
+  const clearAll = async () => {
+    await window.api.notifications.clearAll()
+    toast.success('Notifications cleared')
+    await onRefresh()
+  }
+
+  return (
+    <div className="space-y-6 max-w-3xl">
+      <Section title="Notifications">
+        <div className="flex items-center gap-2 mb-4">
+          <button onClick={() => onRefresh()} disabled={loading} className="btn-secondary btn-sm gap-1.5">
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+          <button onClick={clearAll} className="btn-secondary btn-sm gap-1.5">
+            Clear All
+          </button>
+          <span className="ml-auto text-xs px-2 py-1 rounded-full" style={{ background: 'rgba(59,130,246,0.12)', color: 'var(--brand-primary)' }}>
+            {unreadCount} unread
+          </span>
+        </div>
+
+        <div className="space-y-2">
+          {notifications.length === 0 ? (
+            <div className="rounded-lg border p-4 text-sm" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+              No notifications found.
+            </div>
+          ) : notifications.map((item: any) => {
+            const id = String(item.id || item.notification_id || item.key || Math.random())
+            return (
+              <div key={id} className="rounded-lg border px-4 py-3 flex items-start justify-between gap-3" style={{ borderColor: 'var(--border)' }}>
+                <div>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{item.title || item.message || 'Notification'}</p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>{item.message || item.body || ''}</p>
+                  <p className="text-[11px] mt-1" style={{ color: 'var(--text-4)' }}>{item.created_at || item.date || ''}</p>
+                </div>
+                {!item.read && (
+                  <button onClick={() => markRead(id)} className="btn-secondary btn-sm">
+                    Mark Read
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+function LicenseSettings({
+  licenseInfo,
+  loading,
+  onRefresh,
+}: {
+  licenseInfo: any
+  loading: boolean
+  onRefresh: () => Promise<void>
+}) {
+  const status = licenseInfo?.status || licenseInfo?.state || licenseInfo?.license_status || 'Unknown'
+  const expiresAt = licenseInfo?.expires_at || licenseInfo?.expiry || licenseInfo?.valid_until || ''
+  const company = licenseInfo?.company || licenseInfo?.company_name || ''
+  const plan = licenseInfo?.plan || licenseInfo?.tier || ''
+
+  const refresh = async () => {
+    await window.api.license.refresh()
+    await onRefresh()
+    toast.success('License refreshed')
+  }
+
+  return (
+    <div className="space-y-6 max-w-2xl">
+      <Section title="License Status">
+        <div className="flex items-center gap-2 mb-4">
+          <button onClick={refresh} disabled={loading} className="btn-primary btn-sm gap-1.5">
+            <Shield size={14} />
+            Refresh License
+          </button>
+          <span className="ml-auto text-xs px-2 py-1 rounded-full" style={{ background: 'rgba(34,197,94,0.12)', color: 'rgb(34,197,94)' }}>
+            {String(status)}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-3)' }}>Plan</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{plan || 'N/A'}</p>
+          </div>
+          <div className="rounded-lg border p-3" style={{ borderColor: 'var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-3)' }}>Company</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{company || 'N/A'}</p>
+          </div>
+          <div className="rounded-lg border p-3 col-span-2" style={{ borderColor: 'var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-3)' }}>Expiry</p>
+            <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{expiresAt || 'N/A'}</p>
+          </div>
         </div>
       </Section>
     </div>

@@ -3,6 +3,7 @@ import { resolveCompany, AccountStatusError } from '@/lib/auth'
 import type { QueryClient } from '@/lib/db'
 import { applySyncOperation } from '@/lib/sync'
 import { syncLimiter } from '@/lib/rateLimit'
+import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
 
 export const runtime = 'nodejs'
 
@@ -21,6 +22,11 @@ export async function POST(request: NextRequest) {
   }
   if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const entitlements = await resolveEntitlements({ companyId: company.id })
+  if (!assertFeature({ company_id: company.id, portal: 'admin', permissions: {} }, 'sync.cloud', entitlements)) {
+    return NextResponse.json({ error: 'Feature disabled: sync.cloud' }, { status: 403 })
   }
 
   try {

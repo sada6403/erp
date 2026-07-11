@@ -17,7 +17,16 @@ export interface TokenPayload {
   name:         string
   email:        string
   role?:        string
+  role_id?:     string
+  branch_id?:   string | null
+  sub_branch_id?: string | null
+  scope?:       { level: 'owner' | 'branch' | 'subBranch'; branchId?: string | null; subBranchId?: string | null }
   permissions?: Record<string, unknown>
+  enabledModules?: string[]
+  enabledFeatures?: string[]
+  limits?: { maxUsers?: number; maxBranches?: number }
+  licenseId?: string | null
+  deviceId?: string | null
   iat?:         number
   exp?:         number
 }
@@ -66,6 +75,17 @@ export async function rotateRefreshToken(
 
   let tokenPayload: TokenPayload | null = null
 
+  const resolveScope = (roleName: string, branchId: string | null) => {
+    const normalized = roleName.trim().toLowerCase()
+    if (normalized === 'company admin' || normalized === 'owner' || normalized === 'super admin') {
+      return { level: 'owner' as const, branchId: null, subBranchId: null }
+    }
+    if (normalized === 'branch manager') {
+      return { level: 'branch' as const, branchId, subBranchId: null }
+    }
+    return { level: 'subBranch' as const, branchId, subBranchId: branchId }
+  }
+
   if (stored.portal === 'superadmin') {
     const { rows: sa } = await pool.query(
       `SELECT id, name, email FROM superadmins WHERE id = ?`, [stored.user_id]
@@ -90,10 +110,50 @@ export async function rotateRefreshToken(
     if (!admin.length) return null
     const u = admin[0] as Record<string, unknown>
     const perms = typeof u.permissions === 'string' ? JSON.parse(u.permissions as string) : u.permissions
+    const branchId = u.branch_id ? String(u.branch_id) : null
+    const scope = resolveScope(String(u.role_name || ''), branchId)
     tokenPayload = {
       sub: u.id as string, portal: 'admin', company_id: stored.company_id,
       name: u.name as string, email: u.email as string,
       role: u.role_name as string, permissions: perms,
+      role_id: u.role_id ? String(u.role_id) : undefined,
+      branch_id: scope.level === 'owner' ? null : scope.branchId,
+      sub_branch_id: scope.subBranchId,
+      scope,
+      enabledFeatures: Object.entries(perms as Record<string, unknown>).filter(([, v]) => Boolean(v)).map(([k]) => k),
+      limits: {},
+    }
+  } else if (stored.portal === 'pos') {
+    const { rows: companies } = await pool.query(
+      `SELECT db_schema FROM companies WHERE id = ?`, [stored.company_id]
+    )
+    if (!companies.length) return null
+    const { tenantPool } = await import('./db')
+    const tp = tenantPool((companies[0] as Record<string, string>).db_schema)
+    const { rows: users } = await tp.query(
+      `SELECT u.*, r.name as role_name, r.permissions FROM users u
+       JOIN roles r ON r.id = u.role_id WHERE u.id = ?`,
+      [stored.user_id]
+    )
+    if (!users.length) return null
+    const u = users[0] as Record<string, unknown>
+    const perms = typeof u.permissions === 'string' ? JSON.parse(u.permissions as string) : u.permissions
+    const branchId = u.branch_id ? String(u.branch_id) : null
+    const scope = resolveScope(String(u.role_name || ''), branchId)
+    tokenPayload = {
+      sub: u.id as string,
+      portal: 'pos',
+      company_id: stored.company_id,
+      name: u.name as string,
+      email: u.email as string,
+      role: u.role_name as string,
+      permissions: perms,
+      role_id: u.role_id ? String(u.role_id) : undefined,
+      branch_id: scope.branchId,
+      sub_branch_id: scope.subBranchId,
+      scope,
+      enabledFeatures: Object.entries(perms as Record<string, unknown>).filter(([, v]) => Boolean(v)).map(([k]) => k),
+      limits: {},
     }
   }
 

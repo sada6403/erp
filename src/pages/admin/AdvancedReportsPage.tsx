@@ -16,6 +16,7 @@ type ReportData = {
   stockMovements: Row[]
   lowStock: Row[]
   expenses: Row[]
+  transferHistory: Row[]
   installmentSummary: Row
   installmentCustomers: Row[]
   paidInstallmentHistory: Row[]
@@ -31,6 +32,7 @@ const reportTabs = [
   { key: 'paymentMethods', label: 'Payment Methods' },
   { key: 'refundCancelled', label: 'Refund / Cancelled Bills' },
   { key: 'stockMovements', label: 'Stock Movement' },
+  { key: 'transferHistory', label: 'Transfer History' },
   { key: 'lowStock', label: 'Low Stock' },
   { key: 'expenses', label: 'Expenses' },
   { key: 'installmentCustomers', label: 'Installment Balances' },

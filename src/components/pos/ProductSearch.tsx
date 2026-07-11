@@ -3,6 +3,7 @@ import type { Product } from '@/types'
 import { Package, MapPin, ArrowRightLeft, Plus, Minus, Check, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
+import { resolveImageSrc } from '@/lib/imageUrl'
 
 interface Props {
   query: string
@@ -233,8 +234,8 @@ export default function ProductSearch({ query, onSelect }: Props) {
               className={`flex items-center gap-4 px-4 py-3 ${outOfStock ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
             >
               <div className="pos-product-media w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden border">
-                {product.image_url
-                  ? <img src={product.image_url} alt={product.name} className="w-full h-full object-cover rounded-lg" />
+                {resolveImageSrc(product.image_url)
+                  ? <img src={resolveImageSrc(product.image_url)} alt={product.name} className="w-full h-full object-cover rounded-lg" />
                   : <Package size={20} style={{ color: 'var(--text-3)' }} />}
               </div>
 
