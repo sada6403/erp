@@ -1,4 +1,4 @@
-import { ipcMain, dialog, BrowserWindow } from 'electron'
+import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import * as XLSX from 'xlsx'
@@ -35,6 +35,12 @@ function currentPermissions() {
   return ((role?.permissions as Record<string, unknown>) ||
     (caller?.permissions as Record<string, unknown>) ||
     {}) as Record<string, unknown>
+}
+
+function requireReportsAccess(): { ok: true } | { ok: false; error: string } {
+  const perms = currentPermissions()
+  if (!perms.all && !perms.reports) return { ok: false, error: 'Reports access required' }
+  return { ok: true }
 }
 
 function scopedInvoiceWhere(filters: ReportFilters = {}, alias = 'i') {
@@ -129,11 +135,119 @@ function auditReport(action: string, payload: Record<string, unknown>) {
   } catch { /* reports must not fail because audit insert failed */ }
 }
 
+function companySettings() {
+  return (store.get('app_settings') as Record<string, unknown>) || {}
+}
+
+function esc(value: unknown): string {
+  if (value == null) return ''
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+const NUMERIC_COLUMN = /amount|total|balance|paid|tax|discount|price|profit|cogs|quantity|count|rate/i
+
+function renderReportTable(rows: Record<string, unknown>[]): string {
+  const columns = rows[0] ? Object.keys(rows[0]) : []
+  const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const rowsHtml = rows.map(row => `<tr>${columns.map(col => {
+    const value = row[col]
+    const isNum = typeof value === 'number' || NUMERIC_COLUMN.test(col)
+    const display = isNum ? money(value) : (value == null || value === '' ? '-' : esc(value))
+    return `<td class="${isNum ? 'num' : ''}">${display}</td>`
+  }).join('')}</tr>`).join('')
+
+  if (!rows.length) return `<div class="empty">No records for the selected filters</div>`
+  return `<table><thead><tr>${columns.map(c => `<th class="${NUMERIC_COLUMN.test(c) ? 'num' : ''}">${esc(c)}</th>`).join('')}</tr></thead><tbody>${rowsHtml}</tbody></table>`
+}
+
+function buildReportHtml(payload: {
+  title: string
+  metadata: Record<string, unknown>
+  summary?: Array<[string, unknown]>
+  rows?: Record<string, unknown>[]
+  sections?: Array<{ title: string; rows: Record<string, unknown>[] }>
+}): string {
+  const settings = companySettings()
+  const companyName = esc((settings.company_name as string) || 'Nature Plantation')
+  const companyAddress = esc((settings.company_address as string) || '')
+  const companyPhone = (settings.company_phone as string) || ''
+  const companyEmail = (settings.company_email as string) || ''
+  const contactLine = esc([companyPhone && `Tel: ${companyPhone}`, companyEmail].filter(Boolean).join('  ·  '))
+  const logoUrl = String(settings.company_logo_url || '')
+  const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+  const bodyHtml = payload.sections
+    ? payload.sections.map(sec => `<h2 class="section-title">${esc(sec.title)}</h2>${renderReportTable(sec.rows)}`).join('')
+    : renderReportTable(payload.rows || [])
+
+  const metaHtml = Object.entries(payload.metadata)
+    .filter(([, v]) => v !== undefined && v !== null && v !== '')
+    .map(([k, v]) => `<div class="meta-item"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`)
+    .join('')
+
+  const summaryHtml = (payload.summary || [])
+    .filter(([, v]) => v !== undefined && v !== null)
+    .map(([label, value]) => `<div class="stat"><span>${esc(label)}</span><strong>${typeof value === 'number' ? money(value) : esc(value)}</strong></div>`)
+    .join('')
+
+  return `<!doctype html><html><head><meta charset="utf-8"/><style>
+    * { box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; margin: 0; padding: 24px; color: #111827; }
+    .hdr { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #15803d; padding-bottom: 14px; margin-bottom: 14px; }
+    .co { display: flex; gap: 12px; align-items: center; }
+    .co img { width: 56px; height: 56px; object-fit: contain; border-radius: 10px; }
+    .co-name { font-size: 18px; font-weight: 800; color: #14532d; }
+    .co-sub { font-size: 10px; color: #6b7280; margin-top: 2px; }
+    .title h1 { font-size: 16px; margin: 0; text-align: right; color: #111827; }
+    .meta { display: flex; flex-wrap: wrap; gap: 18px; margin-bottom: 14px; }
+    .meta-item { font-size: 9.5px; color: #374151; }
+    .meta-item span { display: block; color: #9ca3af; text-transform: uppercase; letter-spacing: .04em; font-size: 8px; }
+    .stats { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    .stat { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 12px; min-width: 100px; }
+    .stat span { display: block; font-size: 8px; color: #9ca3af; text-transform: uppercase; }
+    .stat strong { font-size: 13px; color: #111827; }
+    table { width: 100%; border-collapse: collapse; font-size: 8.5px; }
+    thead { display: table-header-group; }
+    tr { page-break-inside: avoid; }
+    th { background: #14532d; color: #fff; text-align: left; padding: 6px; white-space: nowrap; }
+    td { padding: 5px 6px; border-bottom: 1px solid #e5e7eb; word-break: break-word; }
+    tbody tr:nth-child(even) { background: #f9fafb; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    .empty { text-align: center; padding: 40px; color: #9ca3af; }
+    .footer { margin-top: 16px; font-size: 8px; color: #9ca3af; text-align: center; }
+    .section-title { font-size: 11px; font-weight: 700; color: #14532d; margin: 18px 0 6px; }
+    .section-title:first-of-type { margin-top: 0; }
+  </style></head><body>
+    <div class="hdr">
+      <div class="co">
+        ${logoUrl ? `<img src="${esc(logoUrl)}" onerror="this.style.display='none'"/>` : ''}
+        <div>
+          <div class="co-name">${companyName}</div>
+          ${companyAddress ? `<div class="co-sub">${companyAddress}</div>` : ''}
+          ${contactLine ? `<div class="co-sub">${contactLine}</div>` : ''}
+        </div>
+      </div>
+      <div class="title"><h1>${esc(payload.title)}</h1></div>
+    </div>
+    <div class="meta">${metaHtml}</div>
+    ${summaryHtml ? `<div class="stats">${summaryHtml}</div>` : ''}
+    ${bodyHtml}
+    <div class="footer">Generated by ${companyName} · Every export is recorded in audit logs.</div>
+  </body></html>`
+}
+
 export function registerReportHandlers() {
 
   // ── Transaction Report ────────────────────────────────────────────────────
   ipcMain.handle('reports:transactions', (_e, filters: TxFilters = {}) => {
     try {
+      const access = requireReportsAccess()
+      if (!access.ok) return { success: false, error: access.error }
       const db = getDb()
       const scope = scopedInvoiceWhere(filters)
       const conditions = [...scope.conditions]
@@ -205,6 +319,8 @@ export function registerReportHandlers() {
 
   ipcMain.handle('reports:advancedSummary', (_e, filters: ReportFilters = {}) => {
     try {
+      const access = requireReportsAccess()
+      if (!access.ok) return { success: false, error: access.error }
       const db = getDb()
       const scope = scopedInvoiceWhere(filters)
       const where = scope.where
@@ -278,21 +394,77 @@ export function registerReportHandlers() {
         LIMIT 366
       `, params)
 
+      // Profit & Loss by period — sales, COGS, expenses and net profit grouped
+      // the same way as periodSales (daily/weekly/monthly/yearly, per the
+      // groupBy filter), so the same date range can be sliced any way.
+      const periodCogs = safeAll(db, `
+        WITH invoice_cogs AS (
+          SELECT ii.invoice_id, SUM(ii.quantity * COALESCE(p.cost_price, 0)) as cogs
+          FROM invoice_items ii
+          LEFT JOIN products p ON p.id = ii.product_id
+          GROUP BY ii.invoice_id
+        )
+        SELECT ${groupExpr} as period,
+          COALESCE(SUM(i.total_amount), 0) as sales_total,
+          COALESCE(SUM(ic.cogs), 0) as cogs
+        FROM invoices i
+        LEFT JOIN invoice_cogs ic ON ic.invoice_id = i.id
+        ${where}
+        GROUP BY period
+        ORDER BY period DESC
+        LIMIT 366
+      `, params) as Array<{ period: string; sales_total: number; cogs: number }>
+
+      const periodExpenseRows = tableExists(db, 'expenses') ? safeAll(db, `
+        SELECT ${groupExpr.replace(/i\./g, 'e.')} as period, COALESCE(SUM(amount), 0) as expense_total
+        FROM expenses e
+        ${expenseScope.where}
+        GROUP BY period
+      `, expenseScope.params) as Array<{ period: string; expense_total: number }> : []
+      const expenseByPeriod = new Map(periodExpenseRows.map(r => [r.period, Number(r.expense_total) || 0]))
+
+      const periodProfitLoss = periodCogs.map(row => {
+        const salesTotal = Number(row.sales_total) || 0
+        const cogs = Number(row.cogs) || 0
+        const expenseTotal = expenseByPeriod.get(row.period) || 0
+        const grossProfit = salesTotal - cogs
+        return {
+          period: row.period,
+          sales_total: salesTotal,
+          cogs,
+          gross_profit: grossProfit,
+          expenses: expenseTotal,
+          net_profit: grossProfit - expenseTotal,
+        }
+      })
+
+      const caller = currentUser()
+      const perms = currentPermissions()
+      const isGlobalReports = Boolean(perms.all || perms.reports)
+      const stockBranchId = (filters.branchId || (!isGlobalReports ? caller?.branch_id as string | undefined : undefined)) || ''
+
       const productSales = safeAll(db, `
-        SELECT p.name as product_name, p.sku, SUM(ii.quantity) as quantity,
+        SELECT p.name as product_name, p.sku,
+          p.cost_price as buy_price,
+          p.selling_price as sell_price,
+          SUM(ii.quantity) as quantity,
           COALESCE(SUM(ii.line_total), 0) as sales_total,
           COALESCE(SUM(ii.discount_amount), 0) as discount_total,
           COALESCE(SUM(ii.tax_amount), 0) as tax_total,
           COALESCE(SUM(ii.quantity * COALESCE(p.cost_price, 0)), 0) as cost_total,
-          COALESCE(SUM(ii.line_total - (ii.quantity * COALESCE(p.cost_price, 0))), 0) as gross_profit
+          COALESCE(SUM(ii.line_total - (ii.quantity * COALESCE(p.cost_price, 0))), 0) as gross_profit,
+          COALESCE((SELECT SUM(s.quantity) FROM stocks s WHERE s.product_id = p.id${stockBranchId ? ' AND s.branch_id = ?' : ''}), 0) as current_stock,
+          COALESCE(SUM(CASE WHEN ins.id IS NOT NULL THEN ii.quantity ELSE 0 END), 0) as installment_qty,
+          COALESCE(SUM(CASE WHEN ins.id IS NOT NULL THEN ii.line_total ELSE 0 END), 0) as installment_sales
         FROM invoice_items ii
         JOIN invoices i ON i.id = ii.invoice_id
         LEFT JOIN products p ON p.id = ii.product_id
+        LEFT JOIN installments ins ON ins.invoice_id = i.id
         ${where}
         GROUP BY ii.product_id
-        ORDER BY sales_total DESC
-        LIMIT 100
-      `, params)
+        ORDER BY gross_profit DESC
+        LIMIT 200
+      `, [...(stockBranchId ? [stockBranchId] : []), ...params])
 
       const customerSales = safeAll(db, `
         SELECT COALESCE(c.name, 'Walk-in Customer') as customer_name, c.phone as customer_phone,
@@ -497,6 +669,7 @@ export function registerReportHandlers() {
         data: {
           summary: { ...summary, cogs: (cogs as Record<string, number>).cogs, expenses: (expenses as Record<string, number>).expense_total, profit },
           periodSales,
+          periodProfitLoss,
           productSales,
           customerSales,
           cashierSales,
@@ -521,6 +694,8 @@ export function registerReportHandlers() {
   // Agent commission summary for manager review / printing
   ipcMain.handle('reports:agentCommissions', (_e, filters: TxFilters = {}) => {
     try {
+      const access = requireReportsAccess()
+      if (!access.ok) return { success: false, error: access.error }
       const db = getDb()
       const scope = scopedInvoiceWhere(filters)
       const conditions = ["COALESCE(i.agent_code, '') <> ''", ...scope.conditions]
@@ -605,6 +780,8 @@ export function registerReportHandlers() {
   // ── Export Transactions to CSV ────────────────────────────────────────────
   ipcMain.handle('reports:exportTransactionsCsv', async (_e, filters: TxFilters = {}) => {
     try {
+      const access = requireReportsAccess()
+      if (!access.ok) return { success: false, error: access.error }
       const win = BrowserWindow.getFocusedWindow()
       const saveResult = await dialog.showSaveDialog(win!, {
         title: 'Export Transactions CSV',
@@ -675,6 +852,13 @@ export function registerReportHandlers() {
       const wb = XLSX.utils.book_new()
       for (const sheet of payload.sheets) {
         const ws = XLSX.utils.json_to_sheet(sheet.rows)
+        const headers = sheet.rows.length ? Object.keys(sheet.rows[0]) : []
+        if (headers.length) {
+          ws['!cols'] = headers.map(h => {
+            const maxLen = Math.max(h.length, ...sheet.rows.map(r => String(r[h] ?? '').length))
+            return { wch: Math.min(Math.max(maxLen + 2, 10), 40) }
+          })
+        }
         XLSX.utils.book_append_sheet(wb, ws, sheet.name.slice(0, 31))
       }
       XLSX.writeFile(wb, result.filePath)
@@ -723,8 +907,18 @@ export function registerReportHandlers() {
     }
   })
 
-  // Export current view to PDF using Electron printToPDF
-  ipcMain.handle('reports:exportPdf', async (_e, payload: { filename: string }) => {
+  // Export a report to PDF as a proper formatted document (company header +
+  // full data table), rendered off-screen — NOT a screenshot of the live app window.
+  ipcMain.handle('reports:exportPdf', async (_e, payload: {
+    filename: string
+    title?: string
+    metadata?: Record<string, unknown>
+    summary?: Array<[string, unknown]>
+    rows?: Record<string, unknown>[]
+    sections?: Array<{ title: string; rows: Record<string, unknown>[] }>
+  }) => {
+    let tmpPath: string | undefined
+    let pdfWin: BrowserWindow | undefined
     try {
       const win = BrowserWindow.getFocusedWindow()
       if (!win) return { success: false, error: 'No window' }
@@ -736,16 +930,45 @@ export function registerReportHandlers() {
       })
       if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true }
 
-      const pdfBuffer = await win.webContents.printToPDF({
+      const html = buildReportHtml({
+        title: payload.title || 'Report',
+        metadata: payload.metadata || {},
+        summary: payload.summary,
+        rows: payload.rows,
+        sections: payload.sections,
+      })
+      tmpPath = path.join(app.getPath('temp'), `report-${Date.now()}.html`)
+      fs.writeFileSync(tmpPath, html, 'utf-8')
+
+      pdfWin = new BrowserWindow({
+        width: 1400,
+        height: 900,
+        show: false,
+        webPreferences: { contextIsolation: true, nodeIntegration: false },
+      })
+      const loadedPdfWin = pdfWin
+      await loadedPdfWin.loadFile(tmpPath)
+      const pdfBuffer = await loadedPdfWin.webContents.printToPDF({
         printBackground: true,
         pageSize: 'A4',
         landscape: true,
-        margins: { top: 0.5, bottom: 0.5, left: 0.5, right: 0.5 },
+        margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 },
       })
+
       fs.writeFileSync(saveResult.filePath, pdfBuffer)
+      auditReport('REPORT_EXPORT_PDF', {
+        filename: payload.filename,
+        title: payload.title,
+        rows: payload.sections
+          ? payload.sections.reduce((sum, s) => sum + s.rows.length, 0)
+          : (payload.rows || []).length,
+      })
       return { success: true, filePath: saveResult.filePath }
     } catch (err) {
       return { success: false, error: String(err) }
+    } finally {
+      if (pdfWin && !pdfWin.isDestroyed()) pdfWin.close()
+      if (tmpPath) { try { fs.unlinkSync(tmpPath) } catch { /* ignore */ } }
     }
   })
 

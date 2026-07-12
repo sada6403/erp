@@ -81,6 +81,74 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
+  // Net profit (sell price − buy price, i.e. sales − COGS) and installment
+  // totals for the selected date range, so Analytics can show profit rather
+  // than just raw sales revenue.
+  ipcMain.handle('analytics:profitSummary', (_e, filters: Record<string, unknown> = {}) => {
+    try {
+      const db = getDb()
+      const user = store.get('auth_user') as Record<string, unknown>
+      const superAdmin = isSuperAdmin(user)
+      const dateFrom = (filters.date_from as string) || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
+      const dateTo = (filters.date_to as string) || new Date().toISOString().slice(0, 10)
+      const branchFilter = filters.branch_id as string | undefined
+        || (!superAdmin ? user?.branch_id as string : undefined)
+
+      const invoiceWhere = branchFilter
+        ? `WHERE i.branch_id = ? AND i.status = 'completed' AND date(i.created_at) BETWEEN ? AND ?`
+        : `WHERE i.status = 'completed' AND date(i.created_at) BETWEEN ? AND ?`
+      const invoiceArgs = branchFilter ? [branchFilter, dateFrom, dateTo] : [dateFrom, dateTo]
+
+      const sales = db.prepare(`
+        SELECT COALESCE(SUM(i.total_amount), 0) as sales_total, COUNT(*) as invoice_count
+        FROM invoices i
+        ${invoiceWhere}
+      `).get(...invoiceArgs) as { sales_total: number; invoice_count: number }
+
+      const cogsRow = db.prepare(`
+        SELECT COALESCE(SUM(ii.quantity * COALESCE(p.cost_price, 0)), 0) as cogs
+        FROM invoice_items ii
+        JOIN invoices i ON i.id = ii.invoice_id
+        LEFT JOIN products p ON p.id = ii.product_id
+        ${invoiceWhere}
+      `).get(...invoiceArgs) as { cogs: number }
+
+      const netProfit = Number(sales.sales_total || 0) - Number(cogsRow.cogs || 0)
+
+      const installmentWhere = branchFilter
+        ? `WHERE ins.branch_id = ? AND date(ins.created_at) BETWEEN ? AND ?`
+        : `WHERE date(ins.created_at) BETWEEN ? AND ?`
+      const installmentArgs = branchFilter ? [branchFilter, dateFrom, dateTo] : [dateFrom, dateTo]
+
+      const installmentGiven = db.prepare(`
+        SELECT COALESCE(SUM(ins.total_amount), 0) as given_total, COUNT(*) as contract_count
+        FROM installments ins
+        ${installmentWhere}
+      `).get(...installmentArgs) as { given_total: number; contract_count: number }
+
+      const pendingWhere = branchFilter ? 'WHERE ins.branch_id = ? AND' : 'WHERE'
+      const pendingArgs = branchFilter ? [branchFilter] : []
+      const installmentPending = db.prepare(`
+        SELECT COALESCE(SUM(ins.due_amount), 0) as pending_total
+        FROM installments ins
+        ${pendingWhere} ins.status IN ('active','overdue')
+      `).get(...pendingArgs) as { pending_total: number }
+
+      return {
+        success: true,
+        data: {
+          sales_total: sales.sales_total,
+          invoice_count: sales.invoice_count,
+          cogs: cogsRow.cogs,
+          net_profit: netProfit,
+          installment_given: installmentGiven.given_total,
+          installment_contracts: installmentGiven.contract_count,
+          installment_pending: installmentPending.pending_total,
+        },
+      }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
   ipcMain.handle('analytics:topProducts', (_e, filters: Record<string, unknown> = {}) => {
     try {
       const db = getDb()
@@ -118,19 +186,36 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('analytics:branchPerformance', (_e, _filters: Record<string, unknown> = {}) => {
+  ipcMain.handle('analytics:branchPerformance', (_e, filters: Record<string, unknown> = {}) => {
     try {
       const db = getDb()
-      const rows = db.prepare(`
-        SELECT b.id as branch_id, b.name as branch_name,
-               COUNT(i.id) as total_invoices,
-               ROUND(SUM(i.total_amount), 2) as total_revenue,
-               ROUND(AVG(i.total_amount), 2) as avg_invoice_value
-        FROM branches b
-        LEFT JOIN invoices i ON i.branch_id = b.id AND i.status = 'completed'
-        GROUP BY b.id
-        ORDER BY total_revenue DESC
-      `).all()
+      const user = store.get('auth_user') as Record<string, unknown>
+      const superAdmin = isSuperAdmin(user)
+      const branchFilter = filters.branch_id as string | undefined
+        || (!superAdmin ? user?.branch_id as string : undefined)
+
+      const rows = branchFilter
+        ? db.prepare(`
+            SELECT b.id as branch_id, b.name as branch_name,
+                   COUNT(i.id) as total_invoices,
+                   ROUND(SUM(i.total_amount), 2) as total_revenue,
+                   ROUND(AVG(i.total_amount), 2) as avg_invoice_value
+            FROM branches b
+            LEFT JOIN invoices i ON i.branch_id = b.id AND i.status = 'completed'
+            WHERE b.id = ?
+            GROUP BY b.id
+            ORDER BY total_revenue DESC
+          `).all(branchFilter)
+        : db.prepare(`
+            SELECT b.id as branch_id, b.name as branch_name,
+                   COUNT(i.id) as total_invoices,
+                   ROUND(SUM(i.total_amount), 2) as total_revenue,
+                   ROUND(AVG(i.total_amount), 2) as avg_invoice_value
+            FROM branches b
+            LEFT JOIN invoices i ON i.branch_id = b.id AND i.status = 'completed'
+            GROUP BY b.id
+            ORDER BY total_revenue DESC
+          `).all()
       return { success: true, data: rows }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })

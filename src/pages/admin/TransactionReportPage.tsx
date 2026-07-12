@@ -204,8 +204,7 @@ export default function TransactionReportPage() {
     setExporting(false)
   }
 
-  const exportExcel = async () => {
-    setExporting(true)
+  const fetchAllTransactionRows = async () => {
     const res = await window.api?.reports.transactions({
       ...filters,
       search: filters.search || undefined,
@@ -220,28 +219,34 @@ export default function TransactionReportPage() {
       limit: 50000,
       offset: 0,
     })
-    if (res?.success) {
-      const xlsRows = res.data.map((r: TxRow) => ({
-        'Bill No': r.invoice_number,
-        'Date & Time': fmtDate(r.created_at),
-        'Type': r.bill_type,
-        'Status': r.status,
-        'Branch': r.branch_name ?? '',
-        'Cashier': r.cashier_name ?? '',
-        'Customer': r.customer_name ?? '',
-        'Phone': r.customer_phone ?? '',
-        'Payment Method': r.payment_methods ?? '',
-        'Agent Code': r.agent_code ?? '',
-        'Agent Name': r.agent_name ?? '',
-        'Commission %': r.agent_commission_pct ?? 0,
-        'Commission Amount': r.agent_commission_amount ?? 0,
-        'Subtotal': r.subtotal,
-        'Discount': r.discount_amount,
-        'Tax': r.tax_amount,
-        'Total': r.total_amount,
-        'Paid': r.paid_amount,
-        'Balance': r.due_amount,
-      }))
+    if (!res?.success) return null
+    return (res.data as TxRow[]).map(r => ({
+      'Bill No': r.invoice_number,
+      'Date & Time': fmtDate(r.created_at),
+      'Type': r.bill_type,
+      'Status': r.status,
+      'Branch': r.branch_name ?? '',
+      'Cashier': r.cashier_name ?? '',
+      'Customer': r.customer_name ?? '',
+      'Phone': r.customer_phone ?? '',
+      'Payment Method': r.payment_methods ?? '',
+      'Agent Code': r.agent_code ?? '',
+      'Agent Name': r.agent_name ?? '',
+      'Commission %': r.agent_commission_pct ?? 0,
+      'Commission Amount': r.agent_commission_amount ?? 0,
+      'Subtotal': r.subtotal,
+      'Discount': r.discount_amount,
+      'Tax': r.tax_amount,
+      'Total': r.total_amount,
+      'Paid': r.paid_amount,
+      'Balance': r.due_amount,
+    }))
+  }
+
+  const exportExcel = async () => {
+    setExporting(true)
+    const xlsRows = await fetchAllTransactionRows()
+    if (xlsRows) {
       await window.api?.reports.exportExcel({
         filename: `transactions-${new Date().toISOString().slice(0, 10)}`,
         sheets: [{ name: 'Transactions', rows: xlsRows }],
@@ -252,7 +257,23 @@ export default function TransactionReportPage() {
 
   const exportPdf = async () => {
     setExporting(true)
-    await window.api?.reports.exportPdf({ filename: `transactions-${new Date().toISOString().slice(0, 10)}` })
+    const pdfRows = await fetchAllTransactionRows()
+    await window.api?.reports.exportPdf({
+      filename: `transactions-${new Date().toISOString().slice(0, 10)}`,
+      title: 'Transaction Report',
+      metadata: {
+        'Date Range': `${filters.dateFrom || 'Start'} to ${filters.dateTo || 'Today'}`,
+        'Status': filters.status || 'All',
+        'Generated Time': new Date().toLocaleString(),
+      },
+      summary: [
+        ['Bills', total],
+        ['Total Sales', (pdfRows || []).reduce((sum, r) => sum + Number(r['Total'] || 0), 0)],
+        ['Total Paid', (pdfRows || []).reduce((sum, r) => sum + Number(r['Paid'] || 0), 0)],
+        ['Balance', (pdfRows || []).reduce((sum, r) => sum + Number(r['Balance'] || 0), 0)],
+      ],
+      rows: pdfRows || [],
+    })
     setExporting(false)
   }
 

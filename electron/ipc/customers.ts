@@ -1,10 +1,28 @@
 import type { IpcMain } from 'electron'
+import { dialog } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
+import * as XLSX from 'xlsx'
 
 const store = new Store()
+
+const PHONE_RE = /^\+?\d{9,12}$/
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const NIC_RE = /^(\d{9}[vVxX]|\d{12})$/
+
+function importCell(row: Record<string, unknown>, ...names: string[]): string {
+  for (const name of names) {
+    for (const key of Object.keys(row)) {
+      if (key.trim().toLowerCase() === name.toLowerCase()) {
+        const v = row[key]
+        if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+      }
+    }
+  }
+  return ''
+}
 
 export function registerCustomerHandlers(ipcMain: IpcMain) {
   ipcMain.handle('customers:list', (_e, filters: Record<string, unknown> = {}) => {
@@ -70,6 +88,116 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
         .run({ ...payload, id })
       await enqueuSync('customers', id, 'UPDATE', { id, ...payload })
       return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('customers:downloadTemplate', async () => {
+    try {
+      const saveResult = await dialog.showSaveDialog({
+        title: 'Save Customer Import Template',
+        defaultPath: 'customer-import-template.xlsx',
+        filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
+      })
+      if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true }
+
+      const wb = XLSX.utils.book_new()
+      const sample = [
+        { 'Name': 'Kumaran Silva', 'Phone': '0771234567', 'NIC': '199012345678', 'Email': 'kumaran@example.com', 'Address': '12 Galle Road, Colombo', 'Credit Limit': 0, 'Notes': '' },
+        { 'Name': '', 'Phone': '', 'NIC': '', 'Email': '', 'Address': '', 'Credit Limit': '', 'Notes': '' },
+      ]
+      const ws = XLSX.utils.json_to_sheet(sample)
+      ws['!cols'] = [{ wch: 22 }, { wch: 16 }, { wch: 16 }, { wch: 26 }, { wch: 30 }, { wch: 12 }, { wch: 24 }]
+      XLSX.utils.book_append_sheet(wb, ws, 'Customers')
+
+      const instructions = XLSX.utils.aoa_to_sheet([
+        ['Column', 'Required', 'Rules'],
+        ['Name', 'Yes', 'Full customer name'],
+        ['Phone', 'Yes', '9-12 digits, optionally starting with +'],
+        ['NIC', 'No', 'Sri Lankan NIC — 9 digits + V/X, or 12 digits'],
+        ['Email', 'No', 'Must be a valid email if provided'],
+        ['Address', 'Yes', 'Free text'],
+        ['Credit Limit', 'No', 'Number, defaults to 0'],
+        ['Notes', 'No', 'Free text'],
+        [],
+        ['Delete the sample row before uploading, or leave it — the importer skips fully blank rows.'],
+        ['Upload this file from Customers → Bulk Import. You can also open it in Google Sheets (File > Import > Upload) and re-export as .xlsx before uploading here.'],
+      ])
+      instructions['!cols'] = [{ wch: 16 }, { wch: 10 }, { wch: 60 }]
+      XLSX.utils.book_append_sheet(wb, instructions, 'Instructions')
+
+      XLSX.writeFile(wb, saveResult.filePath)
+      return { success: true, filePath: saveResult.filePath }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('customers:importExcel', async () => {
+    try {
+      const { filePaths } = await dialog.showOpenDialog({
+        title: 'Select Customer Import File',
+        filters: [{ name: 'Excel / CSV', extensions: ['xlsx', 'xls', 'csv'] }],
+        properties: ['openFile'],
+      })
+      if (!filePaths || filePaths.length === 0) return { success: false, cancelled: true }
+
+      const db = getDb()
+      const authUserRow = store.get('auth_user') as Record<string, unknown> | undefined
+      const workbook = XLSX.readFile(filePaths[0])
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, unknown>[]
+
+      let imported = 0
+      let skipped = 0
+      const errors: string[] = []
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]
+        const rowNum = i + 2 // header is row 1
+        const name = importCell(row, 'Name', 'Full Name')
+        const phone = importCell(row, 'Phone', 'Mobile', 'Mobile Number').replace(/[\s-]/g, '')
+        const nic = importCell(row, 'NIC')
+        const email = importCell(row, 'Email')
+        const address = importCell(row, 'Address')
+        const creditLimitRaw = importCell(row, 'Credit Limit')
+        const notes = importCell(row, 'Notes')
+
+        if (!name && !phone && !address) continue // fully blank row
+
+        if (!name) { errors.push(`Row ${rowNum}: name is required`); skipped++; continue }
+        if (!phone) { errors.push(`Row ${rowNum}: phone is required`); skipped++; continue }
+        if (!PHONE_RE.test(phone)) { errors.push(`Row ${rowNum}: invalid phone "${phone}"`); skipped++; continue }
+        if (!address) { errors.push(`Row ${rowNum}: address is required`); skipped++; continue }
+        if (email && !EMAIL_RE.test(email)) { errors.push(`Row ${rowNum}: invalid email "${email}"`); skipped++; continue }
+        if (nic && !NIC_RE.test(nic)) { errors.push(`Row ${rowNum}: invalid NIC "${nic}"`); skipped++; continue }
+
+        const id = crypto.randomUUID()
+        const safe = {
+          id,
+          branch_id: authUserRow?.branch_id || null,
+          name,
+          phone,
+          email: email || null,
+          address,
+          nic: nic || null,
+          notes: notes || null,
+        }
+        try {
+          db.prepare(`
+            INSERT INTO customers (id, branch_id, name, phone, email, address, nic, notes)
+            VALUES (@id, @branch_id, @name, @phone, @email, @address, @nic, @notes)
+          `).run(safe)
+          if (creditLimitRaw) {
+            const creditLimit = Number(creditLimitRaw) || 0
+            if (creditLimit) db.prepare('UPDATE customers SET credit_limit = ? WHERE id = ?').run(creditLimit, id)
+          }
+          await enqueuSync('customers', id, 'INSERT', safe)
+          imported++
+        } catch (err: unknown) {
+          errors.push(`Row ${rowNum}: ${(err as Error).message}`)
+          skipped++
+        }
+      }
+
+      return { success: true, imported, skipped, errors: errors.slice(0, 50) }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 

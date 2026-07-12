@@ -268,6 +268,11 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
   ipcMain.handle('products:delete', async (_e, id: string) => {
     try {
+      const caller = getAuthUser()
+      const perms = (caller?.role as Record<string, unknown>)?.permissions as Record<string, unknown>
+        || (caller?.permissions as Record<string, unknown>) || {}
+      if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
+
       const db = getDb()
       db.prepare("UPDATE products SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id)
       await enqueuSync('products', id, 'UPDATE', { id, is_active: 0 })

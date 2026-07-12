@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, Trash2, Users, ShieldCheck, Search, Lock, UserX, UserCheck, KeyRound, AlertTriangle } from 'lucide-react'
+import { Plus, Edit2, Trash2, Users, ShieldCheck, Search, Lock, UserX, UserCheck, KeyRound, AlertTriangle, Upload, FileDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -39,6 +39,7 @@ export default function UsersPage() {
   const [hardDeleteUser, setHardDeleteUser] = useState<Record<string,unknown>|null>(null)
   const [tab,          setTab]          = useState<'users' | 'roles'>('users')
   const [search,       setSearch]       = useState('')
+  const [importing,    setImporting]    = useState(false)
   const currentUser = useAuthStore(s => s.user)
 
   // ── Permission helpers ──────────────────────────────────────────────────────
@@ -96,6 +97,25 @@ export default function UsersPage() {
     else toast.error(res.error || 'Failed')
   }
 
+  const downloadUserTemplate = async () => {
+    const res = await window.api.admin.users.downloadTemplate()
+    if (res.success) toast.success('Template saved')
+    else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+  }
+
+  const bulkImportUsers = async () => {
+    setImporting(true)
+    const res = await window.api.admin.users.importExcel()
+    setImporting(false)
+    if (res.cancelled) return
+    if (!res.success) { toast.error(res.error || 'Import failed'); return }
+    if (res.imported) toast.success(`Imported ${res.imported} employee(s)`)
+    if (res.skipped) {
+      toast.error(`Skipped ${res.skipped} row(s)${res.errors?.[0] ? ` — e.g. ${res.errors[0]}` : ''}`, { duration: 6000 })
+    }
+    if (res.imported) load()
+  }
+
   const deleteRole = async (role: Role) => {
     if (role.name === 'Company Admin') { toast.error('Cannot delete Company Admin role'); return }
     if ((roleUsage[role.id] || 0) > 0) { toast.error('Role is assigned to users'); return }
@@ -112,12 +132,20 @@ export default function UsersPage() {
         subtitle={`${filteredUsers.length} users, ${roles.length} roles`}
         actions={
           tab === 'users' ? (
-            <button
-              onClick={() => { setEditingUser(null); setShowUserForm(true) }}
-              className="btn-primary btn-sm gap-1.5"
-            >
-              <Plus size={14} /> Add User
-            </button>
+            <div className="flex gap-2">
+              <button onClick={downloadUserTemplate} className="btn-secondary btn-sm gap-1.5">
+                <FileDown size={14} /> Template
+              </button>
+              <button onClick={bulkImportUsers} disabled={importing} className="btn-secondary btn-sm gap-1.5">
+                <Upload size={14} /> {importing ? 'Importing...' : 'Bulk Import'}
+              </button>
+              <button
+                onClick={() => { setEditingUser(null); setShowUserForm(true) }}
+                className="btn-primary btn-sm gap-1.5"
+              >
+                <Plus size={14} /> Add User
+              </button>
+            </div>
           ) : isGlobalUser ? (
             // Only Company Admin can create roles
             <button

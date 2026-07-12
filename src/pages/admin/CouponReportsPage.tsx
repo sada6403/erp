@@ -101,18 +101,23 @@ export default function CouponReportsPage() {
     if ((res as { success: boolean }).success) toast.success('Excel exported')
   }
 
-  const exportPdf = async () => {
-    const res = await window.api.reports.exportPdf({
-      filename: `coupon-report-${tab}-${new Date().toISOString().slice(0, 10)}`,
-    })
-    if ((res as { success: boolean }).success) toast.success('PDF exported')
-  }
-
   const summaryCards: Array<[string, unknown, boolean?]> =
     tab === 'redeemed' ? [['Redemptions', summary.count], ['Total Redeemed', summary.total_redeemed, true]]
     : tab === 'customerSummary' ? [['Customers', summary.customers], ['Total Value', summary.total_value, true], ['Total Used', summary.total_used, true]]
     : tab === 'expired' ? [['Coupons', summary.count], ['Total Value', summary.total_value, true], ['Used Before Expiry', summary.total_used, true], ['Forfeited Balance', summary.forfeited_balance, true]]
     : [['Coupons', summary.count], ['Total Value', summary.total_value, true], ['Used', summary.total_used, true], ['Remaining', summary.total_remaining, true]]
+
+  const exportPdf = async () => {
+    if (!rows.length) { toast.error('Nothing to export'); return }
+    const res = await window.api.reports.exportPdf({
+      filename: `coupon-report-${tab}-${new Date().toISOString().slice(0, 10)}`,
+      title: `Coupons — ${TABS.find(t => t.key === tab)?.label}`,
+      metadata: { Report: `Coupons — ${TABS.find(t => t.key === tab)?.label}`, From: dateFrom || 'All', To: dateTo || 'All' },
+      summary: summaryCards.map(([label, value]) => [label, value] as [string, unknown]),
+      rows: exportRows(),
+    })
+    if ((res as { success: boolean }).success) toast.success('PDF exported')
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">

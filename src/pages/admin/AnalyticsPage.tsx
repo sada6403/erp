@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import PageHeader from '@/components/shared/PageHeader'
 import StatCard from '@/components/shared/StatCard'
-import { TrendingUp, ShoppingBag, Users, Package, FileSpreadsheet, FileText } from 'lucide-react'
+import { TrendingUp, ShoppingBag, Users, Package, FileSpreadsheet, FileText, DollarSign, CreditCard } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 
@@ -11,31 +11,48 @@ export default function AnalyticsPage() {
   const [topProducts, setTopProducts]     = useState<Record<string,unknown>[]>([])
   const [branchPerf, setBranchPerf]       = useState<Record<string,unknown>[]>([])
   const [revenue, setRevenue]             = useState<Record<string,unknown> | null>(null)
+  const [profit, setProfit]               = useState<Record<string,unknown> | null>(null)
   const [dateFrom, setDateFrom]           = useState(new Date(Date.now()-30*86400000).toISOString().slice(0,10))
   const [dateTo, setDateTo]               = useState(new Date().toISOString().slice(0,10))
 
   const load = async () => {
-    const [s, t, b, r] = await Promise.all([
+    const [s, t, b, r, p] = await Promise.all([
       window.api.analytics.salesSummary({ date_from: dateFrom, date_to: dateTo }),
       window.api.analytics.topProducts({ limit: 8 }),
       window.api.analytics.branchPerformance({}),
-      window.api.analytics.revenue({})
+      window.api.analytics.revenue({}),
+      window.api.analytics.profitSummary({ date_from: dateFrom, date_to: dateTo }),
     ])
     if (s.success) setSalesData((s.data as Record<string,unknown>[]).reverse())
     if (t.success) setTopProducts(t.data as Record<string,unknown>[])
     if (b.success) setBranchPerf(b.data as Record<string,unknown>[])
     if (r.success) setRevenue(r.data as Record<string,unknown>)
+    if (p.success) setProfit(p.data as Record<string,unknown>)
   }
 
   useEffect(() => { load() }, [dateFrom, dateTo])
 
   const rev = revenue as Record<string, Record<string, number>> | null
+  const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   const exportExcel = async () => {
     const filename = `analytics-report-${dateFrom}-to-${dateTo}`
     const res = await window.api.reports.exportExcel({
       filename,
       sheets: [
+        {
+          name: 'Profit & Loss Summary',
+          rows: [{
+            'Date Range': `${dateFrom} to ${dateTo}`,
+            'Sales Total': profit?.sales_total || 0,
+            'Buy Price (COGS)': profit?.cogs || 0,
+            'Net Profit': profit?.net_profit || 0,
+            'Profit Margin %': profit?.sales_total ? (Number(profit?.net_profit || 0) / Number(profit?.sales_total || 1) * 100).toFixed(1) : 0,
+            'Installments Given': profit?.installment_given || 0,
+            'Installment Contracts': profit?.installment_contracts || 0,
+            'Installments Pending': profit?.installment_pending || 0,
+          }],
+        },
         {
           name: 'Daily Revenue',
           rows: salesData.map(r => ({
@@ -73,7 +90,46 @@ export default function AnalyticsPage() {
 
   const exportPdf = async () => {
     const filename = `analytics-report-${dateFrom}-to-${dateTo}`
-    const res = await window.api.reports.exportPdf({ filename }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
+    const res = await window.api.reports.exportPdf({
+      filename,
+      title: 'Analytics Report',
+      metadata: { 'Date Range': `${dateFrom} to ${dateTo}`, 'Generated Time': new Date().toLocaleString() },
+      summary: [
+        ['Sales Total', profit?.sales_total],
+        ['Buy Price (COGS)', profit?.cogs],
+        ['Net Profit', profit?.net_profit],
+        ['Outstanding', rev?.outstanding?.total],
+        ['Installments Given', profit?.installment_given],
+        ['Installments Pending', profit?.installment_pending],
+      ],
+      sections: [
+        {
+          title: 'Daily Revenue',
+          rows: salesData.map(r => ({
+            Date: r.date,
+            'Total Revenue': r.total_revenue,
+            'Invoice Count': r.invoice_count,
+          })),
+        },
+        {
+          title: 'Top Products',
+          rows: topProducts.map(r => ({
+            Product: r.name,
+            'Units Sold': r.total_quantity,
+            'Revenue': r.total_revenue,
+          })),
+        },
+        {
+          title: 'Branch Performance',
+          rows: branchPerf.map(r => ({
+            Branch: r.branch_name,
+            'Total Revenue': r.total_revenue,
+            'Invoices': r.total_invoices,
+            'Avg Invoice': r.avg_invoice_value,
+          })),
+        },
+      ],
+    }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
     if (res.success) {
       toast.success('PDF report saved!')
       if (res.filePath) window.api.reports.openFile(res.filePath)
@@ -108,6 +164,13 @@ export default function AnalyticsPage() {
           <StatCard label="Month Revenue" value={`Rs.${(rev?.month?.revenue || 0).toLocaleString()}`} sub={`${rev?.month?.invoices || 0} invoices`} icon={ShoppingBag} color="blue" />
           <StatCard label="Avg Invoice" value={rev?.month?.invoices ? `Rs.${((rev?.month?.revenue || 0) / (rev?.month?.invoices || 1)).toLocaleString(undefined, {maximumFractionDigits:0})}` : '—'} icon={Package} color="purple" />
           <StatCard label="Outstanding" value={`Rs.${(rev?.outstanding?.total || 0).toLocaleString()}`} icon={Users} color="yellow" />
+        </div>
+
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
+          <StatCard label="Net Profit (selected range)" value={`Rs.${money(profit?.net_profit)}`} sub={`Sales Rs.${money(profit?.sales_total)} − Buy Price Rs.${money(profit?.cogs)}`} icon={DollarSign} color="green" />
+          <StatCard label="Installments Given (range)" value={`Rs.${money(profit?.installment_given)}`} sub={`${profit?.installment_contracts || 0} contracts`} icon={CreditCard} color="blue" />
+          <StatCard label="Installments Pending" value={`Rs.${money(profit?.installment_pending)}`} sub="Still to be collected" icon={CreditCard} color="yellow" />
+          <StatCard label="Profit Margin" value={profit?.sales_total ? `${(Number(profit?.net_profit || 0) / Number(profit?.sales_total || 1) * 100).toFixed(1)}%` : '—'} sub="Net profit ÷ sales" icon={TrendingUp} color="purple" />
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">

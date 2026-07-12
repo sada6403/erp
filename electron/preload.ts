@@ -67,6 +67,8 @@ const api = {
     update: (id: string, payload: unknown) => ipcRenderer.invoke('customers:update', id, payload),
     installments: (id: string)  => ipcRenderer.invoke('customers:installments', id),
     history:      (id: string)  => ipcRenderer.invoke('customers:history', id),
+    importExcel:      ()        => ipcRenderer.invoke('customers:importExcel'),
+    downloadTemplate: ()        => ipcRenderer.invoke('customers:downloadTemplate'),
   },
 
   // Stocks
@@ -125,13 +127,14 @@ const api = {
     topProducts:       (filters: unknown) => ipcRenderer.invoke('analytics:topProducts', filters),
     branchPerformance: (filters: unknown) => ipcRenderer.invoke('analytics:branchPerformance', filters),
     revenue:           (filters: unknown) => ipcRenderer.invoke('analytics:revenue', filters),
+    profitSummary:     (filters: unknown) => ipcRenderer.invoke('analytics:profitSummary', filters),
     dailyReport:       (date: string)     => ipcRenderer.invoke('analytics:dailyReport', date),
   },
 
   // Admin
   admin: {
     branches:    { list: () => ipcRenderer.invoke('admin:branches:list'), findByCode: (code: string) => ipcRenderer.invoke('admin:branches:findByCode', code), create: (p: unknown) => ipcRenderer.invoke('admin:branches:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:branches:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:branches:delete', id) },
-    users:       { list: () => ipcRenderer.invoke('admin:users:list'), create: (p: unknown) => ipcRenderer.invoke('admin:users:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:users:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:users:delete', id), hardDelete: (id: string) => ipcRenderer.invoke('admin:users:hardDelete', id), toggleActive: (id: string, active: boolean) => ipcRenderer.invoke('admin:users:toggleActive', id, active), resetPassword: (id: string, newPassword: string) => ipcRenderer.invoke('admin:users:resetPassword', id, newPassword), forcePasswordChange: (id: string, force: boolean) => ipcRenderer.invoke('admin:users:forcePasswordChange', id, force) },
+    users:       { list: () => ipcRenderer.invoke('admin:users:list'), create: (p: unknown) => ipcRenderer.invoke('admin:users:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:users:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:users:delete', id), hardDelete: (id: string) => ipcRenderer.invoke('admin:users:hardDelete', id), toggleActive: (id: string, active: boolean) => ipcRenderer.invoke('admin:users:toggleActive', id, active), resetPassword: (id: string, newPassword: string) => ipcRenderer.invoke('admin:users:resetPassword', id, newPassword), forcePasswordChange: (id: string, force: boolean) => ipcRenderer.invoke('admin:users:forcePasswordChange', id, force), importExcel: () => ipcRenderer.invoke('admin:users:importExcel'), downloadTemplate: () => ipcRenderer.invoke('admin:users:downloadTemplate') },
     roles:       { list: () => ipcRenderer.invoke('admin:roles:list'), create: (p: unknown) => ipcRenderer.invoke('admin:roles:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:roles:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:roles:delete', id) },
     suppliers:   { list: () => ipcRenderer.invoke('admin:suppliers:list'), create: (p: unknown) => ipcRenderer.invoke('admin:suppliers:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:suppliers:update', id, p) },
     categories:  { list: () => ipcRenderer.invoke('admin:categories:list'), create: (p: unknown) => ipcRenderer.invoke('admin:categories:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:categories:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:categories:delete', id) },

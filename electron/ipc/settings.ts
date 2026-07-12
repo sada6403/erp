@@ -330,6 +330,13 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
 
   ipcMain.handle('settings:update', (_e, payload) => {
     try {
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const callerPerms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+        || user?.permissions as Record<string, unknown> || {}
+      if (!callerPerms.all && !callerPerms.settings) {
+        return { success: false, error: 'Settings access required' }
+      }
+
       const current = store.get('app_settings') as Record<string, unknown> || {}
       const next = normalizeForStorage(payload as Record<string, unknown>, current)
       store.set('app_settings', next)

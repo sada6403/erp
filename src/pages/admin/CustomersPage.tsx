@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import type { Customer } from '@/types'
-import { Plus, Search, Edit2, Eye } from 'lucide-react'
+import { Plus, Search, Edit2, Eye, Upload, FileDown } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { validateCustomer } from '@/lib/validateCustomer'
 
@@ -13,12 +13,32 @@ export default function CustomersPage() {
   const [editing, setEditing]     = useState<Customer | null>(null)
   const [viewing, setViewing]     = useState<Customer | null>(null)
   const [loading, setLoading]     = useState(true)
+  const [importing, setImporting] = useState(false)
 
   const load = async () => {
     setLoading(true)
     const res = await window.api.customers.list({})
     if (res.success) setCustomers(res.data as Customer[])
     setLoading(false)
+  }
+
+  const downloadTemplate = async () => {
+    const res = await window.api.customers.downloadTemplate()
+    if (res.success) toast.success('Template saved')
+    else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+  }
+
+  const bulkImport = async () => {
+    setImporting(true)
+    const res = await window.api.customers.importExcel()
+    setImporting(false)
+    if (res.cancelled) return
+    if (!res.success) { toast.error(res.error || 'Import failed'); return }
+    if (res.imported) toast.success(`Imported ${res.imported} customer(s)`)
+    if (res.skipped) {
+      toast.error(`Skipped ${res.skipped} row(s)${res.errors?.[0] ? ` — e.g. ${res.errors[0]}` : ''}`, { duration: 6000 })
+    }
+    if (res.imported) load()
   }
 
   useEffect(() => { load() }, [])
@@ -34,9 +54,17 @@ export default function CustomersPage() {
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader title="Customers" subtitle={`${filtered.length} customers`}
         actions={
-          <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn-primary btn-sm gap-1.5">
-            <Plus size={14} /> Add Customer
-          </button>
+          <div className="flex gap-2">
+            <button onClick={downloadTemplate} className="btn-secondary btn-sm gap-1.5">
+              <FileDown size={14} /> Template
+            </button>
+            <button onClick={bulkImport} disabled={importing} className="btn-secondary btn-sm gap-1.5">
+              <Upload size={14} /> {importing ? 'Importing...' : 'Bulk Import'}
+            </button>
+            <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn-primary btn-sm gap-1.5">
+              <Plus size={14} /> Add Customer
+            </button>
+          </div>
         }
       />
 

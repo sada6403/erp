@@ -22,6 +22,13 @@ export default function StockIntelligencePage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [exporting, setExporting] = useState(false)
+  const [companyName, setCompanyName] = useState('')
+
+  useEffect(() => {
+    window.api?.settings?.get?.().then((res: { success: boolean; data?: Record<string, unknown> }) => {
+      if (res?.success && res.data) setCompanyName(String(res.data.company_name || ''))
+    })
+  }, [])
 
   const load = async () => {
     setLoading(true)
@@ -74,7 +81,7 @@ export default function StockIntelligencePage() {
         filename: `stock-intelligence-${new Date().toISOString().slice(0, 10)}`,
         rows: branchId ? branchStock : branchSummary,
         metadata: {
-          Company: 'Enterprise POS ERP',
+          Company: companyName || 'Nature Plantation',
           Branch: branchId || 'All Branches',
           Period: `${dateFrom || 'Start'} to ${dateTo || 'Today'}`,
           Movement: movementType || 'All',
@@ -92,7 +99,7 @@ export default function StockIntelligencePage() {
         filename: `stock-movements-${new Date().toISOString().slice(0, 10)}`,
         rows: filteredMovements,
         metadata: {
-          Company: 'Enterprise POS ERP',
+          Company: companyName || 'Nature Plantation',
           Branch: branchId || 'All Branches',
           Period: `${dateFrom || 'Start'} to ${dateTo || 'Today'}`,
           Movement: movementType || 'All',

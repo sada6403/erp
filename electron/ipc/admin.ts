@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { app } from 'electron'
+import { app, dialog } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
@@ -8,11 +8,20 @@ import path from 'path'
 import { enqueuSync, enqueueUserRow } from '../services/syncQueue'
 import Store from 'electron-store'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
+import * as XLSX from 'xlsx'
 
 const store = new Store()
 
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+}
+
+const EMAIL_RE_ADMIN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function currentPerms(caller: Record<string, unknown> = authUser()): Record<string, unknown> {
+  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller.permissions as Record<string, unknown>)
+    || {}
 }
 
 function defaultBranchId() {
@@ -328,11 +337,21 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         return { success: false, error: `User limit reached (${cnt}/${maxUsers}). Please upgrade your plan.` }
       }
 
-      // Non-global callers can only create users in their own branch
       const caller = authUser()
-      const perms  = (caller.permissions as Record<string, unknown>) || {}
-      if (!perms.all && caller.branch_id) {
-        p.branch_id = caller.branch_id
+      const perms  = currentPerms(caller)
+      if (!perms.all && !perms.employees) {
+        return { success: false, error: 'Employee management access required' }
+      }
+      // Non-global callers can only create users in their own branch, and
+      // can never assign a role that itself carries admin-level permissions
+      // (would otherwise let a Branch Manager mint a new Company Admin).
+      if (!perms.all) {
+        if (caller.branch_id) p.branch_id = caller.branch_id
+        if (p.role_id) {
+          const targetRole = db.prepare('SELECT permissions FROM roles WHERE id=?').get(p.role_id) as { permissions: string } | undefined
+          const targetPerms = targetRole ? JSON.parse(targetRole.permissions || '{}') : {}
+          if (targetPerms.all) return { success: false, error: 'Cannot assign Company Admin role' }
+        }
       }
 
       const id = crypto.randomUUID()
@@ -352,15 +371,22 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       // Branch scope: non-global callers (e.g. Branch Manager) can only update
       // users of their own branch (including themselves).
       const caller = authUser()
-      const perms  = (caller.permissions as Record<string, unknown>) || {}
+      const perms  = currentPerms(caller)
       if (!perms.all) {
         const target = db.prepare('SELECT branch_id FROM users WHERE id=?').get(id) as { branch_id: string | null } | undefined
         if (!target) return { success: false, error: 'User not found' }
         if (!caller.branch_id || target.branch_id !== caller.branch_id) {
           return { success: false, error: 'Cannot update users from another branch' }
         }
-        // Branch-scoped callers must not move users to another branch or escalate roles
+        if (id !== caller.id && !perms.employees) {
+          return { success: false, error: 'Employee management access required' }
+        }
+        // Branch-scoped callers must NEVER move users to another branch or
+        // escalate roles — role_id was previously left untouched here, which
+        // let any authenticated user self-promote by passing a Company Admin
+        // role_id. Strip both regardless of who the target is.
         delete p.branch_id
+        delete p.role_id
       }
 
       if (p.password) {
@@ -393,7 +419,10 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       if (!user) return { success: false, error: 'User not found' }
 
       const caller = authUser()
-      const perms  = (caller.permissions as Record<string, unknown>) || {}
+      const perms  = currentPerms(caller)
+      if (!perms.all && !perms.employees) {
+        return { success: false, error: 'Employee management access required' }
+      }
       if (!perms.all && caller.branch_id && user.branch_id !== caller.branch_id) {
         return { success: false, error: 'Cannot delete users from another branch' }
       }
@@ -485,6 +514,166 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
+  ipcMain.handle('admin:users:downloadTemplate', async () => {
+    try {
+      const perms = currentPerms()
+      if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+
+      const db = getDb()
+      const roles = db.prepare('SELECT name FROM roles ORDER BY name').all() as { name: string }[]
+      const branches = db.prepare('SELECT name FROM branches WHERE is_active = 1 ORDER BY name').all() as { name: string }[]
+
+      const saveResult = await dialog.showSaveDialog({
+        title: 'Save Employee Import Template',
+        defaultPath: 'employee-import-template.xlsx',
+        filters: [{ name: 'Excel Workbook', extensions: ['xlsx'] }],
+      })
+      if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true }
+
+      const wb = XLSX.utils.book_new()
+      const sample = [
+        { 'Name': 'Nimal Perera', 'Role': roles.find(r => r.name !== 'Company Admin')?.name || 'Cashier', 'Branch': branches[0]?.name || 'Main Branch', 'Email': '', 'Password': '', 'PIN': '1234' },
+        { 'Name': '', 'Role': '', 'Branch': '', 'Email': '', 'Password': '', 'PIN': '' },
+      ]
+      const ws = XLSX.utils.json_to_sheet(sample)
+      ws['!cols'] = [{ wch: 22 }, { wch: 18 }, { wch: 18 }, { wch: 26 }, { wch: 16 }, { wch: 8 }]
+      XLSX.utils.book_append_sheet(wb, ws, 'Employees')
+
+      const instructions = XLSX.utils.aoa_to_sheet([
+        ['Column', 'Required', 'Rules'],
+        ['Name', 'Yes', 'Full employee name'],
+        ['Role', 'Yes', 'Must exactly match a role name from the "Roles" sheet'],
+        ['Branch', 'Yes (unless you only manage one branch)', 'Must exactly match a branch name from the "Branches" sheet'],
+        ['Email', 'Admin-level roles only', 'Required + must be unique for Company Admin / Branch Manager / roles with Reports, Employees, or Settings access'],
+        ['Password', 'Admin-level roles only', 'Minimum 8 characters. Not needed for PIN-only staff roles (auto-generated)'],
+        ['PIN', 'Staff roles only', '4-6 digits. Not needed for admin-level roles'],
+        [],
+        ['A role counts as "admin-level" if it has Reports, Employees, Settings, Branches, or Full Access permission — everything else (e.g. Cashier, Warehouse Staff, Delivery Staff) is PIN-only.'],
+        ['You cannot bulk-import a Company Admin account unless you yourself are a Company Admin.'],
+        ['Upload this file from Employee Management → Bulk Import. You can also open it in Google Sheets (File > Import > Upload) and re-export as .xlsx before uploading here.'],
+      ])
+      instructions['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 70 }]
+      XLSX.utils.book_append_sheet(wb, instructions, 'Instructions')
+
+      const rolesSheet = XLSX.utils.json_to_sheet(roles)
+      XLSX.utils.book_append_sheet(wb, rolesSheet, 'Roles')
+      const branchesSheet = XLSX.utils.json_to_sheet(branches)
+      XLSX.utils.book_append_sheet(wb, branchesSheet, 'Branches')
+
+      XLSX.writeFile(wb, saveResult.filePath)
+      return { success: true, filePath: saveResult.filePath }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  ipcMain.handle('admin:users:importExcel', async () => {
+    try {
+      const caller = authUser()
+      const perms = currentPerms(caller)
+      if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+
+      const { filePaths } = await dialog.showOpenDialog({
+        title: 'Select Employee Import File',
+        filters: [{ name: 'Excel / CSV', extensions: ['xlsx', 'xls', 'csv'] }],
+        properties: ['openFile'],
+      })
+      if (!filePaths || filePaths.length === 0) return { success: false, cancelled: true }
+
+      const { getMaxUsers } = await import('../services/licenseService')
+      const db = getDb()
+      const workbook = XLSX.readFile(filePaths[0])
+      const sheetName = workbook.SheetNames.find(n => n.toLowerCase() === 'employees') || workbook.SheetNames[0]
+      const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' }) as Record<string, unknown>[]
+
+      const allRoles = db.prepare('SELECT id, name, permissions FROM roles').all() as { id: string; name: string; permissions: string }[]
+      const roleByName = new Map(allRoles.map(r => [r.name.trim().toLowerCase(), r]))
+      const allBranches = db.prepare('SELECT id, name FROM branches WHERE is_active = 1').all() as { id: string; name: string }[]
+      const branchByName = new Map(allBranches.map(b => [b.name.trim().toLowerCase(), b.id]))
+
+      const cell = (row: Record<string, unknown>, ...names: string[]): string => {
+        for (const name of names) {
+          for (const key of Object.keys(row)) {
+            if (key.trim().toLowerCase() === name.toLowerCase()) {
+              const v = row[key]
+              if (v !== undefined && v !== null && String(v).trim() !== '') return String(v).trim()
+            }
+          }
+        }
+        return ''
+      }
+
+      let imported = 0
+      let skipped = 0
+      const errors: string[] = []
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i]
+        const rowNum = i + 2
+        const name = cell(row, 'Name', 'Full Name')
+        const roleName = cell(row, 'Role')
+        const branchName = cell(row, 'Branch')
+        let email = cell(row, 'Email')
+        let password = cell(row, 'Password')
+        const pin = cell(row, 'PIN', 'Pin')
+
+        if (!name && !roleName) continue // fully blank row
+
+        const { cnt } = db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number }
+        if (cnt >= getMaxUsers()) { errors.push(`Row ${rowNum}: user limit reached, stopped importing`); skipped += (rows.length - i); break }
+
+        if (!name) { errors.push(`Row ${rowNum}: name is required`); skipped++; continue }
+        if (!roleName) { errors.push(`Row ${rowNum}: role is required`); skipped++; continue }
+        const role = roleByName.get(roleName.toLowerCase())
+        if (!role) { errors.push(`Row ${rowNum}: role "${roleName}" not found`); skipped++; continue }
+
+        const rolePerms = JSON.parse(role.permissions || '{}') as Record<string, unknown>
+        const isAdminRole = Boolean(rolePerms.all || rolePerms.reports || rolePerms.employees || rolePerms.settings || rolePerms.branches)
+        if (!perms.all && rolePerms.all) { errors.push(`Row ${rowNum}: cannot assign Company Admin role`); skipped++; continue }
+
+        let branchId: string | null = null
+        if (!perms.all && caller.branch_id) {
+          branchId = caller.branch_id as string
+        } else if (branchName) {
+          const found = branchByName.get(branchName.toLowerCase())
+          if (!found) { errors.push(`Row ${rowNum}: branch "${branchName}" not found`); skipped++; continue }
+          branchId = found
+        } else if (!isAdminRole) {
+          errors.push(`Row ${rowNum}: branch is required`); skipped++; continue
+        }
+
+        if (isAdminRole) {
+          if (!email) { errors.push(`Row ${rowNum}: email is required for role "${role.name}"`); skipped++; continue }
+          if (!EMAIL_RE_ADMIN.test(email)) { errors.push(`Row ${rowNum}: invalid email "${email}"`); skipped++; continue }
+          if (!password) { errors.push(`Row ${rowNum}: password is required for role "${role.name}"`); skipped++; continue }
+          if (password.length < 8) { errors.push(`Row ${rowNum}: password must be at least 8 characters`); skipped++; continue }
+        } else {
+          if (!pin || !/^\d{4,6}$/.test(pin)) { errors.push(`Row ${rowNum}: a 4-6 digit PIN is required for role "${role.name}"`); skipped++; continue }
+          const slug = name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')
+          email = `${slug}.${Date.now()}${i}@staff.local`
+          password = crypto.randomUUID()
+        }
+
+        const existingEmail = db.prepare('SELECT id FROM users WHERE email = ?').get(email) as { id: string } | undefined
+        if (existingEmail) { errors.push(`Row ${rowNum}: email "${email}" already in use`); skipped++; continue }
+
+        try {
+          const id = crypto.randomUUID()
+          const hash = await bcrypt.hash(password, 10)
+          const pinHash = !isAdminRole ? await bcrypt.hash(String(pin), 10) : null
+          db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash)
+            VALUES (?,?,?,?,?,?,?)`)
+            .run(id, branchId, role.id, name, email, hash, pinHash)
+          await enqueueUserRow(id)
+          imported++
+        } catch (err: unknown) {
+          errors.push(`Row ${rowNum}: ${(err as Error).message}`)
+          skipped++
+        }
+      }
+
+      return { success: true, imported, skipped, errors: errors.slice(0, 50) }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
   // Roles
   ipcMain.handle('admin:roles:list', () => {
     try { return { success: true, data: getDb().prepare('SELECT * FROM roles ORDER BY name').all() } }
@@ -492,6 +681,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:roles:create', async (_e, p: Record<string, unknown>) => {
     try {
+      if (!currentPerms().all) return { success: false, error: 'Company Admin access required to create roles' }
       const id = crypto.randomUUID()
       const permissions = typeof p.permissions === 'string' ? p.permissions : JSON.stringify(p.permissions || {})
       getDb().prepare(`INSERT INTO roles (id,name,permissions) VALUES (?,?,?)`)
@@ -502,6 +692,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:roles:update', async (_e, id: string, p: Record<string, unknown>) => {
     try {
+      if (!currentPerms().all) return { success: false, error: 'Company Admin access required to edit roles' }
       const permissions = typeof p.permissions === 'string' ? p.permissions : JSON.stringify(p.permissions || {})
       getDb().prepare(`UPDATE roles SET name=?, permissions=?, updated_at=datetime('now') WHERE id=?`)
         .run(p.name, permissions, id)
@@ -511,6 +702,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:roles:delete', async (_e, id: string) => {
     try {
+      if (!currentPerms().all) return { success: false, error: 'Company Admin access required to delete roles' }
       const db = getDb()
       const role = db.prepare('SELECT name FROM roles WHERE id=?').get(id) as { name: string } | undefined
       if (!role) return { success: false, error: 'Role not found' }
@@ -530,6 +722,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:suppliers:create', async (_e, p) => {
     try {
+      const perms = currentPerms()
+      if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
       const id = crypto.randomUUID()
       getDb().prepare(`INSERT INTO suppliers (id,name,contact,phone,email,address,tax_number)
         VALUES (@id,@name,@contact,@phone,@email,@address,@tax_number)`)
@@ -541,6 +735,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:suppliers:update', async (_e, id: string, p) => {
     try {
+      const perms = currentPerms()
+      if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
       const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
       getDb().prepare(`UPDATE suppliers SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
       await enqueuSync('suppliers', id, 'UPDATE', { id, ...p })
@@ -555,6 +751,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:categories:create', async (_e, p) => {
     try {
+      const perms = currentPerms()
+      if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
       const id = crypto.randomUUID()
       const name = titleCase(p.name)
       const shortCode = String(p.short_code || '').trim() || categoryCodeFromName(name)
@@ -567,6 +765,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:categories:update', async (_e, id: string, p) => {
     try {
+      const perms = currentPerms()
+      if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
       const payload = { ...(p as Record<string, unknown>) }
       if (payload.name !== undefined) payload.name = titleCase(payload.name)
       if (payload.short_code !== undefined) {
@@ -581,6 +781,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
   ipcMain.handle('admin:categories:delete', async (_e, id: string) => {
     try {
+      const perms = currentPerms()
+      if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
       getDb().prepare(`UPDATE categories SET is_active=0, updated_at=datetime('now') WHERE id=?`).run(id)
       await enqueuSync('categories', id, 'UPDATE', { id, is_active: 0 })
       return { success: true }
@@ -1037,10 +1239,19 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   ipcMain.handle('admin:installments:reports', (_e, filters: Record<string, unknown> = {}) => {
     try {
+      const caller = authUser()
+      const perms = currentPerms(caller)
+      const isGlobal = Boolean(perms.all || perms.reports)
+      if (!isGlobal) return { success: false, error: 'Reports access required' }
+
       const db = getDb()
       const params: unknown[] = []
       let branchWhere = ''
-      if (filters.branch_id) { branchWhere = ' AND inst.branch_id=?'; params.push(filters.branch_id) }
+      // Company-Admin / Reports-permission callers may cross branches (same
+      // scoping convention as reports:advancedSummary); everyone else is
+      // forced to their own branch regardless of what filters ask for.
+      const scopedBranchId = isGlobal ? (filters.branch_id as string | undefined) : (caller.branch_id as string | undefined)
+      if (scopedBranchId) { branchWhere = ' AND inst.branch_id=?'; params.push(scopedBranchId) }
       const active = db.prepare(`SELECT COUNT(*) AS count FROM installments inst WHERE status IN ('active','overdue')${branchWhere}`).get(...params) as { count: number }
       const overdue = db.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(due_amount),0) AS amount FROM installments inst WHERE status='overdue'${branchWhere}`).get(...params) as { count: number; amount: number }
       const outstanding = db.prepare(`SELECT COALESCE(SUM(due_amount),0) AS amount FROM installments inst WHERE status IN ('active','overdue')${branchWhere}`).get(...params) as { amount: number }
