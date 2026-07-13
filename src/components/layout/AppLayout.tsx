@@ -118,6 +118,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/users', label: 'User List', perm: 'employees' },
       { to: '/admin/roles', label: 'Roles & Permissions', perm: 'employees' },
+      { to: '/admin/agents', label: 'Agent Management', perm: 'employees' },
     ]
   },
   {

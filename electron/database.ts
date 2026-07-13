@@ -507,6 +507,33 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_expenses_date     ON expenses(created_at);
   `)
 
+  // Referral / sales agents — matched against invoices.agent_code (free text,
+  // predates this table) case/whitespace-insensitively, never by strict FK.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agents (
+      id                      TEXT PRIMARY KEY,
+      code                    TEXT NOT NULL,
+      name                    TEXT NOT NULL,
+      phone                   TEXT,
+      email                   TEXT,
+      nic                     TEXT,
+      branch_id               TEXT REFERENCES branches(id),
+      default_commission_pct  REAL NOT NULL DEFAULT 0,
+      monthly_target          REAL NOT NULL DEFAULT 0,
+      status                  TEXT NOT NULL DEFAULT 'active',
+      notes                   TEXT,
+      created_by              TEXT REFERENCES users(id),
+      created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at               TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_code_ci ON agents(UPPER(TRIM(code)));
+    CREATE INDEX IF NOT EXISTS idx_agents_branch ON agents(branch_id);
+  `)
+  if (!hasColumn('invoices', 'agent_id')) {
+    db.exec(`ALTER TABLE invoices ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
+  }
+
   // Stock count sessions
   db.exec(`
     CREATE TABLE IF NOT EXISTS stock_movements (

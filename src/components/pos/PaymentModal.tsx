@@ -54,7 +54,11 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [balanceReference, setBalanceReference] = useState('')
   const [agentCode, setAgentCode]         = useState('')
   const [agentName, setAgentName]         = useState('')
+  const [agentId, setAgentId]             = useState('')
   const [agentPct, setAgentPct]           = useState('')
+  const [agentQuery, setAgentQuery]       = useState('')
+  const [agentSuggestOpen, setAgentSuggestOpen] = useState(false)
+  const [agents, setAgents]               = useState<Record<string, unknown>[]>([])
   const [validUntil, setValidUntil]     = useState(cart.validUntil)
   const [dueDate, setDueDate]           = useState(cart.dueDate)
   const [loading, setLoading]           = useState(false)
@@ -81,6 +85,32 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     receivedRef.current?.focus()
     receivedRef.current?.select()
   }, [])
+
+  useEffect(() => {
+    window.api.agents?.list?.({ status: 'active' }).then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+      if (r.success) setAgents(r.data || [])
+    })
+  }, [])
+
+  const agentMatches = agentQuery.trim()
+    ? agents.filter(a =>
+        String(a.code || '').toLowerCase().includes(agentQuery.trim().toLowerCase()) ||
+        String(a.name || '').toLowerCase().includes(agentQuery.trim().toLowerCase())
+      ).slice(0, 8)
+    : []
+
+  const selectAgent = (a: Record<string, unknown>) => {
+    setAgentCode(String(a.code || ''))
+    setAgentName(String(a.name || ''))
+    setAgentId(String(a.id || ''))
+    setAgentPct(String(a.default_commission_pct ?? ''))
+    setAgentQuery(`${a.code} — ${a.name}`)
+    setAgentSuggestOpen(false)
+  }
+
+  const clearAgent = () => {
+    setAgentCode(''); setAgentName(''); setAgentId(''); setAgentQuery('')
+  }
 
   // Installment
   const [plans, setPlans]           = useState<Record<string, unknown>[]>([])
@@ -248,6 +278,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
         ],
     agent_code:        agentCode.trim() || undefined,
     agent_name:        agentName.trim() || undefined,
+    agent_id:          agentId || undefined,
     agent_commission_pct: agentCommissionPct,
     agent_commission_amount: agentCommissionAmount,
     valid_until:       isQuotation ? validUntil : undefined,
@@ -338,6 +369,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
         due_amount:      isCredit ? cart.total : Math.max(0, cart.total - effectivePaidAmount),
         agent_code:      agentCode.trim() || undefined,
         agent_name:      agentName.trim() || undefined,
+        agent_id:        agentId || undefined,
         agent_commission_pct: agentCommissionPct,
         notes:           cart.notes,
         items: cart.items.map(i => ({
@@ -602,26 +634,55 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                 <p className="text-xs" style={{ color: 'var(--text-3)' }}>Optional - enter who brought this customer and their commission percentage.</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_1.4fr_0.75fr] gap-3">
-              <div>
-                <label className="label">Agent Code</label>
+            <div className="grid grid-cols-1 sm:grid-cols-[2fr_0.75fr] gap-3">
+              <div className="relative">
+                <label className="label">Agent</label>
                 <input
                   type="text"
-                  value={agentCode}
-                  onChange={e => setAgentCode(e.target.value.toUpperCase())}
+                  value={agentQuery}
+                  onChange={e => {
+                    const v = e.target.value
+                    setAgentQuery(v)
+                    setAgentSuggestOpen(true)
+                    // Typing after a selection (or freehand, for an agent not
+                    // yet registered) clears the link — treated as free text.
+                    setAgentId('')
+                    setAgentCode(v.toUpperCase())
+                    setAgentName(v)
+                  }}
+                  onFocus={() => setAgentSuggestOpen(true)}
+                  onBlur={() => setTimeout(() => setAgentSuggestOpen(false), 150)}
                   className="input"
-                  placeholder="AG-001"
+                  placeholder="Search agent by code or name..."
                 />
-              </div>
-              <div>
-                <label className="label">Agent Name</label>
-                <input
-                  type="text"
-                  value={agentName}
-                  onChange={e => setAgentName(e.target.value)}
-                  className="input"
-                  placeholder="Agent name"
-                />
+                {agentQuery && (
+                  <button
+                    type="button"
+                    onClick={clearAgent}
+                    className="absolute right-2 top-[26px] text-xs"
+                    style={{ color: 'var(--text-3)' }}
+                  >
+                    Clear
+                  </button>
+                )}
+                {agentSuggestOpen && agentMatches.length > 0 && (
+                  <div
+                    className="absolute z-10 mt-1 w-full rounded-lg border shadow-lg max-h-48 overflow-y-auto"
+                    style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+                  >
+                    {agentMatches.map(a => (
+                      <button
+                        key={String(a.id)}
+                        type="button"
+                        onMouseDown={() => selectAgent(a)}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/40"
+                      >
+                        <span className="font-mono text-xs font-semibold mr-2">{String(a.code)}</span>
+                        <span style={{ color: 'var(--text-2)' }}>{String(a.name)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
               <div>
                 <label className="label">Commission %</label>

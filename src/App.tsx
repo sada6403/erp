@@ -11,6 +11,7 @@ import InventoryPage from '@/pages/admin/InventoryPage'
 import StockIntelligencePage from '@/pages/admin/StockIntelligencePage'
 import BranchesPage from '@/pages/admin/BranchesPage'
 import UsersPage from '@/pages/admin/UsersPage'
+import AgentsPage from '@/pages/admin/AgentsPage'
 import SuppliersPage from '@/pages/admin/SuppliersPage'
 import AnalyticsPage from '@/pages/admin/AnalyticsPage'
 import DeliveriesPage from '@/pages/admin/DeliveriesPage'
@@ -136,6 +137,7 @@ export default function App() {
         <Route path="/admin/expenses" element={<ExpensesPage />} />
         <Route path="/admin/branches" element={<BranchesPage />} />
         <Route path="/admin/users" element={<UsersPage />} />
+        <Route path="/admin/agents" element={<AgentsPage />} />
         <Route path="/admin/categories" element={<CategoriesPage />} />
         <Route path="/admin/suppliers" element={<SuppliersPage />} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />

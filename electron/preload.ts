@@ -71,6 +71,18 @@ const api = {
     downloadTemplate: ()        => ipcRenderer.invoke('customers:downloadTemplate'),
   },
 
+  // Agents (referral / sales commission)
+  agents: {
+    list:             (filters?: unknown) => ipcRenderer.invoke('agents:list', filters),
+    get:              (id: string)        => ipcRenderer.invoke('agents:get', id),
+    create:           (payload: unknown)  => ipcRenderer.invoke('agents:create', payload),
+    update:           (id: string, payload: unknown) => ipcRenderer.invoke('agents:update', id, payload),
+    report:           (filters: unknown)  => ipcRenderer.invoke('agents:report', filters),
+    reportAllSummary: (filters?: unknown) => ipcRenderer.invoke('agents:reportAllSummary', filters),
+    importExcel:      ()                  => ipcRenderer.invoke('agents:importExcel'),
+    downloadTemplate: ()                  => ipcRenderer.invoke('agents:downloadTemplate'),
+  },
+
   // Stocks
   stocks: {
     list:         (branchId?: string)  => ipcRenderer.invoke('stocks:list', branchId),
