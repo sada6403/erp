@@ -96,14 +96,28 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const user = store.get('auth_user') as Record<string, unknown>
       const bid = branchId || user?.branch_id || 'b1111111-1111-4111-8111-111111111111'
       const rows = db.prepare(`
-        SELECT s.*, p.name as product_name, p.sku, p.min_stock_level,
-               w.name as warehouse_name
-        FROM stocks s
-        LEFT JOIN products p ON p.id = s.product_id
+        SELECT
+          MIN(s.id) AS id,
+          p.id AS product_id,
+          ? AS branch_id,
+          MIN(s.warehouse_id) AS warehouse_id,
+          COALESCE(SUM(COALESCE(s.quantity, 0)), 0) AS quantity,
+          COALESCE(SUM(COALESCE(s.damaged_qty, 0)), 0) AS damaged_qty,
+          p.name AS product_name,
+          COALESCE(p.sku, p.id) AS sku,
+          p.min_stock_level,
+          COALESCE(MAX(w.name), 'Main') AS warehouse_name,
+          MAX(s.updated_at) AS updated_at
+        FROM products p
+        LEFT JOIN stocks s
+          ON s.product_id = p.id
+         AND s.branch_id = ?
         LEFT JOIN warehouses w ON w.id = s.warehouse_id
-        WHERE s.branch_id = ?
+        WHERE p.is_active = 1
+          AND (p.branch_id = ? OR p.branch_id IS NULL)
+        GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.min_stock_level
         ORDER BY p.name
-      `).all(bid)
+      `).all(bid, bid, bid)
       return { success: true, data: rows }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -115,13 +129,13 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const bid = branchId || user?.branch_id || 'b1111111-1111-4111-8111-111111111111'
       const rows = db.prepare(`
         SELECT
-          COALESCE(s.id, '') AS id,
+          MIN(s.id) AS id,
           p.id AS product_id,
           ? AS branch_id,
-          COALESCE(s.quantity, 0) AS quantity,
-          COALESCE(s.damaged_qty, 0) AS damaged_qty,
+          COALESCE(SUM(COALESCE(s.quantity, 0)), 0) AS quantity,
+          COALESCE(SUM(COALESCE(s.damaged_qty, 0)), 0) AS damaged_qty,
           p.name AS product_name,
-          p.sku,
+          COALESCE(p.sku, p.id) AS sku,
           p.min_stock_level
         FROM products p
         LEFT JOIN stocks s
@@ -129,8 +143,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
          AND s.branch_id = ?
         WHERE p.is_active = 1
           AND (p.branch_id = ? OR p.branch_id IS NULL)
-          AND COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 0)
-        ORDER BY COALESCE(s.quantity, 0) ASC, p.name
+        GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.min_stock_level
+        HAVING COALESCE(SUM(COALESCE(s.quantity, 0)), 0) BETWEEN 1 AND 5
+        ORDER BY COALESCE(SUM(COALESCE(s.quantity, 0)), 0) ASC, p.name
       `).all(bid, bid, bid)
       return { success: true, data: rows }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
@@ -838,50 +853,56 @@ export function registerStockHandlers(ipcMain: IpcMain) {
             SELECT COUNT(DISTINCT p.id)
             FROM products p
             WHERE p.is_active = 1
-              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+              AND (p.branch_id IS NULL OR p.branch_id = b.id)
           ) AS product_count,
           (
             SELECT COALESCE(SUM(COALESCE(s.quantity, 0)), 0)
             FROM products p
-            LEFT JOIN stocks s
-              ON s.product_id = p.id
-             AND s.branch_id = b.id
+            LEFT JOIN (
+              SELECT product_id, branch_id, SUM(COALESCE(quantity, 0)) AS quantity
+              FROM stocks
+              GROUP BY product_id, branch_id
+            ) s ON s.product_id = p.id AND s.branch_id = b.id
             WHERE p.is_active = 1
-              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+              AND (p.branch_id IS NULL OR p.branch_id = b.id)
           ) AS total_units,
           (
             SELECT COALESCE(SUM(COALESCE(s.quantity, 0) * COALESCE(p.cost_price, 0)), 0)
             FROM products p
-            LEFT JOIN stocks s
-              ON s.product_id = p.id
-             AND s.branch_id = b.id
+            LEFT JOIN (
+              SELECT product_id, branch_id, SUM(COALESCE(quantity, 0)) AS quantity
+              FROM stocks
+              GROUP BY product_id, branch_id
+            ) s ON s.product_id = p.id AND s.branch_id = b.id
             WHERE p.is_active = 1
-              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+              AND (p.branch_id IS NULL OR p.branch_id = b.id)
           ) AS total_value,
           (
             SELECT COUNT(DISTINCT CASE
-              WHEN COALESCE(s.quantity, 0) > 0
-               AND COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 0)
-               AND COALESCE(p.min_stock_level, 0) > 0
+              WHEN COALESCE(s.quantity, 0) BETWEEN 1 AND 5
               THEN p.id
             END)
             FROM products p
-            LEFT JOIN stocks s
-              ON s.product_id = p.id
-             AND s.branch_id = b.id
+            LEFT JOIN (
+              SELECT product_id, branch_id, SUM(COALESCE(quantity, 0)) AS quantity
+              FROM stocks
+              GROUP BY product_id, branch_id
+            ) s ON s.product_id = p.id AND s.branch_id = b.id
             WHERE p.is_active = 1
-              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+              AND (p.branch_id IS NULL OR p.branch_id = b.id)
           ) AS low_stock_count,
           (
             SELECT COUNT(DISTINCT CASE
               WHEN COALESCE(s.quantity, 0) = 0 THEN p.id
             END)
             FROM products p
-            LEFT JOIN stocks s
-              ON s.product_id = p.id
-             AND s.branch_id = b.id
+            LEFT JOIN (
+              SELECT product_id, branch_id, SUM(COALESCE(quantity, 0)) AS quantity
+              FROM stocks
+              GROUP BY product_id, branch_id
+            ) s ON s.product_id = p.id AND s.branch_id = b.id
             WHERE p.is_active = 1
-              AND (p.branch_id = b.id OR p.branch_id IS NULL)
+              AND (p.branch_id IS NULL OR p.branch_id = b.id)
           ) AS out_of_stock_count,
           (SELECT COUNT(*) FROM stock_transfers st
            WHERE st.to_branch_id = b.id AND st.status = 'pending_approval') AS pending_requests,
@@ -901,16 +922,17 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const rows = db.prepare(`
         SELECT
-          COALESCE(s.id, '') AS id,
+          MIN(s.id) AS id,
           p.id AS product_id,
-          COALESCE(s.quantity, 0) AS quantity,
-          COALESCE(s.damaged_qty, 0) AS damaged_qty,
-          p.name AS product_name, p.sku, p.image_url, p.unit,
+          COALESCE(p.sku, p.id) AS sku,
+          SUM(COALESCE(s.quantity, 0)) AS quantity,
+          SUM(COALESCE(s.damaged_qty, 0)) AS damaged_qty,
+          p.name AS product_name, MAX(p.image_url) AS image_url, p.unit,
           p.min_stock_level, p.selling_price, p.cost_price,
           p.category_id, cat.name AS category_name,
           CASE
-            WHEN COALESCE(s.quantity, 0) = 0 THEN 'out'
-            WHEN COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 0) AND COALESCE(p.min_stock_level, 0) > 0 THEN 'low'
+            WHEN SUM(COALESCE(s.quantity, 0)) = 0 THEN 'out'
+            WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 'low'
             ELSE 'ok'
           END AS stock_status
         FROM products p
@@ -920,9 +942,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         LEFT JOIN categories cat ON cat.id = p.category_id
         WHERE p.is_active = 1
           AND (p.branch_id = ? OR p.branch_id IS NULL)
+        GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.unit, p.min_stock_level, p.selling_price, p.cost_price, p.category_id, cat.name
         ORDER BY
-          CASE WHEN COALESCE(s.quantity, 0) = 0 THEN 0
-               WHEN COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 0) THEN 1
+          CASE WHEN SUM(COALESCE(s.quantity, 0)) = 0 THEN 0
+               WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 1
                ELSE 2 END,
           p.name
       `).all(branchId, branchId)

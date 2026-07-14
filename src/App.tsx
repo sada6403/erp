@@ -7,7 +7,6 @@ import POSPage from '@/pages/pos/POSPage'
 import AdminDashboard from '@/pages/admin/AdminDashboard'
 import ProductsPage from '@/pages/admin/ProductsPage'
 import CustomersPage from '@/pages/admin/CustomersPage'
-import InventoryPage from '@/pages/admin/InventoryPage'
 import StockIntelligencePage from '@/pages/admin/StockIntelligencePage'
 import BranchesPage from '@/pages/admin/BranchesPage'
 import UsersPage from '@/pages/admin/UsersPage'
@@ -125,7 +124,6 @@ export default function App() {
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/products" element={<ProductsPage />} />
         <Route path="/admin/customers" element={<CustomersPage />} />
-        <Route path="/admin/inventory" element={<InventoryPage />} />
         <Route path="/admin/stock-intelligence" element={<StockIntelligencePage />} />
         <Route path="/admin/stock-count" element={<StockCountPage />} />
         <Route path="/admin/batches" element={<BatchesPage />} />

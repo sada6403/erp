@@ -63,7 +63,6 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/products', label: 'List Products', perm: 'inventory' },
       { to: '/admin/categories', label: 'Categories', perm: 'inventory' },
-      { to: '/admin/inventory', label: 'Inventory', perm: 'inventory' },
       { to: '/admin/stock-intelligence', label: 'Stock Intelligence', perm: 'inventory' },
       { to: '/admin/stock-lookup', label: 'Stock Lookup', perm: 'inventory' },
       { to: '/admin/stock-count', label: 'Stock Count', perm: 'inventory' },

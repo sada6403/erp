@@ -8,6 +8,7 @@ export default function InventoryPage() {
   const [stocks, setStocks]       = useState<Record<string, unknown>[]>([])
   const [branchSummary, setBranchSummary] = useState<Record<string, unknown>[]>([])
   const [branches, setBranches] = useState<Record<string, unknown>[]>([])
+  const [catalogTotalProducts, setCatalogTotalProducts] = useState(0)
   const [branchId, setBranchId] = useState('')
   const [transfers, setTransfers] = useState<Record<string, unknown>[]>([])
   const [movements, setMovements] = useState<Record<string, unknown>[]>([])
@@ -27,18 +28,34 @@ export default function InventoryPage() {
       window.api.stocks.branchSummary(),
       window.api.admin.branches.list(),
     ])
+    const audit = await window.api.products.catalogAudit()
     if (s.success) setStocks(s.data as Record<string, unknown>[])
     if (t.success) setTransfers(t.data as Record<string, unknown>[])
     if (m.success) setMovements(m.data as Record<string, unknown>[])
     if (summary.success) setBranchSummary(summary.data as Record<string, unknown>[])
     if (branchList.success) setBranches(branchList.data as Record<string, unknown>[])
+    if (audit.success) setCatalogTotalProducts(Number((audit.data as { totalProducts?: number } | undefined)?.totalProducts || 0))
     setLoading(false)
   }
 
   useEffect(() => { load() }, [movementType])
   useEffect(() => { load() }, [branchId])
 
-  const lowStock = stocks.filter(s => (s.quantity as number) <= (s.min_stock_level as number))
+  const lowStock = stocks.filter(s => {
+    const qty = Number(s.quantity || 0)
+    return qty >= 1 && qty <= 5
+  })
+  const outOfStockRows = stocks.filter(s => Number(s.quantity || 0) === 0)
+  const activeSummary = branchId
+    ? branchSummary.find(b => String(b.id) === branchId)
+    : branchSummary.find(b => String(b.code || '').toUpperCase() === 'MAIN') || branchSummary[0]
+  const summaryProductCount = activeSummary ? Number(activeSummary.product_count || 0) : 0
+  const summaryLowStockCount = activeSummary ? Number(activeSummary.low_stock_count || 0) : lowStock.length
+  const summaryOutOfStock = activeSummary ? Number(activeSummary.out_of_stock_count || 0) : outOfStockRows.length
+  const totalProducts = catalogTotalProducts || summaryProductCount
+  const outOfStock = summaryOutOfStock
+  const lowStockCount = summaryLowStockCount
+  const remaining = Math.max(0, totalProducts - outOfStock - lowStockCount)
   const nextTransferStatus: Record<string, string> = {
     pending: 'approved', pending_approval: 'approved', approved: 'ready_for_dispatch',
     ready_for_dispatch: 'dispatched', dispatched: 'in_transit', in_transit: 'received'
@@ -62,8 +79,9 @@ export default function InventoryPage() {
       />
 
       <div className="px-6 pt-4">
-        <div className="flex items-center gap-3">
-          <div className="w-72">
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="w-72">
             <label className="block text-xs font-medium mb-1.5 text-slate-400">Branch</label>
             <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input">
               <option value="">All Branches</option>
@@ -73,13 +91,31 @@ export default function InventoryPage() {
                 </option>
               ))}
             </select>
+            </div>
+            <div className="flex flex-wrap gap-2 flex-1">
+              <button
+                onClick={() => setBranchId('')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${branchId === '' ? 'bg-brand-600 text-white border-brand-500' : 'bg-surface-800 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+              >
+                All Branches
+              </button>
+              {branches.map((b: any) => (
+                <button
+                  key={`branch-btn-${String(b.id)}`}
+                  onClick={() => setBranchId(String(b.id))}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${branchId === String(b.id) ? 'bg-brand-600 text-white border-brand-500' : 'bg-surface-800 text-slate-300 border-slate-700 hover:border-slate-500'}`}
+                >
+                  {String(b.name || 'Branch')}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="grid grid-cols-4 gap-3 flex-1">
+          <div className="grid grid-cols-4 gap-3">
             {[
-              { label: 'Branches', value: branchSummary.length },
-              { label: 'Low Stock', value: branchSummary.reduce((sum, b) => sum + Number(b.low_stock_count || 0), 0) },
-              { label: 'Out of Stock', value: branchSummary.reduce((sum, b) => sum + Number(b.out_of_stock_count || 0), 0) },
-              { label: 'Total Units', value: branchSummary.reduce((sum, b) => sum + Number(b.total_units || 0), 0) },
+              { label: 'Total Products', value: totalProducts },
+              { label: 'Low Stock', value: lowStockCount },
+              { label: 'Out of Stock', value: outOfStock },
+              { label: 'Remaining', value: remaining },
             ].map(card => (
               <div key={card.label} className="rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
                 <p className="text-xs uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>{card.label}</p>
@@ -88,12 +124,17 @@ export default function InventoryPage() {
             ))}
           </div>
         </div>
+        {activeSummary && (
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+            Showing summary for <strong style={{ color: 'var(--text-2)' }}>{String(activeSummary.name || 'Main Branch')}</strong>
+          </p>
+        )}
       </div>
 
       {lowStock.length > 0 && (
         <div className="mx-6 my-3 flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-2.5">
           <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
-          <p className="text-sm text-red-400"><strong>{lowStock.length}</strong> items are at or below minimum stock level</p>
+          <p className="text-sm text-red-400"><strong>{lowStock.length}</strong> items are low stock (1 to 5 units)</p>
         </div>
       )}
 
@@ -126,14 +167,14 @@ export default function InventoryPage() {
                     <td className="table-cell font-mono text-xs text-slate-400">{s.sku as string}</td>
                     <td className="table-cell text-slate-400">{s.warehouse_name as string || 'Main'}</td>
                     <td className="table-cell">
-                      <span className={`font-bold ${(s.quantity as number) <= (s.min_stock_level as number) ? 'text-red-400' : 'text-green-400'}`}>
+                      <span className={`font-bold ${Number(s.quantity || 0) === 0 ? 'text-red-400' : Number(s.quantity || 0) <= 5 ? 'text-yellow-400' : 'text-green-400'}`}>
                         {s.quantity as number}
                       </span>
                     </td>
                     <td className="table-cell text-slate-400">{s.damaged_qty as number}</td>
                     <td className="table-cell">
-                      {(s.quantity as number) <= 0 ? <span className="badge-red">Out of Stock</span>
-                      : (s.quantity as number) <= (s.min_stock_level as number) ? <span className="badge-yellow">Low Stock</span>
+                      {Number(s.quantity || 0) <= 0 ? <span className="badge-red">Out of Stock</span>
+                      : Number(s.quantity || 0) <= 5 ? <span className="badge-yellow">Low Stock</span>
                       : <span className="badge-green">In Stock</span>}
                     </td>
                     <td className="table-cell">
@@ -145,8 +186,10 @@ export default function InventoryPage() {
             </table>
             <div className="px-6 pb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
               {branchSummary.map((b: any) => {
-                const low = Number(b.low_stock_count || 0)
-                const out = Number(b.out_of_stock_count || 0)
+                const isMain = String(b.code || '').toUpperCase() === 'MAIN'
+                const low = isMain ? summaryLowStockCount : Number(b.low_stock_count || 0)
+                const out = isMain ? summaryOutOfStock : Number(b.out_of_stock_count || 0)
+                const products = isMain ? totalProducts : Number(b.product_count || 0)
                 return (
                   <div key={String(b.id)} className="rounded-xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
                     <div className="flex items-start justify-between gap-3">
@@ -161,7 +204,7 @@ export default function InventoryPage() {
                     <div className="grid grid-cols-3 gap-2 mt-4 text-center">
                       <div className="rounded-lg p-2" style={{ background: 'var(--bg-soft)' }}>
                         <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>Products</p>
-                        <p className="font-bold" style={{ color: 'var(--text-1)' }}>{Number(b.product_count || 0)}</p>
+                        <p className="font-bold" style={{ color: 'var(--text-1)' }}>{products}</p>
                       </div>
                       <div className="rounded-lg p-2" style={{ background: 'var(--bg-soft)' }}>
                         <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>Low</p>
@@ -173,7 +216,10 @@ export default function InventoryPage() {
                       </div>
                     </div>
                     <button
-                      onClick={() => setBranchId(String(b.id))}
+                      onClick={() => {
+                        setBranchId(String(b.id))
+                        setTab('stock')
+                      }}
                       className="mt-4 btn-secondary btn-sm w-full"
                     >
                       View this branch
@@ -213,7 +259,7 @@ export default function InventoryPage() {
           </table>
         ) : (
           <div className="flex flex-col min-h-full">
-            <div className="flex gap-2 px-6 py-3 border-b border-slate-800 flex-shrink-0">
+            <div className="flex gap-2 px-6 py-3 border-b border-slate-800 flex-shrink-0 overflow-x-auto">
               {['', 'SALE', 'TRANSFER', 'RECEIVE', 'ADJUSTMENT'].map(type => (
                 <button key={type || 'all'} onClick={() => setMovementType(type)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium ${movementType === type ? 'bg-brand-600 text-white' : 'bg-surface-800 text-slate-400'}`}>

@@ -1,6 +1,6 @@
 {
   "name": "pos-erp",
-  "version": "2.0.19",
+  "version": "2.0.20",
   "description": "Enterprise Multi Branch Offline-First POS ERP for Furniture & Electronics",
   "main": "dist-electron/main.js",
   "author": "Enterprise POS ERP",
