@@ -783,7 +783,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       return {
         success: true,
         data: {
-          totalProducts: (db.prepare('SELECT COUNT(*) AS count FROM products WHERE is_active = 1').get() as { count: number }).count,
+          totalProducts: (db.prepare('SELECT COUNT(*) AS count FROM products').get() as { count: number }).count,
           missingSku: missingSku.count,
           duplicateSkuGroups: duplicateSkuGroups.count,
           duplicateSkuProducts: duplicateSkuProducts.count,

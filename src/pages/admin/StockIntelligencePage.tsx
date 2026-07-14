@@ -69,7 +69,10 @@ export default function StockIntelligencePage() {
 
   const lowStock = useMemo(() => {
     if (branchStock.length) {
-      return branchStock.filter(row => Number(row.quantity ?? 0) <= Number(row.min_stock_level ?? 0))
+      return branchStock.filter(row => {
+        const qty = Number(row.quantity ?? 0)
+        return qty >= 1 && qty <= 5
+      })
     }
     return branchSummary.filter(row => Number(row.low_stock_count ?? 0) > 0 || Number(row.out_of_stock_count ?? 0) > 0)
   }, [branchStock, branchSummary])
@@ -228,15 +231,14 @@ export default function StockIntelligencePage() {
                   {(currentRows as Row[]).map(row => {
                     if (branchId) {
                       const qty = Number(row.quantity || 0)
-                      const min = Number(row.min_stock_level || 0)
-                      const status = String(row.stock_status || (qty === 0 ? 'out' : qty <= min ? 'low' : 'ok'))
+                      const status = String(row.stock_status || (qty === 0 ? 'out' : qty <= 5 ? 'low' : 'ok'))
                       return (
                         <tr key={String(row.id)} className="border-t" style={{ borderColor: 'var(--border)' }}>
                           <td className="py-2 pr-3" style={{ color: 'var(--text-1)' }}>{String(row.product_name || '-')}</td>
                           <td className="py-2 pr-3 font-mono text-xs" style={{ color: 'var(--text-3)' }}>{String(row.sku || '-')}</td>
                           <td className="py-2 pr-3" style={{ color: 'var(--text-2)' }}>{String(row.category_name || '-')}</td>
-                          <td className="py-2 pr-3 text-right font-semibold" style={{ color: qty === 0 ? '#ef4444' : qty <= min ? '#eab308' : '#22c55e' }}>{qty}</td>
-                          <td className="py-2 pr-3 text-right" style={{ color: 'var(--text-2)' }}>{min}</td>
+                          <td className="py-2 pr-3 text-right font-semibold" style={{ color: qty === 0 ? '#ef4444' : qty <= 5 ? '#eab308' : '#22c55e' }}>{qty}</td>
+                          <td className="py-2 pr-3 text-right" style={{ color: 'var(--text-2)' }}>{Number(row.min_stock_level || 0)}</td>
                           <td className="py-2">
                             <span className={`badge-${status === 'out' ? 'red' : status === 'low' ? 'yellow' : 'green'}`}>
                               {status === 'out' ? 'Out of stock' : status === 'low' ? 'Low stock' : 'In stock'}
@@ -290,8 +292,8 @@ export default function StockIntelligencePage() {
               ) : lowStock.slice(0, 12).map(row => (
                 <div key={String(row.id)} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
                   <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{String(row.product_name || row.name || '-')}</p>
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
-                    SKU: {String(row.sku || '-')} · Qty: {Number(row.quantity || row.total_units || 0)} · Min: {Number(row.min_stock_level || 0)}
+                      <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                    SKU: {String(row.sku || '-')} · Qty: {Number(row.quantity || row.total_units || 0)} · Range: 1-5 low, 0 out
                   </p>
                 </div>
               ))}
