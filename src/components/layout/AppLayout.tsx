@@ -340,6 +340,7 @@ export default function AppLayout() {
   const [lockReason, setLockReason] = useState<'suspended' | 'cancelled' | null>(null)
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null)
   const sidebarNavRef = useRef<HTMLElement | null>(null)
+  const brand401CountRef = useRef(0)
   const location = useLocation()
 
   const permissions = (user?.role?.permissions ||
@@ -372,11 +373,17 @@ export default function AppLayout() {
           try {
             const resp = await fetch(`${apiUrl}/api/brand`, { headers: { 'x-api-key': apiKey } })
             if (resp.status === 401) {
-              // API key no longer valid — company was permanently deleted by SuperAdmin
+              // A single 401 can be a transient blip (DB hiccup, brief key
+              // mismatch) — only treat it as "company permanently deleted"
+              // after several consecutive confirmations, since forceReset
+              // wipes every local table with no way back.
+              brand401CountRef.current += 1
+              if (brand401CountRef.current < 3) return
               await window.api.admin?.forceReset?.()
               navigate('/setup', { replace: true })
               return
             }
+            brand401CountRef.current = 0
             if (!resp.ok) {
               // 5xx / network error — treat as offline, keep cached settings
               return

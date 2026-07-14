@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { enqueuSync } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { CloudApi } from '../services/cloudApi'
 import { uploadFile as s3UploadFile } from '../services/s3Service'
@@ -301,16 +302,14 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       }
 
       // Audit log before deletion
-      db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, old_values) VALUES (?,?,?,?,?,?,?)`)
-        .run(
-          crypto.randomUUID(),
-          caller?.id || null,
-          (caller?.branch_id || (caller?.branch as Record<string,unknown>)?.id) || null,
-          'PRODUCT_PERMANENT_DELETE',
-          'products',
-          id,
-          JSON.stringify({ name: product.name, sku: product.sku, barcode: product.barcode, reason })
-        )
+      logAudit(db, {
+        userId: (caller?.id as string) || null,
+        branchId: ((caller?.branch_id || (caller?.branch as Record<string,unknown>)?.id) as string) || null,
+        action: 'PRODUCT_PERMANENT_DELETE',
+        tableName: 'products',
+        recordId: id,
+        oldValues: { name: product.name, sku: product.sku, barcode: product.barcode, reason },
+      })
 
       // Remove related stock records then product
       db.prepare(`DELETE FROM stocks WHERE product_id = ?`).run(id)

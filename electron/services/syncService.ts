@@ -237,6 +237,10 @@ export class SyncService {
           payload.image_url = publicUrl
           db.prepare("UPDATE products SET image_url = ?, updated_at = datetime('now') WHERE id = ?")
             .run(publicUrl, item.record_id)
+        } else {
+          // Don't push a locally-only-resolvable app-img:// URL into the cloud
+          // and mark it synced — retry like any other transient failure instead.
+          throw new Error('Image upload failed; retrying before pushing product record')
         }
       }
 
@@ -277,9 +281,14 @@ export class SyncService {
       'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches',
       'branch_transfer_logs', 'branch_transfer_prints',
       'coupons', 'coupon_redemptions',
+      // Phase 2 additions
+      'agents', 'expense_categories', 'expenses',
+      'returns', 'cash_sessions', 'loyalty_config', 'loyalty_transactions',
+      'product_uom', 'product_batches', 'audit_logs',
     ]
 
     let pulledInstallmentIds: string[] = []
+    let pulledReturnIds: string[] = []
 
     for (const table of globalTables) {
       let data: Record<string, unknown>[] = []
@@ -293,9 +302,12 @@ export class SyncService {
       }
       if (data.length === 0) continue
 
-      // Capture installment IDs now; reuse below, no duplicate fetch.
+      // Capture installment/return IDs now; reuse below, no duplicate fetch.
       if (table === 'installments') {
         pulledInstallmentIds = data.map(row => String(row.id))
+      }
+      if (table === 'returns') {
+        pulledReturnIds = data.map(row => String(row.id))
       }
 
       const pendingIds = (db.prepare(`
@@ -307,7 +319,14 @@ export class SyncService {
         db.transaction(() => {
           for (const row of data) {
             if (pendingIds.includes(String(row.id))) continue
-            this.insertFiltered(db, table, row)
+            // One row with bad/dangling data (e.g. a foreign key the cloud
+            // itself never enforced) must not roll back every other row in
+            // this table's batch — skip just that row and keep going.
+            try {
+              this.insertFiltered(db, table, row)
+            } catch (err) {
+              console.error(`[SyncService] Skipping row in ${table} (${row.id}):`, err)
+            }
           }
         })()
       } catch (err) {
@@ -329,7 +348,11 @@ export class SyncService {
           for (const invoice of invoices) {
             if (pendingIds.includes(String(invoice.id))) continue
             pulledInvoiceIds.push(String(invoice.id))
-            this.insertFiltered(db, 'invoices', invoice)
+            try {
+              this.insertFiltered(db, 'invoices', invoice)
+            } catch (err) {
+              console.error(`[SyncService] Skipping invoice (${invoice.id}):`, err)
+            }
           }
         })()
 
@@ -340,8 +363,14 @@ export class SyncService {
           const payments = await cloud.related('payments', 'invoice_id', ids)
           await sleep(REQUEST_DELAY_MS)
           db.transaction(() => {
-            for (const item of items) this.insertFiltered(db, 'invoice_items', item)
-            for (const payment of payments) this.insertFiltered(db, 'payments', payment)
+            for (const item of items) {
+              try { this.insertFiltered(db, 'invoice_items', item) }
+              catch (err) { console.error(`[SyncService] Skipping invoice_item (${item.id}):`, err) }
+            }
+            for (const payment of payments) {
+              try { this.insertFiltered(db, 'payments', payment) }
+              catch (err) { console.error(`[SyncService] Skipping payment (${payment.id}):`, err) }
+            }
           })()
         }
       }
@@ -360,12 +389,37 @@ export class SyncService {
           )
           await sleep(REQUEST_DELAY_MS)
           db.transaction(() => {
-            for (const payment of payments) this.insertFiltered(db, 'installment_payments', payment)
+            for (const payment of payments) {
+              try { this.insertFiltered(db, 'installment_payments', payment) }
+              catch (err) { console.error(`[SyncService] Skipping installment_payment (${payment.id}):`, err) }
+            }
           })()
         }
       } catch (err) {
         if (err instanceof CloudRateLimitError) throw err
         console.error('[SyncService] Failed to pull installment payments:', err)
+      }
+    }
+
+    // Pull return_items using IDs already fetched above — no duplicate API call
+    if (pulledReturnIds.length > 0) {
+      try {
+        for (let index = 0; index < pulledReturnIds.length; index += 50) {
+          const items = await cloud.related(
+            'return_items', 'return_id',
+            pulledReturnIds.slice(index, index + 50)
+          )
+          await sleep(REQUEST_DELAY_MS)
+          db.transaction(() => {
+            for (const item of items) {
+              try { this.insertFiltered(db, 'return_items', item) }
+              catch (err) { console.error(`[SyncService] Skipping return_item (${item.id}):`, err) }
+            }
+          })()
+        }
+      } catch (err) {
+        if (err instanceof CloudRateLimitError) throw err
+        console.error('[SyncService] Failed to pull return items:', err)
       }
     }
 
@@ -431,6 +485,25 @@ export class SyncService {
 
     const keys = Object.keys(localRow)
     if (keys.length === 0) return
+
+    // Roles are UNIQUE(name). A cloud role with the same name but a different
+    // id (e.g. the locally-seeded system roles vs. the company's real cloud
+    // role rows) would make INSERT OR REPLACE delete-then-reinsert on
+    // conflict — which fails with a foreign key error if any local user
+    // still references the row being deleted. Update the existing
+    // name-matched row in place instead of replacing it.
+    if (table === 'roles') {
+      const existingByName = db.prepare(`SELECT id FROM roles WHERE name = ? LIMIT 1`).get(String(localRow.name)) as { id?: string } | undefined
+      if (existingByName?.id && existingByName.id !== localRow.id) {
+        const updateKeys = keys.filter(k => k !== 'id')
+        if (updateKeys.length > 0) {
+          db.prepare(
+            `UPDATE roles SET ${updateKeys.map(k => `${k}=?`).join(',')} WHERE id=?`
+          ).run(...updateKeys.map(k => localRow[k]), existingByName.id)
+        }
+        return
+      }
+    }
 
     if (table === 'categories' && localRow.parent_id) {
       const parentId = String(localRow.parent_id)

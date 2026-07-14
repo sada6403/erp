@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import crypto from 'crypto'
 import { getDb } from '../database'
+import { enqueuSync } from '../services/syncQueue'
 
 export function registerCashRegisterHandlers() {
   ipcMain.handle('cash:getOpen', (_e, branchId: string) => {
@@ -17,7 +18,7 @@ export function registerCashRegisterHandlers() {
     } catch (e) { return { success: false, error: String(e) } }
   })
 
-  ipcMain.handle('cash:open', (_e, data: {
+  ipcMain.handle('cash:open', async (_e, data: {
     branch_id: string
     opened_by: string
     opening_cash: number
@@ -26,17 +27,28 @@ export function registerCashRegisterHandlers() {
   }) => {
     const db = getDb()
     try {
+      const forceClosed = db.prepare(`SELECT id FROM cash_sessions WHERE branch_id=? AND status='open'`).all(data.branch_id) as { id: string }[]
       db.prepare(`UPDATE cash_sessions SET status='force_closed', closed_at=datetime('now') WHERE branch_id=? AND status='open'`).run(data.branch_id)
+      for (const row of forceClosed) {
+        const updated = db.prepare(`SELECT * FROM cash_sessions WHERE id=?`).get(row.id) as Record<string, unknown>
+        await enqueuSync('cash_sessions', row.id, 'UPDATE', updated)
+      }
+
       const id = crypto.randomUUID()
+      const openRow = {
+        id, branch_id: data.branch_id, opened_by: data.opened_by, opening_cash: data.opening_cash,
+        denominations: JSON.stringify(data.denominations), notes: data.notes ?? null, status: 'open',
+      }
       db.prepare(`
         INSERT INTO cash_sessions (id, branch_id, opened_by, opening_cash, denominations, notes, status)
-        VALUES (?, ?, ?, ?, ?, ?, 'open')
-      `).run(id, data.branch_id, data.opened_by, data.opening_cash, JSON.stringify(data.denominations), data.notes ?? null)
+        VALUES (@id, @branch_id, @opened_by, @opening_cash, @denominations, @notes, @status)
+      `).run(openRow)
+      await enqueuSync('cash_sessions', id, 'INSERT', openRow)
       return { success: true, data: id }
     } catch (e) { return { success: false, error: String(e) } }
   })
 
-  ipcMain.handle('cash:close', (_e, data: {
+  ipcMain.handle('cash:close', async (_e, data: {
     session_id: string
     closed_by: string
     closing_cash: number
@@ -67,6 +79,9 @@ export function registerCashRegisterHandlers() {
         JSON.stringify(data.denominations), data.notes ?? null,
         sales.total, sales.count, difference, data.session_id
       )
+
+      const updated = db.prepare('SELECT * FROM cash_sessions WHERE id=?').get(data.session_id) as Record<string, unknown>
+      await enqueuSync('cash_sessions', data.session_id, 'UPDATE', updated)
 
       return { success: true, data: { ...session, closing_cash: data.closing_cash, sales, difference } }
     } catch (e) { return { success: false, error: String(e) } }

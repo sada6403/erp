@@ -3,6 +3,7 @@ import { dialog } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import fs from 'fs'
 import { insertStockMovement } from '../services/stockMovement'
@@ -80,18 +81,12 @@ function auditTransferAction(
   newValue: Record<string, unknown>,
   reason?: string | null,
 ) {
-  db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,old_values,new_values)
-    VALUES (?,?,?,?,?,?,?,?)`)
-    .run(
-      crypto.randomUUID(),
-      user?.id || null,
-      branchId || null,
-      action,
-      'stock_transfers',
-      transferId,
-      oldValue ? JSON.stringify(oldValue) : null,
-      JSON.stringify({ ...newValue, reason: reason || null })
-    )
+  logAudit(db, {
+    userId: (user?.id as string) || null, branchId: (branchId as string) || null,
+    action, tableName: 'stock_transfers', recordId: transferId,
+    oldValues: oldValue ?? undefined,
+    newValues: { ...newValue, reason: reason || null },
+  })
 }
 
 export function registerStockHandlers(ipcMain: IpcMain) {
@@ -186,10 +181,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         })
       }
 
-      db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, new_values)
-        VALUES (?,?,?,?,?,?,?)`)
-        .run(crypto.randomUUID(), user?.id, branch_id, 'STOCK_ADJUST', 'stocks', product_id,
-          JSON.stringify({ quantity, reason }))
+      logAudit(db, {
+        userId: (user?.id as string) || null, branchId: branch_id, action: 'STOCK_ADJUST',
+        tableName: 'stocks', recordId: product_id, newValues: { quantity, reason },
+      })
 
       await enqueuSync('stocks', `${product_id}-${branch_id}`, 'UPDATE', payload)
       if (movement) await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)

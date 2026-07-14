@@ -97,17 +97,26 @@ export function registerReturnHandlers() {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed')
       `).run(id, data.invoice_id, data.customer_id ?? null, data.reason, total_refund, data.refund_method, data.notes ?? null, data.created_by)
 
+      const itemRecords: Record<string, unknown>[] = []
       for (const item of data.items) {
+        const itemId = crypto.randomUUID()
         db.prepare(`
           INSERT INTO return_items (id, return_id, product_id, invoice_item_id, quantity, unit_price)
           VALUES (?, ?, ?, ?, ?, ?)
-        `).run(crypto.randomUUID(), id, item.product_id, item.invoice_item_id ?? null, item.quantity, item.unit_price)
+        `).run(itemId, id, item.product_id, item.invoice_item_id ?? null, item.quantity, item.unit_price)
+        itemRecords.push({
+          id: itemId, return_id: id, product_id: item.product_id,
+          invoice_item_id: item.invoice_item_id ?? null, quantity: item.quantity, unit_price: item.unit_price,
+        })
 
         // Restore stock in the default branch warehouse
         db.prepare(`UPDATE stocks SET quantity = quantity + ? WHERE product_id = ?`).run(item.quantity, item.product_id)
       }
 
       await enqueuSync('returns', id, 'INSERT', { id, ...data, total_refund })
+      for (const itemRow of itemRecords) {
+        await enqueuSync('return_items', String(itemRow.id), 'INSERT', itemRow)
+      }
       return { success: true, data: { id, total_refund } }
     } catch (e) { return { success: false, error: String(e) } }
   })

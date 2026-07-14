@@ -31,9 +31,14 @@ export async function initDatabase(): Promise<void> {
     const schema = fs.readFileSync(schemaPath, 'utf-8')
     db.exec(schema)
     seedDefaultData()
-  } else {
-    runMigrations()
   }
+  // Always run migrations, even right after a fresh schema.sql — the base
+  // schema has drifted behind runMigrations() (e.g. users.login_attempts,
+  // users.locked_until, products.track_batches never made it into
+  // schema.sql), so a fresh install silently ended up missing columns that
+  // sync and login code assume exist. Every statement here is guarded by
+  // hasColumn()/hasTable(), so re-running on an already-migrated DB is a no-op.
+  runMigrations()
 
   console.log('[DB] SQLite initialized at', dbPath)
 }
@@ -178,6 +183,41 @@ function runMigrations(): void {
       }
     }
     if (legacyBranches.length) console.log(`[DB] Migration: hashed ${legacyBranches.length} plaintext branch PIN(s)`)
+  }
+
+  // One-time backfill: invoice_items/payments/credit_ledger were never
+  // enqueued for cloud push before this update (no enqueueSync call existed
+  // at any of their insert sites), so historical rows sit in local SQLite
+  // only. Queue anything not already represented in sync_queue — gated by a
+  // flag so this full-table scan runs once, not on every startup.
+  {
+    const Store = require('electron-store')
+    const store = new Store()
+    const FLAG = 'backfill_invoice_items_payments_credit_ledger_v1'
+    if (!store.get(FLAG)) {
+      const { randomUUID } = require('crypto')
+      const enqueue = (table: string, recordId: string, payload: Record<string, unknown>) => {
+        try {
+          db.prepare(`INSERT INTO sync_queue (id, table_name, record_id, operation, payload) VALUES (?,?,?,'INSERT',?)`)
+            .run(randomUUID(), table, recordId, JSON.stringify(payload))
+        } catch { /* sync_queue not ready — next launch will retry (flag not set) */ }
+      }
+
+      for (const table of ['invoice_items', 'payments', 'credit_ledger']) {
+        try {
+          const rows = db.prepare(`
+            SELECT * FROM ${table}
+            WHERE id NOT IN (SELECT record_id FROM sync_queue WHERE table_name = ?)
+          `).all(table) as Record<string, unknown>[]
+          for (const row of rows) enqueue(table, String(row.id), row)
+          if (rows.length) console.log(`[DB] Backfill: queued ${rows.length} historical ${table} row(s) for cloud sync`)
+        } catch (err) {
+          console.error(`[DB] Backfill failed for ${table}:`, err)
+        }
+      }
+
+      store.set(FLAG, true)
+    }
   }
 
   const transferMigrations: [string, string][] = [

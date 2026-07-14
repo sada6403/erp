@@ -36,8 +36,23 @@ import { type SyncService, getSyncService } from './services/syncService'
 const isDev = process.env.NODE_ENV === 'development'
 const devPort = process.env.DEV_PORT || '5173'
 
-// Fix blank screen on some Windows GPUs
-app.disableHardwareAcceleration()
+// Without this, launching the app twice runs two independent SyncService
+// loops against the same SQLite file — concurrent writers hit SQLITE_BUSY,
+// which sync's per-table try/catch swallows silently, so pulls/pushes for
+// whichever table loses the race just vanish with no visible error.
+if (!isDev && !app.requestSingleInstanceLock()) {
+  app.quit()
+} else {
+  app.on('second-instance', () => {
+    const existing = BrowserWindow.getAllWindows()[0]
+    if (existing) {
+      if (existing.isMinimized()) existing.restore()
+      existing.focus()
+    }
+  })
+
+  // Fix blank screen on some Windows GPUs
+  app.disableHardwareAcceleration()
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.enterprise.pos-erp')
 }
@@ -209,3 +224,4 @@ app.on('window-all-closed', () => {
   stopLicenseChecks()
   if (process.platform !== 'darwin') app.quit()
 })
+}

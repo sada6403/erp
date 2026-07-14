@@ -15,7 +15,7 @@ declare global { var _posErpTenantCompatibility: Set<string> | undefined }
 const migratedTenantSchemas = global._posErpTenantCompatibility ?? new Set<string>()
 global._posErpTenantCompatibility = migratedTenantSchemas
 
-async function ensureTenantCompatibility(dbSchema: string) {
+export async function ensureTenantCompatibility(dbSchema: string) {
   if (migratedTenantSchemas.has(dbSchema)) return
 
   const tp = tenantPool(dbSchema)
@@ -374,6 +374,263 @@ async function ensureTenantCompatibility(dbSchema: string) {
     `ALTER TABLE stock_transfers ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
     `ALTER TABLE stock_transfers ADD COLUMN synced_at DATETIME NULL`,
     `ALTER TABLE branch_transfers ADD COLUMN approved_by CHAR(36) NULL`,
+
+    // ── customer_orders / customer_order_items — were whitelisted and pushed
+    // from every device, but the cloud table never existed, so every real
+    // customer order silently failed forever. ─────────────────────────────
+    `CREATE TABLE IF NOT EXISTS customer_orders (
+       id                    CHAR(36)      NOT NULL PRIMARY KEY,
+       order_number          VARCHAR(64)   NOT NULL UNIQUE,
+       branch_id             CHAR(36)      NOT NULL,
+       customer_id           CHAR(36)      NULL,
+       customer_name         VARCHAR(255)  NOT NULL,
+       customer_phone        VARCHAR(50)   NULL,
+       customer_address      TEXT          NULL,
+       sales_staff_id        CHAR(36)      NULL,
+       approved_by           CHAR(36)      NULL,
+       released_by           CHAR(36)      NULL,
+       driver_name           VARCHAR(255)  NULL,
+       driver_phone          VARCHAR(50)   NULL,
+       vehicle_number        VARCHAR(64)   NULL,
+       status                VARCHAR(32)   NOT NULL DEFAULT 'pending',
+       payment_status        VARCHAR(32)   NOT NULL DEFAULT 'unpaid',
+       total_amount          DECIMAL(14,2) NOT NULL DEFAULT 0,
+       paid_amount           DECIMAL(14,2) NOT NULL DEFAULT 0,
+       delivery_date         DATETIME      NULL,
+       dispatch_at           DATETIME      NULL,
+       delivered_at          DATETIME      NULL,
+       delivery_confirmed_by CHAR(36)      NULL,
+       notes                 TEXT          NULL,
+       created_at            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at             DATETIME      NULL,
+       INDEX idx_customer_orders_branch (branch_id),
+       INDEX idx_customer_orders_status (status),
+       INDEX idx_customer_orders_updated (updated_at)
+     )`,
+    `CREATE TABLE IF NOT EXISTS customer_order_items (
+       id          CHAR(36)      NOT NULL PRIMARY KEY,
+       order_id    CHAR(36)      NOT NULL,
+       product_id  CHAR(36)      NOT NULL,
+       quantity    DECIMAL(12,2) NOT NULL DEFAULT 0,
+       unit_price  DECIMAL(14,2) NOT NULL DEFAULT 0,
+       line_total  DECIMAL(14,2) NOT NULL DEFAULT 0,
+       updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at   DATETIME      NULL,
+       FOREIGN KEY (order_id) REFERENCES customer_orders(id) ON DELETE CASCADE,
+       INDEX idx_coi_order (order_id)
+     )`,
+
+    // ── payments — invoice_items/payments/credit_ledger were never pushed
+    // from any device (no enqueue call existed), and the cloud `payments`
+    // table didn't exist either. This creates the table; the push wiring
+    // is a separate electron-side fix. ─────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS payments (
+       id           CHAR(36)      NOT NULL PRIMARY KEY,
+       invoice_id   CHAR(36)      NOT NULL,
+       method       VARCHAR(32)   NOT NULL,
+       amount       DECIMAL(14,2) NOT NULL DEFAULT 0,
+       reference    VARCHAR(255)  NULL,
+       received_by  CHAR(36)      NULL,
+       paid_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at    DATETIME      NULL,
+       FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE,
+       INDEX idx_payments_invoice (invoice_id)
+     )`,
+    `CREATE TABLE IF NOT EXISTS credit_ledger (
+       id           CHAR(36)      NOT NULL PRIMARY KEY,
+       customer_id  CHAR(36)      NOT NULL,
+       invoice_id   CHAR(36)      NOT NULL,
+       branch_id    CHAR(36)      NOT NULL,
+       amount_due   DECIMAL(14,2) NOT NULL DEFAULT 0,
+       amount_paid  DECIMAL(14,2) NOT NULL DEFAULT 0,
+       due_date     DATETIME      NULL,
+       status       VARCHAR(32)   NOT NULL DEFAULT 'outstanding',
+       created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at    DATETIME      NULL,
+       INDEX idx_credit_ledger_customer (customer_id),
+       INDEX idx_credit_ledger_invoice (invoice_id)
+     )`,
+
+    // ── Phase 2 Group A — agents, expenses, installment_reminders ──────────
+    `CREATE TABLE IF NOT EXISTS agents (
+       id                     CHAR(36)      NOT NULL PRIMARY KEY,
+       code                   VARCHAR(64)   NOT NULL,
+       name                   VARCHAR(255)  NOT NULL,
+       phone                  VARCHAR(50)   NULL,
+       email                  VARCHAR(255)  NULL,
+       nic                    VARCHAR(50)   NULL,
+       branch_id              CHAR(36)      NULL,
+       default_commission_pct DECIMAL(6,2)  NOT NULL DEFAULT 0,
+       monthly_target         DECIMAL(14,2) NOT NULL DEFAULT 0,
+       status                 VARCHAR(32)   NOT NULL DEFAULT 'active',
+       notes                  TEXT          NULL,
+       created_by             CHAR(36)      NULL,
+       created_at             DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at             DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at              DATETIME      NULL,
+       UNIQUE KEY uq_agents_code (code),
+       INDEX idx_agents_branch (branch_id)
+     )`,
+    `CREATE TABLE IF NOT EXISTS expense_categories (
+       id          CHAR(36)     NOT NULL PRIMARY KEY,
+       name        VARCHAR(255) NOT NULL UNIQUE,
+       is_active   BOOLEAN      NOT NULL DEFAULT 1,
+       created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+     )`,
+    `CREATE TABLE IF NOT EXISTS expenses (
+       id              CHAR(36)      NOT NULL PRIMARY KEY,
+       branch_id       CHAR(36)      NULL,
+       category_id     CHAR(36)      NULL,
+       supplier_id     CHAR(36)      NULL,
+       amount          DECIMAL(14,2) NOT NULL DEFAULT 0,
+       paid_amount     DECIMAL(14,2) NOT NULL DEFAULT 0,
+       payment_status  VARCHAR(32)   NOT NULL DEFAULT 'unpaid',
+       payment_method  VARCHAR(32)   NULL,
+       payment_date    DATETIME      NULL,
+       payment_due     DATETIME      NULL,
+       paid_by         CHAR(36)      NULL,
+       description     TEXT          NULL,
+       notes           TEXT          NULL,
+       created_by      CHAR(36)      NULL,
+       created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at       DATETIME      NULL,
+       INDEX idx_expenses_branch (branch_id),
+       INDEX idx_expenses_category (category_id),
+       INDEX idx_expenses_date (created_at)
+     )`,
+    `CREATE TABLE IF NOT EXISTS installment_reminders (
+       id             CHAR(36)     NOT NULL PRIMARY KEY,
+       installment_id CHAR(36)     NOT NULL,
+       schedule_id    CHAR(36)     NULL,
+       channel        VARCHAR(32)  NOT NULL,
+       reminder_type  VARCHAR(32)  NOT NULL,
+       status         VARCHAR(32)  NOT NULL DEFAULT 'pending',
+       message        TEXT         NULL,
+       scheduled_at   DATETIME     NOT NULL,
+       sent_at        DATETIME     NULL,
+       error          TEXT         NULL,
+       created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at      DATETIME     NULL,
+       FOREIGN KEY (installment_id) REFERENCES installments(id) ON DELETE CASCADE,
+       INDEX idx_installment_reminders_status (status, scheduled_at)
+     )`,
+
+    // ── Phase 2 Group B — return_items, cash_sessions, loyalty, batches, uom
+    `CREATE TABLE IF NOT EXISTS returns (
+       id            CHAR(36)      NOT NULL PRIMARY KEY,
+       invoice_id    CHAR(36)      NULL,
+       customer_id   CHAR(36)      NULL,
+       return_date   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       reason        TEXT          NULL,
+       total_refund  DECIMAL(14,2) NOT NULL DEFAULT 0,
+       refund_method VARCHAR(32)   NOT NULL DEFAULT 'cash',
+       notes         TEXT          NULL,
+       created_by    CHAR(36)      NULL,
+       status        VARCHAR(32)   NOT NULL DEFAULT 'completed',
+       created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at     DATETIME      NULL,
+       INDEX idx_returns_invoice (invoice_id),
+       INDEX idx_returns_date (return_date)
+     )`,
+    `CREATE TABLE IF NOT EXISTS return_items (
+       id              CHAR(36)      NOT NULL PRIMARY KEY,
+       return_id       CHAR(36)      NOT NULL,
+       product_id      CHAR(36)      NULL,
+       invoice_item_id CHAR(36)      NULL,
+       quantity        DECIMAL(12,2) NOT NULL DEFAULT 1,
+       unit_price      DECIMAL(14,2) NOT NULL DEFAULT 0,
+       created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at       DATETIME      NULL,
+       FOREIGN KEY (return_id) REFERENCES returns(id) ON DELETE CASCADE,
+       INDEX idx_return_items_return (return_id)
+     )`,
+    `CREATE TABLE IF NOT EXISTS cash_sessions (
+       id                    CHAR(36)      NOT NULL PRIMARY KEY,
+       branch_id             CHAR(36)      NULL,
+       opened_by             CHAR(36)      NULL,
+       opened_at             DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       opening_cash          DECIMAL(14,2) NOT NULL DEFAULT 0,
+       denominations         JSON          NULL,
+       notes                 TEXT          NULL,
+       closed_by             CHAR(36)      NULL,
+       closed_at             DATETIME      NULL,
+       closing_cash          DECIMAL(14,2) NULL DEFAULT 0,
+       closing_denominations JSON          NULL,
+       closing_notes         TEXT          NULL,
+       sales_total           DECIMAL(14,2) NULL DEFAULT 0,
+       sales_count           INT           NULL DEFAULT 0,
+       difference            DECIMAL(14,2) NULL DEFAULT 0,
+       status                VARCHAR(32)   NOT NULL DEFAULT 'open',
+       created_at            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at             DATETIME      NULL,
+       INDEX idx_cash_sessions_branch (branch_id)
+     )`,
+    `CREATE TABLE IF NOT EXISTS loyalty_config (
+       id              CHAR(36)      NOT NULL PRIMARY KEY,
+       enabled         BOOLEAN       NOT NULL DEFAULT 0,
+       earn_points     INT           NOT NULL DEFAULT 1,
+       earn_per_amount DECIMAL(14,2) NOT NULL DEFAULT 100,
+       redeem_points   INT           NOT NULL DEFAULT 100,
+       redeem_value    DECIMAL(14,2) NOT NULL DEFAULT 10,
+       min_redeem      INT           NOT NULL DEFAULT 100,
+       expiry_days     INT           NOT NULL DEFAULT 0,
+       updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at       DATETIME      NULL
+     )`,
+    `CREATE TABLE IF NOT EXISTS loyalty_transactions (
+       id          CHAR(36)     NOT NULL PRIMARY KEY,
+       customer_id CHAR(36)     NOT NULL,
+       invoice_id  CHAR(36)     NULL,
+       type        VARCHAR(20)  NOT NULL,
+       points      INT          NOT NULL,
+       balance     INT          NOT NULL DEFAULT 0,
+       note        TEXT         NULL,
+       created_by  CHAR(36)     NULL,
+       created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at   DATETIME     NULL,
+       INDEX idx_loyalty_customer (customer_id),
+       INDEX idx_loyalty_type (type)
+     )`,
+    `CREATE TABLE IF NOT EXISTS product_uom (
+       id                CHAR(36)      NOT NULL PRIMARY KEY,
+       product_id        CHAR(36)      NOT NULL,
+       uom_name          VARCHAR(64)   NOT NULL,
+       conversion_factor DECIMAL(12,4) NOT NULL DEFAULT 1,
+       is_base           BOOLEAN       NOT NULL DEFAULT 0,
+       wastage           DECIMAL(6,2)  NOT NULL DEFAULT 0,
+       sort_order        INT           NOT NULL DEFAULT 0,
+       created_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at         DATETIME      NULL,
+       FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
+       INDEX idx_product_uom_product (product_id)
+     )`,
+    `CREATE TABLE IF NOT EXISTS product_batches (
+       id            CHAR(36)      NOT NULL PRIMARY KEY,
+       product_id    CHAR(36)      NOT NULL,
+       branch_id     CHAR(36)      NULL,
+       batch_number  VARCHAR(128)  NULL,
+       serial_number VARCHAR(128)  NULL,
+       expiry_date   DATE          NULL,
+       mfg_date      DATE          NULL,
+       quantity      DECIMAL(12,2) NOT NULL DEFAULT 0,
+       cost_price    DECIMAL(14,2) NOT NULL DEFAULT 0,
+       po_id         CHAR(36)      NULL,
+       notes         TEXT          NULL,
+       created_by    CHAR(36)      NULL,
+       created_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at     DATETIME      NULL,
+       INDEX idx_batches_product (product_id),
+       INDEX idx_batches_branch (branch_id),
+       INDEX idx_batches_expiry (expiry_date)
+     )`,
   ]
 
   for (const sql of [...statements, ...stockTransferColumns]) {

@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import * as XLSX from 'xlsx'
 import { getDb } from '../database'
+import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 
 const store = new Store()
@@ -120,18 +121,10 @@ function auditReport(action: string, payload: Record<string, unknown>) {
   try {
     const db = getDb()
     const user = currentUser()
-    const id = `audit_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
-    db.prepare(`
-      INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, new_values)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      id,
-      user?.id ?? null,
-      user?.branch_id ?? null,
-      action,
-      'reports',
-      JSON.stringify(payload),
-    )
+    logAudit(db, {
+      userId: (user?.id as string) ?? null, branchId: (user?.branch_id as string) ?? null,
+      action, tableName: 'reports', newValues: payload,
+    })
   } catch { /* reports must not fail because audit insert failed */ }
 }
 

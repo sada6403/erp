@@ -5,13 +5,19 @@ export const ALLOWED_TABLES = new Set([
   'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers',
   'products', 'stocks', 'stock_movements', 'stock_transfers', 'customers',
   'purchase_orders', 'purchase_items',
-  'invoices', 'invoice_items', 'payments', 'installments', 'installment_payments',
+  'invoices', 'invoice_items', 'payments', 'credit_ledger',
+  'installments', 'installment_payments',
   'installment_plans', 'installment_schedule', 'installment_reminders',
   'deliveries', 'audit_logs', 'customer_orders', 'customer_order_items',
   'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches',
   'branch_transfer_logs', 'branch_transfer_prints',
-  'stock_requests', 'stock_request_items',
   'coupons', 'coupon_redemptions',
+  // Phase 2 additions — previously had UI/local schema but were missing one
+  // or more of: cloud table, whitelist entry, push enqueue, or pull wiring.
+  'agents', 'expense_categories', 'expenses',
+  'returns', 'return_items', 'cash_sessions',
+  'loyalty_config', 'loyalty_transactions',
+  'product_uom', 'product_batches',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
@@ -21,6 +27,7 @@ const RELATED_KEYS: Record<string, Set<string>> = {
   installment_schedule:   new Set(['installment_id']),
   installment_reminders:  new Set(['installment_id']),
   customer_order_items:   new Set(['order_id']),
+  return_items:           new Set(['return_id']),
 }
 
 export function assertTable(table: unknown): asserts table is string {
@@ -70,10 +77,15 @@ async function resolveRoleId(client: QueryClient, record: Record<string, unknown
   const email = String(record.email || '').toLowerCase()
   const name = String(record.name || '').toLowerCase()
   const localBranchManagerRoleId = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
+  // Kept in parity with the pull-side fallback (electron/services/syncService.ts,
+  // insertFiltered's 'users' case) — both must agree or a user pushed before
+  // their role syncs silently gets different permissions than one pulled.
   const fallbackRoleName =
-    roleId === localBranchManagerRoleId || email.startsWith('manager.') || name.includes('manager')
-      ? 'Branch Manager'
-      : 'Cashier'
+    email.includes('admin') || name.includes('admin')
+      ? 'Company Admin'
+      : roleId === localBranchManagerRoleId || email.startsWith('manager.') || email.includes('manager') || name.includes('manager')
+        ? 'Branch Manager'
+        : 'Cashier'
 
   const fallback = await client.query<{ id: string }>(
     `SELECT id FROM roles WHERE name = ? LIMIT 1`,

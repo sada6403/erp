@@ -6,6 +6,7 @@ import bcrypt from 'bcryptjs'
 import fs from 'fs'
 import path from 'path'
 import { enqueuSync, enqueueUserRow } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import * as XLSX from 'xlsx'
@@ -429,8 +430,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
       // Soft delete — just deactivate, preserve audit trail
       db.prepare(`UPDATE users SET is_active=0, updated_at=datetime('now') WHERE id=?`).run(id)
-      db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id) VALUES (?,?,?,?,?,?)`)
-        .run(crypto.randomUUID(), caller.id, caller.branch_id, 'USER_DEACTIVATED', 'users', id)
+      logAudit(db, { userId: caller.id as string, branchId: caller.branch_id as string, action: 'USER_DEACTIVATED', tableName: 'users', recordId: id })
       void enqueueUserRow(id)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
@@ -481,9 +481,11 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const caller = authUser()
       db.prepare(`UPDATE users SET is_active=?, updated_at=datetime('now') WHERE id=?`).run(active ? 1 : 0, id)
-      db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values) VALUES (?,?,?,?,?,?,?)`)
-        .run(crypto.randomUUID(), caller.id, caller.branch_id,
-          active ? 'USER_ENABLED' : 'USER_DISABLED', 'users', id, JSON.stringify({ is_active: active }))
+      logAudit(db, {
+        userId: caller.id as string, branchId: caller.branch_id as string,
+        action: active ? 'USER_ENABLED' : 'USER_DISABLED', tableName: 'users', recordId: id,
+        newValues: { is_active: active },
+      })
       void enqueueUserRow(id)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
@@ -496,8 +498,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const caller = authUser()
       const hash = await bcrypt.hash(newPassword, 10)
       db.prepare(`UPDATE users SET password_hash=?, force_password_change=1, updated_at=datetime('now') WHERE id=?`).run(hash, id)
-      db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id) VALUES (?,?,?,?,?,?)`)
-        .run(crypto.randomUUID(), caller.id, caller.branch_id, 'PASSWORD_RESET_BY_ADMIN', 'users', id)
+      logAudit(db, { userId: caller.id as string, branchId: caller.branch_id as string, action: 'PASSWORD_RESET_BY_ADMIN', tableName: 'users', recordId: id })
       await enqueueUserRow(id)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
@@ -508,8 +509,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const caller = authUser()
       db.prepare(`UPDATE users SET force_password_change=?, updated_at=datetime('now') WHERE id=?`).run(force ? 1 : 0, id)
-      db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id) VALUES (?,?,?,?,?,?)`)
-        .run(crypto.randomUUID(), caller.id, caller.branch_id, 'FORCE_PASSWORD_CHANGE_SET', 'users', id)
+      logAudit(db, { userId: caller.id as string, branchId: caller.branch_id as string, action: 'FORCE_PASSWORD_CHANGE_SET', tableName: 'users', recordId: id })
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -890,6 +890,10 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const startDate = String(p.start_date || new Date().toISOString().slice(0, 10))
       const nextDue = addMonths(startDate, 1)
       const downPayment = Number(calc.down_payment)
+      const itemRecords: Record<string, unknown>[] = []
+      const scheduleRecords: Record<string, unknown>[] = []
+      const reminderRecords: Record<string, unknown>[] = []
+      let downPaymentRow: Record<string, unknown> | null = null
 
       db.transaction(() => {
         if (!customerId) {
@@ -918,11 +922,16 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
           const qty = Number(item.quantity || 1)
           const productId = String(item.product_id)
           const unitPrice = Number(item.unit_price || 0)
+          const itemId = crypto.randomUUID()
           db.prepare(`
             INSERT INTO invoice_items (id, invoice_id, product_id, quantity, unit_price,
               discount_pct, discount_amount, tax_rate, tax_amount, line_total)
             VALUES (?,?,?,?,?,0,0,0,0,?)
-          `).run(crypto.randomUUID(), invoiceId, productId, qty, unitPrice, money(qty * unitPrice))
+          `).run(itemId, invoiceId, productId, qty, unitPrice, money(qty * unitPrice))
+          itemRecords.push({
+            id: itemId, invoice_id: invoiceId, product_id: productId, quantity: qty, unit_price: unitPrice,
+            discount_pct: 0, discount_amount: 0, tax_rate: 0, tax_amount: 0, line_total: money(qty * unitPrice),
+          })
           const changed = db.prepare(`
             UPDATE stocks SET quantity = quantity - ?, updated_at=datetime('now')
             WHERE product_id=? AND branch_id=? AND quantity >= ?
@@ -947,52 +956,75 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
         for (let i = 1; i <= calc.months; i++) {
           const dueDate = addMonths(startDate, i)
+          const scheduleId = crypto.randomUUID()
+          const scheduleRow = {
+            id: scheduleId, installment_id: accountId, installment_no: i, due_date: dueDate,
+            principal: money(calc.financed_amount / calc.months),
+            interest: money(calc.interest_amount / calc.months),
+            total_due: calc.monthly_amount,
+          }
           db.prepare(`
             INSERT INTO installment_schedule
               (id, installment_id, installment_no, due_date, principal, interest, total_due)
-            VALUES (?,?,?,?,?,?,?)
-          `).run(
-            crypto.randomUUID(), accountId, i, dueDate,
-            money(calc.financed_amount / calc.months),
-            money(calc.interest_amount / calc.months),
-            calc.monthly_amount
-          )
+            VALUES (@id,@installment_id,@installment_no,@due_date,@principal,@interest,@total_due)
+          `).run(scheduleRow)
+          scheduleRecords.push(scheduleRow)
+
           for (const offset of [7, 3, 0]) {
             const scheduled = new Date(`${dueDate}T00:00:00`)
             scheduled.setDate(scheduled.getDate() - offset)
+            const reminderId = crypto.randomUUID()
+            const reminderRow = {
+              id: reminderId, installment_id: accountId,
+              channel: 'sms', reminder_type: offset === 0 ? 'due_today' : `${offset}_days_before`,
+              message: `Installment ${contractNumber}: Rs.${calc.monthly_amount} due on ${dueDate}`,
+              scheduled_at: scheduled.toISOString().slice(0, 10),
+            }
             db.prepare(`
               INSERT INTO installment_reminders
                 (id, installment_id, channel, reminder_type, message, scheduled_at)
-              VALUES (?,?,?,?,?,?)
-            `).run(
-              crypto.randomUUID(), accountId, 'sms', offset === 0 ? 'due_today' : `${offset}_days_before`,
-              `Installment ${contractNumber}: Rs.${calc.monthly_amount} due on ${dueDate}`,
-              scheduled.toISOString().slice(0, 10)
-            )
+              VALUES (@id,@installment_id,@channel,@reminder_type,@message,@scheduled_at)
+            `).run(reminderRow)
+            reminderRecords.push(reminderRow)
           }
         }
 
         if (downPayment > 0) {
           const payId = crypto.randomUUID()
+          downPaymentRow = {
+            id: payId, installment_id: accountId, amount: downPayment,
+            method: p.down_payment_method || 'cash', receipt_number: `${contractNumber}-DP`,
+            reference: p.down_payment_reference || null, status: 'approved',
+            received_by: user.id || null, branch_id: branchId, notes: 'Down payment',
+          }
           db.prepare(`
             INSERT INTO installment_payments
               (id, installment_id, amount, method, receipt_number, reference, status, received_by, branch_id, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?)
-          `).run(
-            payId, accountId, downPayment, p.down_payment_method || 'cash',
-            `${contractNumber}-DP`, p.down_payment_reference || null, 'approved',
-            user.id || null, branchId, 'Down payment'
-          )
+            VALUES (@id,@installment_id,@amount,@method,@receipt_number,@reference,@status,@received_by,@branch_id,@notes)
+          `).run(downPaymentRow)
         }
 
-        db.prepare(`
-          INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-          VALUES (?,?,?,?,?,?,?)
-        `).run(crypto.randomUUID(), user.id || null, branchId, 'INSTALLMENT_CREATED', 'installments', accountId, JSON.stringify({ contractNumber, calc }))
+        logAudit(db, {
+          userId: (user.id as string) || null, branchId,
+          action: 'INSTALLMENT_CREATED', tableName: 'installments', recordId: accountId,
+          newValues: { contractNumber, calc },
+        })
       })()
 
       await enqueuSync('invoices', invoiceId, 'INSERT', { id: invoiceId, invoice_number: invoiceNumber, branch_id: branchId, customer_id: customerId })
       await enqueuSync('installments', accountId, 'INSERT', { id: accountId, contract_number: contractNumber, invoice_id: invoiceId, customer_id: customerId, branch_id: branchId, ...calc })
+      for (const itemRow of itemRecords) {
+        await enqueuSync('invoice_items', String(itemRow.id), 'INSERT', itemRow)
+      }
+      for (const scheduleRow of scheduleRecords) {
+        await enqueuSync('installment_schedule', String(scheduleRow.id), 'INSERT', scheduleRow)
+      }
+      for (const reminderRow of reminderRecords) {
+        await enqueuSync('installment_reminders', String(reminderRow.id), 'INSERT', reminderRow)
+      }
+      if (downPaymentRow) {
+        await enqueuSync('installment_payments', String((downPaymentRow as Record<string, unknown>).id), 'INSERT', downPaymentRow)
+      }
       return { success: true, data: { id: accountId, contract_number: contractNumber, invoice_id: invoiceId } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -1117,10 +1149,12 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
           `).run(amount, Math.max(0, dueAmount), Math.max(0, Number(inst.installment_count || 0) - Number(paidRows.count || 0)), next?.due_date || null, dueAmount <= 0.01 ? 'completed' : 'active', id)
         }
 
-        db.prepare(`
-          INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-          VALUES (?,?,?,?,?,?,?)
-        `).run(crypto.randomUUID(), user.id || null, branchId, status === 'approved' ? 'INSTALLMENT_PAYMENT' : 'INSTALLMENT_PAYMENT_PENDING', 'installment_payments', paymentId, JSON.stringify({ amount, method, receiptNumber }))
+        logAudit(db, {
+          userId: (user.id as string) || null, branchId,
+          action: status === 'approved' ? 'INSTALLMENT_PAYMENT' : 'INSTALLMENT_PAYMENT_PENDING',
+          tableName: 'installment_payments', recordId: paymentId,
+          newValues: { amount, method, receiptNumber },
+        })
       })()
       await enqueuSync('installment_payments', paymentId, 'INSERT', { id: paymentId, installment_id: id, amount, method, receipt_number: receiptNumber, status, branch_id: branchId, ...p })
       return { success: true, data: { id: paymentId, receipt_number: receiptNumber, status } }
@@ -1177,10 +1211,11 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
           WHERE id=?
         `).run(Number(payment.amount || 0), Math.max(0, dueAmount), Math.max(0, Number(inst.installment_count || 0) - Number(paidRows.count || 0)), next?.due_date || null, dueAmount <= 0.01 ? 'completed' : 'active', payment.installment_id)
       }
-      db.prepare(`
-        INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-        VALUES (?,?,?,?,?,?,?)
-      `).run(crypto.randomUUID(), user.id || null, payment.branch_id || null, action === 'approve' ? 'BANK_TRANSFER_APPROVED' : 'BANK_TRANSFER_REJECTED', 'installment_payments', paymentId, JSON.stringify({ notes }))
+      logAudit(db, {
+        userId: (user.id as string) || null, branchId: (payment.branch_id as string) || null,
+        action: action === 'approve' ? 'BANK_TRANSFER_APPROVED' : 'BANK_TRANSFER_REJECTED',
+        tableName: 'installment_payments', recordId: paymentId, newValues: { notes },
+      })
       await enqueuSync('installment_payments', paymentId, 'UPDATE', { id: paymentId, status: action === 'approve' ? 'approved' : 'rejected', verified_by: user.id || null, rejected_reason: notes || null })
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
@@ -1321,15 +1356,25 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   ipcMain.handle('admin:productUom:save', async (_e, productId: string, uoms: Record<string,unknown>[]) => {
     try {
       const db = getDb()
+      const oldIds = (db.prepare('SELECT id FROM product_uom WHERE product_id=?').all(productId) as { id: string }[]).map(r => r.id)
+      const newRows: Record<string, unknown>[] = []
       db.transaction(() => {
         db.prepare('DELETE FROM product_uom WHERE product_id=?').run(productId)
         for (let i = 0; i < uoms.length; i++) {
           const u = uoms[i]
+          const row = {
+            id: crypto.randomUUID(), product_id: productId, uom_name: u.uom_name,
+            conversion_factor: u.conversion_factor ?? 1, is_base: u.is_base ? 1 : 0,
+            wastage: u.wastage ?? 0, sort_order: i,
+          }
           db.prepare(`INSERT INTO product_uom (id,product_id,uom_name,conversion_factor,is_base,wastage,sort_order)
-            VALUES (?,?,?,?,?,?,?)`)
-            .run(crypto.randomUUID(), productId, u.uom_name, u.conversion_factor ?? 1, u.is_base ? 1 : 0, u.wastage ?? 0, i)
+            VALUES (@id,@product_id,@uom_name,@conversion_factor,@is_base,@wastage,@sort_order)`)
+            .run(row)
+          newRows.push(row)
         }
       })()
+      for (const oldId of oldIds) await enqueuSync('product_uom', oldId, 'DELETE', { id: oldId })
+      for (const row of newRows) await enqueuSync('product_uom', String(row.id), 'INSERT', row)
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -1343,6 +1388,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     try {
       const id = crypto.randomUUID()
       getDb().prepare('INSERT INTO expense_categories (id,name) VALUES (?,?)').run(id, p.name)
+      await enqueuSync('expense_categories', id, 'INSERT', { id, name: p.name })
       return { success: true, data: { id } }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -1468,9 +1514,19 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // ── Force Reset (called when cloud detects company was deleted by SuperAdmin) ─
   // No permission check — this is triggered by the cloud, not the logged-in user.
-  ipcMain.handle('admin:forceReset', () => {
+  ipcMain.handle('admin:forceReset', async () => {
     try {
       const db = getDb()
+
+      // Safety net: this wipes every local table with no undo. Keep a hot
+      // backup first in case the trigger turns out to be a false positive
+      // (e.g. a transient API-key mismatch) rather than a real deletion.
+      try {
+        const backupsDir = path.join(app.getPath('userData'), 'backups')
+        fs.mkdirSync(backupsDir, { recursive: true })
+        await db.backup(path.join(backupsDir, `pre-reset-${Date.now()}.db`))
+      } catch { /* best-effort — don't block the reset on backup failure */ }
+
       const tables = [
         'sync_queue', 'audit_logs', 'loyalty_transactions',
         'return_items', 'returns', 'installment_payments', 'installment_schedules', 'installments',
@@ -1498,6 +1554,16 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       settings.cloud_api_key = ''
       settings.cloud_api_url = ''
       store.set('app_settings', settings)
+
+      // Also clear activation state — otherwise app:isActivated() still
+      // reports true (it only checks device_activated) and the device skips
+      // straight past the Activation screen into Setup, leaving it looking
+      // "reset" while actually just running disconnected from the cloud forever.
+      store.delete('device_activated')
+      store.delete('device_license_key')
+      store.delete('device_company_key')
+      store.delete('activation_company_name')
+      store.delete('license_data')
 
       store.set('setup_required', true)
       store.delete('auth_user')

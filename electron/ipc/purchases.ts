@@ -2,6 +2,7 @@ import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 
 const store = new Store()
@@ -138,9 +139,10 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             VALUES (@id,@po_id,@product_id,@quantity,@unit_cost,@line_total,@received_qty,@notes)`)
             .run(item)
         }
-        db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-          VALUES (?,?,?,?,?,?,?)`)
-          .run(crypto.randomUUID(), user?.id, branchId, 'PO_CREATE', 'purchase_orders', id, JSON.stringify(po))
+        logAudit(db, {
+          userId: user?.id as string, branchId,
+          action: 'PO_CREATE', tableName: 'purchase_orders', recordId: id, newValues: po,
+        })
       })()
 
       await enqueuSync('purchase_orders', id, 'INSERT', po)
@@ -208,10 +210,11 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
           db.prepare(`UPDATE purchase_orders SET status=?, updated_at=datetime('now') WHERE id=?`)
             .run(patch.status, id)
 
-          db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-            VALUES (?,?,?,?,?,?,?)`)
-            .run(crypto.randomUUID(), user?.id, po.branch_id,
-              `PO_${status}`, 'purchase_orders', id, JSON.stringify({ from: po.status, to: patch.status }))
+          logAudit(db, {
+            userId: user?.id as string, branchId: po.branch_id as string,
+            action: `PO_${status}`, tableName: 'purchase_orders', recordId: id,
+            newValues: { from: po.status, to: patch.status },
+          })
         })()
       } else {
         if (status === 'SENT')      patch.sent_at      = now
@@ -222,10 +225,11 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
         db.prepare(`UPDATE purchase_orders SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
           .run({ id, ...patch })
 
-        db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-          VALUES (?,?,?,?,?,?,?)`)
-          .run(crypto.randomUUID(), user?.id, po.branch_id,
-            `PO_${status}`, 'purchase_orders', id, JSON.stringify({ from: po.status, to: status }))
+        logAudit(db, {
+          userId: user?.id as string, branchId: po.branch_id as string,
+          action: `PO_${status}`, tableName: 'purchase_orders', recordId: id,
+          newValues: { from: po.status, to: status },
+        })
       }
 
       await enqueuSync('purchase_orders', id, 'UPDATE', { id, ...patch })
@@ -264,10 +268,10 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             .run(totalAmount, id)
         }
 
-        db.prepare(`INSERT INTO audit_logs (id,user_id,branch_id,action,table_name,record_id,new_values)
-          VALUES (?,?,?,?,?,?,?)`)
-          .run(crypto.randomUUID(), user?.id, po.branch_id, 'PO_UPDATE', 'purchase_orders', id,
-            JSON.stringify(payload))
+        logAudit(db, {
+          userId: user?.id as string, branchId: po.branch_id as string,
+          action: 'PO_UPDATE', tableName: 'purchase_orders', recordId: id, newValues: payload,
+        })
       })()
 
       await enqueuSync('purchase_orders', id, 'UPDATE', { id, ...payload })

@@ -7,6 +7,7 @@ import fs from 'fs'
 import path from 'path'
 import { getDb } from '../database'
 import { CloudApi } from '../services/cloudApi'
+import { logAudit } from '../services/auditLog'
 
 const store = new Store()
 
@@ -186,18 +187,11 @@ function auditSettingsUpdate(keys: string[]) {
   try {
     const db = getDb()
     const user = store.get('auth_user') as Record<string, unknown> | undefined
-    db.prepare(`
-      INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, new_values)
-      VALUES (?,?,?,?,?,?,?)
-    `).run(
-      crypto.randomUUID(),
-      user?.id || null,
-      user?.branch_id || null,
-      'SETTINGS_UPDATE',
-      'app_settings',
-      'global',
-      JSON.stringify({ keys })
-    )
+    logAudit(db, {
+      userId: (user?.id as string) || null, branchId: (user?.branch_id as string) || null,
+      action: 'SETTINGS_UPDATE', tableName: 'app_settings', recordId: 'global',
+      newValues: { keys },
+    })
   } catch {
     // Settings must still save if audit logging is unavailable.
   }

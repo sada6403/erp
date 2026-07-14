@@ -3,6 +3,7 @@ import { getDb } from '../database'
 import crypto, { randomUUID } from 'crypto'
 import Store from 'electron-store'
 import { enqueuSync } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 
 const store = new Store()
 
@@ -24,10 +25,10 @@ function currentPermissions() {
 function audit(db: ReturnType<typeof getDb>, action: string, recordId: string, values: Record<string, unknown>) {
   try {
     const user = currentUser()
-    db.prepare(`
-      INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, new_values)
-      VALUES (?,?,?,?,?,?,?)
-    `).run(randomUUID(), user?.id || null, user?.branch_id || null, action, 'coupons', recordId, JSON.stringify(values))
+    logAudit(db, {
+      userId: (user?.id as string) || null, branchId: (user?.branch_id as string) || null,
+      action, tableName: 'coupons', recordId, newValues: values,
+    })
   } catch { /* audit failure must not break the operation */ }
 }
 

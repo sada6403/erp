@@ -2,6 +2,7 @@ import { pool, tenantPool } from './db'
 import { randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
 import type { QueryClient } from './db'
+import { ensureTenantCompatibility } from './auth'
 
 // ─── Resolve the per-tenant database name for a company ───────────────────────
 export async function getTenantSchema(companyId: string): Promise<string | null> {
@@ -43,6 +44,12 @@ async function uniqueSlug(base: string): Promise<string> {
 }
 
 // ─── Tenant tables SQL (MySQL syntax) ────────────────────────────────────────
+// Frozen historical bootstrap snapshot — do NOT add new tables/columns here.
+// createTenant() runs this once for provisioning, then immediately calls
+// ensureTenantCompatibility() (backend/lib/auth.ts) so new tenants pick up
+// everything added since. Every future schema change (new table or column)
+// goes into ensureTenantCompatibility()'s statement list only, so there is
+// exactly one place new and existing tenants both converge on.
 const TENANT_SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS branches (
   id          CHAR(36)     NOT NULL PRIMARY KEY,
@@ -623,6 +630,13 @@ export async function createTenant(params: {
     await tp.query(stmt)
   }
   await tp.query(DEFAULT_ROLES_SQL)
+
+  // Walk the same incremental patch list existing tenants get, so a brand-new
+  // tenant doesn't have to wait for its first API request to pick up tables/
+  // columns added after TENANT_SCHEMA_SQL was last written (see the comment
+  // on TENANT_SCHEMA_SQL above — this call is now the single source of truth
+  // for anything added post-bootstrap).
+  await ensureTenantCompatibility(dbSchema)
 
   // 5. Default HQ branch
   const branchId = randomUUID()

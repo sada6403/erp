@@ -8,6 +8,7 @@ import nodemailer from 'nodemailer'
 import { generateSecret, verifyTOTP, generateQrDataUrl } from '../services/totpService'
 import { decryptSecret } from './settings'
 import { enqueueUserRow } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
 
 const store = new Store()
@@ -194,8 +195,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       `).get(normalizedEmail) as Record<string, unknown> | undefined
 
       if (!user) {
-        db.prepare(`INSERT INTO audit_logs (id, action, new_values) VALUES (?,?,?)`)
-          .run(crypto.randomUUID(), 'LOGIN_FAILED', JSON.stringify({ email: normalizedEmail, reason: 'User not found' }))
+        logAudit(db, { action: 'LOGIN_FAILED', newValues: { email: normalizedEmail, reason: 'User not found' } })
         return { success: false, error: 'Invalid credentials' }
       }
 
@@ -223,9 +223,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
         const locked = attempts >= 5
         db.prepare(`UPDATE users SET login_attempts=?, locked_until=? WHERE id=?`)
           .run(attempts, locked ? new Date(Date.now() + 15 * 60000).toISOString() : null, user.id)
-        db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action, new_values) VALUES (?,?,?,?,?)`)
-          .run(crypto.randomUUID(), user.id, user.branch_id, 'LOGIN_FAILED',
-            JSON.stringify({ attempts, locked }))
+        logAudit(db, {
+          userId: user.id as string, branchId: user.branch_id as string,
+          action: 'LOGIN_FAILED', newValues: { attempts, locked },
+        })
         if (locked) return { success: false, error: 'Too many failed attempts. Account locked for 15 minutes.' }
         return { success: false, error: `Invalid credentials. ${5 - attempts} attempt(s) remaining.` }
       }
@@ -257,8 +258,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(user.id)
 
       // Audit log
-      db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action) VALUES (?,?,?,?)`)
-        .run(crypto.randomUUID(), user.id, user.branch_id, 'LOGIN')
+      logAudit(db, { userId: user.id as string, branchId: user.branch_id as string, action: 'LOGIN' })
 
       const payload = buildAuthUserPayload(user as Record<string, unknown>)
 
@@ -393,8 +393,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       }
 
       db.prepare(`UPDATE users SET last_login_at = datetime('now') WHERE id = ?`).run(user.id)
-      db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action) VALUES (?,?,?,?)`)
-        .run(crypto.randomUUID(), user.id, user.branch_id, 'LOGIN_2FA')
+      logAudit(db, { userId: user.id as string, branchId: user.branch_id as string, action: 'LOGIN_2FA' })
 
       const payload = buildAuthUserPayload(user as Record<string, unknown>)
       const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '12h' })
@@ -432,8 +431,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
         return { success: false, error: 'Invalid code — please try again' }
       }
       db.prepare(`UPDATE users SET two_factor_enabled = 1 WHERE id = ?`).run(userId)
-      db.prepare(`INSERT INTO audit_logs (id, user_id, action) VALUES (?,?,?)`)
-        .run(crypto.randomUUID(), userId, '2FA_ENABLED')
+      logAudit(db, { userId, action: '2FA_ENABLED' })
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -451,8 +449,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
         return { success: false, error: 'Invalid code' }
       }
       db.prepare(`UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?`).run(userId)
-      db.prepare(`INSERT INTO audit_logs (id, user_id, action) VALUES (?,?,?)`)
-        .run(crypto.randomUUID(), userId, '2FA_DISABLED')
+      logAudit(db, { userId, action: '2FA_DISABLED' })
       return { success: true }
     } catch (err) {
       return { success: false, error: String(err) }
@@ -532,8 +529,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
             text: `Your Enterprise POS password reset code is: ${otp}\nExpires in 10 minutes.`,
           })
 
-          db.prepare(`INSERT INTO audit_logs (id, user_id, action, new_values) VALUES (?,?,?,?)`)
-            .run(crypto.randomUUID(), user.id, 'PASSWORD_RESET_OTP_SENT', JSON.stringify({ email }))
+          logAudit(db, { userId: user.id as string, action: 'PASSWORD_RESET_OTP_SENT', newValues: { email } })
 
           return { success: true, sent: true }
         } catch (emailErr) {
@@ -570,8 +566,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
           login_attempts=0, locked_until=NULL, updated_at=datetime('now')
         WHERE id=?
       `).run(hash, entry.userId)
-      db.prepare(`INSERT INTO audit_logs (id, user_id, action) VALUES (?,?,?)`)
-        .run(crypto.randomUUID(), entry.userId, 'PASSWORD_RESET_OTP')
+      logAudit(db, { userId: entry.userId, action: 'PASSWORD_RESET_OTP' })
       await enqueueUserRow(entry.userId)
 
       otpStore.delete(key)
@@ -595,8 +590,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       const hash = await bcrypt.hash(newPassword, 10)
       db.prepare(`UPDATE users SET password_hash=?, force_password_change=0, updated_at=datetime('now') WHERE id=?`).run(hash, userId)
-      db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action) VALUES (?,?,?,?)`)
-        .run(crypto.randomUUID(), userId, user.branch_id, 'PASSWORD_CHANGED')
+      logAudit(db, { userId, branchId: user.branch_id as string, action: 'PASSWORD_CHANGED' })
       await enqueueUserRow(userId)
       return { success: true }
     } catch (err) {
@@ -622,8 +616,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       const hash = await bcrypt.hash(newPassword, 10)
       db.prepare(`UPDATE users SET password_hash=?, force_password_change=0, last_login_at=datetime('now'), updated_at=datetime('now') WHERE id=?`).run(hash, decoded.userId)
-      db.prepare(`INSERT INTO audit_logs (id, user_id, branch_id, action) VALUES (?,?,?,?)`)
-        .run(crypto.randomUUID(), decoded.userId, user.branch_id, 'PASSWORD_CHANGED')
+      logAudit(db, { userId: decoded.userId, branchId: user.branch_id as string, action: 'PASSWORD_CHANGED' })
       await enqueueUserRow(decoded.userId)
 
       const payload = buildAuthUserPayload(user as Record<string, unknown>)

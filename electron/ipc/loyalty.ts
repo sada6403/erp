@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
+import { enqueuSync } from '../services/syncQueue'
 
 interface LoyaltyConfig {
   enabled: number
@@ -28,10 +29,17 @@ export function earnPoints(customerId: string, invoiceAmount: number, invoiceId:
 
     const newBalance = Number((db.prepare(`SELECT loyalty_points FROM customers WHERE id = ?`).get(customerId) as { loyalty_points: number })?.loyalty_points ?? 0) + points
     db.prepare(`UPDATE customers SET loyalty_points = ? WHERE id = ?`).run(newBalance, customerId)
+    const txId = randomUUID()
+    const txRow = {
+      id: txId, customer_id: customerId, invoice_id: invoiceId, type: 'earn',
+      points, balance: newBalance, note: 'Earned from invoice', created_by: createdBy ?? null,
+    }
     db.prepare(`
       INSERT INTO loyalty_transactions (id, customer_id, invoice_id, type, points, balance, note, created_by)
-      VALUES (?, ?, ?, 'earn', ?, ?, ?, ?)
-    `).run(randomUUID(), customerId, invoiceId, points, newBalance, `Earned from invoice`, createdBy ?? null)
+      VALUES (@id, @customer_id, @invoice_id, @type, @points, @balance, @note, @created_by)
+    `).run(txRow)
+    void enqueuSync('loyalty_transactions', txId, 'INSERT', txRow)
+    void enqueuSync('customers', customerId, 'UPDATE', { id: customerId, loyalty_points: newBalance })
 
     return points
   } catch { return 0 }
@@ -44,11 +52,13 @@ export function registerLoyaltyHandlers() {
     catch (err) { return { success: false, error: String(err) } }
   })
 
-  ipcMain.handle('loyalty:config:save', (_e, cfg: Partial<LoyaltyConfig>) => {
+  ipcMain.handle('loyalty:config:save', async (_e, cfg: Partial<LoyaltyConfig>) => {
     try {
       const db = getDb()
       const sets = Object.entries(cfg).map(([k]) => `${k} = ?`).join(', ')
       db.prepare(`UPDATE loyalty_config SET ${sets}, updated_at = datetime('now') WHERE id = 'default'`).run(...Object.values(cfg))
+      const updated = db.prepare(`SELECT * FROM loyalty_config WHERE id = 'default'`).get() as Record<string, unknown>
+      await enqueuSync('loyalty_config', 'default', 'UPDATE', updated)
       return { success: true }
     } catch (err) { return { success: false, error: String(err) } }
   })
@@ -85,10 +95,18 @@ export function registerLoyaltyHandlers() {
       const discount    = (payload.points / cfg.redeem_points) * cfg.redeem_value
       const newBalance  = current - payload.points
       db.prepare(`UPDATE customers SET loyalty_points = ? WHERE id = ?`).run(newBalance, payload.customer_id)
+      const txId = randomUUID()
+      const txRow = {
+        id: txId, customer_id: payload.customer_id, invoice_id: payload.invoice_id ?? null, type: 'redeem',
+        points: -payload.points, balance: newBalance,
+        note: `Redeemed for Rs.${discount.toFixed(2)} discount`, created_by: payload.created_by ?? null,
+      }
       db.prepare(`
         INSERT INTO loyalty_transactions (id, customer_id, invoice_id, type, points, balance, note, created_by)
-        VALUES (?, ?, ?, 'redeem', ?, ?, ?, ?)
-      `).run(randomUUID(), payload.customer_id, payload.invoice_id ?? null, -payload.points, newBalance, `Redeemed for Rs.${discount.toFixed(2)} discount`, payload.created_by ?? null)
+        VALUES (@id, @customer_id, @invoice_id, @type, @points, @balance, @note, @created_by)
+      `).run(txRow)
+      void enqueuSync('loyalty_transactions', txId, 'INSERT', txRow)
+      void enqueuSync('customers', payload.customer_id, 'UPDATE', { id: payload.customer_id, loyalty_points: newBalance })
 
       return { success: true, discount, points_used: payload.points, new_balance: newBalance }
     } catch (err) { return { success: false, error: String(err) } }
@@ -101,10 +119,17 @@ export function registerLoyaltyHandlers() {
       const current    = row?.loyalty_points ?? 0
       const newBalance = Math.max(0, current + payload.points)
       db.prepare(`UPDATE customers SET loyalty_points = ? WHERE id = ?`).run(newBalance, payload.customer_id)
+      const txId = randomUUID()
+      const txRow = {
+        id: txId, customer_id: payload.customer_id, type: 'adjust',
+        points: payload.points, balance: newBalance, note: payload.note, created_by: payload.created_by ?? null,
+      }
       db.prepare(`
         INSERT INTO loyalty_transactions (id, customer_id, type, points, balance, note, created_by)
-        VALUES (?, ?, 'adjust', ?, ?, ?, ?)
-      `).run(randomUUID(), payload.customer_id, payload.points, newBalance, payload.note, payload.created_by ?? null)
+        VALUES (@id, @customer_id, @type, @points, @balance, @note, @created_by)
+      `).run(txRow)
+      void enqueuSync('loyalty_transactions', txId, 'INSERT', txRow)
+      void enqueuSync('customers', payload.customer_id, 'UPDATE', { id: payload.customer_id, loyalty_points: newBalance })
       return { success: true, new_balance: newBalance }
     } catch (err) { return { success: false, error: String(err) } }
   })

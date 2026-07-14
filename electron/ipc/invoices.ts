@@ -2,6 +2,7 @@ import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
 import { redeemCouponInTransaction, reverseCouponForInvoice, type CouponRedemptionResult } from './coupons'
@@ -78,6 +79,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const id = crypto.randomUUID()
       const invoiceNumber = getNextBillNumber(branchId, billType)
       const movementRecords: Record<string, unknown>[] = []
+      const itemRecords: Record<string, unknown>[] = []
+      const paymentRecords: Record<string, unknown>[] = []
+      let creditLedgerRecord: Record<string, unknown> | null = null
       let couponResult: CouponRedemptionResult | null = null
       const agentCode = String(payload.agent_code || '').trim() || null
       const agentName = String(payload.agent_name || '').trim() || null
@@ -171,12 +175,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
         // Insert line items
         for (const item of (payload.items || [])) {
-          db.prepare(`
-            INSERT INTO invoice_items (id, invoice_id, product_id, quantity, unit_price,
-              discount_pct, discount_amount, tax_rate, tax_amount, line_total)
-            VALUES (@id, @invoice_id, @product_id, @quantity, @unit_price,
-              @discount_pct, @discount_amount, @tax_rate, @tax_amount, @line_total)
-          `).run({
+          const itemRow = {
             id:              crypto.randomUUID(),
             invoice_id:      id,
             product_id:      item.product_id,
@@ -187,7 +186,14 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
             tax_rate:        item.tax_rate || 0,
             tax_amount:      item.tax_amount || 0,
             line_total:      item.line_total,
-          })
+          }
+          db.prepare(`
+            INSERT INTO invoice_items (id, invoice_id, product_id, quantity, unit_price,
+              discount_pct, discount_amount, tax_rate, tax_amount, line_total)
+            VALUES (@id, @invoice_id, @product_id, @quantity, @unit_price,
+              @discount_pct, @discount_amount, @tax_rate, @tax_amount, @line_total)
+          `).run(itemRow)
+          itemRecords.push(itemRow)
 
           // QUOTATION: do NOT deduct stock. RETAIL and CREDIT: deduct immediately.
           if (billType !== 'QUOTATION') {
@@ -225,11 +231,18 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           for (const payment of paymentLines) {
             const amount = Number(payment?.amount || 0)
             if (!payment?.method || amount <= 0) continue
+            const paymentId = crypto.randomUUID()
             insertPayment.run(
-              crypto.randomUUID(), id,
+              paymentId, id,
               payment.method, amount,
               payment.reference || null, (user?.id as string) || null
             )
+            paymentRecords.push({
+              id: paymentId, invoice_id: id,
+              method: payment.method, amount,
+              reference: payment.reference || null,
+              received_by: (user?.id as string) || null,
+            })
           }
         }
 
@@ -249,13 +262,18 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         if (billType === 'CREDIT') {
           const dueAmt = payload.total_amount - (payload.paid_amount || 0)
           if (dueAmt > 0) {
+            const ledgerId = crypto.randomUUID()
             db.prepare(`
               INSERT INTO credit_ledger (id, customer_id, invoice_id, branch_id, amount_due, amount_paid, due_date)
               VALUES (?, ?, ?, ?, ?, ?, ?)
             `).run(
-              crypto.randomUUID(), payload.customer_id, id, branchId,
+              ledgerId, payload.customer_id, id, branchId,
               dueAmt, payload.paid_amount || 0, payload.due_date || null
             )
+            creditLedgerRecord = {
+              id: ledgerId, customer_id: payload.customer_id, invoice_id: id, branch_id: branchId,
+              amount_due: dueAmt, amount_paid: payload.paid_amount || 0, due_date: payload.due_date || null,
+            }
             db.prepare(`
               UPDATE customers SET outstanding_due = outstanding_due + ?, updated_at = datetime('now') WHERE id = ?
             `).run(dueAmt, payload.customer_id)
@@ -267,14 +285,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         }
 
         // Audit log
-        db.prepare(`
-          INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, new_values)
-          VALUES (?,?,?,?,?,?,?)
-        `).run(
-          crypto.randomUUID(), user?.id, branchId,
-          `CREATE_${billType}_BILL`, 'invoices', id,
-          JSON.stringify({ bill_type: billType, total: payload.total_amount })
-        )
+        logAudit(db, {
+          userId: user?.id as string, branchId,
+          action: `CREATE_${billType}_BILL`, tableName: 'invoices', recordId: id,
+          newValues: { bill_type: billType, total: payload.total_amount },
+        })
       })
 
       insertInvoice()
@@ -294,6 +309,15 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       })
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
+      for (const itemRow of itemRecords) {
+        await enqueuSync('invoice_items', String(itemRow.id), 'INSERT', itemRow)
+      }
+      for (const paymentRow of paymentRecords) {
+        await enqueuSync('payments', String(paymentRow.id), 'INSERT', paymentRow)
+      }
+      if (creditLedgerRecord) {
+        await enqueuSync('credit_ledger', String((creditLedgerRecord as Record<string, unknown>).id), 'INSERT', creditLedgerRecord)
       }
       // (cast: TS cannot see the assignment inside the transaction closure)
       const redeemed = couponResult as CouponRedemptionResult | null
@@ -353,10 +377,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         `).run(newNumber, id)
 
         // Record payment if provided
-        db.prepare(`
-          INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id)
-          VALUES (?,?,?,?,?,?)
-        `).run(crypto.randomUUID(), user?.id, invoice.branch_id, 'CONVERT_QUOTATION', 'invoices', id)
+        logAudit(db, {
+          userId: user?.id as string, branchId: invoice.branch_id as string,
+          action: 'CONVERT_QUOTATION', tableName: 'invoices', recordId: id,
+        })
 
         return newNumber
       })
@@ -386,10 +410,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         UPDATE invoices SET approved_by=?, status='completed', updated_at=datetime('now') WHERE id=?
       `).run(user?.id, id)
 
-      db.prepare(`
-        INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id)
-        VALUES (?,?,?,?,?,?)
-      `).run(crypto.randomUUID(), user?.id, invoice.branch_id, 'APPROVE_CREDIT_BILL', 'invoices', id)
+      logAudit(db, {
+        userId: user?.id as string, branchId: invoice.branch_id as string,
+        action: 'APPROVE_CREDIT_BILL', tableName: 'invoices', recordId: id,
+      })
 
       await enqueuSync('invoices', id as string, 'UPDATE', { id, approved_by: user?.id, status: 'completed' })
       return { success: true }
@@ -404,12 +428,20 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(payload.invoice_id) as Record<string, unknown>
       if (!invoice) return { success: false, error: 'Invoice not found' }
 
+      let paymentRow: Record<string, unknown> | null = null
+      let updatedInvoice: Record<string, unknown> | null = null
+      let ledgerId: string | null = null
+
       const addPayment = db.transaction(() => {
         const paymentId = crypto.randomUUID()
         db.prepare(`
           INSERT INTO payments (id, invoice_id, method, amount, reference, received_by)
           VALUES (?, ?, ?, ?, ?, ?)
         `).run(paymentId, payload.invoice_id, payload.method, payload.amount, payload.reference || null, user?.id)
+        paymentRow = {
+          id: paymentId, invoice_id: payload.invoice_id, method: payload.method,
+          amount: payload.amount, reference: payload.reference || null, received_by: user?.id || null,
+        }
 
         const newPaid = (invoice.paid_amount as number) + payload.amount
         const newDue  = Math.max(0, (invoice.total_amount as number) - newPaid)
@@ -418,6 +450,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         db.prepare(`
           UPDATE invoices SET paid_amount=?, due_amount=?, status=?, updated_at=datetime('now') WHERE id=?
         `).run(newPaid, newDue, newStatus, payload.invoice_id)
+        updatedInvoice = { ...invoice, paid_amount: newPaid, due_amount: newDue, status: newStatus }
 
         // Update credit_ledger
         db.prepare(`
@@ -426,6 +459,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
             updated_at = datetime('now')
           WHERE invoice_id = ?
         `).run(payload.amount, payload.amount, payload.invoice_id)
+        ledgerId = (db.prepare(`SELECT id FROM credit_ledger WHERE invoice_id = ?`).get(payload.invoice_id) as { id?: string } | undefined)?.id ?? null
 
         // Update customer outstanding
         if (invoice.customer_id) {
@@ -434,17 +468,22 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           `).run(payload.amount, invoice.customer_id)
         }
 
-        db.prepare(`
-          INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, new_values)
-          VALUES (?,?,?,?,?,?,?)
-        `).run(
-          crypto.randomUUID(), user?.id, invoice.branch_id,
-          'CREDIT_PAYMENT', 'invoices', payload.invoice_id,
-          JSON.stringify({ amount: payload.amount, method: payload.method })
-        )
+        logAudit(db, {
+          userId: user?.id as string, branchId: invoice.branch_id as string,
+          action: 'CREDIT_PAYMENT', tableName: 'invoices', recordId: payload.invoice_id,
+          newValues: { amount: payload.amount, method: payload.method },
+        })
       })
 
       addPayment()
+
+      if (paymentRow) await enqueuSync('payments', String((paymentRow as Record<string, unknown>).id), 'INSERT', paymentRow)
+      if (updatedInvoice) await enqueuSync('invoices', payload.invoice_id, 'UPDATE', updatedInvoice)
+      if (ledgerId) {
+        const ledgerRow = db.prepare(`SELECT * FROM credit_ledger WHERE id = ?`).get(ledgerId) as Record<string, unknown>
+        await enqueuSync('credit_ledger', ledgerId, 'UPDATE', ledgerRow)
+      }
+
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
@@ -572,13 +611,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
         db.prepare(`UPDATE invoices SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
 
-        db.prepare(`
-          INSERT INTO audit_logs (id, user_id, branch_id, action, table_name, record_id, new_values)
-          VALUES (?,?,?,?,?,?,?)
-        `).run(
-          crypto.randomUUID(), user?.id, invoice.branch_id, 'CANCEL_INVOICE', 'invoices', id,
-          JSON.stringify({ reason: reason || 'No reason provided' })
-        )
+        logAudit(db, {
+          userId: user?.id as string, branchId: invoice.branch_id as string,
+          action: 'CANCEL_INVOICE', tableName: 'invoices', recordId: id,
+          newValues: { reason: reason || 'No reason provided' },
+        })
       })
 
       cancel()

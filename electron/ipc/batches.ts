@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
+import { enqueuSync } from '../services/syncQueue'
 
 interface BatchRow {
   id: string
@@ -49,24 +50,28 @@ export function registerBatchHandlers() {
     } catch (err) { return { success: false, error: String(err) } }
   })
 
-  ipcMain.handle('batches:create', (_e, payload: Partial<BatchRow> & { product_id: string }) => {
+  ipcMain.handle('batches:create', async (_e, payload: Partial<BatchRow> & { product_id: string }) => {
     try {
       const db = getDb()
       const id = randomUUID()
+      const row = {
+        id, product_id: payload.product_id, branch_id: payload.branch_id ?? null,
+        batch_number: payload.batch_number ?? null, serial_number: payload.serial_number ?? null,
+        expiry_date: payload.expiry_date ?? null, mfg_date: payload.mfg_date ?? null,
+        quantity: payload.quantity ?? 0, cost_price: payload.cost_price ?? 0,
+        po_id: payload.po_id ?? null, notes: payload.notes ?? null,
+        created_by: (payload as Record<string, unknown>).created_by ?? null,
+      }
       db.prepare(`
         INSERT INTO product_batches (id, product_id, branch_id, batch_number, serial_number, expiry_date, mfg_date, quantity, cost_price, po_id, notes, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        id, payload.product_id, payload.branch_id ?? null, payload.batch_number ?? null,
-        payload.serial_number ?? null, payload.expiry_date ?? null, payload.mfg_date ?? null,
-        payload.quantity ?? 0, payload.cost_price ?? 0, payload.po_id ?? null, payload.notes ?? null,
-        (payload as Record<string, unknown>).created_by ?? null
-      )
+        VALUES (@id, @product_id, @branch_id, @batch_number, @serial_number, @expiry_date, @mfg_date, @quantity, @cost_price, @po_id, @notes, @created_by)
+      `).run(row)
+      await enqueuSync('product_batches', id, 'INSERT', row)
       return { success: true, id }
     } catch (err) { return { success: false, error: String(err) } }
   })
 
-  ipcMain.handle('batches:update', (_e, id: string, payload: Partial<BatchRow>) => {
+  ipcMain.handle('batches:update', async (_e, id: string, payload: Partial<BatchRow>) => {
     try {
       const db = getDb()
       const allowed = ['batch_number','serial_number','expiry_date','mfg_date','quantity','cost_price','notes'] as const
@@ -74,17 +79,21 @@ export function registerBatchHandlers() {
       const vals = allowed.filter(k => payload[k] !== undefined).map(k => payload[k])
       if (!sets.length) return { success: false, error: 'Nothing to update' }
       db.prepare(`UPDATE product_batches SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...vals, id)
+      const row = db.prepare(`SELECT * FROM product_batches WHERE id = ?`).get(id) as Record<string, unknown>
+      await enqueuSync('product_batches', id, 'UPDATE', row)
       return { success: true }
     } catch (err) { return { success: false, error: String(err) } }
   })
 
-  ipcMain.handle('batches:consume', (_e, payload: { batch_id: string; qty: number }) => {
+  ipcMain.handle('batches:consume', async (_e, payload: { batch_id: string; qty: number }) => {
     try {
       const db = getDb()
       const row = db.prepare(`SELECT quantity FROM product_batches WHERE id = ?`).get(payload.batch_id) as { quantity: number } | undefined
       if (!row) return { success: false, error: 'Batch not found' }
       if (row.quantity < payload.qty) return { success: false, error: `Insufficient batch quantity (available: ${row.quantity})` }
       db.prepare(`UPDATE product_batches SET quantity = quantity - ?, updated_at = datetime('now') WHERE id = ?`).run(payload.qty, payload.batch_id)
+      const updated = db.prepare(`SELECT * FROM product_batches WHERE id = ?`).get(payload.batch_id) as Record<string, unknown>
+      await enqueuSync('product_batches', payload.batch_id, 'UPDATE', updated)
       return { success: true }
     } catch (err) { return { success: false, error: String(err) } }
   })
