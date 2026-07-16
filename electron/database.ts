@@ -679,6 +679,35 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_status ON chit_contributions(status);
   `)
 
+  // Edit requests — a branch manager/cashier wanting to correct an
+  // already-completed invoice line item or a direct stock quantity must
+  // submit a request here; only after a Company Admin approves it does the
+  // edit unlock (single-use, 48h window) for that specific user + record.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS edit_requests (
+      id                  TEXT PRIMARY KEY,
+      target_table        TEXT NOT NULL,
+      target_record_id    TEXT NOT NULL,
+      branch_id           TEXT REFERENCES branches(id),
+      requested_by        TEXT NOT NULL REFERENCES users(id),
+      reason              TEXT NOT NULL,
+      requested_changes   TEXT NOT NULL,
+      status              TEXT NOT NULL DEFAULT 'pending',
+      reviewed_by         TEXT REFERENCES users(id),
+      reviewed_at         TEXT,
+      review_notes        TEXT,
+      approved_expires_at TEXT,
+      consumed_at         TEXT,
+      created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at           TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_edit_requests_target ON edit_requests(target_table, target_record_id);
+    CREATE INDEX IF NOT EXISTS idx_edit_requests_status ON edit_requests(status);
+    CREATE INDEX IF NOT EXISTS idx_edit_requests_requester ON edit_requests(requested_by);
+    CREATE INDEX IF NOT EXISTS idx_edit_requests_branch ON edit_requests(branch_id);
+  `)
+
   // Stock count sessions
   db.exec(`
     CREATE TABLE IF NOT EXISTS stock_movements (

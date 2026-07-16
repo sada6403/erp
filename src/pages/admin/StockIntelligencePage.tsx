@@ -140,7 +140,11 @@ export default function StockIntelligencePage() {
               Branch
               <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input mt-1 w-full">
                 <option value="">All Branches</option>
-                {branches.map(b => <option key={String(b.id)} value={String(b.id)}>{String(b.name)}</option>)}
+                {branches.map(b => (
+                  <option key={String(b.id)} value={String(b.id)}>
+                    {String(b.name)}{(b as { is_active?: number | boolean }).is_active === 0 ? ' (Inactive)' : ''}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>

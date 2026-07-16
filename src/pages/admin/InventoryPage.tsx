@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { AlertCircle, ArrowRightLeft, Plus } from 'lucide-react'
+import { AlertCircle, ArrowRightLeft, Plus, Lock, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/store/authStore'
 
 export default function InventoryPage() {
   const [stocks, setStocks]       = useState<Record<string, unknown>[]>([])
@@ -306,22 +307,77 @@ export default function InventoryPage() {
   )
 }
 
-function AdjustBtn({ stockId, productId, branchId, current, onDone }: { stockId: string; productId: string; branchId: string; current: number; onDone: () => void }) {
+function AdjustBtn({ stockId: _stockId, productId, branchId, current, onDone }: { stockId: string; productId: string; branchId: string; current: number; onDone: () => void }) {
+  const { user } = useAuthStore()
+  const isAdmin = Boolean(((user?.role as unknown as Record<string, unknown>)?.permissions as Record<string, unknown> || {})?.all)
+  const targetRecordId = `${productId}-${branchId}`
+
   const [open, setOpen] = useState(false)
   const [qty, setQty]   = useState(current)
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
+  const [unlock, setUnlock] = useState<{ unlocked: boolean; pending: boolean; request_id: string | null } | null>(null)
+
+  const checkUnlock = async () => {
+    if (isAdmin) return
+    const res = await window.api.editRequests.checkUnlocked('stocks', targetRecordId)
+    if (res.success) setUnlock(res.data)
+  }
+
+  const openEditor = async () => {
+    await checkUnlock()
+    setOpen(true)
+  }
 
   const save = async () => {
     setSaving(true)
-    await window.api.stocks.adjust({ product_id: productId, branch_id: branchId, quantity: qty, reason })
+    const res = await window.api.stocks.adjustCorrection({
+      product_id: productId, branch_id: branchId, quantity: qty, reason,
+      edit_request_id: unlock?.request_id || undefined,
+    })
     setSaving(false)
+    if (!res.success) { toast.error(res.error || 'Stock adjustment failed'); return }
     setOpen(false)
+    setUnlock(null)
     onDone()
     toast.success('Stock adjusted')
   }
 
-  if (!open) return <button onClick={() => setOpen(true)} className="btn-ghost btn-sm"><Plus size={13} /></button>
+  const requestEdit = async () => {
+    if (!reason.trim()) { toast.error('Enter a reason for the request'); return }
+    setSaving(true)
+    const res = await window.api.editRequests.create({
+      target_table: 'stocks', target_record_id: targetRecordId, reason,
+      requested_changes: { new_quantity: qty },
+    })
+    setSaving(false)
+    if (!res.success) { toast.error(res.error || 'Could not submit request'); return }
+    toast.success('Edit request submitted — waiting for admin approval')
+    await checkUnlock()
+  }
+
+  if (!open) return <button onClick={openEditor} className="btn-ghost btn-sm"><Plus size={13} /></button>
+
+  const canEditDirectly = isAdmin || unlock?.unlocked
+
+  if (!canEditDirectly && unlock?.pending) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}>
+        <Clock size={13} /> Pending approval
+        <button onClick={() => setOpen(false)} className="btn-ghost btn-sm">✕</button>
+      </div>
+    )
+  }
+
+  if (!canEditDirectly) {
+    return (
+      <div className="flex items-center gap-1">
+        <input value={reason} onChange={e => setReason(e.target.value)} placeholder="reason for request" className="input py-1 text-sm w-32" />
+        <button onClick={requestEdit} disabled={saving} className="btn-secondary btn-sm gap-1"><Lock size={12} /> Request Edit</button>
+        <button onClick={() => setOpen(false)} className="btn-ghost btn-sm">✕</button>
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center gap-1">

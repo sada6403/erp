@@ -18,6 +18,7 @@ import InstallmentsPage from '@/pages/admin/InstallmentsPage'
 import ChitSchemesPage from '@/pages/admin/ChitSchemesPage'
 import ChitSchemeDetailPage from '@/pages/admin/ChitSchemeDetailPage'
 import AuditLogsPage from '@/pages/admin/AuditLogsPage'
+import EditRequestsPage from '@/pages/admin/EditRequestsPage'
 import OperationsHubPage from '@/pages/admin/OperationsHubPage'
 import SettingsPage from '@/pages/admin/SettingsPage'
 import SyncMonitorPage from '@/pages/admin/SyncMonitorPage'
@@ -146,6 +147,7 @@ export default function App() {
         <Route path="/admin/chits" element={<ChitSchemesPage />} />
         <Route path="/admin/chits/:id" element={<ChitSchemeDetailPage />} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
+        <Route path="/admin/edit-requests" element={<EditRequestsPage />} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />
         <Route path="/admin/sync" element={<SyncMonitorPage />} />
         <Route path="/admin/settings" element={<RequireSuperAdmin><SettingsPage /></RequireSuperAdmin>} />

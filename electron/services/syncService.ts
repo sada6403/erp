@@ -287,6 +287,8 @@ export class SyncService {
       'product_uom', 'product_batches', 'audit_logs',
       // Chit Fund
       'chit_schemes',
+      // Edit requests
+      'edit_requests',
     ]
 
     let pulledInstallmentIds: string[] = []

@@ -202,25 +202,13 @@ export function registerActivationHandlers() {
         brand_logo_url:  data.brand_logo_url ?? null,
       })
 
-      // A cloud branch was selected → hide the local seeded placeholder branch
-      // so it doesn't clutter branch pickers (local-only change, never synced).
-      if (branch_id && branch_id !== 'b1111111-1111-4111-8111-111111111111') {
-        try {
-          const { getDb } = await import('../database')
-          const db = getDb()
-          const { cnt } = db.prepare(
-            `SELECT COUNT(*) as cnt FROM invoices WHERE branch_id = 'b1111111-1111-4111-8111-111111111111'`
-          ).get() as { cnt: number }
-          if (cnt === 0) {
-            db.prepare(`UPDATE branches SET is_active = 0 WHERE id = 'b1111111-1111-4111-8111-111111111111'`).run()
-            // Keep the seeded fallback admin usable under the activated branch
-            db.prepare(`UPDATE users SET branch_id = ? WHERE id = 'u9999999-9999-4999-8999-999999999999' AND branch_id = 'b1111111-1111-4111-8111-111111111111'`)
-              .run(branch_id)
-          }
-        } catch (err) {
-          console.warn('[Activation] Could not deactivate placeholder branch:', err)
-        }
-      }
+      // Main Branch (the locally-seeded branch, id b1111111-...) is the
+      // company's permanent Head Office — it stays active and keeps its own
+      // staff regardless of which cloud branch was picked during activation.
+      // (Previously this block deactivated it and moved the seeded admin off
+      // it once a real branch was chosen — removed, since Head Office is a
+      // real, ongoing branch with its own manager/cashier, not a bootstrap
+      // placeholder to hide.)
 
       // Kick off an immediate full sync so the device shows the company's
       // existing data (users, branches, products, sales, branding) right away.

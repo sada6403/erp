@@ -7,6 +7,12 @@ import Store from 'electron-store'
 
 const store = new Store()
 
+function currentPerms(): Record<string, unknown> {
+  const caller = (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller.permissions as Record<string, unknown>) || {}
+}
+
 type POStatus = 'DRAFT' | 'SENT' | 'PARTIAL' | 'RECEIVED' | 'CANCELLED'
 
 const PO_TRANSITIONS: Record<string, string[]> = {
@@ -161,6 +167,13 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       const allowed = PO_TRANSITIONS[String(po.status)]
       if (!allowed?.includes(status)) {
         throw new Error(`Cannot move PO from '${po.status}' to '${status}'`)
+      }
+
+      // Only a Company Admin can mark stock as received — this is the point
+      // new stock actually enters the company (PARTIAL also increments stock
+      // and can auto-promote to RECEIVED below, so it's gated too).
+      if ((status === 'RECEIVED' || status === 'PARTIAL') && !currentPerms().all) {
+        throw new Error('Only a Company Admin can mark a purchase order as received.')
       }
 
       const now = new Date().toISOString()

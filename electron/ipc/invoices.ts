@@ -631,6 +631,130 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
+  // Corrects a single line item's quantity/price on an already-completed
+  // invoice. Deliberately narrow — no item add/delete, no customer/payment
+  // changes, no void (that stays on invoices:cancel). Non-admins must supply
+  // an edit_request_id from an approved editRequests row; it's re-validated
+  // and consumed inside this same transaction so there's no check-then-use race.
+  ipcMain.handle('invoices:applyEdit', async (_e, id: string, payload: {
+    item_id: string; new_quantity: number; new_unit_price: number; edit_request_id?: string
+  }) => {
+    try {
+      const db = getDb()
+      const user = getAuthUser()
+      const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+        || (user?.permissions as Record<string, unknown>) || {}
+      const isAdmin = Boolean(perms.all)
+
+      const invoice = db.prepare('SELECT * FROM invoices WHERE id=?').get(id) as Record<string, unknown> | undefined
+      if (!invoice) return { success: false, error: 'Invoice not found' }
+      if (invoice.status !== 'completed') return { success: false, error: 'Only completed invoices can be corrected this way' }
+      if (invoice.locked_at) return { success: false, error: 'Invoice is locked for day-end. Contact admin.' }
+
+      const item = db.prepare('SELECT * FROM invoice_items WHERE id=? AND invoice_id=?')
+        .get(payload.item_id, id) as Record<string, unknown> | undefined
+      if (!item) return { success: false, error: 'Invoice line item not found' }
+
+      const newQty = Number(payload.new_quantity)
+      const newPrice = Number(payload.new_unit_price)
+      if (!(newQty > 0) || newPrice < 0) return { success: false, error: 'Enter a valid quantity and price' }
+
+      const money = (v: number) => Math.round(v * 100) / 100
+      const discountPct = Number(item.discount_pct || 0)
+      const taxRate = Number(item.tax_rate || 0)
+      const newGross = newQty * newPrice
+      const newDiscountAmount = money(newGross * discountPct / 100)
+      const newTaxAmount = money((newGross - newDiscountAmount) * taxRate / 100)
+      const newLineTotal = money(newGross - newDiscountAmount + newTaxAmount)
+      const deltaQuantity = newQty - Number(item.quantity)
+      const deltaLineTotal = money(newLineTotal - Number(item.line_total))
+
+      const movementRecords: Record<string, unknown>[] = []
+
+      db.transaction(() => {
+        if (!isAdmin) {
+          const request = db.prepare(`
+            SELECT id FROM edit_requests
+            WHERE id=? AND status='approved' AND approved_expires_at > datetime('now')
+              AND requested_by=? AND target_table='invoices' AND target_record_id=?
+          `).get(payload.edit_request_id, user?.id, id) as { id: string } | undefined
+          if (!request) throw new Error('Edit request no longer valid — please request approval again')
+          db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
+            .run(request.id)
+        }
+
+        db.prepare(`
+          UPDATE invoice_items
+          SET quantity=?, unit_price=?, discount_amount=?, tax_amount=?, line_total=?, updated_at=datetime('now')
+          WHERE id=?
+        `).run(newQty, newPrice, newDiscountAmount, newTaxAmount, newLineTotal, item.id)
+
+        if (deltaQuantity !== 0 && invoice.bill_type !== 'QUOTATION') {
+          // A quantity increase sells more (stock decreases further); a decrease restores stock.
+          db.prepare(`
+            UPDATE stocks SET quantity = quantity - ?, updated_at=datetime('now')
+            WHERE product_id=? AND branch_id=?
+          `).run(deltaQuantity, item.product_id, invoice.branch_id)
+          movementRecords.push(insertStockMovement(db, {
+            product_id: item.product_id as string,
+            from_branch_id: deltaQuantity > 0 ? invoice.branch_id as string : null,
+            to_branch_id: deltaQuantity < 0 ? invoice.branch_id as string : null,
+            quantity: Math.abs(deltaQuantity),
+            movement_type: 'ADJUSTMENT',
+            reference_order_id: id,
+            notes: `Invoice item correction on ${invoice.invoice_number}`,
+            created_by: (user?.id as string) || null,
+          }))
+        }
+
+        const newSubtotal = money(Number(invoice.subtotal) + (newGross - Number(item.quantity) * Number(item.unit_price)))
+        const newDiscount = money(Number(invoice.discount_amount) + (newDiscountAmount - Number(item.discount_amount)))
+        const newTax = money(Number(invoice.tax_amount) + (newTaxAmount - Number(item.tax_amount)))
+        const newTotal = money(Number(invoice.total_amount) + deltaLineTotal)
+        const newDue = money(Number(invoice.due_amount) + deltaLineTotal)
+
+        db.prepare(`
+          UPDATE invoices
+          SET subtotal=?, discount_amount=?, tax_amount=?, total_amount=?, due_amount=?, updated_at=datetime('now')
+          WHERE id=?
+        `).run(newSubtotal, newDiscount, newTax, newTotal, Math.max(0, newDue), id)
+
+        if (invoice.bill_type === 'CREDIT' && deltaLineTotal !== 0) {
+          db.prepare(`
+            UPDATE credit_ledger SET amount_due = MAX(0, amount_due + ?), updated_at=datetime('now')
+            WHERE invoice_id=? AND status='outstanding'
+          `).run(deltaLineTotal, id)
+          if (invoice.customer_id) {
+            db.prepare(`
+              UPDATE customers SET outstanding_due = MAX(0, outstanding_due + ?), updated_at=datetime('now') WHERE id=?
+            `).run(deltaLineTotal, invoice.customer_id)
+          }
+        }
+
+        logAudit(db, {
+          userId: (user?.id as string) || null, branchId: invoice.branch_id as string,
+          action: 'INVOICE_ITEM_CORRECTED', tableName: 'invoices', recordId: id,
+          oldValues: { quantity: item.quantity, unit_price: item.unit_price, line_total: item.line_total },
+          newValues: { quantity: newQty, unit_price: newPrice, line_total: newLineTotal },
+        })
+      })()
+
+      await enqueuSync('invoice_items', String(item.id), 'UPDATE', {
+        id: item.id, quantity: newQty, unit_price: newPrice,
+        discount_amount: newDiscountAmount, tax_amount: newTaxAmount, line_total: newLineTotal,
+      })
+      const updatedInvoice = db.prepare('SELECT * FROM invoices WHERE id=?').get(id)
+      await enqueuSync('invoices', id, 'UPDATE', updatedInvoice as Record<string, unknown>)
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
+      if (!isAdmin && payload.edit_request_id) {
+        await enqueuSync('edit_requests', payload.edit_request_id, 'UPDATE', { id: payload.edit_request_id, status: 'consumed' })
+      }
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
   ipcMain.handle('invoices:listHeld', (_e) => {
     try {
       const db = getDb()

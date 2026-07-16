@@ -16,6 +16,12 @@ function currentBranchId(): string {
   return (user?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111'
 }
 
+function currentPerms(): Record<string, unknown> {
+  const caller = (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller.permissions as Record<string, unknown>) || {}
+}
+
 function csvCell(value: unknown): string {
   const text = String(value ?? '')
   if (/[",\r\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`
@@ -203,6 +209,82 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('stocks', `${product_id}-${branch_id}`, 'UPDATE', payload)
       if (movement) await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      return { success: true }
+    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  })
+
+  // Ad-hoc "correct this stock number" action (InventoryPage's manual adjust
+  // button, distinct from stocks:adjust which is also fired on every product
+  // form save — that path must stay ungated). Non-admins must supply an
+  // edit_request_id from an approved editRequests row; it's re-validated and
+  // consumed inside this same transaction so there's no check-then-use race.
+  ipcMain.handle('stocks:adjustCorrection', async (_e, payload: {
+    product_id: string; branch_id: string; warehouse_id?: string
+    quantity: number; reason: string; edit_request_id?: string
+  }) => {
+    try {
+      const db = getDb()
+      const { product_id, branch_id, warehouse_id, quantity, reason } = payload
+      const user = store.get('auth_user') as Record<string, unknown>
+      const isAdmin = Boolean(currentPerms().all)
+
+      if (!isAdmin && !payload.edit_request_id) {
+        return { success: false, error: 'No approved edit request found — please request approval first' }
+      }
+
+      let movement: Record<string, unknown> | null = null
+      let previousQty = 0
+
+      db.transaction(() => {
+        if (!isAdmin) {
+          const targetRecordId = `${product_id}-${branch_id}`
+          const request = db.prepare(`
+            SELECT id FROM edit_requests
+            WHERE id=? AND status='approved' AND approved_expires_at > datetime('now')
+              AND requested_by=? AND target_table='stocks' AND target_record_id=?
+          `).get(payload.edit_request_id, user?.id, targetRecordId) as { id: string } | undefined
+          if (!request) throw new Error('Edit request no longer valid — please request approval again')
+          db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
+            .run(request.id)
+        }
+
+        const existing = db.prepare(`SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?`)
+          .get(product_id, branch_id) as Record<string, unknown> | undefined
+
+        if (existing) {
+          db.prepare(`UPDATE stocks SET quantity = ?, updated_at = datetime('now')
+            WHERE product_id = ? AND branch_id = ?`).run(quantity, product_id, branch_id)
+        } else {
+          const id = crypto.randomUUID()
+          db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity)
+            VALUES (?, ?, ?, ?, ?)`).run(id, product_id, branch_id, warehouse_id || null, quantity)
+        }
+
+        previousQty = existing ? Number(existing.quantity || 0) : 0
+        const delta = Number(quantity) - previousQty
+        if (delta !== 0) {
+          movement = insertStockMovement(db, {
+            product_id,
+            from_branch_id: delta < 0 ? branch_id : null,
+            to_branch_id: delta > 0 ? branch_id : null,
+            quantity: Math.abs(delta),
+            movement_type: 'ADJUSTMENT',
+            notes: reason || `Stock corrected from ${previousQty} to ${quantity}`,
+            created_by: (user?.id as string) || null,
+          })
+        }
+
+        logAudit(db, {
+          userId: (user?.id as string) || null, branchId: branch_id, action: 'STOCK_ADJUST_CORRECTION',
+          tableName: 'stocks', recordId: product_id, newValues: { quantity, reason, edit_request_id: payload.edit_request_id },
+        })
+      })()
+
+      await enqueuSync('stocks', `${product_id}-${branch_id}`, 'UPDATE', payload)
+      if (movement) await enqueuSync('stock_movements', String((movement as Record<string, unknown>).id), 'INSERT', movement)
+      if (!isAdmin && payload.edit_request_id) {
+        await enqueuSync('edit_requests', payload.edit_request_id, 'UPDATE', { id: payload.edit_request_id, status: 'consumed' })
+      }
       return { success: true }
     } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })

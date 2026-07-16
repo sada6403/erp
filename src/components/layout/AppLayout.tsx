@@ -6,7 +6,7 @@ import {
   Truck, Settings, LogOut, Wifi, WifiOff, AlertCircle, UserCog,
   FileText, ShoppingCart, Receipt, Sun, Moon, ChevronDown,
   ChevronRight, ShoppingBag, Menu, Building2, Shield, HardDrive,
-  Activity, Download, RefreshCw, Ticket, type LucideIcon
+  Activity, Download, RefreshCw, Ticket, Coins, type LucideIcon
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
@@ -76,7 +76,18 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/customers', label: 'Customers', perm: 'customers' },
       { to: '/admin/installments', label: 'Installments', perm: 'customers' },
-      { to: '/admin/chits', label: 'Chit Fund', perm: 'customers' },
+    ]
+  },
+  {
+    // Umbrella home for every Chit Fund feature — schemes, member/customer
+    // management, and agent management all live here so future chit-fund
+    // development has one place to grow into instead of being scattered
+    // across other groups.
+    label: 'Chit Fund Management', icon: Coins, perm: 'customers', module: 'customers',
+    items: [
+      { to: '/admin/chits', label: 'Chit Schemes', perm: 'customers' },
+      { to: '/admin/customers', label: 'Customers', perm: 'customers' },
+      { to: '/admin/agents', label: 'Agent Management', perm: 'employees' },
     ]
   },
   {
@@ -126,6 +137,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/branches', label: 'Branches', perm: 'branches' },
       { to: '/admin/audit-logs', label: 'Audit Logs', perm: 'branches' },
+      { to: '/admin/edit-requests', label: 'Edit Requests', adminOnly: true },
       { to: '/admin/sync', label: 'Sync Monitor', adminOnly: true },
       { to: '/admin/operations', label: 'Operations Hub', perm: 'branches' },
     ]
@@ -149,11 +161,11 @@ function canSeeItem(item: NavItem, permissions: Record<string, unknown>, isAdmin
 function canSeeGroup(group: NavGroup, kind: SessionRoleKind) {
   const label = group.label
   if (kind === 'owner') return true
-  if (kind === 'cashier') return ['Sell', 'Customers', 'Customer Management', 'Coupons', 'Deliveries'].includes(label)
-  if (kind === 'accountant') return ['Customer Management', 'Expenses', 'Reports', 'Branches'].includes(label)
+  if (kind === 'cashier') return ['Sell', 'Customers', 'Customer Management', 'Chit Fund Management', 'Coupons', 'Deliveries'].includes(label)
+  if (kind === 'accountant') return ['Customer Management', 'Chit Fund Management', 'Expenses', 'Reports', 'Branches'].includes(label)
   if (kind === 'storeKeeper') return ['Products', 'Purchase Orders', 'Supplier Management', 'Stock Transfers', 'Branches'].includes(label)
   if (kind === 'branchManager' || kind === 'subBranchManager') {
-    return ['Products', 'Purchase Orders', 'Supplier Management', 'Customer Management', 'Stock Transfers', 'Sell', 'Coupons', 'Deliveries', 'Expenses', 'Reports', 'Employee Management', 'Branches'].includes(label)
+    return ['Products', 'Purchase Orders', 'Supplier Management', 'Customer Management', 'Chit Fund Management', 'Stock Transfers', 'Sell', 'Coupons', 'Deliveries', 'Expenses', 'Reports', 'Employee Management', 'Branches'].includes(label)
   }
   return true
 }

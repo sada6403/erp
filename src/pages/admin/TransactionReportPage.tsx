@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Search, Filter, Download, FileText, Eye, RefreshCw, X, ChevronLeft, ChevronRight, Printer } from 'lucide-react'
+import { Search, Filter, Download, FileText, Eye, RefreshCw, X, ChevronLeft, ChevronRight, Printer, Lock, Clock, Pencil } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
+import { useAuthStore } from '@/store/authStore'
+import toast from 'react-hot-toast'
 
 interface TxRow {
   id: string
@@ -108,6 +110,8 @@ const STATUS_COLORS: Record<string, string> = {
 }
 
 export default function TransactionReportPage() {
+  const { user } = useAuthStore()
+  const isAdmin = Boolean(((user?.role as unknown as Record<string, unknown>)?.permissions as Record<string, unknown> || {})?.all)
   const [filters, setFilters] = useState<Filters>({
     search: '', dateFrom: '', dateTo: '', branchId: '', cashierId: '',
     paymentMethod: '', status: '', billType: '', agentCode: '',
@@ -735,7 +739,7 @@ export default function TransactionReportPage() {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="border-b border-surface-600">
-                        {['Product','SKU','Qty','Unit Price','Discount','Tax','Total'].map(h => (
+                        {['Product','SKU','Qty','Unit Price','Discount','Tax','Total', ''].map(h => (
                           <th key={h} className="py-1 pr-3 text-left text-slate-500 font-medium">{h}</th>
                         ))}
                       </tr>
@@ -750,6 +754,16 @@ export default function TransactionReportPage() {
                           <td className="py-1.5 pr-3 text-orange-400">{item.discount > 0 ? `-${fmt(item.discount)}` : '-'}</td>
                           <td className="py-1.5 pr-3 text-slate-400">{item.tax > 0 ? fmt(item.tax) : '-'}</td>
                           <td className="py-1.5 pr-3 text-slate-100 font-medium">{fmt(item.total)}</td>
+                          <td className="py-1.5 pr-3">
+                            {detail.status === 'completed' && (
+                              <InvoiceItemEditCell
+                                invoiceId={detail.id}
+                                item={item}
+                                isAdmin={isAdmin}
+                                onDone={() => openDetail(detail.id)}
+                              />
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -784,6 +798,95 @@ export default function TransactionReportPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// Correct a single line item's quantity/price on a completed invoice.
+// Admins edit directly; everyone else must request approval first (the
+// request unlocks a one-time, 48h edit window for that exact line item).
+function InvoiceItemEditCell({ invoiceId, item, isAdmin, onDone }: {
+  invoiceId: string
+  item: { id: string; quantity: number; unit_price: number }
+  isAdmin: boolean
+  onDone: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [qty, setQty] = useState(item.quantity)
+  const [price, setPrice] = useState(item.unit_price)
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [unlock, setUnlock] = useState<{ unlocked: boolean; pending: boolean; request_id: string | null } | null>(null)
+
+  const checkUnlock = async () => {
+    if (isAdmin) return
+    const res = await window.api.editRequests.checkUnlocked('invoices', invoiceId)
+    if (res.success) setUnlock(res.data)
+  }
+
+  const openEditor = async () => {
+    await checkUnlock()
+    setOpen(true)
+  }
+
+  const save = async () => {
+    setSaving(true)
+    const res = await window.api.invoices.applyEdit(invoiceId, {
+      item_id: item.id, new_quantity: qty, new_unit_price: price,
+      edit_request_id: unlock?.request_id || undefined,
+    })
+    setSaving(false)
+    if (!res.success) { toast.error(res.error || 'Correction failed'); return }
+    setOpen(false)
+    setUnlock(null)
+    toast.success('Invoice item corrected')
+    onDone()
+  }
+
+  const requestEdit = async () => {
+    if (!reason.trim()) { toast.error('Enter a reason for the request'); return }
+    setSaving(true)
+    const res = await window.api.editRequests.create({
+      target_table: 'invoices', target_record_id: invoiceId, reason,
+      requested_changes: { item_id: item.id, new_quantity: qty, new_unit_price: price },
+    })
+    setSaving(false)
+    if (!res.success) { toast.error(res.error || 'Could not submit request'); return }
+    toast.success('Edit request submitted — waiting for admin approval')
+    await checkUnlock()
+  }
+
+  if (!open) {
+    return <button onClick={openEditor} className="btn-ghost btn-sm p-1" title="Correct this line item"><Pencil size={12} /></button>
+  }
+
+  const canEditDirectly = isAdmin || unlock?.unlocked
+
+  if (!canEditDirectly && unlock?.pending) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-slate-400">
+        <Clock size={12} /> Pending
+        <button onClick={() => setOpen(false)} className="btn-ghost btn-sm p-1"><X size={12} /></button>
+      </div>
+    )
+  }
+
+  if (!canEditDirectly) {
+    return (
+      <div className="flex items-center gap-1">
+        <input value={reason} onChange={e => setReason(e.target.value)} placeholder="reason" className="input py-1 text-xs w-24" />
+        <button onClick={requestEdit} disabled={saving} className="btn-secondary btn-sm gap-1 px-2"><Lock size={11} /> Request</button>
+        <button onClick={() => setOpen(false)} className="btn-ghost btn-sm p-1"><X size={12} /></button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input type="number" value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} className="input py-1 text-xs w-14" />
+      <input type="number" value={price} onChange={e => setPrice(parseFloat(e.target.value) || 0)} className="input py-1 text-xs w-16" />
+      <button onClick={save} disabled={saving} className="btn-success btn-sm px-2">OK</button>
+      <button onClick={() => setOpen(false)} className="btn-ghost btn-sm p-1"><X size={12} /></button>
     </div>
   )
 }

@@ -728,6 +728,30 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_chit_contributions_member (member_id),
        INDEX idx_chit_contributions_status (status)
      )`,
+
+    // ── Edit requests — manager-requested, admin-approved corrections to
+    // already-completed invoices/stock ──────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS edit_requests (
+       id                  CHAR(36)     NOT NULL PRIMARY KEY,
+       target_table        VARCHAR(32)  NOT NULL,
+       target_record_id    VARCHAR(128) NOT NULL,
+       branch_id           CHAR(36)     NULL,
+       requested_by        CHAR(36)     NOT NULL,
+       reason              TEXT         NOT NULL,
+       requested_changes   JSON         NOT NULL,
+       status              VARCHAR(20)  NOT NULL DEFAULT 'pending',
+       reviewed_by         CHAR(36)     NULL,
+       reviewed_at         DATETIME     NULL,
+       review_notes        TEXT         NULL,
+       approved_expires_at DATETIME     NULL,
+       consumed_at         DATETIME     NULL,
+       created_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at          DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at           DATETIME     NULL,
+       INDEX idx_edit_requests_target (target_table, target_record_id),
+       INDEX idx_edit_requests_status (status),
+       INDEX idx_edit_requests_requester (requested_by)
+     )`,
   ]
 
   for (const sql of [...statements, ...stockTransferColumns]) {

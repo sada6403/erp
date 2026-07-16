@@ -56,6 +56,7 @@ const api = {
     addCreditPayment:   (id: string, payload: unknown)            => ipcRenderer.invoke('invoices:addCreditPayment', id, payload),
     pendingApproval:    ()                                        => ipcRenderer.invoke('invoices:pendingApproval'),
     creditSummary:      (customerId: string)                      => ipcRenderer.invoke('invoices:creditSummary', customerId),
+    applyEdit:          (id: string, payload: unknown)            => ipcRenderer.invoke('invoices:applyEdit', id, payload),
   },
 
   // Customers
@@ -110,11 +111,21 @@ const api = {
     },
   },
 
+  // Edit requests — manager-requested, admin-approved corrections to
+  // already-completed invoices / stock records
+  editRequests: {
+    create:        (payload: unknown)                     => ipcRenderer.invoke('editRequests:create', payload),
+    list:          (filters?: unknown)                    => ipcRenderer.invoke('editRequests:list', filters),
+    review:        (id: string, action: 'approve' | 'reject', notes?: string) => ipcRenderer.invoke('editRequests:review', id, action, notes),
+    checkUnlocked: (targetTable: string, targetRecordId: string) => ipcRenderer.invoke('editRequests:checkUnlocked', targetTable, targetRecordId),
+  },
+
   // Stocks
   stocks: {
     list:         (branchId?: string)  => ipcRenderer.invoke('stocks:list', branchId),
     get:          (productId: string)  => ipcRenderer.invoke('stocks:get', productId),
     transfer:     (payload: unknown)   => ipcRenderer.invoke('stocks:transfer', payload),
+    adjustCorrection: (payload: unknown) => ipcRenderer.invoke('stocks:adjustCorrection', payload),
     listTransfers:(filters?: unknown)  => ipcRenderer.invoke('stocks:listTransfers', filters),
     getTransfer:  (id: string)         => ipcRenderer.invoke('stocks:getTransfer', id),
     logTransferPrint:(id: string, payload?: unknown) => ipcRenderer.invoke('stocks:logTransferPrint', id, payload),

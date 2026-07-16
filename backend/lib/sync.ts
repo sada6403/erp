@@ -20,6 +20,8 @@ export const ALLOWED_TABLES = new Set([
   'product_uom', 'product_batches',
   // Chit Fund
   'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions',
+  // Edit requests
+  'edit_requests',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
