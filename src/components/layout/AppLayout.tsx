@@ -76,6 +76,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/customers', label: 'Customers', perm: 'customers' },
       { to: '/admin/installments', label: 'Installments', perm: 'customers' },
+      { to: '/admin/chits', label: 'Chit Fund', perm: 'customers' },
     ]
   },
   {

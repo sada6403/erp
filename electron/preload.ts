@@ -83,6 +83,33 @@ const api = {
     downloadTemplate: ()                  => ipcRenderer.invoke('agents:downloadTemplate'),
   },
 
+  // Chit Fund
+  chits: {
+    list:    (filters?: unknown) => ipcRenderer.invoke('chits:list', filters),
+    get:     (id: string)        => ipcRenderer.invoke('chits:get', id),
+    create:  (payload: unknown)  => ipcRenderer.invoke('chits:create', payload),
+    update:  (id: string, payload: unknown) => ipcRenderer.invoke('chits:update', id, payload),
+    reports: (filters?: unknown) => ipcRenderer.invoke('chits:reports', filters),
+    members: {
+      add:              (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:add', schemeId, payload),
+      remove:           (memberId: string)                   => ipcRenderer.invoke('chits:members:remove', memberId),
+      list:             (schemeId: string)                   => ipcRenderer.invoke('chits:members:list', schemeId),
+      downloadTemplate: ()                                   => ipcRenderer.invoke('chits:members:downloadTemplate'),
+      importExcel:      (schemeId: string)                   => ipcRenderer.invoke('chits:members:importExcel', schemeId),
+      earlyRedeem:      (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:members:earlyRedeem', memberId, payload),
+    },
+    draws: {
+      eligible: (schemeId: string, cycleNo: number) => ipcRenderer.invoke('chits:draws:eligible', schemeId, cycleNo),
+      conduct:  (schemeId: string, cycleNo: number, options?: unknown) => ipcRenderer.invoke('chits:draws:conduct', schemeId, cycleNo, options),
+      list:     (schemeId: string) => ipcRenderer.invoke('chits:draws:list', schemeId),
+    },
+    contributions: {
+      record:           (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:contributions:record', memberId, payload),
+      verify:            (id: string, action: 'approve' | 'reject', notes?: string) => ipcRenderer.invoke('chits:contributions:verify', id, action, notes),
+      pendingTransfers: (filters?: unknown) => ipcRenderer.invoke('chits:contributions:pendingTransfers', filters),
+    },
+  },
+
   // Stocks
   stocks: {
     list:         (branchId?: string)  => ipcRenderer.invoke('stocks:list', branchId),

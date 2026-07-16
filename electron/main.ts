@@ -29,6 +29,7 @@ import { registerBranchTransferHandlers } from './ipc/branchTransfers'
 import { registerBackupHandlers } from './ipc/backup'
 import { registerMonitorHandlers } from './ipc/monitor'
 import { registerLicenseHandlers } from './ipc/license'
+import { registerChitHandlers } from './ipc/chits'
 import { startAutoBackup, stopAutoBackup } from './services/backupService'
 import { startLicenseChecks, stopLicenseChecks } from './services/licenseService'
 import { type SyncService, getSyncService } from './services/syncService'
@@ -168,6 +169,7 @@ async function bootstrap() {
   registerBackupHandlers()
   registerMonitorHandlers()
   registerLicenseHandlers(ipcMain)
+  registerChitHandlers(ipcMain)
   startAutoBackup()
   startLicenseChecks()
 

@@ -18,6 +18,8 @@ export const ALLOWED_TABLES = new Set([
   'returns', 'return_items', 'cash_sessions',
   'loyalty_config', 'loyalty_transactions',
   'product_uom', 'product_batches',
+  // Chit Fund
+  'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
@@ -28,6 +30,9 @@ const RELATED_KEYS: Record<string, Set<string>> = {
   installment_reminders:  new Set(['installment_id']),
   customer_order_items:   new Set(['order_id']),
   return_items:           new Set(['return_id']),
+  chit_members:           new Set(['scheme_id']),
+  chit_draws:             new Set(['scheme_id']),
+  chit_contributions:     new Set(['scheme_id']),
 }
 
 export function assertTable(table: unknown): asserts table is string {

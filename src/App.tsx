@@ -15,6 +15,8 @@ import SuppliersPage from '@/pages/admin/SuppliersPage'
 import AnalyticsPage from '@/pages/admin/AnalyticsPage'
 import DeliveriesPage from '@/pages/admin/DeliveriesPage'
 import InstallmentsPage from '@/pages/admin/InstallmentsPage'
+import ChitSchemesPage from '@/pages/admin/ChitSchemesPage'
+import ChitSchemeDetailPage from '@/pages/admin/ChitSchemeDetailPage'
 import AuditLogsPage from '@/pages/admin/AuditLogsPage'
 import OperationsHubPage from '@/pages/admin/OperationsHubPage'
 import SettingsPage from '@/pages/admin/SettingsPage'
@@ -141,6 +143,8 @@ export default function App() {
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
         <Route path="/admin/deliveries" element={<DeliveriesPage />} />
         <Route path="/admin/installments" element={<InstallmentsPage />} />
+        <Route path="/admin/chits" element={<ChitSchemesPage />} />
+        <Route path="/admin/chits/:id" element={<ChitSchemeDetailPage />} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />
         <Route path="/admin/sync" element={<SyncMonitorPage />} />

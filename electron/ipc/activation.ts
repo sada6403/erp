@@ -3,16 +3,17 @@ import Store from 'electron-store'
 import os from 'os'
 import { randomUUID, createHash, timingSafeEqual } from 'crypto'
 import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
+import { decryptSecret } from './settings'
 
 const store = new Store()
 
 // Support passcode — unlocks the hidden Cloud API URL settings (activation
-// page + admin settings). Known only to the software owner/superadmin.
-// Change before building a customer release.
-const SUPPORT_PASSCODE = 'NF@2026'
-
+// page + admin settings). DB-backed via app_settings.support_passcode
+// (encrypted at rest, seeded to 'NF@2026' by settings.ts's DEFAULTS, changeable
+// from Settings without a rebuild) rather than hardcoded in source.
 export function verifySupportPasscode(input: string): boolean {
-  const expected = Buffer.from(SUPPORT_PASSCODE)
+  const settings = store.get('app_settings') as Record<string, unknown> | undefined
+  const expected = Buffer.from(decryptSecret(settings?.support_passcode) || 'NF@2026')
   const received = Buffer.from(String(input ?? ''))
   return expected.length === received.length && timingSafeEqual(expected, received)
 }

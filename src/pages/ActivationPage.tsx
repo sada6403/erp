@@ -404,7 +404,11 @@ export default function ActivationPage({ onActivated }: Props) {
                 </div>
               </div>
 
-              <button onClick={handleActivate} disabled={!deviceName.trim()}
+              {verifyResult.branches.length > 0 && !selectedBranch && (
+                <p className="text-xs text-amber-400">Please select a branch above before activating.</p>
+              )}
+              <button onClick={handleActivate}
+                disabled={!deviceName.trim() || (verifyResult.branches.length > 0 && !selectedBranch)}
                 className="w-full py-3 rounded-xl font-semibold text-white text-sm transition-all flex items-center justify-center gap-2 disabled:opacity-40"
                 style={{ background: 'linear-gradient(135deg, #16a34a, #15803d)' }}>
                 <ShieldCheck className="w-4 h-4" /> Activate Device

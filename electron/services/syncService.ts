@@ -285,10 +285,13 @@ export class SyncService {
       'agents', 'expense_categories', 'expenses',
       'returns', 'cash_sessions', 'loyalty_config', 'loyalty_transactions',
       'product_uom', 'product_batches', 'audit_logs',
+      // Chit Fund
+      'chit_schemes',
     ]
 
     let pulledInstallmentIds: string[] = []
     let pulledReturnIds: string[] = []
+    let pulledChitSchemeIds: string[] = []
 
     for (const table of globalTables) {
       let data: Record<string, unknown>[] = []
@@ -308,6 +311,9 @@ export class SyncService {
       }
       if (table === 'returns') {
         pulledReturnIds = data.map(row => String(row.id))
+      }
+      if (table === 'chit_schemes') {
+        pulledChitSchemeIds = data.map(row => String(row.id))
       }
 
       const pendingIds = (db.prepare(`
@@ -420,6 +426,38 @@ export class SyncService {
       } catch (err) {
         if (err instanceof CloudRateLimitError) throw err
         console.error('[SyncService] Failed to pull return items:', err)
+      }
+    }
+
+    // Pull chit_members/chit_draws/chit_contributions using scheme IDs already fetched above
+    if (pulledChitSchemeIds.length > 0) {
+      try {
+        for (let index = 0; index < pulledChitSchemeIds.length; index += 50) {
+          const ids = pulledChitSchemeIds.slice(index, index + 50)
+          const members = await cloud.related('chit_members', 'scheme_id', ids)
+          await sleep(REQUEST_DELAY_MS)
+          const draws = await cloud.related('chit_draws', 'scheme_id', ids)
+          await sleep(REQUEST_DELAY_MS)
+          const contributions = await cloud.related('chit_contributions', 'scheme_id', ids)
+          await sleep(REQUEST_DELAY_MS)
+          db.transaction(() => {
+            for (const member of members) {
+              try { this.insertFiltered(db, 'chit_members', member) }
+              catch (err) { console.error(`[SyncService] Skipping chit_member (${member.id}):`, err) }
+            }
+            for (const draw of draws) {
+              try { this.insertFiltered(db, 'chit_draws', draw) }
+              catch (err) { console.error(`[SyncService] Skipping chit_draw (${draw.id}):`, err) }
+            }
+            for (const contribution of contributions) {
+              try { this.insertFiltered(db, 'chit_contributions', contribution) }
+              catch (err) { console.error(`[SyncService] Skipping chit_contribution (${contribution.id}):`, err) }
+            }
+          })()
+        }
+      } catch (err) {
+        if (err instanceof CloudRateLimitError) throw err
+        console.error('[SyncService] Failed to pull chit fund child records:', err)
       }
     }
 

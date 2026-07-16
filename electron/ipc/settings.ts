@@ -29,6 +29,7 @@ const SECRET_KEYS = new Set([
   'cloud_api_key',
   'api_secret',
   'api_token',
+  'support_passcode',
   's3_secret_key',
   'whatsapp_access_token',
   'whatsapp_twilio_token',
@@ -58,6 +59,10 @@ const DEFAULTS = {
   cloud_api_url: '',
   cloud_api_key: '',
   theme: 'dark',
+  // Support unlock — gates the hidden Cloud API URL panel (activation page +
+  // admin settings). DB-backed (encrypted at rest via SECRET_KEYS) so it can
+  // be changed per-install from Settings instead of being baked into source.
+  support_passcode: 'NF@2026',
 
   // SMTP
   email_enabled: false,
