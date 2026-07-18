@@ -40,7 +40,8 @@ export default function BranchTransferView() {
       ])
       
       if (sRes.success) setSettings(sRes.data)
-      
+      else toast.error(sRes.error || 'Failed to load settings')
+
       if (tRes.success) {
         setTransfer(tRes.data)
         // Initialize receive items
@@ -143,9 +144,14 @@ export default function BranchTransferView() {
       </html>
     `)
     printWindow.document.close()
-    
+
     // Log print
-    await window.api.branchTransfers.logPrint(id!)
+    try {
+      const res = await window.api.branchTransfers.logPrint(id!)
+      if (!res.success) toast.error(res.error || 'Failed to log print')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to log print')
+    }
     loadData()
   }
 

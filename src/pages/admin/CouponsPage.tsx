@@ -48,23 +48,35 @@ export default function CouponsPage() {
   useEffect(() => { load() }, [load])
 
   const openDetail = async (idOrCode: string) => {
-    const res = await window.api.coupons.get(idOrCode)
-    if (res.success) setDetail(res.data as Coupon)
-    else toast.error(String(res.error || 'Coupon not found'))
+    try {
+      const res = await window.api.coupons.get(idOrCode)
+      if (res.success) setDetail(res.data as Coupon)
+      else toast.error(String(res.error || 'Coupon not found'))
+    } catch {
+      toast.error('Failed to load coupon')
+    }
   }
 
   const printCard = async (coupon: Coupon) => {
-    const res = await window.api.printer.printCoupon(coupon)
-    if ((res as { success: boolean }).success) toast.success('Coupon card printed')
-    else toast.error('Print failed')
+    try {
+      const res = await window.api.printer.printCoupon(coupon)
+      if ((res as { success: boolean }).success) toast.success('Coupon card printed')
+      else toast.error('Print failed')
+    } catch {
+      toast.error('Print failed')
+    }
   }
 
   const voidCoupon = async (coupon: Coupon) => {
     const reason = prompt(`Void coupon ${coupon.code}? The remaining balance (${money(coupon.balance)}) will be forfeited.\n\nReason:`)
     if (reason === null) return
-    const res = await window.api.coupons.void(String(coupon.id), reason || undefined)
-    if (res.success) { toast.success('Coupon voided'); setDetail(null); load() }
-    else toast.error(String(res.error || 'Failed'))
+    try {
+      const res = await window.api.coupons.void(String(coupon.id), reason || undefined)
+      if (res.success) { toast.success('Coupon voided'); setDetail(null); load() }
+      else toast.error(String(res.error || 'Failed'))
+    } catch {
+      toast.error('Failed to void coupon')
+    }
   }
 
   return (
@@ -183,9 +195,10 @@ function CreateCouponModal({ onClose, onDone }: { onClose: () => void; onDone: (
   const [created, setCreated] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
-    window.api.customers.list().then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+    window.api.customers.list().then((r: { success: boolean; data?: Record<string, unknown>[]; error?: string }) => {
       if (r.success && r.data) setCustomers(r.data)
-    })
+      else if (!r.success) toast.error(r.error || 'Failed to load customers')
+    }).catch(() => toast.error('Failed to load customers'))
   }, [])
 
   const save = async () => {
@@ -211,9 +224,13 @@ function CreateCouponModal({ onClose, onDone }: { onClose: () => void; onDone: (
   const printCard = async () => {
     if (!created) return
     const customer = customers.find(c => String(c.id) === String(created.customer_id))
-    const res = await window.api.printer.printCoupon({ ...created, customer_name: customer?.name || 'Bearer' })
-    if ((res as { success: boolean }).success) toast.success('Coupon card printed')
-    else toast.error('Print failed')
+    try {
+      const res = await window.api.printer.printCoupon({ ...created, customer_name: customer?.name || 'Bearer' })
+      if ((res as { success: boolean }).success) toast.success('Coupon card printed')
+      else toast.error('Print failed')
+    } catch {
+      toast.error('Print failed')
+    }
   }
 
   // Success screen: show the generated code + print

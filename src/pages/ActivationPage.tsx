@@ -42,7 +42,7 @@ export default function ActivationPage({ onActivated }: Props) {
     if (!window.api?.app) return
     window.api.app.getDeviceInfo().then((info: Record<string, string>) => {
       setDeviceName(info.device_name ?? '')
-    })
+    }).catch(() => {})
     const saved = localStorage.getItem('activation_api_url')?.trim().replace(/\/+$/, '')
     if (saved && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(saved)) {
       setApiUrl(saved)

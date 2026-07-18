@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, FileText, RefreshCw, Search, Table2 } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import { useAuthStore } from '@/store/authStore'
+import toast from 'react-hot-toast'
 
 type Row = Record<string, unknown>
 
@@ -111,6 +112,9 @@ export default function AdvancedReportsPage() {
     try {
       const res = await window.api?.reports?.advancedSummary?.(filters)
       if (res?.success) setData(res.data as ReportData)
+      else toast.error(res?.error || 'Failed to generate report')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to generate report')
     } finally {
       setLoading(false)
     }
@@ -121,7 +125,7 @@ export default function AdvancedReportsPage() {
   useEffect(() => {
     window.api?.settings?.get?.().then((res: { success: boolean; data?: Record<string, unknown> }) => {
       if (res?.success && res.data) setCompanyName(String(res.data.company_name || ''))
-    })
+    }).catch(() => {})
   }, [])
 
   const filteredRows = useMemo(() => {
@@ -155,38 +159,56 @@ export default function AdvancedReportsPage() {
 
   const exportCsv = async () => {
     setExporting(true)
-    await window.api?.reports?.exportCsvRows?.({
-      filename: `${active}-${today}`,
-      rows: cleanRows(filteredRows),
-      metadata,
-    })
-    setExporting(false)
+    try {
+      const res = await window.api?.reports?.exportCsvRows?.({
+        filename: `${active}-${today}`,
+        rows: cleanRows(filteredRows),
+        metadata,
+      })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'CSV export failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'CSV export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const exportExcel = async () => {
     if (!data) return
     setExporting(true)
-    await window.api?.reports?.exportExcel?.({
-      filename: `advanced-reports-${today}`,
-      sheets: [
-        { name: 'Report Info', rows: Object.entries(metadata).map(([Field, Value]) => ({ Field, Value })) },
-        { name: reportTitle.slice(0, 31), rows: cleanRows(filteredRows) },
-        { name: 'Installment Summary', rows: [data.installmentSummary] },
-      ],
-    })
-    setExporting(false)
+    try {
+      const res = await window.api?.reports?.exportExcel?.({
+        filename: `advanced-reports-${today}`,
+        sheets: [
+          { name: 'Report Info', rows: Object.entries(metadata).map(([Field, Value]) => ({ Field, Value })) },
+          { name: reportTitle.slice(0, 31), rows: cleanRows(filteredRows) },
+          { name: 'Installment Summary', rows: [data.installmentSummary] },
+        ],
+      })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'Excel export failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Excel export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const exportPdf = async () => {
     setExporting(true)
-    await window.api?.reports?.exportPdf?.({
-      filename: `${active}-${today}`,
-      title: reportTitle,
-      metadata,
-      summary: summaryEntries,
-      rows: cleanRows(filteredRows),
-    })
-    setExporting(false)
+    try {
+      const res = await window.api?.reports?.exportPdf?.({
+        filename: `${active}-${today}`,
+        title: reportTitle,
+        metadata,
+        summary: summaryEntries,
+        rows: cleanRows(filteredRows),
+      })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'PDF export failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'PDF export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   return (

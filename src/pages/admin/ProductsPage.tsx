@@ -43,15 +43,23 @@ export default function ProductsPage() {
 
   const load = async () => {
     setLoading(true)
-    const [p, c, s] = await Promise.all([
-      window.api.products.list({}),
-      window.api.admin.categories.list(),
-      window.api.admin.suppliers.list()
-    ])
-    if (p.success) setProducts(p.data as Product[])
-    if (c.success) setCategories(c.data as Category[])
-    if (s.success) setSuppliers(s.data as Supplier[])
-    setLoading(false)
+    try {
+      const [p, c, s] = await Promise.all([
+        window.api.products.list({}),
+        window.api.admin.categories.list(),
+        window.api.admin.suppliers.list()
+      ])
+      if (p.success) setProducts(p.data as Product[])
+      else toast.error(p.error || 'Failed to load products')
+      if (c.success) setCategories(c.data as Category[])
+      else toast.error(c.error || 'Failed to load categories')
+      if (s.success) setSuppliers(s.data as Supplier[])
+      else toast.error(s.error || 'Failed to load suppliers')
+    } catch (err) {
+      toast.error('Failed to load product data: ' + String(err))
+    } finally {
+      setLoading(false)
+    }
   }
 
   const loadAudit = async () => {
@@ -59,6 +67,9 @@ export default function ProductsPage() {
     try {
       const res = await window.api.products.catalogAudit() as { success: boolean; data?: CatalogAudit; error?: string }
       if (res.success && res.data) setAudit(res.data)
+      else toast.error(res.error || 'Failed to load catalog audit')
+    } catch (err) {
+      toast.error('Failed to load catalog audit: ' + String(err))
     } finally {
       setAuditLoading(false)
     }
@@ -95,30 +106,38 @@ export default function ProductsPage() {
   })
 
   const handleImportExcel = async () => {
-    const res = await window.api.products.importExcel()
-    if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Import failed'); return }
-    const data = res.data as {
-      imported: number
-      created?: number
-      updated?: number
-      skipped: number
-      deactivatedDuplicates?: number
-      errors: string[]
-      mode?: string
+    try {
+      const res = await window.api.products.importExcel()
+      if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Import failed'); return }
+      const data = res.data as {
+        imported: number
+        created?: number
+        updated?: number
+        skipped: number
+        deactivatedDuplicates?: number
+        errors: string[]
+        mode?: string
+      }
+      const detail = data.mode === 'woocommerce'
+        ? ` (${data.created || 0} new, ${data.updated || 0} updated${data.deactivatedDuplicates ? `, ${data.deactivatedDuplicates} duplicates inactive` : ''})`
+        : ''
+      toast.success(`Imported ${data.imported} products${detail}${data.skipped ? `, skipped ${data.skipped}` : ''}`)
+      load()
+      loadAudit()
+    } catch (err) {
+      toast.error('Import failed: ' + String(err))
     }
-    const detail = data.mode === 'woocommerce'
-      ? ` (${data.created || 0} new, ${data.updated || 0} updated${data.deactivatedDuplicates ? `, ${data.deactivatedDuplicates} duplicates inactive` : ''})`
-      : ''
-    toast.success(`Imported ${data.imported} products${detail}${data.skipped ? `, skipped ${data.skipped}` : ''}`)
-    load()
-    loadAudit()
   }
 
   const handleExportCsv = async () => {
-    const res = await window.api.products.exportCsv()
-    if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Export failed'); return }
-    const data = res.data as { exported: number; path: string }
-    toast.success(`Exported ${data.exported} products to CSV`)
+    try {
+      const res = await window.api.products.exportCsv()
+      if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Export failed'); return }
+      const data = res.data as { exported: number; path: string }
+      toast.success(`Exported ${data.exported} products to CSV`)
+    } catch (err) {
+      toast.error('Export failed: ' + String(err))
+    }
   }
 
   const handleNormalizeCatalog = async () => {
@@ -133,15 +152,25 @@ export default function ProductsPage() {
       load()
       loadAudit()
       setShowNormalizeConfirm(false)
+    } catch (err) {
+      toast.error('Catalog normalization failed: ' + String(err))
     } finally {
       setNormalizing(false)
     }
   }
 
   const toggleActive = async (p: Product) => {
-    await window.api.products.update(p.id, { is_active: p.is_active ? 0 : 1 })
-    toast.success(p.is_active ? 'Product deactivated' : 'Product activated')
-    load()
+    try {
+      const res = await window.api.products.update(p.id, { is_active: p.is_active ? 0 : 1 }) as { success: boolean; error?: string }
+      if (res.success) {
+        toast.success(p.is_active ? 'Product deactivated' : 'Product activated')
+        load()
+      } else {
+        toast.error(res.error || 'Failed to update product')
+      }
+    } catch (err) {
+      toast.error('Failed to update product: ' + String(err))
+    }
   }
 
   const handlePermanentDelete = async () => {
@@ -400,17 +429,22 @@ function QuickCategoryModal({ allCategories, onClose, onCreated }: {
   const save = async () => {
     if (!form.name.trim()) { toast.error('Name required'); return }
     setSaving(true)
-    const res = await window.api.admin.categories.create({
-      name: form.name.trim(), short_code: form.short_code || null,
-      parent_id: form.parent_id || null, description: form.description || null,
-      show_in_menu: form.show_in_menu ? 1 : 0,
-    })
-    setSaving(false)
-    if (res.success) {
-      toast.success('Category created')
-      onCreated((res.data as { id: string }).id, form.name.trim())
-    } else {
-      toast.error(String(res.error))
+    try {
+      const res = await window.api.admin.categories.create({
+        name: form.name.trim(), short_code: form.short_code || null,
+        parent_id: form.parent_id || null, description: form.description || null,
+        show_in_menu: form.show_in_menu ? 1 : 0,
+      })
+      if (res.success) {
+        toast.success('Category created')
+        onCreated((res.data as { id: string }).id, form.name.trim())
+      } else {
+        toast.error(String(res.error))
+      }
+    } catch (err) {
+      toast.error('Failed to create category: ' + String(err))
+    } finally {
+      setSaving(false)
     }
   }
   return (
@@ -509,15 +543,16 @@ function ProductForm({ product, categories, suppliers, onClose, onSave, onCatego
 
   useEffect(() => {
     if (product) {
-      window.api.stocks.get(product.id).then((res: { success: boolean; data?: unknown }) => {
+      window.api.stocks.get(product.id).then((res: { success: boolean; data?: unknown; error?: string }) => {
         if (res.success && res.data) setStockQty((res.data as { quantity: number }).quantity)
-      })
-      window.api.admin.productUom.list(product.id).then((res: { success: boolean; data?: unknown }) => {
+        else if (!res.success) toast.error(res.error || 'Failed to load stock quantity')
+      }).catch((err: unknown) => toast.error('Failed to load stock quantity: ' + String(err)))
+      window.api.admin.productUom.list(product.id).then((res: { success: boolean; data?: unknown; error?: string }) => {
         if (res.success && res.data) {
           const rows = res.data as UOMRow[]
           setUoms(rows.length ? rows : [{ uom_name: '', conversion_factor: 1, is_base: true, wastage: 0 }])
-        }
-      })
+        } else if (!res.success) toast.error(res.error || 'Failed to load UOMs')
+      }).catch((err: unknown) => toast.error('Failed to load UOMs: ' + String(err)))
     }
   }, [product])
 
@@ -530,6 +565,8 @@ function ProductForm({ product, categories, suppliers, onClose, onSave, onCatego
       const res = await window.api.products.selectAndUploadImage()
       if (res.success && res.data) setForm(p => ({ ...p, image_url: res.data as string }))
       else if (res.error && res.error !== 'Cancelled') toast.error(res.error)
+    } catch (err) {
+      toast.error('Image upload failed: ' + String(err))
     } finally { setUploading(false) }
   }
 
@@ -558,7 +595,8 @@ function ProductForm({ product, categories, suppliers, onClose, onSave, onCatego
       }
       let productId = ''
       if (product) {
-        await window.api.products.update(product.id, payload)
+        const res = await window.api.products.update(product.id, payload) as { success: boolean; error?: string }
+        if (!res.success) { toast.error(res.error || 'Failed to update product'); return }
         productId = product.id
         toast.success('Product updated')
       } else {
@@ -568,11 +606,15 @@ function ProductForm({ product, categories, suppliers, onClose, onSave, onCatego
         toast.success('Product created')
       }
       // Save stock and UOMs in parallel
-      await Promise.all([
-        window.api.stocks.adjust({ product_id: productId, branch_id: branchId, quantity: stockQty, reason: 'Product form update' }),
-        window.api.admin.productUom.save(productId, uoms.filter(u => u.uom_name.trim())),
+      const [stockRes, uomRes] = await Promise.all([
+        window.api.stocks.adjust({ product_id: productId, branch_id: branchId, quantity: stockQty, reason: 'Product form update' }) as Promise<{ success: boolean; error?: string }>,
+        window.api.admin.productUom.save(productId, uoms.filter(u => u.uom_name.trim())) as Promise<{ success: boolean; error?: string }>,
       ])
+      if (!stockRes.success) toast.error(stockRes.error || 'Failed to update stock quantity')
+      if (!uomRes.success) toast.error(uomRes.error || 'Failed to save units of measure')
       onSave()
+    } catch (err) {
+      toast.error('Failed to save product: ' + String(err))
     } finally { setSaving(false) }
   }
 

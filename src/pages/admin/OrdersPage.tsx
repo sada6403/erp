@@ -12,15 +12,24 @@ export default function OrdersPage() {
   const [filter, setFilter] = useState('')
   const [showForm, setShowForm] = useState(false)
   const load = async () => {
-    const res = await window.api.orders.list(filter ? { status: filter } : {})
-    if (res.success) setOrders(res.data)
+    try {
+      const res = await window.api.orders.list(filter ? { status: filter } : {})
+      if (res.success) setOrders(res.data)
+      else toast.error(res.error || 'Failed to load orders')
+    } catch (err) {
+      toast.error('Failed to load orders: ' + String(err))
+    }
   }
   useEffect(() => { load() }, [filter])
   const advance = async (o: Record<string, unknown>) => {
     const next = FLOW[FLOW.indexOf(String(o.status)) + 1]
     if (!next) return
-    const res = await window.api.orders.updateStatus(o.id, next)
-    if (res.success) { toast.success(`Order marked ${labels(next)}`); load() } else toast.error(res.error)
+    try {
+      const res = await window.api.orders.updateStatus(o.id, next)
+      if (res.success) { toast.success(`Order marked ${labels(next)}`); load() } else toast.error(res.error)
+    } catch (err) {
+      toast.error('Failed to update order status: ' + String(err))
+    }
   }
   return <div className="flex flex-col h-full overflow-hidden">
     <PageHeader title="Customer Orders" subtitle={`${orders.length} tracked orders`}
@@ -49,15 +58,23 @@ export default function OrdersPage() {
 function OrderForm({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [products, setProducts] = useState<any[]>([])
   const [form, setForm] = useState({ customer_name:'', customer_phone:'', customer_address:'', delivery_date:'', notes:'', items:[{ product_id:'', quantity:1, unit_price:0 }] })
-  useEffect(() => { window.api.products.list({ is_active:true }).then((r: any) => r.success && setProducts(r.data)) }, [])
+  useEffect(() => {
+    window.api.products.list({ is_active:true })
+      .then((r: any) => { if (r.success) setProducts(r.data); else toast.error(r.error || 'Failed to load products') })
+      .catch((err: unknown) => toast.error('Failed to load products: ' + String(err)))
+  }, [])
   const setItem = (index: number, key: string, value: any) => setForm(p => ({ ...p, items: p.items.map((i, n) => {
     if (n !== index) return i
     if (key === 'product_id') return { ...i, product_id:value, unit_price:Number(products.find(x => x.id === value)?.selling_price || 0) }
     return { ...i, [key]:value }
   }) }))
   const save = async () => {
-    const res = await window.api.orders.create(form)
-    if (res.success) { toast.success(`Order ${res.data.order_number} created`); onDone() } else toast.error(res.error)
+    try {
+      const res = await window.api.orders.create(form)
+      if (res.success) { toast.success(`Order ${res.data.order_number} created`); onDone() } else toast.error(res.error)
+    } catch (err) {
+      toast.error('Failed to create order: ' + String(err))
+    }
   }
   return <Modal title="New Customer Order" size="lg" onClose={onClose}
     footer={<><button className="btn-secondary" onClick={onClose}>Cancel</button><button className="btn-primary" onClick={save}>Create Order</button></>}>

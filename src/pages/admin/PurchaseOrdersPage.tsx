@@ -27,26 +27,40 @@ export default function PurchaseOrdersPage() {
 
   const load = async () => {
     setLoading(true)
-    const res = await window.api.purchases.list(statusFilter ? { status: statusFilter } : {})
-    if (res.success) setPOs(res.data as PO[])
+    try {
+      const res = await window.api.purchases.list(statusFilter ? { status: statusFilter } : {})
+      if (res.success) setPOs(res.data as PO[])
+      else toast.error(String(res.error || 'Failed to load purchase orders'))
+    } catch (err) {
+      toast.error('Failed to load purchase orders: ' + String(err))
+    }
     setLoading(false)
   }
 
   useEffect(() => { load() }, [statusFilter])
 
   const loadDetail = async (id: string) => {
-    const res = await window.api.purchases.get(id)
-    if (res.success) setViewPO(res.data as PO & { items?: POItem[] })
+    try {
+      const res = await window.api.purchases.get(id)
+      if (res.success) setViewPO(res.data as PO & { items?: POItem[] })
+      else toast.error(String(res.error || 'Failed to load purchase order'))
+    } catch (err) {
+      toast.error('Failed to load purchase order: ' + String(err))
+    }
   }
 
   const updateStatus = async (po: PO, status: string, extra?: unknown) => {
-    const res = await window.api.purchases.updateStatus(String(po.id), status, extra)
-    if (res.success) {
-      toast.success(`PO ${po.po_number} → ${status}`)
-      load()
-      if (viewPO?.id === po.id) loadDetail(String(po.id))
-    } else {
-      toast.error(String(res.error))
+    try {
+      const res = await window.api.purchases.updateStatus(String(po.id), status, extra)
+      if (res.success) {
+        toast.success(`PO ${po.po_number} → ${status}`)
+        load()
+        if (viewPO?.id === po.id) loadDetail(String(po.id))
+      } else {
+        toast.error(String(res.error))
+      }
+    } catch (err) {
+      toast.error('Failed to update purchase order: ' + String(err))
     }
   }
 
@@ -409,12 +423,14 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    window.api.admin.suppliers.list().then((r: { success: boolean; data: unknown }) => {
+    window.api.admin.suppliers.list().then((r: { success: boolean; data: unknown; error?: string }) => {
       if (r.success) setSuppliers(r.data as Record<string, unknown>[])
-    })
-    window.api.products.list({ is_active: true }).then((r: { success: boolean; data: unknown }) => {
+      else toast.error(r.error || 'Failed to load suppliers')
+    }).catch((err: unknown) => toast.error('Failed to load suppliers: ' + String(err)))
+    window.api.products.list({ is_active: true }).then((r: { success: boolean; data: unknown; error?: string }) => {
       if (r.success) setProducts(r.data as Record<string, unknown>[])
-    })
+      else toast.error(r.error || 'Failed to load products')
+    }).catch((err: unknown) => toast.error('Failed to load products: ' + String(err)))
   }, [])
 
   const setItem = (index: number, key: string, value: unknown) => {
@@ -440,13 +456,18 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
     if (!form.supplier_id) { toast.error('Select a supplier'); return }
     if (form.items.some(i => !i.product_id)) { toast.error('All items need a product'); return }
     setSaving(true)
-    const res = await window.api.purchases.create(form)
-    setSaving(false)
-    if (res.success) {
-      toast.success(`PO ${(res.data as Record<string, unknown>).po_number} created`)
-      onDone()
-    } else {
-      toast.error(String(res.error))
+    try {
+      const res = await window.api.purchases.create(form)
+      if (res.success) {
+        toast.success(`PO ${(res.data as Record<string, unknown>).po_number} created`)
+        onDone()
+      } else {
+        toast.error(String(res.error))
+      }
+    } catch (err) {
+      toast.error('Failed to create purchase order: ' + String(err))
+    } finally {
+      setSaving(false)
     }
   }
 

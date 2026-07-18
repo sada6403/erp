@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, RefreshCw, Search, GitBranch, Package, ArrowDownUp, Download, FileText } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
+import toast from 'react-hot-toast'
 
 type Row = Record<string, unknown>
 
@@ -45,9 +46,15 @@ export default function StockIntelligencePage() {
         }),
       ])
       if (branchList.success) setBranches(branchList.data as Row[])
+      else toast.error((branchList as { error?: string }).error || 'Failed to load branches')
       if (summary.success) setBranchSummary(summary.data as Row[])
+      else toast.error((summary as { error?: string }).error || 'Failed to load branch summary')
       if (stockRes.success) setBranchStock(stockRes.data as Row[])
+      else toast.error((stockRes as { error?: string }).error || 'Failed to load branch stock')
       if (moveRes.success) setMovements(moveRes.data as Row[])
+      else toast.error((moveRes as { error?: string }).error || 'Failed to load stock movements')
+    } catch (err) {
+      toast.error('Failed to load stock intelligence data: ' + String(err))
     } finally {
       setLoading(false)
     }
@@ -80,7 +87,7 @@ export default function StockIntelligencePage() {
   const exportRows = async () => {
     setExporting(true)
     try {
-      await window.api.reports.exportCsvRows({
+      const res = await window.api.reports.exportCsvRows({
         filename: `stock-intelligence-${new Date().toISOString().slice(0, 10)}`,
         rows: branchId ? branchStock : branchSummary,
         metadata: {
@@ -89,7 +96,10 @@ export default function StockIntelligencePage() {
           Period: `${dateFrom || 'Start'} to ${dateTo || 'Today'}`,
           Movement: movementType || 'All',
         },
-      })
+      }) as { success: boolean; error?: string }
+      if (!res.success && res.error !== 'Cancelled') toast.error(res.error || 'Failed to export stock')
+    } catch (err) {
+      toast.error('Failed to export stock: ' + String(err))
     } finally {
       setExporting(false)
     }
@@ -98,7 +108,7 @@ export default function StockIntelligencePage() {
   const exportMovements = async () => {
     setExporting(true)
     try {
-      await window.api.reports.exportCsvRows({
+      const res = await window.api.reports.exportCsvRows({
         filename: `stock-movements-${new Date().toISOString().slice(0, 10)}`,
         rows: filteredMovements,
         metadata: {
@@ -107,7 +117,10 @@ export default function StockIntelligencePage() {
           Period: `${dateFrom || 'Start'} to ${dateTo || 'Today'}`,
           Movement: movementType || 'All',
         },
-      })
+      }) as { success: boolean; error?: string }
+      if (!res.success && res.error !== 'Cancelled') toast.error(res.error || 'Failed to export movements')
+    } catch (err) {
+      toast.error('Failed to export movements: ' + String(err))
     } finally {
       setExporting(false)
     }

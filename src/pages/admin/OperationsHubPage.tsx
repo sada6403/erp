@@ -36,10 +36,16 @@ export default function OperationsHubPage() {
       setPrinters((deviceRes as Record<string, unknown>[]) ?? [])
       setNotifications((notifRes as NotificationItem[]) ?? [])
       setUnread(Number(unreadRes || 0))
-      const branches = (branchesRes as { success?: boolean; data?: unknown[] })?.data ?? []
-      const users = (usersRes as { success?: boolean; data?: unknown[] })?.data ?? []
+      const branchesResult = branchesRes as { success?: boolean; data?: unknown[]; error?: string }
+      const usersResult = usersRes as { success?: boolean; data?: unknown[]; error?: string }
+      const branches = branchesResult?.data ?? []
+      const users = usersResult?.data ?? []
       setBranchCount(Array.isArray(branches) ? branches.length : 0)
       setUserCount(Array.isArray(users) ? users.length : 0)
+      if (branchesResult?.success === false) toast.error(branchesResult.error || 'Failed to load branches')
+      if (usersResult?.success === false) toast.error(usersResult.error || 'Failed to load users')
+    } catch {
+      toast.error('Failed to load operations data')
     } finally {
       setLoading(false)
     }
@@ -48,9 +54,17 @@ export default function OperationsHubPage() {
   useEffect(() => { load() }, [])
 
   async function refreshNotifications() {
-    await window.api.notifications.refresh().catch(() => undefined)
+    try {
+      const res = await window.api.notifications.refresh()
+      if ((res as { success?: boolean })?.success === false) {
+        toast.error((res as { error?: string }).error || 'Failed to refresh notifications')
+      } else {
+        toast.success('Notifications refreshed')
+      }
+    } catch {
+      toast.error('Failed to refresh notifications')
+    }
     await load()
-    toast.success('Notifications refreshed')
   }
 
   async function testPrinter() {

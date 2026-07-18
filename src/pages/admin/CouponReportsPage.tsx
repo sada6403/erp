@@ -67,6 +67,8 @@ export default function CouponReportsPage() {
         setRows(data.rows || [])
         setSummary(data.summary || {})
       } else toast.error(String(res.error || 'Failed to load report'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load report')
     } finally { setLoading(false) }
   }, [tab, dateFrom, dateTo, search])
 
@@ -84,21 +86,31 @@ export default function CouponReportsPage() {
 
   const exportCsv = async () => {
     if (!rows.length) { toast.error('Nothing to export'); return }
-    const res = await window.api.reports.exportCsvRows({
-      filename: `coupon-report-${tab}-${new Date().toISOString().slice(0, 10)}`,
-      rows: exportRows(),
-      metadata: { Report: `Coupons — ${TABS.find(t => t.key === tab)?.label}`, From: dateFrom || 'All', To: dateTo || 'All' },
-    })
-    if ((res as { success: boolean }).success) toast.success('CSV exported')
+    try {
+      const res = await window.api.reports.exportCsvRows({
+        filename: `coupon-report-${tab}-${new Date().toISOString().slice(0, 10)}`,
+        rows: exportRows(),
+        metadata: { Report: `Coupons — ${TABS.find(t => t.key === tab)?.label}`, From: dateFrom || 'All', To: dateTo || 'All' },
+      }) as { success: boolean; cancelled?: boolean; error?: string }
+      if (res.success) toast.success('CSV exported')
+      else if (!res.cancelled) toast.error(res.error || 'Failed to export CSV')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to export CSV')
+    }
   }
 
   const exportExcel = async () => {
     if (!rows.length) { toast.error('Nothing to export'); return }
-    const res = await window.api.reports.exportExcel({
-      filename: `coupon-report-${tab}-${new Date().toISOString().slice(0, 10)}`,
-      sheets: [{ name: TABS.find(t => t.key === tab)?.label || 'Coupons', rows: exportRows() }],
-    })
-    if ((res as { success: boolean }).success) toast.success('Excel exported')
+    try {
+      const res = await window.api.reports.exportExcel({
+        filename: `coupon-report-${tab}-${new Date().toISOString().slice(0, 10)}`,
+        sheets: [{ name: TABS.find(t => t.key === tab)?.label || 'Coupons', rows: exportRows() }],
+      }) as { success: boolean; cancelled?: boolean; error?: string }
+      if (res.success) toast.success('Excel exported')
+      else if (!res.cancelled) toast.error(res.error || 'Failed to export Excel')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to export Excel')
+    }
   }
 
   const summaryCards: Array<[string, unknown, boolean?]> =
@@ -109,14 +121,19 @@ export default function CouponReportsPage() {
 
   const exportPdf = async () => {
     if (!rows.length) { toast.error('Nothing to export'); return }
-    const res = await window.api.reports.exportPdf({
-      filename: `coupon-report-${tab}-${new Date().toISOString().slice(0, 10)}`,
-      title: `Coupons — ${TABS.find(t => t.key === tab)?.label}`,
-      metadata: { Report: `Coupons — ${TABS.find(t => t.key === tab)?.label}`, From: dateFrom || 'All', To: dateTo || 'All' },
-      summary: summaryCards.map(([label, value]) => [label, value] as [string, unknown]),
-      rows: exportRows(),
-    })
-    if ((res as { success: boolean }).success) toast.success('PDF exported')
+    try {
+      const res = await window.api.reports.exportPdf({
+        filename: `coupon-report-${tab}-${new Date().toISOString().slice(0, 10)}`,
+        title: `Coupons — ${TABS.find(t => t.key === tab)?.label}`,
+        metadata: { Report: `Coupons — ${TABS.find(t => t.key === tab)?.label}`, From: dateFrom || 'All', To: dateTo || 'All' },
+        summary: summaryCards.map(([label, value]) => [label, value] as [string, unknown]),
+        rows: exportRows(),
+      }) as { success: boolean; cancelled?: boolean; error?: string }
+      if (res.success) toast.success('PDF exported')
+      else if (!res.cancelled) toast.error(res.error || 'Failed to export PDF')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to export PDF')
+    }
   }
 
   return (

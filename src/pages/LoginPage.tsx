@@ -174,7 +174,7 @@ export default function LoginPage() {
       const res = await window.api.settings.get() as { success: boolean; data?: unknown }
       if (res.success && res.data) setBranding(res.data as Record<string, unknown>)
     }
-    loadBranding()
+    loadBranding().catch(() => undefined)
     window.api.license?.status?.().then((r: { active?: boolean }) => {
       setLicenseOk(r?.active !== false)
     }).catch(() => {})
@@ -266,6 +266,10 @@ export default function LoginPage() {
         if (errMsg.toLowerCase().includes('locked')) setIsAccountLocked(true)
         setTimeout(() => setLoginState('idle'), 1500)
       }
+    } catch (err) {
+      setLoginState('error')
+      toast.error((err as Error)?.message || 'Login failed')
+      setTimeout(() => setLoginState('idle'), 1500)
     } finally { setLoading(false) }
   }
 
@@ -296,6 +300,10 @@ export default function LoginPage() {
         setLoginState('error'); toast.error(result.error || 'Failed to change password')
         setTimeout(() => setLoginState('idle'), 1500)
       }
+    } catch (err) {
+      setLoginState('error')
+      toast.error((err as Error)?.message || 'Failed to change password')
+      setTimeout(() => setLoginState('idle'), 1500)
     } finally { setLoading(false) }
   }
 
@@ -314,6 +322,10 @@ export default function LoginPage() {
         setLoginState('error'); toast.error(result.error || 'Invalid code')
         setOtpCode(''); setTimeout(() => setLoginState('idle'), 1500)
       }
+    } catch (err) {
+      setLoginState('error')
+      toast.error((err as Error)?.message || 'Invalid code')
+      setOtpCode(''); setTimeout(() => setLoginState('idle'), 1500)
     } finally { setLoading(false) }
   }
 
@@ -330,6 +342,8 @@ export default function LoginPage() {
         setShowBranchInput(false); setBranchCode('')
         toast.success(`Branch → ${branch.name}`)
       } else { toast.error('Branch not found. Check the code or PIN.') }
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Branch lookup failed')
     } finally { setBranchSearching(false) }
   }
 
@@ -359,6 +373,8 @@ export default function LoginPage() {
         return
       }
       toast.error(res.error || 'Could not load branches')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Could not load branches')
     } finally {
       setBranchListLoading(false)
     }
@@ -493,7 +509,7 @@ export default function LoginPage() {
           </span>
           {updateState === 'idle' && (
             <button
-              onClick={() => { setUpdateState('downloading'); window.api.updater?.download?.() }}
+              onClick={() => { setUpdateState('downloading'); window.api.updater?.download?.()?.catch(() => { setUpdateState('idle'); toast.error('Failed to start update download') }) }}
               className="rounded-lg bg-indigo-600 px-3 py-1 text-xs font-bold text-white hover:bg-indigo-500"
             >
               Download
@@ -501,7 +517,7 @@ export default function LoginPage() {
           )}
           {updateState === 'ready' && (
             <button
-              onClick={() => window.api.updater?.install?.()}
+              onClick={() => window.api.updater?.install?.()?.catch(() => toast.error('Failed to install update'))}
               className="rounded-lg bg-emerald-600 px-3 py-1 text-xs font-bold text-white hover:bg-emerald-500"
             >
               Install

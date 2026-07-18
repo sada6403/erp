@@ -2,6 +2,7 @@ import { ipcMain } from 'electron'
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
 import Store from 'electron-store'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -68,37 +69,30 @@ export function registerNotificationHandlers() {
     } catch { return 0 }
   })
 
-  ipcMain.handle('notifications:markRead', (_e, id: string) => {
-    try {
-      const db = getDb()
-      if (id === 'all') {
-        db.prepare(`UPDATE notifications SET is_read = 1`).run()
-      } else {
-        db.prepare(`UPDATE notifications SET is_read = 1 WHERE id = ?`).run(id)
-      }
-      return { success: true }
-    } catch { return { success: false } }
+  safeHandle(ipcMain, 'notifications:markRead', (_e, id: string) => {
+    const db = getDb()
+    if (id === 'all') {
+      db.prepare(`UPDATE notifications SET is_read = 1`).run()
+    } else {
+      db.prepare(`UPDATE notifications SET is_read = 1 WHERE id = ?`).run(id)
+    }
+    return { success: true }
   })
 
-  ipcMain.handle('notifications:delete', (_e, id: string) => {
-    try {
-      const db = getDb()
-      db.prepare(`DELETE FROM notifications WHERE id = ?`).run(id)
-      return { success: true }
-    } catch { return { success: false } }
+  safeHandle(ipcMain, 'notifications:delete', (_e, id: string) => {
+    const db = getDb()
+    db.prepare(`DELETE FROM notifications WHERE id = ?`).run(id)
+    return { success: true }
   })
 
-  ipcMain.handle('notifications:clearAll', () => {
-    try {
-      const db = getDb()
-      db.prepare(`DELETE FROM notifications WHERE is_read = 1`).run()
-      return { success: true }
-    } catch { return { success: false } }
+  safeHandle(ipcMain, 'notifications:clearAll', () => {
+    const db = getDb()
+    db.prepare(`DELETE FROM notifications WHERE is_read = 1`).run()
+    return { success: true }
   })
 
   // Generate notifications based on current app state
-  ipcMain.handle('notifications:refresh', () => {
-    try {
+  safeHandle(ipcMain, 'notifications:refresh', () => {
       const db = getDb()
 
       // Low stock check
@@ -324,6 +318,5 @@ export function registerNotificationHandlers() {
       }
 
       return { success: true }
-    } catch { return { success: false } }
   })
 }

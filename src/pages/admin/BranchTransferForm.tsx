@@ -59,12 +59,16 @@ export default function BranchTransferForm() {
       const branchRes = await window.api.admin?.branches?.list?.()
       if (branchRes?.success) {
         setBranches(branchRes.data.filter((b: any) => b.is_active && b.id !== fromBranchId))
+      } else {
+        toast.error(branchRes?.error || 'Failed to load branches')
       }
-      
+
       // Load products (ideally stocks available in current branch)
       const prodRes = await window.api.products?.list?.({ is_active: 1 })
       if (prodRes?.success) {
         setProducts(prodRes.data)
+      } else {
+        toast.error(prodRes?.error || 'Failed to load products')
       }
     } catch (err: any) {
       toast.error('Failed to load form data: ' + err.message)

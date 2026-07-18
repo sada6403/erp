@@ -8,6 +8,7 @@ import toast from 'react-hot-toast'
 import { getSessionProfile } from '@/lib/sessionRouting'
 
 interface RevenueData { today: { revenue: number; invoices: number }; month: { revenue: number; invoices: number }; outstanding: { total: number } }
+interface ProfitData { net_profit: number }
 interface SalesData { date: string; total_revenue: number; total_invoices: number }
 interface PendingTransfer {
   id: string; transfer_number: string; product_name: string; sku: string
@@ -45,6 +46,8 @@ export default function AdminDashboard() {
   const myBranchId = String(u?.branch_id ?? '')
 
   const [revenue, setRevenue]             = useState<RevenueData | null>(null)
+  const [todayProfit, setTodayProfit]     = useState<ProfitData | null>(null)
+  const [monthProfit, setMonthProfit]     = useState<ProfitData | null>(null)
   const [salesData, setSalesData]         = useState<SalesData[]>([])
   const [topProducts, setTopProducts]     = useState<Record<string,unknown>[]>([])
   const [lowStock, setLowStock]           = useState<Record<string,unknown>[]>([])
@@ -56,44 +59,68 @@ export default function AdminDashboard() {
   const brandColor                        = useBrandColor()
 
   const loadTransfers = async () => {
-    const res = await window.api.stocks.listTransfers({ status: 'pending_approval' })
-    if (res.success) {
-      const all = res.data as (PendingTransfer & { from_branch_id: string })[]
-      const mine = isAdmin ? all : all.filter(t => t.from_branch_id === myBranchId)
-      setPendingTx(mine)
+    try {
+      const res = await window.api.stocks.listTransfers({ status: 'pending_approval' })
+      if (res.success) {
+        const all = res.data as (PendingTransfer & { from_branch_id: string })[]
+        const mine = isAdmin ? all : all.filter(t => t.from_branch_id === myBranchId)
+        setPendingTx(mine)
+      } else {
+        toast.error(res.error || 'Failed to load transfer requests')
+      }
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to load transfer requests')
     }
   }
 
   const handleAccept = async (id: string) => {
     setActionLoading(id)
-    const res = await window.api.stocks.updateTransfer(id, 'received', {})
-    if (res.success) { toast.success('Stock transferred — inventory updated'); loadTransfers() }
-    else toast.error(res.error || 'Failed')
-    setActionLoading(null)
+    try {
+      const res = await window.api.stocks.updateTransfer(id, 'received', {})
+      if (res.success) { toast.success('Stock transferred — inventory updated'); loadTransfers() }
+      else toast.error(res.error || 'Failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to accept transfer')
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   const handleReject = async () => {
     if (!rejectId || !rejectReason.trim()) { toast.error('Reason required'); return }
     setActionLoading(rejectId)
-    const res = await window.api.stocks.updateTransfer(rejectId, 'rejected', { reject_reason: rejectReason })
-    if (res.success) { toast.success('Transfer rejected'); setRejectId(null); setRejectReason(''); loadTransfers() }
-    else toast.error(res.error || 'Failed')
-    setActionLoading(null)
+    try {
+      const res = await window.api.stocks.updateTransfer(rejectId, 'rejected', { reject_reason: rejectReason })
+      if (res.success) { toast.success('Transfer rejected'); setRejectId(null); setRejectReason(''); loadTransfers() }
+      else toast.error(res.error || 'Failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to reject transfer')
+    } finally {
+      setActionLoading(null)
+    }
   }
 
   const load = async () => {
     setLoading(true)
     try {
-      const [rev, sales, top, low] = await Promise.all([
+      const today = new Date().toISOString().slice(0, 10)
+      const monthStart = `${today.slice(0, 7)}-01`
+      const [rev, sales, top, low, profitToday, profitMonth] = await Promise.all([
         window.api.analytics.revenue({}),
         window.api.analytics.salesSummary({}),
         window.api.analytics.topProducts({ limit: 5 }),
-        window.api.stocks.lowStock()
+        window.api.stocks.lowStock(),
+        window.api.analytics.profitSummary({ date_from: today, date_to: today }),
+        window.api.analytics.profitSummary({ date_from: monthStart, date_to: today }),
       ])
       if (rev.success)  setRevenue(rev.data as RevenueData)
       if (sales.success) setSalesData((sales.data as SalesData[]).slice(0, 14).reverse())
       if (top.success)  setTopProducts(top.data as Record<string,unknown>[])
       if (low.success)  setLowStock(low.data as Record<string,unknown>[])
+      if (profitToday.success) setTodayProfit(profitToday.data as ProfitData)
+      if (profitMonth.success) setMonthProfit(profitMonth.data as ProfitData)
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to load dashboard data')
     } finally { setLoading(false) }
     loadTransfers()
   }
@@ -132,6 +159,8 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
           {!isStockRole && <StatCard label="Today's Revenue" value={`Rs.${(revenue?.today?.revenue || 0).toLocaleString()}`} sub={`${revenue?.today?.invoices || 0} invoices`} icon={TrendingUp} color="green" />}
           <StatCard label={isCashier ? 'Today’s Bills' : 'Monthly Revenue'} value={`Rs.${(revenue?.month?.revenue || 0).toLocaleString()}`} sub={`${revenue?.month?.invoices || 0} invoices`} icon={ShoppingBag} color="brand" />
+          {!isCashier && !isStockRole && <StatCard label="Today's Profit" value={`Rs.${(todayProfit?.net_profit || 0).toLocaleString()}`} sub="Sales minus cost price" icon={TrendingUp} color="green" />}
+          {!isCashier && !isStockRole && <StatCard label="Monthly Profit" value={`Rs.${(monthProfit?.net_profit || 0).toLocaleString()}`} sub="Sales minus cost price" icon={TrendingUp} color="brand" />}
           {!isCashier && <StatCard label="Outstanding Due" value={`Rs.${(revenue?.outstanding?.total || 0).toLocaleString()}`} sub="Unpaid balances" icon={CreditCard} color="yellow" />}
           {!isCashier && <StatCard label="Low Stock Alerts" value={lowStock.length} sub="Items need restocking" icon={AlertCircle} color="red" />}
         </div>

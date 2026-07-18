@@ -87,8 +87,12 @@ export default function CashRegisterPage() {
         window.api.cash.getOpen(branchId),
         window.api.cash.history(branchId),
       ])
-      setSession(sess.success ? (sess.data as Session | null) : null)
-      setHistory(hist.success ? (hist.data as Session[]) : [])
+      if (sess.success) setSession(sess.data as Session | null)
+      else { setSession(null); toast.error(sess.error || 'Failed to load cash session') }
+      if (hist.success) setHistory(hist.data as Session[])
+      else { setHistory([]); toast.error(hist.error || 'Failed to load cash history') }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load cash register data')
     } finally { setLoading(false) }
   }
 
@@ -109,6 +113,8 @@ export default function CashRegisterPage() {
         setOpenNotes('')
         load()
       } else toast.error(res.error || 'Failed to open session')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to open session')
     } finally { setOpening(false) }
   }
 
@@ -128,6 +134,8 @@ export default function CashRegisterPage() {
         setCloseNotes('')
         load()
       } else toast.error(res.error || 'Failed to close session')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to close session')
     } finally { setClosing(false) }
   }
 

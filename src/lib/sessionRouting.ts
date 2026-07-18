@@ -54,9 +54,6 @@ export function getLandingRoute(user?: AuthUser | null): string {
       return '/admin/reports'
     case 'storeKeeper':
       return '/admin/stock-intelligence'
-    case 'branchManager':
-    case 'subBranchManager':
-      return '/admin/operations'
     default:
       return '/admin'
   }
@@ -70,9 +67,6 @@ export function getHomeLabel(kind: SessionRoleKind): string {
       return 'Reports'
     case 'storeKeeper':
       return 'Stock'
-    case 'branchManager':
-    case 'subBranchManager':
-      return 'Branch Hub'
     default:
       return 'Dashboard'
   }

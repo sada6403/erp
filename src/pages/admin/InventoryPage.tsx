@@ -20,23 +20,34 @@ export default function InventoryPage() {
 
   const load = async () => {
     setLoading(true)
-    const [s, t, m] = await Promise.all([
-      window.api.stocks.list(branchId || undefined),
-      window.api.stocks.listTransfers(),
-      window.api.stocks.movements(movementType ? { movement_type: movementType } : {})
-    ])
-    const [summary, branchList] = await Promise.all([
-      window.api.stocks.branchSummary(),
-      window.api.admin.branches.list(),
-    ])
-    const audit = await window.api.products.catalogAudit()
-    if (s.success) setStocks(s.data as Record<string, unknown>[])
-    if (t.success) setTransfers(t.data as Record<string, unknown>[])
-    if (m.success) setMovements(m.data as Record<string, unknown>[])
-    if (summary.success) setBranchSummary(summary.data as Record<string, unknown>[])
-    if (branchList.success) setBranches(branchList.data as Record<string, unknown>[])
-    if (audit.success) setCatalogTotalProducts(Number((audit.data as { totalProducts?: number } | undefined)?.totalProducts || 0))
-    setLoading(false)
+    try {
+      const [s, t, m] = await Promise.all([
+        window.api.stocks.list(branchId || undefined),
+        window.api.stocks.listTransfers(),
+        window.api.stocks.movements(movementType ? { movement_type: movementType } : {})
+      ])
+      const [summary, branchList] = await Promise.all([
+        window.api.stocks.branchSummary(),
+        window.api.admin.branches.list(),
+      ])
+      const audit = await window.api.products.catalogAudit()
+      if (s.success) setStocks(s.data as Record<string, unknown>[])
+      else toast.error(s.error || 'Failed to load stock')
+      if (t.success) setTransfers(t.data as Record<string, unknown>[])
+      else toast.error(t.error || 'Failed to load transfers')
+      if (m.success) setMovements(m.data as Record<string, unknown>[])
+      else toast.error(m.error || 'Failed to load movements')
+      if (summary.success) setBranchSummary(summary.data as Record<string, unknown>[])
+      else toast.error(summary.error || 'Failed to load branch summary')
+      if (branchList.success) setBranches(branchList.data as Record<string, unknown>[])
+      else toast.error(branchList.error || 'Failed to load branches')
+      if (audit.success) setCatalogTotalProducts(Number((audit.data as { totalProducts?: number } | undefined)?.totalProducts || 0))
+      else toast.error(audit.error || 'Failed to load catalog audit')
+    } catch {
+      toast.error('Failed to load inventory data')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [movementType])
@@ -64,9 +75,13 @@ export default function InventoryPage() {
   const advanceTransfer = async (transfer: Record<string, unknown>) => {
     const next = nextTransferStatus[String(transfer.status)]
     if (!next) return
-    const res = await window.api.stocks.updateTransfer(transfer.id, next)
-    if (res.success) { toast.success(`Transfer marked ${next.replace(/_/g, ' ')}`); load() }
-    else toast.error(res.error || 'Could not update transfer')
+    try {
+      const res = await window.api.stocks.updateTransfer(transfer.id, next)
+      if (res.success) { toast.success(`Transfer marked ${next.replace(/_/g, ' ')}`); load() }
+      else toast.error(res.error || 'Could not update transfer')
+    } catch {
+      toast.error('Could not update transfer')
+    }
   }
 
   return (
@@ -320,8 +335,13 @@ function AdjustBtn({ stockId: _stockId, productId, branchId, current, onDone }: 
 
   const checkUnlock = async () => {
     if (isAdmin) return
-    const res = await window.api.editRequests.checkUnlocked('stocks', targetRecordId)
-    if (res.success) setUnlock(res.data)
+    try {
+      const res = await window.api.editRequests.checkUnlocked('stocks', targetRecordId)
+      if (res.success) setUnlock(res.data)
+      else toast.error(res.error || 'Failed to check edit permission')
+    } catch {
+      toast.error('Failed to check edit permission')
+    }
   }
 
   const openEditor = async () => {
@@ -331,29 +351,39 @@ function AdjustBtn({ stockId: _stockId, productId, branchId, current, onDone }: 
 
   const save = async () => {
     setSaving(true)
-    const res = await window.api.stocks.adjustCorrection({
-      product_id: productId, branch_id: branchId, quantity: qty, reason,
-      edit_request_id: unlock?.request_id || undefined,
-    })
-    setSaving(false)
-    if (!res.success) { toast.error(res.error || 'Stock adjustment failed'); return }
-    setOpen(false)
-    setUnlock(null)
-    onDone()
-    toast.success('Stock adjusted')
+    try {
+      const res = await window.api.stocks.adjustCorrection({
+        product_id: productId, branch_id: branchId, quantity: qty, reason,
+        edit_request_id: unlock?.request_id || undefined,
+      })
+      if (!res.success) { toast.error(res.error || 'Stock adjustment failed'); return }
+      setOpen(false)
+      setUnlock(null)
+      onDone()
+      toast.success('Stock adjusted')
+    } catch {
+      toast.error('Stock adjustment failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const requestEdit = async () => {
     if (!reason.trim()) { toast.error('Enter a reason for the request'); return }
     setSaving(true)
-    const res = await window.api.editRequests.create({
-      target_table: 'stocks', target_record_id: targetRecordId, reason,
-      requested_changes: { new_quantity: qty },
-    })
-    setSaving(false)
-    if (!res.success) { toast.error(res.error || 'Could not submit request'); return }
-    toast.success('Edit request submitted — waiting for admin approval')
-    await checkUnlock()
+    try {
+      const res = await window.api.editRequests.create({
+        target_table: 'stocks', target_record_id: targetRecordId, reason,
+        requested_changes: { new_quantity: qty },
+      })
+      if (!res.success) { toast.error(res.error || 'Could not submit request'); return }
+      toast.success('Edit request submitted — waiting for admin approval')
+      await checkUnlock()
+    } catch {
+      toast.error('Could not submit request')
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (!open) return <button onClick={openEditor} className="btn-ghost btn-sm"><Plus size={13} /></button>
@@ -396,16 +426,27 @@ function TransferModal({ onClose, onSave }: { onClose: () => void; onSave: () =>
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    window.api.products.list({}).then((r: any) => r.success && setProducts(r.data as Record<string,unknown>[]))
-    window.api.admin.branches.list().then((r: any) => r.success && setBranches(r.data as Record<string,unknown>[]))
+    window.api.products.list({}).then((r: any) => {
+      if (r.success) setProducts(r.data as Record<string,unknown>[])
+      else toast.error(r.error || 'Failed to load products')
+    }).catch(() => toast.error('Failed to load products'))
+    window.api.admin.branches.list().then((r: any) => {
+      if (r.success) setBranches(r.data as Record<string,unknown>[])
+      else toast.error(r.error || 'Failed to load branches')
+    }).catch(() => toast.error('Failed to load branches'))
   }, [])
 
   const save = async () => {
     setSaving(true)
-    const res = await window.api.stocks.transfer(form)
-    setSaving(false)
-    if (res.success) { toast.success('Transfer initiated'); onSave() }
-    else toast.error(res.error || 'Transfer failed')
+    try {
+      const res = await window.api.stocks.transfer(form)
+      if (res.success) { toast.success('Transfer initiated'); onSave() }
+      else toast.error(res.error || 'Transfer failed')
+    } catch {
+      toast.error('Transfer failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (

@@ -5,6 +5,7 @@ import * as XLSX from 'xlsx'
 import { getDb } from '../database'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -237,8 +238,7 @@ function buildReportHtml(payload: {
 export function registerReportHandlers() {
 
   // ── Transaction Report ────────────────────────────────────────────────────
-  ipcMain.handle('reports:transactions', (_e, filters: TxFilters = {}) => {
-    try {
+  safeHandle(ipcMain, 'reports:transactions', (_e, filters: TxFilters = {}) => {
       const access = requireReportsAccess()
       if (!access.ok) return { success: false, error: access.error }
       const db = getDb()
@@ -305,13 +305,9 @@ export function registerReportHandlers() {
       })
 
       return { success: true, data, total }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
-  ipcMain.handle('reports:advancedSummary', (_e, filters: ReportFilters = {}) => {
-    try {
+  safeHandle(ipcMain, 'reports:advancedSummary', (_e, filters: ReportFilters = {}) => {
       const access = requireReportsAccess()
       if (!access.ok) return { success: false, error: access.error }
       const db = getDb()
@@ -679,14 +675,10 @@ export function registerReportHandlers() {
           generatedAt: new Date().toISOString(),
         },
       }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // Agent commission summary for manager review / printing
-  ipcMain.handle('reports:agentCommissions', (_e, filters: TxFilters = {}) => {
-    try {
+  safeHandle(ipcMain, 'reports:agentCommissions', (_e, filters: TxFilters = {}) => {
       const access = requireReportsAccess()
       if (!access.ok) return { success: false, error: access.error }
       const db = getDb()
@@ -725,14 +717,10 @@ export function registerReportHandlers() {
       `).all(params)
 
       return { success: true, data: rows, detail }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // ── Transaction Detail (single invoice with items) ────────────────────────
-  ipcMain.handle('reports:transactionDetail', (_e, invoiceId: string) => {
-    try {
+  safeHandle(ipcMain, 'reports:transactionDetail', (_e, invoiceId: string) => {
       const db = getDb()
       const caller = currentUser()
       const perms = currentPermissions()
@@ -765,14 +753,10 @@ export function registerReportHandlers() {
       `).all(invoiceId)
 
       return { success: true, data: { ...invoice, items, payments } }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // ── Export Transactions to CSV ────────────────────────────────────────────
-  ipcMain.handle('reports:exportTransactionsCsv', async (_e, filters: TxFilters = {}) => {
-    try {
+  safeHandle(ipcMain, 'reports:exportTransactionsCsv', async (_e, filters: TxFilters = {}) => {
       const access = requireReportsAccess()
       if (!access.ok) return { success: false, error: access.error }
       const win = BrowserWindow.getFocusedWindow()
@@ -822,18 +806,14 @@ export function registerReportHandlers() {
 
       fs.writeFileSync(saveResult.filePath, csv, 'utf8')
       return { success: true, filePath: saveResult.filePath, exported: rows.length }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
 
   // Export data to Excel (.xlsx) with native save dialog
-  ipcMain.handle('reports:exportExcel', async (_e, payload: {
+  safeHandle(ipcMain, 'reports:exportExcel', async (_e, payload: {
     filename: string
     sheets: Array<{ name: string; rows: Record<string, unknown>[] }>
   }) => {
-    try {
       const win = BrowserWindow.getFocusedWindow()
       const result = await dialog.showSaveDialog(win!, {
         title: 'Save Excel Report',
@@ -857,17 +837,13 @@ export function registerReportHandlers() {
       XLSX.writeFile(wb, result.filePath)
       auditReport('REPORT_EXPORT_EXCEL', { filename: payload.filename, sheets: payload.sheets.map(s => ({ name: s.name, rows: s.rows.length })) })
       return { success: true, filePath: result.filePath }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
-  ipcMain.handle('reports:exportCsvRows', async (_e, payload: {
+  safeHandle(ipcMain, 'reports:exportCsvRows', async (_e, payload: {
     filename: string
     rows: Record<string, unknown>[]
     metadata?: Record<string, unknown>
   }) => {
-    try {
       const win = BrowserWindow.getFocusedWindow()
       const result = await dialog.showSaveDialog(win!, {
         title: 'Save CSV Report',
@@ -895,9 +871,6 @@ export function registerReportHandlers() {
       fs.writeFileSync(result.filePath, csv, 'utf8')
       auditReport('REPORT_EXPORT_CSV', { filename: payload.filename, rows: rows.length, metadata: payload.metadata })
       return { success: true, filePath: result.filePath, exported: rows.length }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // Export a report to PDF as a proper formatted document (company header +
@@ -966,11 +939,9 @@ export function registerReportHandlers() {
   })
 
   // Open file in system viewer after export
-  ipcMain.handle('reports:openFile', async (_e, filePath: string) => {
-    try {
+  safeHandle(ipcMain, 'reports:openFile', async (_e, filePath: string) => {
       const { shell } = await import('electron')
       await shell.openPath(filePath)
       return { success: true }
-    } catch { return { success: false } }
   })
 }

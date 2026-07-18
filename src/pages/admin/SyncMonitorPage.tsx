@@ -29,8 +29,13 @@ export default function SyncMonitorPage() {
   const [queue, setQueue] = useState<QueueItem[]>([])
 
   const loadQueue = useCallback(async () => {
-    const res = await window.api.sync.queue()
-    if (res.success) setQueue(res.data as QueueItem[])
+    try {
+      const res = await window.api.sync.queue()
+      if (res.success) setQueue(res.data as QueueItem[])
+      else toast.error(res.error || 'Failed to load sync queue')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load sync queue')
+    }
   }, [])
 
   useEffect(() => { loadQueue() }, [loadQueue])
@@ -43,35 +48,55 @@ export default function SyncMonitorPage() {
   }
 
   const handleResetFailed = async () => {
-    const res = await window.api.sync.resetFailed()
-    if (res.success) {
-      toast.success(`Reset ${res.data as number} failed item(s) - click Sync Now`)
-      await loadQueue()
+    try {
+      const res = await window.api.sync.resetFailed()
+      if (res.success) {
+        toast.success(`Reset ${res.data as number} failed item(s) - click Sync Now`)
+        await loadQueue()
+      } else {
+        toast.error(res.error || 'Failed to reset failed items')
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reset failed items')
     }
   }
 
   const handleFixAndSync = async () => {
     setSyncing(true)
-    await window.api.sync.fixInvoices()
-    await triggerSync()
-    await loadQueue()
-    setSyncing(false)
-    toast.success('Fixed and synced')
+    try {
+      const res = await window.api.sync.fixInvoices()
+      if (!res.success) {
+        toast.error(res.error || 'Failed to fix invoices')
+        return
+      }
+      await triggerSync()
+      await loadQueue()
+      toast.success('Fixed and synced')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to fix and sync')
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const handleDiagnose = async () => {
     setDiagnosing(true)
     setDiagSteps([])
-    const res = await window.api.sync.diagnose()
-    if (res.success) {
-      const steps = res.data as DiagStep[]
-      setDiagSteps(steps)
-      if (steps.every(s => s.ok)) toast.success('All checks passed - sync should work')
-      else toast.error('Issue found - check diagnosis below')
-    } else {
-      toast.error('Diagnose failed: ' + (res as { error?: string }).error)
+    try {
+      const res = await window.api.sync.diagnose()
+      if (res.success) {
+        const steps = res.data as DiagStep[]
+        setDiagSteps(steps)
+        if (steps.every(s => s.ok)) toast.success('All checks passed - sync should work')
+        else toast.error('Issue found - check diagnosis below')
+      } else {
+        toast.error('Diagnose failed: ' + (res as { error?: string }).error)
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Diagnose failed')
+    } finally {
+      setDiagnosing(false)
     }
-    setDiagnosing(false)
   }
 
   return (
@@ -195,9 +220,17 @@ export default function SyncMonitorPage() {
                         {canManageSync && (
                           <button
                             onClick={async () => {
-                              await window.api.sync.discardItem(item.id)
-                              toast.success('Item discarded')
-                              await loadQueue()
+                              try {
+                                const res = await window.api.sync.discardItem(item.id)
+                                if (res.success) {
+                                  toast.success('Item discarded')
+                                  await loadQueue()
+                                } else {
+                                  toast.error(res.error || 'Failed to discard item')
+                                }
+                              } catch (e: any) {
+                                toast.error(e?.message || 'Failed to discard item')
+                              }
                             }}
                             className="text-slate-500 hover:text-red-400 transition-colors"
                             title="Discard this stuck item"

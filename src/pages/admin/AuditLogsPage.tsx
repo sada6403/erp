@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import { Shield, RefreshCw } from 'lucide-react'
+import toast from 'react-hot-toast'
 
 export default function AuditLogsPage() {
   const [logs, setLogs]     = useState<Record<string,unknown>[]>([])
@@ -9,9 +10,15 @@ export default function AuditLogsPage() {
 
   const load = async () => {
     setLoading(true)
-    const res = await window.api.admin.auditLogs.list(filter ? { action: filter } : {})
-    if (res.success) setLogs(res.data as Record<string,unknown>[])
-    setLoading(false)
+    try {
+      const res = await window.api.admin.auditLogs.list(filter ? { action: filter } : {})
+      if (res.success) setLogs(res.data as Record<string,unknown>[])
+      else toast.error(res.error || 'Failed to load audit logs')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to load audit logs')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [filter])

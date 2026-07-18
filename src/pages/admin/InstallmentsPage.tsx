@@ -306,24 +306,30 @@ export default function InstallmentsPage() {
 
   const loadStats = useCallback(async () => {
     const filters = branchId ? { branch_id: branchId } : {}
-    const res = await window.api.admin.installments.list(filters)
-    if (!res.success) return
-    const list = res.data as Inst[]
-    setSummaryStats({
-      active:    list.filter(i => i.status === 'active').length,
-      overdue:   list.filter(i => i.status === 'overdue').length,
-      completed: list.filter(i => i.status === 'completed').length,
-      totalDue:  list.reduce((s, i) => s + Number(i.due_amount || 0), 0),
-    })
+    try {
+      const res = await window.api.admin.installments.list(filters)
+      if (!res.success) { toast.error(res.error || 'Failed to load installment stats'); return }
+      const list = res.data as Inst[]
+      setSummaryStats({
+        active:    list.filter(i => i.status === 'active').length,
+        overdue:   list.filter(i => i.status === 'overdue').length,
+        completed: list.filter(i => i.status === 'completed').length,
+        totalDue:  list.reduce((s, i) => s + Number(i.due_amount || 0), 0),
+      })
+    } catch {
+      toast.error('Failed to load installment stats')
+    }
   }, [branchId])
 
   useEffect(() => {
     if (!isAdmin) return
-    window.api.admin.branches.list().then((r: { success: boolean; data?: unknown }) => {
+    window.api.admin.branches.list().then((r: { success: boolean; data?: unknown; error?: string }) => {
       if (r.success && Array.isArray(r.data)) {
         setBranches((r.data as { id: string; name: string }[]).filter(b => Boolean(b.id)))
+      } else if (!r.success) {
+        toast.error(r.error || 'Failed to load branches')
       }
-    })
+    }).catch(() => toast.error('Failed to load branches'))
   }, [isAdmin])
 
   useEffect(() => { loadStats() }, [loadStats])
@@ -426,14 +432,19 @@ function AccountsTab({ branchId, onPay, onStatsChange }: { branchId: string; onP
   const [detailLoading, setDetailLoading] = useState(false)
 
   const load = useCallback(async () => {
-    const res = await window.api.admin.installments.list(
-      Object.assign(
-        branchId ? { branch_id: branchId } : {},
-        filter ? { status: filter } : {},
-        search ? { search } : {}
+    try {
+      const res = await window.api.admin.installments.list(
+        Object.assign(
+          branchId ? { branch_id: branchId } : {},
+          filter ? { status: filter } : {},
+          search ? { search } : {}
+        )
       )
-    )
-    if (res.success) setList(res.data as Inst[])
+      if (res.success) setList(res.data as Inst[])
+      else toast.error(res.error || 'Failed to load installment accounts')
+    } catch {
+      toast.error('Failed to load installment accounts')
+    }
   }, [branchId, filter, search])
 
   useEffect(() => { load() }, [load])
@@ -442,10 +453,15 @@ function AccountsTab({ branchId, onPay, onStatsChange }: { branchId: string; onP
     if (expanded === id) { setExpanded(null); setDetail(null); return }
     setExpanded(id)
     setDetailLoading(true)
-    const res = await window.api.admin.installments.get(id)
-    setDetailLoading(false)
-    if (res.success) setDetail(res.data as Inst)
-    else toast.error(res.error || 'Failed to load details')
+    try {
+      const res = await window.api.admin.installments.get(id)
+      if (res.success) setDetail(res.data as Inst)
+      else toast.error(res.error || 'Failed to load details')
+    } catch {
+      toast.error('Failed to load details')
+    } finally {
+      setDetailLoading(false)
+    }
   }
 
   const overdueList = list.filter(i => i.status === 'overdue')
@@ -568,7 +584,7 @@ function AccountsTab({ branchId, onPay, onStatsChange }: { branchId: string; onP
                             window.api.comm.sendInstallmentReminder(inst.id as string).then((r: { success: boolean; error?: string }) => {
                               if (r.success) toast.success('Reminder sent!')
                               else toast.error(r.error || 'Failed to send reminder')
-                            })
+                            }).catch(() => toast.error('Failed to send reminder'))
                           }}
                           className="btn-ghost btn-sm gap-1 text-yellow-400 hover:text-yellow-300">
                           <Phone size={10} /> Remind
@@ -587,8 +603,13 @@ function AccountsTab({ branchId, onPay, onStatsChange }: { branchId: string; onP
                           ? <p className="text-sm py-6 text-center" style={{ color: 'var(--text-3)' }}>Loading…</p>
                           : detail
                           ? <DetailPanel detail={detail} onPayNow={() => onPay(inst)} onRefresh={async () => {
-                              const r = await window.api.admin.installments.get(inst.id as string)
-                              if (r.success) setDetail(r.data as Inst)
+                              try {
+                                const r = await window.api.admin.installments.get(inst.id as string)
+                                if (r.success) setDetail(r.data as Inst)
+                                else toast.error(r.error || 'Failed to refresh details')
+                              } catch {
+                                toast.error('Failed to refresh details')
+                              }
                               await load()
                               onStatsChange()
                             }} />
@@ -791,16 +812,22 @@ function NewSaleTab({ branchId, branchLabel, onSuccess }: { branchId: string; br
   const cashPrice = items.reduce((s, i) => s + i.qty * i.price, 0)
 
   useEffect(() => {
-    window.api.admin.installments.plans().then((r: { success: boolean; data?: unknown }) => {
+    window.api.admin.installments.plans().then((r: { success: boolean; data?: unknown; error?: string }) => {
       if (r.success) setPlans(r.data as Plan[])
-    })
+      else toast.error(r.error || 'Failed to load installment plans')
+    }).catch(() => toast.error('Failed to load installment plans'))
   }, [])
 
   // Customer search
   const searchCust = useCallback(async (q: string) => {
     if (!q.trim()) { setCustResults([]); return }
-    const r = await window.api.customers.search(q)
-    if (r.success) setCustResults(r.data as CustomerRow[])
+    try {
+      const r = await window.api.customers.search(q)
+      if (r.success) setCustResults(r.data as CustomerRow[])
+      else toast.error(r.error || 'Customer search failed')
+    } catch {
+      toast.error('Customer search failed')
+    }
   }, [])
   const custTimer = useRef<ReturnType<typeof setTimeout>>()
   const onCustQuery = (q: string) => {
@@ -812,8 +839,13 @@ function NewSaleTab({ branchId, branchLabel, onSuccess }: { branchId: string; br
   // Product search
   const searchProd = useCallback(async (q: string) => {
     if (!q.trim()) { setProdResults([]); return }
-    const r = await window.api.products.search(q)
-    if (r.success) setProdResults(r.data as ProductRow[])
+    try {
+      const r = await window.api.products.search(q)
+      if (r.success) setProdResults(r.data as ProductRow[])
+      else toast.error(r.error || 'Product search failed')
+    } catch {
+      toast.error('Product search failed')
+    }
   }, [])
   const prodTimer = useRef<ReturnType<typeof setTimeout>>()
   const onProdQuery = (q: string) => {
@@ -849,8 +881,13 @@ function NewSaleTab({ branchId, branchLabel, onSuccess }: { branchId: string; br
     clearTimeout(calcTimer.current)
     if (cashPrice <= 0 || months <= 0) { setCalc(null); return }
     calcTimer.current = setTimeout(async () => {
-      const r = await window.api.admin.installments.calculate({ cash_price: cashPrice, down_payment: downPmt, months, interest_type: iType, interest_rate: iRate })
-      if (r.success) setCalc(r.data as Calc)
+      try {
+        const r = await window.api.admin.installments.calculate({ cash_price: cashPrice, down_payment: downPmt, months, interest_type: iType, interest_rate: iRate })
+        if (r.success) setCalc(r.data as Calc)
+        else toast.error(r.error || 'Failed to calculate EMI')
+      } catch {
+        toast.error('Failed to calculate EMI')
+      }
     }, 250)
   }, [cashPrice, downPmt, months, iType, iRate])
 
@@ -881,17 +918,22 @@ function NewSaleTab({ branchId, branchLabel, onSuccess }: { branchId: string; br
       down_payment_method: downMethod,
       notes,
     }
-    const r = await window.api.admin.installments.createSale(payload)
-    setSubmitting(false)
-    if (r.success) {
-      const data = r.data as { contract_number: string }
-      toast.success(`✅ Account ${data.contract_number} created successfully!`)
-      // Reset
-      setCustomer(null); setIsNewCust(false); setNewCust({ name: '', phone: '', email: '', nic: '', address: '' })
-      setItems([]); setCalc(null); setDownPmt(0); setNotes(''); setPlanId(''); setCustQuery('')
-      onSuccess()
-    } else {
-      toast.error(r.error || 'Failed to create installment account')
+    try {
+      const r = await window.api.admin.installments.createSale(payload)
+      if (r.success) {
+        const data = r.data as { contract_number: string }
+        toast.success(`✅ Account ${data.contract_number} created successfully!`)
+        // Reset
+        setCustomer(null); setIsNewCust(false); setNewCust({ name: '', phone: '', email: '', nic: '', address: '' })
+        setItems([]); setCalc(null); setDownPmt(0); setNotes(''); setPlanId(''); setCustQuery('')
+        onSuccess()
+      } else {
+        toast.error(r.error || 'Failed to create installment account')
+      }
+    } catch {
+      toast.error('Failed to create installment account')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -1154,18 +1196,28 @@ function PlansTab() {
   const [applying, setApplying] = useState(false)
 
   const load = useCallback(async () => {
-    const r = await window.api.admin.installments.plans()
-    if (r.success) setPlans(r.data as Plan[])
+    try {
+      const r = await window.api.admin.installments.plans()
+      if (r.success) setPlans(r.data as Plan[])
+      else toast.error(r.error || 'Failed to load plans')
+    } catch {
+      toast.error('Failed to load plans')
+    }
   }, [])
 
   useEffect(() => { load() }, [load])
 
   const handleApplyPenalties = async () => {
     setApplying(true)
-    const r = await window.api.admin.installments.applyPenalties()
-    setApplying(false)
-    if (r.success) toast.success(`Penalties applied to ${r.data?.applied ?? 0} schedule slots`)
-    else toast.error(r.error || 'Failed')
+    try {
+      const r = await window.api.admin.installments.applyPenalties()
+      if (r.success) toast.success(`Penalties applied to ${r.data?.applied ?? 0} schedule slots`)
+      else toast.error(r.error || 'Failed')
+    } catch {
+      toast.error('Failed to apply penalties')
+    } finally {
+      setApplying(false)
+    }
   }
 
   const initPlan = (): Partial<Plan> => ({
@@ -1233,8 +1285,13 @@ function PlansTab() {
               <span className={plan.is_active ? 'badge-green' : 'badge-gray'}>{plan.is_active ? 'Active' : 'Inactive'}</span>
               <button
                 onClick={async () => {
-                  await window.api.admin.installments.savePlan({ ...plan, is_active: plan.is_active ? 0 : 1 })
-                  load()
+                  try {
+                    const r = await window.api.admin.installments.savePlan({ ...plan, is_active: plan.is_active ? 0 : 1 })
+                    if (r.success) load()
+                    else toast.error(r.error || 'Failed to update plan')
+                  } catch {
+                    toast.error('Failed to update plan')
+                  }
                 }}
                 className="text-xs" style={{ color: 'var(--text-3)' }}>
                 {plan.is_active ? 'Deactivate' : 'Activate'}
@@ -1256,9 +1313,13 @@ function PlansTab() {
           initial={editing}
           onClose={() => setEditing(null)}
           onSave={async (data) => {
-            const r = await window.api.admin.installments.savePlan(data)
-            if (r.success) { toast.success('Plan saved'); setEditing(null); load() }
-            else toast.error(r.error || 'Failed')
+            try {
+              const r = await window.api.admin.installments.savePlan(data)
+              if (r.success) { toast.success('Plan saved'); setEditing(null); load() }
+              else toast.error(r.error || 'Failed')
+            } catch {
+              toast.error('Failed to save plan')
+            }
           }}
         />
       )}
@@ -1344,21 +1405,30 @@ function BankTransfersTab({ branchId, onStatsChange }: { branchId: string; onSta
   const [notes, setNotes]         = useState('')
 
   const load = useCallback(async () => {
-    const r = await window.api.admin.installments.pendingTransfers(branchId ? { branch_id: branchId } : {})
-    if (r.success) setTransfers(r.data as Inst[])
+    try {
+      const r = await window.api.admin.installments.pendingTransfers(branchId ? { branch_id: branchId } : {})
+      if (r.success) setTransfers(r.data as Inst[])
+      else toast.error(r.error || 'Failed to load pending transfers')
+    } catch {
+      toast.error('Failed to load pending transfers')
+    }
   }, [branchId])
 
   useEffect(() => { load() }, [load])
 
   const verify = async () => {
     if (!verifying) return
-    const r = await window.api.admin.installments.verifyPayment(verifying.id, verifying.action, notes)
-    if (r.success) {
-      toast.success(verifying.action === 'approve' ? 'Payment approved ✅' : 'Payment rejected')
-      setVerifying(null); setNotes('')
-      load(); onStatsChange()
-    } else {
-      toast.error(r.error || 'Failed')
+    try {
+      const r = await window.api.admin.installments.verifyPayment(verifying.id, verifying.action, notes)
+      if (r.success) {
+        toast.success(verifying.action === 'approve' ? 'Payment approved ✅' : 'Payment rejected')
+        setVerifying(null); setNotes('')
+        load(); onStatsChange()
+      } else {
+        toast.error(r.error || 'Failed')
+      }
+    } catch {
+      toast.error('Failed to verify payment')
     }
   }
 
@@ -1485,10 +1555,11 @@ function ReportsTab({ branchId }: { branchId: string }) {
 
   useEffect(() => {
     setLoading(true)
-    window.api.admin.installments.reports(branchId ? { branch_id: branchId } : {}).then((r: { success: boolean; data?: unknown }) => {
+    window.api.admin.installments.reports(branchId ? { branch_id: branchId } : {}).then((r: { success: boolean; data?: unknown; error?: string }) => {
       if (r.success) setData(r.data as Record<string, unknown>)
+      else toast.error(r.error || 'Failed to load installment reports')
       setLoading(false)
-    })
+    }).catch(() => { toast.error('Failed to load installment reports'); setLoading(false) })
   }, [branchId])
 
   if (loading) return (
@@ -1646,30 +1717,35 @@ function PaymentModal({ installment, onClose, onSave }: {
     if (amount <= 0) { toast.error('Enter a valid amount'); return }
     if (amount > maxAmt + 0.01) { toast.error(`Max payable: ${fmt(maxAmt)}`); return }
     setSaving(true)
-    const res = await window.api.admin.installments.recordPayment(installment.id as string, {
-      amount,
-      method,
-      reference: reference || null,
-      receipt_image_url: proofUrl || null,
-      notes: notes || null,
-    })
-    setSaving(false)
-    if (res.success) {
-      const d = res.data as { receipt_number: string; status: string }
-      toast.success(isBankTransfer ? 'Bank transfer submitted — pending verification' : 'Payment recorded ✅')
-      onSave({
-        receipt_number:   d.receipt_number,
-        contract_number:  installment.contract_number as string,
-        customer_name:    installment.customer_name as string,
-        customer_phone:   installment.customer_phone as string || '',
+    try {
+      const res = await window.api.admin.installments.recordPayment(installment.id as string, {
         amount,
         method,
-        paid_at:          new Date().toISOString(),
-        cashier:          'Current User',
-        status:           d.status,
+        reference: reference || null,
+        receipt_image_url: proofUrl || null,
+        notes: notes || null,
       })
-    } else {
-      toast.error(res.error || 'Failed to record payment')
+      if (res.success) {
+        const d = res.data as { receipt_number: string; status: string }
+        toast.success(isBankTransfer ? 'Bank transfer submitted — pending verification' : 'Payment recorded ✅')
+        onSave({
+          receipt_number:   d.receipt_number,
+          contract_number:  installment.contract_number as string,
+          customer_name:    installment.customer_name as string,
+          customer_phone:   installment.customer_phone as string || '',
+          amount,
+          method,
+          paid_at:          new Date().toISOString(),
+          cashier:          'Current User',
+          status:           d.status,
+        })
+      } else {
+        toast.error(res.error || 'Failed to record payment')
+      }
+    } catch {
+      toast.error('Failed to record payment')
+    } finally {
+      setSaving(false)
     }
   }
 

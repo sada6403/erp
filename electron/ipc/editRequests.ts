@@ -5,6 +5,7 @@ import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { createNotification } from './notifications'
 import Store from 'electron-store'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -22,13 +23,13 @@ function currentPerms(caller: Record<string, unknown> = authUser()): Record<stri
 }
 
 export function registerEditRequestHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('editRequests:create', async (_e, payload: {
+  safeHandle(ipcMain, 'editRequests:create', async (_e, payload: {
     target_table: string
     target_record_id: string
     reason: string
     requested_changes: Record<string, unknown>
   }) => {
-    try {
+    {
       if (!ALLOWED_TARGET_TABLES.has(payload.target_table)) {
         return { success: false, error: 'Unsupported edit-request target' }
       }
@@ -89,11 +90,11 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
       )
 
       return { success: true, data: { id } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('editRequests:list', (_e, filters: { status?: string; branch_id?: string } = {}) => {
-    try {
+  safeHandle(ipcMain, 'editRequests:list', (_e, filters: { status?: string; branch_id?: string } = {}) => {
+    {
       if (!currentPerms().all) return { success: false, error: 'Company Admin access required' }
 
       const db = getDb()
@@ -116,11 +117,11 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
         LIMIT 200
       `).all(...params)
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('editRequests:review', async (_e, id: string, action: 'approve' | 'reject', notes?: string) => {
-    try {
+  safeHandle(ipcMain, 'editRequests:review', async (_e, id: string, action: 'approve' | 'reject', notes?: string) => {
+    {
       if (!currentPerms().all) return { success: false, error: 'Company Admin access required' }
 
       const db = getDb()
@@ -163,11 +164,11 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
       )
 
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('editRequests:checkUnlocked', (_e, targetTable: string, targetRecordId: string) => {
-    try {
+  safeHandle(ipcMain, 'editRequests:checkUnlocked', (_e, targetTable: string, targetRecordId: string) => {
+    {
       const db = getDb()
       const user = authUser()
 
@@ -189,6 +190,6 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
       `).get(targetTable, targetRecordId, user.id) as { id: string } | undefined
 
       return { success: true, data: { unlocked: false, pending: Boolean(pending), request_id: pending?.id ?? null, expires_at: null } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 }

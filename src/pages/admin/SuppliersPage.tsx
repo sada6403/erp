@@ -13,8 +13,13 @@ export default function SuppliersPage() {
   const [search, setSearch]       = useState('')
 
   const load = async () => {
-    const res = await window.api.admin.suppliers.list()
-    if (res.success) setSuppliers(res.data as Supplier[])
+    try {
+      const res = await window.api.admin.suppliers.list()
+      if (res.success) setSuppliers(res.data as Supplier[])
+      else toast.error(res.error || 'Failed to load suppliers')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load suppliers')
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -144,11 +149,21 @@ function SupplierForm({ supplier, onClose, onSave }: { supplier: Supplier | null
       name: form.name.trim() || `${form.first_name} ${form.last_name}`.trim(),
       phone: form.mobile_number,
     }
-    if (supplier) await window.api.admin.suppliers.update(supplier.id as string, payload)
-    else          await window.api.admin.suppliers.create(payload)
-    setSaving(false)
-    toast.success('Saved')
-    onSave()
+    try {
+      const res = supplier
+        ? await window.api.admin.suppliers.update(supplier.id as string, payload)
+        : await window.api.admin.suppliers.create(payload)
+      if (res.success) {
+        toast.success('Saved')
+        onSave()
+      } else {
+        toast.error(res.error || 'Failed to save supplier')
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save supplier')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (

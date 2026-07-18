@@ -12,11 +12,21 @@ export default function StockLookupPage() {
   const [availability, setAvailability] = useState<Record<string, unknown>[]>([])
   const [transferFrom, setTransferFrom] = useState<Record<string, unknown> | null>(null)
 
-  useEffect(() => { window.api.products.list({ is_active: true }).then((r: any) => r.success && setProducts(r.data)) }, [])
+  useEffect(() => {
+    window.api.products.list({ is_active: true }).then((r: any) => {
+      if (r.success) setProducts(r.data)
+      else toast.error(r.error || 'Failed to load products')
+    }).catch((e: any) => toast.error(e?.message || 'Failed to load products'))
+  }, [])
   const choose = async (product: Record<string, unknown>) => {
     setSelected(product)
-    const res = await window.api.stocks.availability(product.id)
-    if (res.success) setAvailability(res.data)
+    try {
+      const res = await window.api.stocks.availability(product.id)
+      if (res.success) setAvailability(res.data)
+      else toast.error(res.error || 'Failed to load branch availability')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load branch availability')
+    }
   }
   const filtered = products.filter(p => !query || String(p.name).toLowerCase().includes(query.toLowerCase()) ||
     String(p.sku).toLowerCase().includes(query.toLowerCase()))
@@ -69,20 +79,25 @@ function QuickTransfer({ product, source, onClose, onDone }: any) {
   useEffect(() => {
     window.api.admin.branches.list().then((r: any) => {
       if (r.success) setBranches(r.data)
-    })
+      else toast.error(r.error || 'Failed to load branches')
+    }).catch((e: any) => toast.error(e?.message || 'Failed to load branches'))
   }, [])
 
   const save = async () => {
     if (!to) { toast.error('Please select a destination branch'); return }
     if (to === source.branch_id) { toast.error('Source and destination must be different'); return }
-    const res = await window.api.stocks.transfer({
-      product_id: product.id,
-      from_branch_id: source.branch_id,
-      to_branch_id: to,
-      quantity: qty,
-    })
-    if (res.success) { toast.success(`Transfer request ${res.data.transfer_number} created`); onDone() }
-    else toast.error(res.error)
+    try {
+      const res = await window.api.stocks.transfer({
+        product_id: product.id,
+        from_branch_id: source.branch_id,
+        to_branch_id: to,
+        quantity: qty,
+      })
+      if (res.success) { toast.success(`Transfer request ${res.data.transfer_number} created`); onDone() }
+      else toast.error(res.error)
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to create transfer request')
+    }
   }
 
   return (

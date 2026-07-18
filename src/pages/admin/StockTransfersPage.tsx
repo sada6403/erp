@@ -103,10 +103,15 @@ function ApproveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
   const [loading, setLoading] = useState(false)
   const submit = async () => {
     setLoading(true)
-    const res = await window.api.stocks.updateTransfer(t.id, 'approved', {})
-    if (res.success) { toast.success('Transfer approved. Dispatch will move stock to in-transit.'); onDone() }
-    else toast.error(res.error || 'Failed')
-    setLoading(false)
+    try {
+      const res = await window.api.stocks.updateTransfer(t.id, 'approved', {})
+      if (res.success) { toast.success('Transfer approved. Dispatch will move stock to in-transit.'); onDone() }
+      else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to approve transfer')
+    } finally {
+      setLoading(false)
+    }
   }
   return (
     <Modal title="Approve Transfer" onClose={onClose}
@@ -132,10 +137,15 @@ function RejectModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void;
   const submit = async () => {
     if (!reason.trim()) { toast.error('Rejection reason required'); return }
     setLoading(true)
-    const res = await window.api.stocks.updateTransfer(t.id, 'rejected', { reject_reason: reason })
-    if (res.success) { toast.success('Transfer rejected'); onDone() }
-    else toast.error(res.error || 'Failed')
-    setLoading(false)
+    try {
+      const res = await window.api.stocks.updateTransfer(t.id, 'rejected', { reject_reason: reason })
+      if (res.success) { toast.success('Transfer rejected'); onDone() }
+      else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reject transfer')
+    } finally {
+      setLoading(false)
+    }
   }
   return (
     <Modal title="Reject Transfer" onClose={onClose}
@@ -170,10 +180,15 @@ function DispatchModal({ t, onClose, onDone }: { t: Transfer; onClose: () => voi
   const submit = async () => {
     if (!form.driver_name.trim()) { toast.error('Driver name required'); return }
     setLoading(true)
-    const res = await window.api.stocks.updateTransfer(t.id, 'dispatched', form)
-    if (res.success) { toast.success('Dispatched - stock will update when receiving branch confirms'); onDone() }
-    else toast.error(res.error || 'Failed')
-    setLoading(false)
+    try {
+      const res = await window.api.stocks.updateTransfer(t.id, 'dispatched', form)
+      if (res.success) { toast.success('Dispatched - stock will update when receiving branch confirms'); onDone() }
+      else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to dispatch transfer')
+    } finally {
+      setLoading(false)
+    }
   }
   return (
     <Modal title="Dispatch Transfer" onClose={onClose}
@@ -232,17 +247,22 @@ function ReceiveModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void
     if (!receivedByName.trim()) { toast.error('Received by name required'); return }
     setLoading(true)
     const status = received >= t.quantity ? 'received' : 'partially_received'
-    const res = await window.api.stocks.updateTransfer(t.id, status, {
-      received_quantity: received,
-      damaged_quantity: damaged,
-      received_by_name: receivedByName,
-      received_designation: designation,
-      received_remarks: notes,
-      notes,
-    })
-    if (res.success) { toast.success('Stock received at destination branch'); onDone() }
-    else toast.error(res.error || 'Failed')
-    setLoading(false)
+    try {
+      const res = await window.api.stocks.updateTransfer(t.id, status, {
+        received_quantity: received,
+        damaged_quantity: damaged,
+        received_by_name: receivedByName,
+        received_designation: designation,
+        received_remarks: notes,
+        notes,
+      })
+      if (res.success) { toast.success('Stock received at destination branch'); onDone() }
+      else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to record receipt')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -354,7 +374,12 @@ function deliveryNoteHtml(t: Transfer) {
 
 function DeliveryNoteModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void; onDone: () => void }) {
   const doPrint = async () => {
-    await window.api.stocks.logTransferPrint(t.id, { print_type: Number(t.print_count || 0) > 0 ? 'reprint' : 'print' })
+    try {
+      const logRes = await window.api.stocks.logTransferPrint(t.id, { print_type: Number(t.print_count || 0) > 0 ? 'reprint' : 'print' })
+      if (!logRes?.success) toast.error(logRes?.error || 'Failed to log print')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to log print')
+    }
     const win = window.open('', '_blank', 'width=900,height=700')
     if (!win) { toast.error('Popup blocked'); return }
     win.document.open()
@@ -391,16 +416,21 @@ function MismatchModal({ t, onClose, onDone }: { t: Transfer; onClose: () => voi
   const submit = async () => {
     if (!details.trim()) { toast.error('Detailed reason required'); return }
     setLoading(true)
-    const res = await window.api.stocks.reportMismatch(t.id, {
-      received_quantity: received,
-      damaged_quantity: damaged,
-      missing_quantity: missing,
-      reason_category: reason,
-      detailed_reason: details,
-    })
-    if (res.success) { toast.success('Mismatch reported for admin review'); onDone() }
-    else toast.error(res.error || 'Failed')
-    setLoading(false)
+    try {
+      const res = await window.api.stocks.reportMismatch(t.id, {
+        received_quantity: received,
+        damaged_quantity: damaged,
+        missing_quantity: missing,
+        reason_category: reason,
+        detailed_reason: details,
+      })
+      if (res.success) { toast.success('Mismatch reported for admin review'); onDone() }
+      else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to report mismatch')
+    } finally {
+      setLoading(false)
+    }
   }
   return (
     <Modal title="Report Transfer Mismatch" onClose={onClose}
@@ -445,7 +475,10 @@ function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefres
 
   useEffect(() => {
     if (expanded) {
-      window.api.stocks.transferHistory(t.id).then((r: any) => { if (r.success) setHistory(r.data) })
+      window.api.stocks.transferHistory(t.id).then((r: any) => {
+        if (r.success) setHistory(r.data)
+        else toast.error(r.error || 'Failed to load transfer history')
+      }).catch((e: any) => toast.error(e?.message || 'Failed to load transfer history'))
     }
   }, [expanded, t.id, t.status])
 
@@ -455,6 +488,8 @@ function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefres
       const r = await window.api.printer.printTransfer(t as unknown as Record<string, unknown>)
       if (r?.success) toast.success('Transfer note sent to printer')
       else toast.error(r?.error || 'Print failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Print failed')
     } finally { setPrinting(false) }
   }
 
@@ -667,7 +702,11 @@ export default function StockTransfersPage() {
           )
         }
         setTransfers(data)
+      } else {
+        toast.error(res.error || 'Failed to load transfers')
       }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load transfers')
     } finally {
       setLoading(false)
     }
@@ -682,7 +721,10 @@ export default function StockTransfersPage() {
     return () => window.clearInterval(timer)
   }, [load])
   useEffect(() => {
-    window.api.admin.branches.list().then((r: any) => r.success && setBranches(r.data))
+    window.api.admin.branches.list().then((r: any) => {
+      if (r.success) setBranches(r.data)
+      else toast.error(r.error || 'Failed to load branches')
+    }).catch((e: any) => toast.error(e?.message || 'Failed to load branches'))
   }, [])
 
   const pending    = transfers.filter(t => t.status === 'pending_approval').length

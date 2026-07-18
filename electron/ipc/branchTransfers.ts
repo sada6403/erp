@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -33,8 +34,8 @@ function logTransferAction(db: ReturnType<typeof getDb>, transferId: string, act
 
 export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   // Create new branch transfer
-  ipcMain.handle('branchTransfers:create', async (_e, payload: Record<string, any>) => {
-    try {
+  safeHandle(ipcMain, 'branchTransfers:create', async (_e, payload: Record<string, any>) => {
+    {
       const db = getDb()
       const transferId = crypto.randomUUID()
       const transferNumber = `BTR-${Date.now().toString(36).toUpperCase()}`
@@ -136,12 +137,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true, data: { id: transferId, transfer_number: transferNumber } }
-    } catch (err: any) { return { success: false, error: err.message } }
+    }
   })
 
   // List branch transfers
-  ipcMain.handle('branchTransfers:list', (_e, filters: Record<string, any> = {}) => {
-    try {
+  safeHandle(ipcMain, 'branchTransfers:list', (_e, filters: Record<string, any> = {}) => {
+    {
       const db = getDb()
       let sql = `
         SELECT bt.*, 
@@ -169,12 +170,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       sql += ' ORDER BY bt.created_at DESC LIMIT 200'
       const rows = db.prepare(sql).all(...params)
       return { success: true, data: rows }
-    } catch (err: any) { return { success: false, error: err.message } }
+    }
   })
 
   // Get transfer by ID with items, logs, mismatches
-  ipcMain.handle('branchTransfers:getById', (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'branchTransfers:getById', (_e, id: string) => {
+    {
       const db = getDb()
       const transfer = db.prepare(`
         SELECT bt.*, 
@@ -223,12 +224,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       `).all(id)
 
       return { success: true, data: { ...transfer, items, mismatches, logs, prints } }
-    } catch (err: any) { return { success: false, error: err.message } }
+    }
   })
 
   // Update status (e.g. dispatch)
-  ipcMain.handle('branchTransfers:updateStatus', async (_e, id: string, status: string, payload: any = {}) => {
-    try {
+  safeHandle(ipcMain, 'branchTransfers:updateStatus', async (_e, id: string, status: string, payload: any = {}) => {
+    {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
@@ -286,12 +287,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('branch_transfers', id, 'UPDATE', { id, ...patch })
       return { success: true }
-    } catch (err: any) { return { success: false, error: err.message } }
+    }
   })
 
   // Receive transfer items
-  ipcMain.handle('branchTransfers:receive', async (_e, id: string, payload: any) => {
-    try {
+  safeHandle(ipcMain, 'branchTransfers:receive', async (_e, id: string, payload: any) => {
+    {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
@@ -400,12 +401,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true }
-    } catch (err: any) { return { success: false, error: err.message } }
+    }
   })
 
   // Report mismatch specifically
-  ipcMain.handle('branchTransfers:reportMismatch', async (_e, id: string, payload: any) => {
-    try {
+  safeHandle(ipcMain, 'branchTransfers:reportMismatch', async (_e, id: string, payload: any) => {
+    {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
@@ -446,12 +447,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       await enqueuSync('branch_transfers', id, 'UPDATE', { id, status: 'under_admin_review' })
 
       return { success: true }
-    } catch (err: any) { return { success: false, error: err.message } }
+    }
   })
 
   // Log print
-  ipcMain.handle('branchTransfers:logPrint', async (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'branchTransfers:logPrint', async (_e, id: string) => {
+    {
       const db = getDb()
       const logId = crypto.randomUUID()
       const log = {
@@ -463,12 +464,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       db.prepare(`INSERT INTO branch_transfer_prints (id, transfer_id, printed_by, print_type) VALUES (@id, @transfer_id, @printed_by, @print_type)`).run(log)
       await enqueuSync('branch_transfer_prints', logId, 'INSERT', log)
       return { success: true }
-    } catch (err: any) { return { success: false, error: err.message } }
+    }
   })
 
   // Resolve mismatch
-  ipcMain.handle('branchTransfers:resolveMismatch', async (_e, id: string, payload: any) => {
-    try {
+  safeHandle(ipcMain, 'branchTransfers:resolveMismatch', async (_e, id: string, payload: any) => {
+    {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
@@ -500,6 +501,6 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
       
       return { success: true }
-    } catch (err: any) { return { success: false, error: err.message } }
+    }
   })
 }

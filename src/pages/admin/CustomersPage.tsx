@@ -17,28 +17,43 @@ export default function CustomersPage() {
 
   const load = async () => {
     setLoading(true)
-    const res = await window.api.customers.list({})
-    if (res.success) setCustomers(res.data as Customer[])
-    setLoading(false)
+    try {
+      const res = await window.api.customers.list({})
+      if (res.success) setCustomers(res.data as Customer[])
+      else toast.error(res.error || 'Failed to load customers')
+    } catch {
+      toast.error('Failed to load customers')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const downloadTemplate = async () => {
-    const res = await window.api.customers.downloadTemplate()
-    if (res.success) toast.success('Template saved')
-    else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+    try {
+      const res = await window.api.customers.downloadTemplate()
+      if (res.success) toast.success('Template saved')
+      else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+    } catch {
+      toast.error('Failed to save template')
+    }
   }
 
   const bulkImport = async () => {
     setImporting(true)
-    const res = await window.api.customers.importExcel()
-    setImporting(false)
-    if (res.cancelled) return
-    if (!res.success) { toast.error(res.error || 'Import failed'); return }
-    if (res.imported) toast.success(`Imported ${res.imported} customer(s)`)
-    if (res.skipped) {
-      toast.error(`Skipped ${res.skipped} row(s)${res.errors?.[0] ? ` — e.g. ${res.errors[0]}` : ''}`, { duration: 6000 })
+    try {
+      const res = await window.api.customers.importExcel()
+      if (res.cancelled) return
+      if (!res.success) { toast.error(res.error || 'Import failed'); return }
+      if (res.imported) toast.success(`Imported ${res.imported} customer(s)`)
+      if (res.skipped) {
+        toast.error(`Skipped ${res.skipped} row(s)${res.errors?.[0] ? ` — e.g. ${res.errors[0]}` : ''}`, { duration: 6000 })
+      }
+      if (res.imported) load()
+    } catch {
+      toast.error('Import failed')
+    } finally {
+      setImporting(false)
     }
-    if (res.imported) load()
   }
 
   useEffect(() => { load() }, [])
@@ -135,10 +150,21 @@ function CustomerForm({ customer, onClose, onSave }: { customer: Customer | null
     const err = validateCustomer(form)
     if (err) { toast.error(err); return }
     setSaving(true)
-    if (customer) { await window.api.customers.update(customer.id, form); toast.success('Customer updated') }
-    else { await window.api.customers.create(form); toast.success('Customer created') }
-    setSaving(false)
-    onSave()
+    try {
+      if (customer) {
+        const res = await window.api.customers.update(customer.id, form)
+        if (res.success) { toast.success('Customer updated'); onSave() }
+        else toast.error(res.error || 'Failed to update customer')
+      } else {
+        const res = await window.api.customers.create(form)
+        if (res.success) { toast.success('Customer created'); onSave() }
+        else toast.error(res.error || 'Failed to create customer')
+      }
+    } catch {
+      toast.error('Failed to save customer')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
@@ -167,8 +193,14 @@ function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: (
   const [installments, setInstallments] = useState<Record<string,unknown>[]>([])
 
   useEffect(() => {
-    window.api.customers.history(customer.id).then((r: any) => r.success && setInvoices(r.data as Record<string,unknown>[]))
-    window.api.customers.installments(customer.id).then((r: any) => r.success && setInstallments(r.data as Record<string,unknown>[]))
+    window.api.customers.history(customer.id).then((r: any) => {
+      if (r.success) setInvoices(r.data as Record<string,unknown>[])
+      else toast.error(r.error || 'Failed to load invoice history')
+    }).catch(() => toast.error('Failed to load invoice history'))
+    window.api.customers.installments(customer.id).then((r: any) => {
+      if (r.success) setInstallments(r.data as Record<string,unknown>[])
+      else toast.error(r.error || 'Failed to load installments')
+    }).catch(() => toast.error('Failed to load installments'))
   }, [customer.id])
 
   return (

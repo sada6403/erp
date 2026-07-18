@@ -16,18 +16,22 @@ export default function AnalyticsPage() {
   const [dateTo, setDateTo]               = useState(new Date().toISOString().slice(0,10))
 
   const load = async () => {
-    const [s, t, b, r, p] = await Promise.all([
-      window.api.analytics.salesSummary({ date_from: dateFrom, date_to: dateTo }),
-      window.api.analytics.topProducts({ limit: 8 }),
-      window.api.analytics.branchPerformance({}),
-      window.api.analytics.revenue({}),
-      window.api.analytics.profitSummary({ date_from: dateFrom, date_to: dateTo }),
-    ])
-    if (s.success) setSalesData((s.data as Record<string,unknown>[]).reverse())
-    if (t.success) setTopProducts(t.data as Record<string,unknown>[])
-    if (b.success) setBranchPerf(b.data as Record<string,unknown>[])
-    if (r.success) setRevenue(r.data as Record<string,unknown>)
-    if (p.success) setProfit(p.data as Record<string,unknown>)
+    try {
+      const [s, t, b, r, p] = await Promise.all([
+        window.api.analytics.salesSummary({ date_from: dateFrom, date_to: dateTo }),
+        window.api.analytics.topProducts({ limit: 8 }),
+        window.api.analytics.branchPerformance({}),
+        window.api.analytics.revenue({}),
+        window.api.analytics.profitSummary({ date_from: dateFrom, date_to: dateTo }),
+      ])
+      if (s.success) setSalesData((s.data as Record<string,unknown>[]).reverse())
+      if (t.success) setTopProducts(t.data as Record<string,unknown>[])
+      if (b.success) setBranchPerf(b.data as Record<string,unknown>[])
+      if (r.success) setRevenue(r.data as Record<string,unknown>)
+      if (p.success) setProfit(p.data as Record<string,unknown>)
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to load analytics data')
+    }
   }
 
   useEffect(() => { load() }, [dateFrom, dateTo])
@@ -37,6 +41,7 @@ export default function AnalyticsPage() {
 
   const exportExcel = async () => {
     const filename = `analytics-report-${dateFrom}-to-${dateTo}`
+    try {
     const res = await window.api.reports.exportExcel({
       filename,
       sheets: [
@@ -82,14 +87,18 @@ export default function AnalyticsPage() {
     }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
     if (res.success) {
       toast.success('Excel report saved!')
-      if (res.filePath) window.api.reports.openFile(res.filePath)
+      if (res.filePath) window.api.reports.openFile(res.filePath).catch(() => toast.error('Failed to open file'))
     } else if (!res.cancelled) {
       toast.error(res.error || 'Export failed')
+    }
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Export failed')
     }
   }
 
   const exportPdf = async () => {
     const filename = `analytics-report-${dateFrom}-to-${dateTo}`
+    try {
     const res = await window.api.reports.exportPdf({
       filename,
       title: 'Analytics Report',
@@ -132,9 +141,12 @@ export default function AnalyticsPage() {
     }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
     if (res.success) {
       toast.success('PDF report saved!')
-      if (res.filePath) window.api.reports.openFile(res.filePath)
+      if (res.filePath) window.api.reports.openFile(res.filePath).catch(() => toast.error('Failed to open file'))
     } else if (!res.cancelled) {
       toast.error(res.error || 'Export failed')
+    }
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Export failed')
     }
   }
 

@@ -20,17 +20,30 @@ export default function CategoriesPage() {
   const [editing, setEditing] = useState<Category | null>(null)
 
   const load = async () => {
-    const res = await window.api.admin.categories.list()
-    if (res.success) setCategories(res.data as Category[])
+    try {
+      const res = await window.api.admin.categories.list()
+      if (res.success) setCategories(res.data as Category[])
+      else toast.error(res.error || 'Failed to load categories')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load categories')
+    }
   }
 
   useEffect(() => { load() }, [])
 
   const toggle = async (cat: Category) => {
     const newActive = cat.is_active ? 0 : 1
-    await window.api.admin.categories.update(cat.id, { is_active: newActive })
-    toast.success(newActive ? 'Category activated' : 'Category deactivated')
-    load()
+    try {
+      const res = await window.api.admin.categories.update(cat.id, { is_active: newActive })
+      if (res.success) {
+        toast.success(newActive ? 'Category activated' : 'Category deactivated')
+        load()
+      } else {
+        toast.error(res.error || 'Failed to update category')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update category')
+    }
   }
 
   const parentMap = Object.fromEntries(categories.map(c => [c.id, c.name]))
@@ -159,22 +172,32 @@ function CategoryForm({
   const save = async () => {
     if (!form.name.trim()) { toast.error('Name is required'); return }
     setSaving(true)
-    const payload = {
-      name:                   form.name.trim(),
-      short_code:             form.short_code.trim() || null,
-      description:            form.description.trim() || null,
-      parent_id:              form.parent_id || null,
-      sort_order:             Number(form.sort_order) || 0,
-      show_in_menu:           form.show_in_menu ? 1 : 0,
-      exclude_service_charge: form.exclude_service_charge ? 1 : 0,
-      issue_token:            form.issue_token ? 1 : 0,
-      image_url:              form.image_url || null,
+    try {
+      const payload = {
+        name:                   form.name.trim(),
+        short_code:             form.short_code.trim() || null,
+        description:            form.description.trim() || null,
+        parent_id:              form.parent_id || null,
+        sort_order:             Number(form.sort_order) || 0,
+        show_in_menu:           form.show_in_menu ? 1 : 0,
+        exclude_service_charge: form.exclude_service_charge ? 1 : 0,
+        issue_token:            form.issue_token ? 1 : 0,
+        image_url:              form.image_url || null,
+      }
+      const res = category
+        ? await window.api.admin.categories.update(category.id, payload)
+        : await window.api.admin.categories.create(payload)
+      if (res.success) {
+        toast.success('Saved')
+        onSave()
+      } else {
+        toast.error(res.error || 'Save failed')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Save failed')
+    } finally {
+      setSaving(false)
     }
-    if (category) await window.api.admin.categories.update(category.id, payload)
-    else          await window.api.admin.categories.create(payload)
-    setSaving(false)
-    toast.success('Saved')
-    onSave()
   }
 
   const validParents = allCategories.filter(c => c.id !== category?.id && c.is_active)

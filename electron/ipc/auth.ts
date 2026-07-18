@@ -10,6 +10,7 @@ import { decryptSecret } from './settings'
 import { enqueueUserRow } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -140,8 +141,7 @@ function loadCurrentAuthUser(userId: string): Record<string, unknown> | undefine
 }
 
 export function registerAuthHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('auth:loginOptions', async (_e, payload?: { branch_id?: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:loginOptions', async (_e, payload?: { branch_id?: string }) => {
       const db = getDb()
       const branchId = String(payload?.branch_id || '').trim()
       const users = branchId
@@ -176,13 +176,9 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
           admin_email: admin?.email ? String(admin.email) : '',
         },
       }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
-  ipcMain.handle('auth:login', async (_e, { email, password }) => {
-    try {
+  safeHandle(ipcMain, 'auth:login', async (_e, { email, password }) => {
       const db = getDb()
       const normalizedEmail = String(email || '').trim().toLowerCase()
       const user = db.prepare(`
@@ -267,13 +263,9 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       store.set('auth_user', payload)
 
       return { success: true, data: { user: payload, token } }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
-  ipcMain.handle('auth:pinLogin', async (_e, { pin, branch_id }) => {
-    try {
+  safeHandle(ipcMain, 'auth:pinLogin', async (_e, { pin, branch_id }) => {
       const db = getDb()
       let users: Record<string, unknown>[] = []
 
@@ -332,9 +324,6 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       store.set('auth_user', payload)
 
       return { success: true, data: { user: payload, token } }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
   ipcMain.handle('auth:whoami', async () => {
@@ -366,15 +355,14 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
     }
   })
 
-  ipcMain.handle('auth:logout', async () => {
+  safeHandle(ipcMain, 'auth:logout', async () => {
     store.delete('auth_token')
     store.delete('auth_user')
     return { success: true }
   })
 
   // ── 2FA: verify OTP after password login ─────────────────────────────────
-  ipcMain.handle('auth:2fa:verify', async (_e, { tempToken, otp }: { tempToken: string; otp: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:2fa:verify', async (_e, { tempToken, otp }: { tempToken: string; otp: string }) => {
       const decoded = jwt.verify(tempToken, JWT_SECRET) as { userId: string; type: string }
       if (decoded.type !== '2fa_pending') return { success: false, error: 'Invalid token' }
 
@@ -400,14 +388,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       store.set('auth_token', token)
       store.set('auth_user', payload)
       return { success: true, data: { user: payload, token } }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // ── 2FA: setup — generate secret + QR code ───────────────────────────────
-  ipcMain.handle('auth:2fa:setup', async (_e, { userId }: { userId: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:2fa:setup', async (_e, { userId }: { userId: string }) => {
       const db = getDb()
       const user = db.prepare(`SELECT email FROM users WHERE id = ?`).get(userId) as { email: string } | undefined
       if (!user) return { success: false, error: 'User not found' }
@@ -416,14 +400,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       // Store temp secret but do NOT enable yet (user must confirm)
       db.prepare(`UPDATE users SET two_factor_secret = ? WHERE id = ?`).run(secret, userId)
       return { success: true, data: { secret, qrDataUrl } }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // ── 2FA: confirm — verify OTP to activate 2FA ────────────────────────────
-  ipcMain.handle('auth:2fa:confirm', async (_e, { userId, otp }: { userId: string; otp: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:2fa:confirm', async (_e, { userId, otp }: { userId: string; otp: string }) => {
       const db = getDb()
       const user = db.prepare(`SELECT two_factor_secret FROM users WHERE id = ?`).get(userId) as { two_factor_secret: string } | undefined
       if (!user?.two_factor_secret) return { success: false, error: 'Setup not started — call auth:2fa:setup first' }
@@ -433,14 +413,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       db.prepare(`UPDATE users SET two_factor_enabled = 1 WHERE id = ?`).run(userId)
       logAudit(db, { userId, action: '2FA_ENABLED' })
       return { success: true }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // ── 2FA: disable ─────────────────────────────────────────────────────────
-  ipcMain.handle('auth:2fa:disable', async (_e, { userId, otp }: { userId: string; otp: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:2fa:disable', async (_e, { userId, otp }: { userId: string; otp: string }) => {
       const db = getDb()
       const user = db.prepare(`SELECT two_factor_secret, two_factor_enabled FROM users WHERE id = ?`).get(userId) as Record<string, unknown> | undefined
       if (!user) return { success: false, error: 'User not found' }
@@ -451,25 +427,17 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       db.prepare(`UPDATE users SET two_factor_enabled = 0, two_factor_secret = NULL WHERE id = ?`).run(userId)
       logAudit(db, { userId, action: '2FA_DISABLED' })
       return { success: true }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // ── 2FA: status ──────────────────────────────────────────────────────────
-  ipcMain.handle('auth:2fa:status', async (_e, { userId }: { userId: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:2fa:status', async (_e, { userId }: { userId: string }) => {
       const db = getDb()
       const user = db.prepare(`SELECT two_factor_enabled FROM users WHERE id = ?`).get(userId) as { two_factor_enabled: number } | undefined
       return { success: true, data: { enabled: Boolean(user?.two_factor_enabled) } }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // ── Forgot password: generate OTP and send via email if SMTP configured ───
-  ipcMain.handle('auth:forgotPassword', async (_e, { email }: { email: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:forgotPassword', async (_e, { email }: { email: string }) => {
       const db = getDb()
       const user = db.prepare(
         `SELECT id, name, email FROM users WHERE LOWER(email) = ? AND is_active = 1`
@@ -540,14 +508,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       // No SMTP or send failed — OTP is still stored, just not emailed
       return { success: true, sent: false, noSmtp: !smtpEnabled || !smtpHost }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
   // ── Reset password using OTP ──────────────────────────────────────────────
-  ipcMain.handle('auth:resetWithOtp', async (_e, { email, otp, newPassword }: { email: string; otp: string; newPassword: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:resetWithOtp', async (_e, { email, otp, newPassword }: { email: string; otp: string; newPassword: string }) => {
       const key = email.toLowerCase().trim()
       const entry = otpStore.get(key)
 
@@ -571,14 +535,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       otpStore.delete(key)
       return { success: true }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
   // ── Change own password (requires current password) ───────────────────────
-  ipcMain.handle('auth:changePassword', async (_e, { userId, currentPassword, newPassword }: { userId: string; currentPassword: string; newPassword: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:changePassword', async (_e, { userId, currentPassword, newPassword }: { userId: string; currentPassword: string; newPassword: string }) => {
       const db = getDb()
       const user = db.prepare(`SELECT id, password_hash, branch_id FROM users WHERE id = ? AND is_active = 1`).get(userId) as Record<string, unknown> | undefined
       if (!user) return { success: false, error: 'User not found' }
@@ -593,14 +553,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       logAudit(db, { userId, branchId: user.branch_id as string, action: 'PASSWORD_CHANGED' })
       await enqueueUserRow(userId)
       return { success: true }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
   // ── Complete forced password change (uses tempToken from login) ───────────
-  ipcMain.handle('auth:completeForcePasswordChange', async (_e, { tempToken, newPassword }: { tempToken: string; newPassword: string }) => {
-    try {
+  safeHandle(ipcMain, 'auth:completeForcePasswordChange', async (_e, { tempToken, newPassword }: { tempToken: string; newPassword: string }) => {
       const decoded = jwt.verify(tempToken, JWT_SECRET) as { userId: string; type: string }
       if (decoded.type !== 'force_pw_change') return { success: false, error: 'Invalid token' }
 
@@ -624,8 +580,5 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       store.set('auth_token', token)
       store.set('auth_user', payload)
       return { success: true, data: { user: payload, token } }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 }

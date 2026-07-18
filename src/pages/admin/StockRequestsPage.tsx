@@ -70,24 +70,45 @@ export default function StockRequestsPage() {
   const loadMyStock = useCallback(async () => {
     if (!userBranchId) return
     setLoading(true)
-    const res = await window.api.stocks.branchDetail(userBranchId)
-    setLoading(false)
-    if (res.success) setMyStock(res.data as StockItem[])
+    try {
+      const res = await window.api.stocks.branchDetail(userBranchId)
+      if (res.success) setMyStock(res.data as StockItem[])
+      else toast.error(res.error || 'Failed to load branch stock')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load branch stock')
+    } finally {
+      setLoading(false)
+    }
   }, [userBranchId])
 
   const loadTransfers = useCallback(async () => {
-    const res = await window.api.stocks.listTransfers(tfFilter ? { status: tfFilter } : {})
-    if (res.success) setTransfers(res.data as Transfer[])
+    try {
+      const res = await window.api.stocks.listTransfers(tfFilter ? { status: tfFilter } : {})
+      if (res.success) setTransfers(res.data as Transfer[])
+      else toast.error(res.error || 'Failed to load transfers')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load transfers')
+    }
   }, [tfFilter])
 
   const loadBranchStats = useCallback(async () => {
-    const res = await window.api.stocks.branchSummary()
-    if (res.success) setBranchStats(res.data as BranchStat[])
+    try {
+      const res = await window.api.stocks.branchSummary()
+      if (res.success) setBranchStats(res.data as BranchStat[])
+      else toast.error(res.error || 'Failed to load branch summary')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load branch summary')
+    }
   }, [])
 
   const loadBranches = useCallback(async () => {
-    const res = await window.api.admin.branches.list()
-    if (res.success) setBranches((res.data as Record<string,unknown>[]).map(b => ({ id: String(b.id), name: String(b.name) })))
+    try {
+      const res = await window.api.admin.branches.list()
+      if (res.success) setBranches((res.data as Record<string,unknown>[]).map(b => ({ id: String(b.id), name: String(b.name) })))
+      else toast.error(res.error || 'Failed to load branches')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load branches')
+    }
   }, [])
 
   useEffect(() => {
@@ -112,20 +133,29 @@ export default function StockRequestsPage() {
 
   const drillIntoBranch = async (b: BranchStat) => {
     setDrillBranch(b)
-    const res = await window.api.stocks.branchDetail(String(b.id))
-    if (res.success) setDrillStock(res.data as StockItem[])
+    try {
+      const res = await window.api.stocks.branchDetail(String(b.id))
+      if (res.success) setDrillStock(res.data as StockItem[])
+      else toast.error(res.error || 'Failed to load branch stock')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load branch stock')
+    }
   }
 
   const handleAdvanceTransfer = async (tf: Transfer, status: string, extra: Record<string,unknown> = {}) => {
-    const res = await window.api.stocks.updateTransfer(String(tf.id), status, extra)
-    if (res.success) {
-      toast.success(`Transfer marked as ${status.replace(/_/g, ' ')}`)
-      loadTransfers()
-      if (tab === 'my-stock') loadMyStock()
-      if (tab === 'branches') loadBranchStats()
-      setSelectedTf(null)
-    } else {
-      toast.error(res.error || 'Failed')
+    try {
+      const res = await window.api.stocks.updateTransfer(String(tf.id), status, extra)
+      if (res.success) {
+        toast.success(`Transfer marked as ${status.replace(/_/g, ' ')}`)
+        loadTransfers()
+        if (tab === 'my-stock') loadMyStock()
+        if (tab === 'branches') loadBranchStats()
+        setSelectedTf(null)
+      } else {
+        toast.error(res.error || 'Failed')
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update transfer')
     }
   }
 
@@ -548,16 +578,18 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
   const [saving, setSaving]         = useState(false)
 
   useEffect(() => {
-    window.api.products.list({ is_active: true }).then((r: {success:boolean;data:unknown}) => {
+    window.api.products.list({ is_active: true }).then((r: {success:boolean;data:unknown;error?:string}) => {
       if (r.success) setProducts(r.data as Record<string, unknown>[])
-    })
+      else toast.error(r.error || 'Failed to load products')
+    }).catch((e: any) => toast.error(e?.message || 'Failed to load products'))
   }, [])
 
   useEffect(() => {
     if (!productId) { setAvailability([]); return }
-    window.api.stocks.availability(productId).then((r: {success:boolean;data:unknown}) => {
+    window.api.stocks.availability(productId).then((r: {success:boolean;data:unknown;error?:string}) => {
       if (r.success) setAvailability(r.data as Record<string, unknown>[])
-    })
+      else toast.error(r.error || 'Failed to load stock availability')
+    }).catch((e: any) => toast.error(e?.message || 'Failed to load stock availability'))
   }, [productId])
 
   const sourceStock = availability.find(a => String(a.branch_id) === fromBranch)
@@ -570,19 +602,24 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
     }
     if (qty <= 0) { toast.error('Enter a valid quantity'); return }
     setSaving(true)
-    const res = await window.api.stocks.transfer({
-      product_id: productId,
-      from_branch_id: fromBranch,
-      to_branch_id: toBranch,
-      quantity: qty,
-      package_count: packageCount,
-      serial_batch_no: serialBatch,
-      item_description: description,
-      notes: notes || `Stock request from branch`,
-    })
-    setSaving(false)
-    if (res.success) onDone()
-    else toast.error(res.error || 'Failed to submit request')
+    try {
+      const res = await window.api.stocks.transfer({
+        product_id: productId,
+        from_branch_id: fromBranch,
+        to_branch_id: toBranch,
+        quantity: qty,
+        package_count: packageCount,
+        serial_batch_no: serialBatch,
+        item_description: description,
+        notes: notes || `Stock request from branch`,
+      })
+      if (res.success) onDone()
+      else toast.error(res.error || 'Failed to submit request')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to submit request')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (

@@ -23,13 +23,18 @@ export default function AgentsPage() {
 
   const load = async (branchId?: string) => {
     setLoading(true)
-    const [a, b] = await Promise.all([
-      window.api.agents.reportAllSummary({ branchId: branchId || undefined }),
-      window.api.admin.branches.list(),
-    ])
-    if (a.success) setAgents(a.data as Row[])
-    if (b.success) setBranches(b.data as Row[])
-    setLoading(false)
+    try {
+      const [a, b] = await Promise.all([
+        window.api.agents.reportAllSummary({ branchId: branchId || undefined }),
+        window.api.admin.branches.list(),
+      ])
+      if (a.success) setAgents(a.data as Row[])
+      if (b.success) setBranches(b.data as Row[])
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to load agents')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load(branchFilter) }, [branchFilter]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -41,14 +46,25 @@ export default function AgentsPage() {
   })
 
   const downloadTemplate = async () => {
-    const res = await window.api.agents.downloadTemplate()
-    if (res.success) toast.success('Template saved')
-    else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+    try {
+      const res = await window.api.agents.downloadTemplate()
+      if (res.success) toast.success('Template saved')
+      else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to save template')
+    }
   }
 
   const bulkImport = async () => {
     setImporting(true)
-    const res = await window.api.agents.importExcel()
+    let res
+    try {
+      res = await window.api.agents.importExcel()
+    } catch (err) {
+      setImporting(false)
+      toast.error((err as Error)?.message || 'Import failed')
+      return
+    }
     setImporting(false)
     if (res.cancelled) return
     if (!res.success) { toast.error(res.error || 'Import failed'); return }
@@ -166,15 +182,20 @@ function AgentForm({ agent, branches, onClose, onSave }: { agent: Agent | null; 
     if (!form.code.trim()) { toast.error('Agent code is required'); return }
     if (!form.name.trim()) { toast.error('Agent name is required'); return }
     setSaving(true)
-    const res = agent
-      ? await window.api.agents.update(agent.id, form)
-      : await window.api.agents.create(form)
-    setSaving(false)
-    if (res.success) {
-      toast.success(agent ? 'Agent updated' : 'Agent created')
-      onSave()
-    } else {
-      toast.error(String(res.error || 'Save failed'))
+    try {
+      const res = agent
+        ? await window.api.agents.update(agent.id, form)
+        : await window.api.agents.create(form)
+      if (res.success) {
+        toast.success(agent ? 'Agent updated' : 'Agent created')
+        onSave()
+      } else {
+        toast.error(String(res.error || 'Save failed'))
+      }
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Save failed')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -228,10 +249,15 @@ function AgentReportModal({ agent, onClose }: { agent: Agent; onClose: () => voi
 
   const load = async () => {
     setLoading(true)
-    const res = await window.api.agents.report({ agentId: agent.id, dateFrom, dateTo })
-    if (res.success) setData(res.data)
-    else toast.error(res.error || 'Failed to load report')
-    setLoading(false)
+    try {
+      const res = await window.api.agents.report({ agentId: agent.id, dateFrom, dateTo })
+      if (res.success) setData(res.data)
+      else toast.error(res.error || 'Failed to load report')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to load report')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -259,39 +285,57 @@ function AgentReportModal({ agent, onClose }: { agent: Agent; onClose: () => voi
 
   const exportPdf = async () => {
     setExporting(true)
-    await window.api.reports.exportPdf({
-      filename: `agent-${agent.code}-${today}`,
-      title: `Agent Commission Report — ${agent.name}`,
-      metadata, summary,
-      sections: [
-        { title: 'Products Sold', rows: cleanRows(products) },
-        { title: 'Invoices', rows: cleanRows(invoices) },
-      ],
-    })
-    setExporting(false)
+    try {
+      const res = await window.api.reports.exportPdf({
+        filename: `agent-${agent.code}-${today}`,
+        title: `Agent Commission Report — ${agent.name}`,
+        metadata, summary,
+        sections: [
+          { title: 'Products Sold', rows: cleanRows(products) },
+          { title: 'Invoices', rows: cleanRows(invoices) },
+        ],
+      })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'PDF export failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'PDF export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const exportExcel = async () => {
     setExporting(true)
-    await window.api.reports.exportExcel({
-      filename: `agent-${agent.code}-${today}`,
-      sheets: [
-        { name: 'Report Info', rows: Object.entries(metadata).map(([Field, Value]) => ({ Field, Value })) },
-        { name: 'Products Sold', rows: cleanRows(products) },
-        { name: 'Invoices', rows: cleanRows(invoices) },
-      ],
-    })
-    setExporting(false)
+    try {
+      const res = await window.api.reports.exportExcel({
+        filename: `agent-${agent.code}-${today}`,
+        sheets: [
+          { name: 'Report Info', rows: Object.entries(metadata).map(([Field, Value]) => ({ Field, Value })) },
+          { name: 'Products Sold', rows: cleanRows(products) },
+          { name: 'Invoices', rows: cleanRows(invoices) },
+        ],
+      })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'Excel export failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Excel export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const exportCsv = async () => {
     setExporting(true)
-    await window.api.reports.exportCsvRows({
-      filename: `agent-${agent.code}-products-${today}`,
-      rows: cleanRows(products),
-      metadata,
-    })
-    setExporting(false)
+    try {
+      const res = await window.api.reports.exportCsvRows({
+        filename: `agent-${agent.code}-products-${today}`,
+        rows: cleanRows(products),
+        metadata,
+      })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'CSV export failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'CSV export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const pct = Number(target.pct || 0)

@@ -1,12 +1,13 @@
 import type { IpcMain } from 'electron'
 import { getCachedLicense, fetchAndCacheLicense } from '../services/licenseService'
+import { safeHandle } from './ipcHandler'
 
 export function registerLicenseHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('license:status', () => {
+  safeHandle(ipcMain, 'license:status', () => {
     return { success: true, data: getCachedLicense() }
   })
 
-  ipcMain.handle('license:refresh', async () => {
+  safeHandle(ipcMain, 'license:refresh', async () => {
     const data = await fetchAndCacheLicense()
     return { success: true, data }
   })

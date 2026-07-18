@@ -70,10 +70,15 @@ export default function SystemHealthPage() {
 
   const refresh = useCallback(async () => {
     setLoading(true)
-    const res = await window.api.monitor.health() as { success: boolean; data: HealthData; error?: string }
-    if (res.success) { setHealth(res.data); setLastUpdated(new Date()) }
-    else toast.error(res.error || 'Failed to load health data')
-    setLoading(false)
+    try {
+      const res = await window.api.monitor.health() as { success: boolean; data: HealthData; error?: string }
+      if (res.success) { setHealth(res.data); setLastUpdated(new Date()) }
+      else toast.error(res.error || 'Failed to load health data')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load health data')
+    } finally {
+      setLoading(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -84,21 +89,33 @@ export default function SystemHealthPage() {
 
   const runVacuum = async () => {
     setVacuuming(true)
-    const res = await window.api.monitor.vacuum() as { success: boolean; error?: string }
-    setVacuuming(false)
-    if (res.success) { toast.success('VACUUM completed — DB optimized'); refresh() }
-    else toast.error(res.error || 'VACUUM failed')
+    try {
+      const res = await window.api.monitor.vacuum() as { success: boolean; error?: string }
+      if (res.success) { toast.success('VACUUM completed — DB optimized'); refresh() }
+      else toast.error(res.error || 'VACUUM failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'VACUUM failed')
+    } finally {
+      setVacuuming(false)
+    }
   }
 
   const runIntegrityCheck = async () => {
     setCheckingInt(true)
-    const res = await window.api.monitor.integrity() as { success: boolean; data: { passed: boolean; details: string[] } }
-    setCheckingInt(false)
-    if (res.success) {
-      setIntegrity(res.data)
-      toast[res.data.passed ? 'success' : 'error'](
-        res.data.passed ? 'Integrity check passed ✓' : 'Integrity issues found!'
-      )
+    try {
+      const res = await window.api.monitor.integrity() as { success: boolean; data: { passed: boolean; details: string[] }; error?: string }
+      if (res.success) {
+        setIntegrity(res.data)
+        toast[res.data.passed ? 'success' : 'error'](
+          res.data.passed ? 'Integrity check passed ✓' : 'Integrity issues found!'
+        )
+      } else {
+        toast.error(res.error || 'Integrity check failed')
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Integrity check failed')
+    } finally {
+      setCheckingInt(false)
     }
   }
 

@@ -219,6 +219,8 @@ export default function SettingsPage() {
           ? unreadRes
           : Number((unreadRes as { data?: number })?.data ?? 0)
       )
+    } catch (err) {
+      toast.error('Failed to refresh: ' + String(err))
     } finally {
       setOpsLoading(false)
     }
@@ -230,7 +232,11 @@ export default function SettingsPage() {
       window.api.app.isActivated(),
     ]).then(([res, activated]: [any, boolean]) => {
       if (res.success && res.data) setForm(f => ({ ...f, ...(res.data as object) }))
+      else if (!res.success) toast.error(res.error || 'Failed to load settings')
       setIsActivated(Boolean(activated))
+      setLoading(false)
+    }).catch((err: unknown) => {
+      toast.error('Failed to load settings: ' + String(err))
       setLoading(false)
     })
 
@@ -239,13 +245,18 @@ export default function SettingsPage() {
 
   const save = async () => {
     setSaving(true)
-    const res = await window.api.settings.update(form)
-    setSaving(false)
-    if (res.success) {
-      applySystemTheme(form)
-      toast.success('Settings saved')
+    try {
+      const res = await window.api.settings.update(form)
+      if (res.success) {
+        applySystemTheme(form)
+        toast.success('Settings saved')
+      }
+      else toast.error(String(res.error || 'Settings save failed'))
+    } catch (err) {
+      toast.error('Settings save failed: ' + String(err))
+    } finally {
+      setSaving(false)
     }
-    else toast.error(String(res.error || 'Settings save failed'))
   }
 
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -569,6 +580,8 @@ function LogoUploadField({
       } else if (res.error && res.error !== 'Cancelled') {
         toast.error(res.error)
       }
+    } catch (err) {
+      toast.error('Logo upload failed: ' + String(err))
     } finally { setUploading(false) }
   }
 
@@ -670,8 +683,13 @@ function SyncSettings({ form, f, check, isActivated }: { form: Record<string, an
 
   const handleReactivate = async () => {
     if (!confirm('This will clear the current activation and show the activation screen. Continue?')) return
-    await window.api.app.deactivate()
-    navigate('/activate')
+    try {
+      const res = await window.api.app.deactivate() as { success?: boolean; error?: string } | undefined
+      if (res && res.success === false) { toast.error(res.error || 'Failed to deactivate device'); return }
+      navigate('/activate')
+    } catch (err) {
+      toast.error('Failed to deactivate device: ' + String(err))
+    }
   }
 
   return (
@@ -1097,17 +1115,23 @@ function LoyaltySettings() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    window.api.loyalty.config.get().then((r: { success: boolean; data?: Record<string, number> }) => {
+    window.api.loyalty.config.get().then((r: { success: boolean; data?: Record<string, number>; error?: string }) => {
       if (r.success && r.data) setCfg(r.data as typeof cfg)
-    })
+      else if (!r.success) toast.error(r.error || 'Failed to load loyalty settings')
+    }).catch((err: unknown) => toast.error('Failed to load loyalty settings: ' + String(err)))
   }, [])
 
   const save = async () => {
     setSaving(true)
-    const res = await window.api.loyalty.config.save(cfg) as { success: boolean; error?: string }
-    setSaving(false)
-    if (res.success) toast.success('Loyalty settings saved')
-    else toast.error(res.error || 'Save failed')
+    try {
+      const res = await window.api.loyalty.config.save(cfg) as { success: boolean; error?: string }
+      if (res.success) toast.success('Loyalty settings saved')
+      else toast.error(res.error || 'Save failed')
+    } catch (err) {
+      toast.error('Save failed: ' + String(err))
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -1186,6 +1210,8 @@ function CommunicationsSettings({ form, f, check }: {
       const res = await fn()
       if (res.success) toast.success(`${key} test sent!`)
       else toast.error(res.error || `${key} test failed`)
+    } catch (err) {
+      toast.error(`${key} test failed: ` + String(err))
     } finally {
       setTesting(t => ({ ...t, [key]: false }))
     }
@@ -1434,7 +1460,7 @@ function CommunicationsSettings({ form, f, check }: {
               window.api.comm.sendLowStockAlert().then((r: { success: boolean; count?: number; error?: string }) => {
                 if (r.success) toast.success(r.count ? `Low stock alert sent for ${r.count} items` : 'No low stock items found')
                 else toast.error(r.error || 'Failed to send alert')
-              })
+              }).catch((err: unknown) => toast.error('Failed to send alert: ' + String(err)))
             }}
             className="btn-secondary btn-sm"
           >
@@ -1463,6 +1489,8 @@ function PrinterSettings({
       const res = await window.api.printer.test() as { success: boolean; error?: string }
       if (res.success) toast.success('Printer test sent')
       else toast.error(res.error || 'Printer test failed')
+    } catch (err) {
+      toast.error('Printer test failed: ' + String(err))
     } finally {
       setTesting(false)
     }
@@ -1523,14 +1551,24 @@ function NotificationsSettings({
   onRefresh: () => Promise<void>
 }) {
   const markRead = async (id: string) => {
-    await window.api.notifications.markRead(id)
-    await onRefresh()
+    try {
+      const res = await window.api.notifications.markRead(id) as { success?: boolean; error?: string } | undefined
+      if (res && res.success === false) { toast.error(res.error || 'Failed to mark notification as read'); return }
+      await onRefresh()
+    } catch (err) {
+      toast.error('Failed to mark notification as read: ' + String(err))
+    }
   }
 
   const clearAll = async () => {
-    await window.api.notifications.clearAll()
-    toast.success('Notifications cleared')
-    await onRefresh()
+    try {
+      const res = await window.api.notifications.clearAll() as { success?: boolean; error?: string } | undefined
+      if (res && res.success === false) { toast.error(res.error || 'Failed to clear notifications'); return }
+      toast.success('Notifications cleared')
+      await onRefresh()
+    } catch (err) {
+      toast.error('Failed to clear notifications: ' + String(err))
+    }
   }
 
   return (
@@ -1592,9 +1630,14 @@ function LicenseSettings({
   const plan = licenseInfo?.plan || licenseInfo?.tier || ''
 
   const refresh = async () => {
-    await window.api.license.refresh()
-    await onRefresh()
-    toast.success('License refreshed')
+    try {
+      const res = await window.api.license.refresh() as { success?: boolean; error?: string } | undefined
+      if (res && res.success === false) { toast.error(res.error || 'Failed to refresh license'); return }
+      await onRefresh()
+      toast.success('License refreshed')
+    } catch (err) {
+      toast.error('Failed to refresh license: ' + String(err))
+    }
   }
 
   return (
@@ -1650,18 +1693,28 @@ function S3Settings({ form, f, check }: {
       s3_endpoint: form.s3_endpoint,
       s3_cdn_url:  form.s3_cdn_url,
     }
-    const res = await window.api.settings.update(s3Fields) as { success: boolean; error?: string }
-    setSaving(false)
-    if (res.success) toast.success('S3 settings saved')
-    else toast.error(res.error || 'Save failed')
+    try {
+      const res = await window.api.settings.update(s3Fields) as { success: boolean; error?: string }
+      if (res.success) toast.success('S3 settings saved')
+      else toast.error(res.error || 'Save failed')
+    } catch (err) {
+      toast.error('Save failed: ' + String(err))
+    } finally {
+      setSaving(false)
+    }
   }
 
   const testConnection = async () => {
     setTesting(true)
-    const res = await window.api.settings.s3Test() as { success: boolean; error?: string }
-    setTesting(false)
-    if (res.success) toast.success('S3 connection successful!')
-    else toast.error(res.error || 'Connection failed')
+    try {
+      const res = await window.api.settings.s3Test() as { success: boolean; error?: string }
+      if (res.success) toast.success('S3 connection successful!')
+      else toast.error(res.error || 'Connection failed')
+    } catch (err) {
+      toast.error('Connection failed: ' + String(err))
+    } finally {
+      setTesting(false)
+    }
   }
 
   return (

@@ -4,6 +4,7 @@ import Store from 'electron-store'
 import path from 'path'
 import fs from 'fs'
 import QRCode from 'qrcode'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -72,73 +73,59 @@ interface InvoicePayload {
 }
 
 export function registerPrinterHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('printer:printReceipt', async (_e, payload) => {
-    try {
-      const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const lines = buildReceiptText(payload, settings)
-      console.log('[PRINTER - text]', lines)
-      return { success: true, data: { receipt_text: lines } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'printer:printReceipt', async (_e, payload) => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const lines = buildReceiptText(payload, settings)
+    console.log('[PRINTER - text]', lines)
+    return { success: true, data: { receipt_text: lines } }
   })
 
-  ipcMain.handle('printer:printInvoice', async (_e, payload: InvoicePayload) => {
-    try {
-      const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const html = await buildInvoiceHtml(payload, settings)
-      const design = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
-      await printHtml(html, design, selectedPaperType(settings, design))
-      return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'printer:printInvoice', async (_e, payload: InvoicePayload) => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const html = await buildInvoiceHtml(payload, settings)
+    const design = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
+    await printHtml(html, design, selectedPaperType(settings, design))
+    return { success: true }
   })
 
-  ipcMain.handle('printer:printTransfer', async (_e, payload: Record<string, unknown>) => {
-    try {
-      const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const html = await buildTransferNoteHtml(payload, settings)
-      await printHtml(html, 'a4', 'A4')
-      return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'printer:printTransfer', async (_e, payload: Record<string, unknown>) => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const html = await buildTransferNoteHtml(payload, settings)
+    await printHtml(html, 'a4', 'A4')
+    return { success: true }
   })
 
-  ipcMain.handle('printer:printInstallmentCard', async (_e, payload: Record<string, unknown>) => {
-    try {
-      const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const html = await buildInstallmentCardHtml(payload, settings)
-      await printHtml(html, 'a4', 'A4')
-      return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'printer:printInstallmentCard', async (_e, payload: Record<string, unknown>) => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const html = await buildInstallmentCardHtml(payload, settings)
+    await printHtml(html, 'a4', 'A4')
+    return { success: true }
   })
 
-  ipcMain.handle('printer:printCoupon', async (_e, payload: Record<string, unknown>) => {
-    try {
-      const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const html = await buildCouponHtml(payload, settings)
-      await printHtml(html, 'a4', 'A4')
-      return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'printer:printCoupon', async (_e, payload: Record<string, unknown>) => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const html = await buildCouponHtml(payload, settings)
+    await printHtml(html, 'a4', 'A4')
+    return { success: true }
   })
 
-  ipcMain.handle('printer:emailInvoice', async (_e, payload: InvoicePayload) => {
-    try {
-      const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const companyName = (settings.company_name as string) || 'Nature Plantation'
-      const toEmail = payload.customer_email || ''
-      const subject = `Invoice ${payload.invoice_number} - ${companyName}`
-      const body = buildEmailBody(payload, settings)
-      const mailtoUrl = `mailto:${encodeURIComponent(toEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
-      await shell.openExternal(mailtoUrl)
-      return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'printer:emailInvoice', async (_e, payload: InvoicePayload) => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const companyName = (settings.company_name as string) || 'Nature Plantation'
+    const toEmail = payload.customer_email || ''
+    const subject = `Invoice ${payload.invoice_number} - ${companyName}`
+    const body = buildEmailBody(payload, settings)
+    const mailtoUrl = `mailto:${encodeURIComponent(toEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
+    await shell.openExternal(mailtoUrl)
+    return { success: true }
   })
 
-  ipcMain.handle('printer:test', async () => {
-    try { return { success: true, data: 'Test print queued' } }
-    catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'printer:test', async () => {
+    return { success: true, data: 'Test print queued' }
   })
 
-  ipcMain.handle('printer:listDevices', async () => {
-    try { return { success: true, data: [] } }
-    catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'printer:listDevices', async () => {
+    return { success: true, data: [] }
   })
 }
 

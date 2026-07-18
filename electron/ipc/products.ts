@@ -12,6 +12,7 @@ import { uploadFile as s3UploadFile } from '../services/s3Service'
 import type { S3Config } from '../services/s3Service'
 import { decryptSecret } from './settings'
 import { buildSku, categoryCodeFromName, normalizeCategoryPath, titleCase } from '../lib/catalog'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -126,8 +127,7 @@ function firstImage(value: string): string | null {
 }
 
 export function registerProductHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('products:list', (_e, filters: { category_id?: string; is_active?: boolean } = {}) => {
-    try {
+  safeHandle(ipcMain, 'products:list', (_e, filters: { category_id?: string; is_active?: boolean } = {}) => {
       const db = getDb()
       const authUser = getAuthUser()
       const superAdmin = isSuperAdmin(authUser)
@@ -164,11 +164,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       if (filters.is_active !== undefined) { sql += ' AND p.is_active = ?'; params.push(filters.is_active ? 1 : 0) }
       sql += ' ORDER BY p.name'
       return { success: true, data: db.prepare(sql).all(...params) }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('products:search', (_e, query: string) => {
-    try {
+  safeHandle(ipcMain, 'products:search', (_e, query: string) => {
       const db = getDb()
       const authUser = getAuthUser()
       const superAdmin = isSuperAdmin(authUser)
@@ -190,11 +188,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       sql += ' ORDER BY p.name LIMIT 50'
       return { success: true, data: db.prepare(sql).all(...params) }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('products:searchSku', (_e, sku: string) => {
-    try {
+  safeHandle(ipcMain, 'products:searchSku', (_e, sku: string) => {
       const db = getDb()
       const authUser = getAuthUser()
       const superAdmin = isSuperAdmin(authUser)
@@ -213,19 +209,15 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       `
       const params: unknown[] = (!superAdmin && branchId) ? [branchId, sku, sku] : [sku, sku]
       return { success: true, data: db.prepare(sql).get(...params) || null }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('products:get', (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'products:get', (_e, id: string) => {
       const db = getDb()
       const row = db.prepare('SELECT * FROM products WHERE id = ?').get(id)
       return { success: true, data: row || null }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('products:create', async (_e, payload) => {
-    try {
+  safeHandle(ipcMain, 'products:create', async (_e, payload) => {
       const db = getDb()
       const id = crypto.randomUUID()
       const authUser = getAuthUser()
@@ -245,11 +237,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('products', id, 'INSERT', { id, branch_id, ...payload, sku })
       return { success: true, data: { id } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('products:update', async (_e, id: string, payload) => {
-    try {
+  safeHandle(ipcMain, 'products:update', async (_e, id: string, payload) => {
       const db = getDb()
       const nextPayload = { ...(payload as Record<string, unknown>) }
       if (!String(nextPayload.sku || '').trim()) {
@@ -264,11 +254,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('products', id, 'UPDATE', { id, ...nextPayload })
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('products:delete', async (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'products:delete', async (_e, id: string) => {
       const caller = getAuthUser()
       const perms = (caller?.role as Record<string, unknown>)?.permissions as Record<string, unknown>
         || (caller?.permissions as Record<string, unknown>) || {}
@@ -278,11 +266,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       db.prepare("UPDATE products SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id)
       await enqueuSync('products', id, 'UPDATE', { id, is_active: 0 })
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('products:permanentDelete', async (_e, id: string, reason: string) => {
-    try {
+  safeHandle(ipcMain, 'products:permanentDelete', async (_e, id: string, reason: string) => {
       const db = getDb()
       const caller = getAuthUser()
 
@@ -316,11 +302,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       db.prepare(`DELETE FROM products WHERE id = ?`).run(id)
 
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('products:selectAndUploadImage', async (_e) => {
-    try {
+  safeHandle(ipcMain, 'products:selectAndUploadImage', async (_e) => {
       const result = await dialog.showOpenDialog({
         properties: ['openFile'],
         filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'gif', 'webp'] }]
@@ -394,13 +378,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       // 3. Fall back to local app-img:// URL
       return { success: true, data: localUrl }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
-  ipcMain.handle('products:importExcel', async () => {
-    try {
+  safeHandle(ipcMain, 'products:importExcel', async () => {
       const { filePaths } = await dialog.showOpenDialog({
         title: 'Select Excel File',
         filters: [{ name: 'Excel', extensions: ['xlsx', 'xls', 'csv'] }],
@@ -677,13 +657,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true, data: { imported, skipped, errors } }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
-  ipcMain.handle('products:normalizeCatalog', async () => {
-    try {
+  safeHandle(ipcMain, 'products:normalizeCatalog', async () => {
       const db = getDb()
       const syncOps: { table: string; id: string; operation: 'INSERT' | 'UPDATE'; data: Record<string, unknown> }[] = []
       let categoriesUpdated = 0
@@ -738,13 +714,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true, data: { categoriesUpdated, productsUpdated } }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
-  ipcMain.handle('products:catalogAudit', async () => {
-    try {
+  safeHandle(ipcMain, 'products:catalogAudit', async () => {
       const db = getDb()
       const missingSku = db.prepare(`
         SELECT COUNT(*) AS count
@@ -792,13 +764,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           nonNormalizedCategories,
         },
       }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 
-  ipcMain.handle('products:exportCsv', async () => {
-    try {
+  safeHandle(ipcMain, 'products:exportCsv', async () => {
       const result = await dialog.showSaveDialog({
         title: 'Export Products CSV',
         defaultPath: `products-${new Date().toISOString().slice(0, 10)}.csv`,
@@ -840,8 +808,5 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       fs.writeFileSync(result.filePath, csv, 'utf8')
       return { success: true, data: { path: result.filePath, exported: rows.length } }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
-    }
   })
 }

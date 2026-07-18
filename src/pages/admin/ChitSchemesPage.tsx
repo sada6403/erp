@@ -22,17 +22,26 @@ export default function ChitSchemesPage() {
 
   const load = async () => {
     setLoading(true)
-    const [s, b, a, p] = await Promise.all([
-      window.api.chits.list(),
-      window.api.admin.branches.list(),
-      window.api.agents.list(),
-      window.api.products.list(),
-    ])
-    if (s.success) setSchemes(s.data as Row[])
-    if (b.success) setBranches(b.data as Row[])
-    if (a.success) setAgents(a.data as Row[])
-    if (p.success) setProducts(p.data as Row[])
-    setLoading(false)
+    try {
+      const [s, b, a, p] = await Promise.all([
+        window.api.chits.list(),
+        window.api.admin.branches.list(),
+        window.api.agents.list(),
+        window.api.products.list(),
+      ])
+      if (s.success) setSchemes(s.data as Row[])
+      else toast.error(String(s.error || 'Failed to load chit schemes'))
+      if (b.success) setBranches(b.data as Row[])
+      else toast.error(String(b.error || 'Failed to load branches'))
+      if (a.success) setAgents(a.data as Row[])
+      else toast.error(String(a.error || 'Failed to load agents'))
+      if (p.success) setProducts(p.data as Row[])
+      else toast.error(String(p.error || 'Failed to load products'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load data')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -135,13 +144,18 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
     if (form.member_count <= 0) { toast.error('Member count must be greater than 0'); return }
     if (form.cycle_count <= 0) { toast.error('Cycle count must be greater than 0'); return }
     setSaving(true)
-    const res = await window.api.chits.create(form)
-    setSaving(false)
-    if (res.success) {
-      toast.success('Chit scheme created')
-      onSave(res.data.id)
-    } else {
-      toast.error(String(res.error || 'Save failed'))
+    try {
+      const res = await window.api.chits.create(form)
+      if (res.success) {
+        toast.success('Chit scheme created')
+        onSave(res.data.id)
+      } else {
+        toast.error(String(res.error || 'Save failed'))
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Save failed')
+    } finally {
+      setSaving(false)
     }
   }
 

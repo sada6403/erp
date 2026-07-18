@@ -356,12 +356,16 @@ export default function SetupWizardPage() {
             <button
               type="button"
               onClick={async () => {
-                const res = await (window as unknown as { api: { admin: { seedLocalDefaults: () => Promise<{ success: boolean; error?: string }> } } }).api.admin.seedLocalDefaults()
-                if (res.success) {
-                  toast.success('Local setup complete!')
-                  setTimeout(() => navigate('/login', { replace: true }), 800)
-                } else {
-                  toast.error(res.error || 'Setup failed')
+                try {
+                  const res = await (window as unknown as { api: { admin: { seedLocalDefaults: () => Promise<{ success: boolean; error?: string }> } } }).api.admin.seedLocalDefaults()
+                  if (res.success) {
+                    toast.success('Local setup complete!')
+                    setTimeout(() => navigate('/login', { replace: true }), 800)
+                  } else {
+                    toast.error(res.error || 'Setup failed')
+                  }
+                } catch (err) {
+                  toast.error((err as Error)?.message || 'Setup failed')
                 }
               }}
               className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg text-sm font-semibold"

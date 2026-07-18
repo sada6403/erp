@@ -8,6 +8,7 @@ import path from 'path'
 import { getDb } from '../database'
 import { CloudApi } from '../services/cloudApi'
 import { logAudit } from '../services/auditLog'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -315,8 +316,8 @@ export function ensureSettingsDefaults() {
 }
 
 export function registerSettingsHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('settings:get', () => {
-    try {
+  safeHandle(ipcMain, 'settings:get', () => {
+    {
       const saved = store.get('app_settings') as Record<string, unknown> || {}
       const merged = { ...DEFAULTS }
       for (const [k, v] of Object.entries(saved)) {
@@ -324,11 +325,11 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
           (merged as Record<string, unknown>)[k] = v
       }
       return { success: true, data: normalizeForFrontend(merged) }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('settings:update', (_e, payload) => {
-    try {
+  safeHandle(ipcMain, 'settings:update', (_e, payload) => {
+    {
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const callerPerms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
         || user?.permissions as Record<string, unknown> || {}
@@ -356,21 +357,19 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
       }
       broadcastSettingsUpdated('settings-updated', { keys: payloadKeys })
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
-  })
-
-  ipcMain.handle('settings:refreshBranding', async () => {
-    try {
-      const result = await refreshBrandingFromCloud()
-      if (!result.success) return result
-      return { success: true, data: normalizeForFrontend((store.get('app_settings') as Record<string, unknown>) || {}) }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('settings:revealSecret', (_e, key: string) => {
-    try {
+  safeHandle(ipcMain, 'settings:refreshBranding', async () => {
+    {
+      const result = await refreshBrandingFromCloud()
+      if (!result.success) return result
+      return { success: true, data: normalizeForFrontend((store.get('app_settings') as Record<string, unknown>) || {}) }
+    }
+  })
+
+  safeHandle(ipcMain, 'settings:revealSecret', (_e, key: string) => {
+    {
       if (!SECRET_KEYS.has(key)) return { success: false, error: 'Unsupported secret key' }
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
@@ -378,11 +377,11 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
       if (!perms.all) return { success: false, error: 'Company Admin access required' }
       const current = store.get('app_settings') as Record<string, unknown> || {}
       return { success: true, data: decryptSecret(current[key]) }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('settings:s3Test', async () => {
-    try {
+  safeHandle(ipcMain, 'settings:s3Test', async () => {
+    {
       const { testConnection } = await import('../services/s3Service')
       const current = store.get('app_settings') as Record<string, unknown> || {}
       const config = {
@@ -397,6 +396,6 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
         return { success: false, error: 'Bucket, access key and secret key are required' }
       }
       return await testConnection(config)
-    } catch (err: unknown) { return { success: false, error: String(err) } }
+    }
   })
 }

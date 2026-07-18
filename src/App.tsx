@@ -9,6 +9,8 @@ import ProductsPage from '@/pages/admin/ProductsPage'
 import CustomersPage from '@/pages/admin/CustomersPage'
 import StockIntelligencePage from '@/pages/admin/StockIntelligencePage'
 import BranchesPage from '@/pages/admin/BranchesPage'
+import BranchInspectPage from '@/pages/admin/BranchInspectPage'
+import BranchInspectDetailPage from '@/pages/admin/BranchInspectDetailPage'
 import UsersPage from '@/pages/admin/UsersPage'
 import AgentsPage from '@/pages/admin/AgentsPage'
 import SuppliersPage from '@/pages/admin/SuppliersPage'
@@ -136,7 +138,9 @@ export default function App() {
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
         <Route path="/admin/purchase-orders" element={<PurchaseOrdersPage />} />
         <Route path="/admin/expenses" element={<ExpensesPage />} />
-        <Route path="/admin/branches" element={<BranchesPage />} />
+        <Route path="/admin/branches" element={<RequireSuperAdmin><BranchesPage /></RequireSuperAdmin>} />
+        <Route path="/admin/branch-inspect" element={<RequireSuperAdmin><BranchInspectPage /></RequireSuperAdmin>} />
+        <Route path="/admin/branch-inspect/:branchId" element={<RequireSuperAdmin><BranchInspectDetailPage /></RequireSuperAdmin>} />
         <Route path="/admin/users" element={<UsersPage />} />
         <Route path="/admin/agents" element={<AgentsPage />} />
         <Route path="/admin/categories" element={<CategoriesPage />} />

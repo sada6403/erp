@@ -57,6 +57,9 @@ export default function ReturnsPage() {
     try {
       const res = await window.api.returns.list({ from_date: fromDate || undefined, to_date: toDate || undefined, status: statusF || undefined })
       if (res.success) setReturns(res.data as Return[])
+      else toast.error(res.error || 'Failed to load returns')
+    } catch (err) {
+      toast.error('Failed to load returns: ' + String(err))
     } finally { setLoading(false) }
   }
 
@@ -68,6 +71,9 @@ export default function ReturnsPage() {
     try {
       const res = await window.api.invoices.list({ search: q, limit: 10 })
       if (res.success) setSearchResults((res.data as Invoice[]).slice(0, 10))
+      else toast.error(res.error || 'Failed to search invoices')
+    } catch (err) {
+      toast.error('Failed to search invoices: ' + String(err))
     } finally { setSearching(false) }
   }
 
@@ -81,10 +87,16 @@ export default function ReturnsPage() {
     setSelectedInvoice(inv)
     setSearchResults([])
     setInvoiceSearch(inv.invoice_number)
-    const res = await window.api.returns.getInvoiceItems(inv.id)
-    if (res.success) {
-      const d = res.data as { items: InvoiceItem[] }
-      setInvoiceItems(d.items.map(it => ({ ...it, return_qty: 0 })))
+    try {
+      const res = await window.api.returns.getInvoiceItems(inv.id)
+      if (res.success) {
+        const d = res.data as { items: InvoiceItem[] }
+        setInvoiceItems(d.items.map(it => ({ ...it, return_qty: 0 })))
+      } else {
+        toast.error(res.error || 'Failed to load invoice items')
+      }
+    } catch (err) {
+      toast.error('Failed to load invoice items: ' + String(err))
     }
   }
 
@@ -119,19 +131,30 @@ export default function ReturnsPage() {
         resetForm()
         load()
       } else toast.error(res.error || 'Failed to process return')
+    } catch (err) {
+      toast.error('Failed to process return: ' + String(err))
     } finally { setSaving(false) }
   }
 
   const cancelReturn = async (ret: Return) => {
     if (!confirm('Cancel this return? Stock will NOT be re-adjusted.')) return
-    const res = await window.api.returns.cancel(ret.id)
-    if (res.success) { toast.success('Return cancelled'); load() }
-    else toast.error(res.error || 'Failed to cancel')
+    try {
+      const res = await window.api.returns.cancel(ret.id)
+      if (res.success) { toast.success('Return cancelled'); load() }
+      else toast.error(res.error || 'Failed to cancel')
+    } catch (err) {
+      toast.error('Failed to cancel return: ' + String(err))
+    }
   }
 
   const viewDetail = async (ret: Return) => {
-    const res = await window.api.returns.get(ret.id)
-    if (res.success) setViewReturn(res.data as Return & { items: unknown[] })
+    try {
+      const res = await window.api.returns.get(ret.id)
+      if (res.success) setViewReturn(res.data as Return & { items: unknown[] })
+      else toast.error(res.error || 'Failed to load return details')
+    } catch (err) {
+      toast.error('Failed to load return details: ' + String(err))
+    }
   }
 
   const resetForm = () => {

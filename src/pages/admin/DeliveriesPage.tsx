@@ -11,8 +11,13 @@ export default function DeliveriesPage() {
   const [filter, setFilter]         = useState('')
 
   const load = async () => {
-    const res = await window.api.admin.deliveries.list(filter ? { status: filter } : {})
-    if (res.success) setDeliveries(res.data as Record<string,unknown>[])
+    try {
+      const res = await window.api.admin.deliveries.list(filter ? { status: filter } : {})
+      if (res.success) setDeliveries(res.data as Record<string,unknown>[])
+      else toast.error(res.error || 'Failed to load deliveries')
+    } catch {
+      toast.error('Failed to load deliveries')
+    }
   }
 
   useEffect(() => { load() }, [filter])
@@ -20,9 +25,17 @@ export default function DeliveriesPage() {
   const advance = async (id: string, current: string) => {
     const next = NEXT_STATUS[current]
     if (!next) return
-    await window.api.admin.deliveries.update(id, { status: next })
-    toast.success(`Marked as ${next}`)
-    load()
+    try {
+      const res = await window.api.admin.deliveries.update(id, { status: next })
+      if (res.success) {
+        toast.success(`Marked as ${next}`)
+        load()
+      } else {
+        toast.error(res.error || 'Failed to update delivery status')
+      }
+    } catch {
+      toast.error('Failed to update delivery status')
+    }
   }
 
   return (

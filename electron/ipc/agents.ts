@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
 import * as XLSX from 'xlsx'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -38,8 +39,8 @@ function codeTaken(db: ReturnType<typeof getDb>, code: string, excludeId?: strin
 }
 
 export function registerAgentHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('agents:list', (_e, filters: Record<string, unknown> = {}) => {
-    try {
+  safeHandle(ipcMain, 'agents:list', (_e, filters: Record<string, unknown> = {}) => {
+    {
       const db = getDb()
       const caller = authUser()
       const perms = currentPerms(caller)
@@ -55,18 +56,18 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
 
       const rows = db.prepare(`SELECT * FROM agents ${where} ORDER BY name`).all(...params)
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('agents:get', (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'agents:get', (_e, id: string) => {
+    {
       const db = getDb()
       return { success: true, data: db.prepare('SELECT * FROM agents WHERE id = ?').get(id) }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('agents:create', async (_e, payload: Record<string, unknown>) => {
-    try {
+  safeHandle(ipcMain, 'agents:create', async (_e, payload: Record<string, unknown>) => {
+    {
       const perms = currentPerms()
       if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
 
@@ -99,11 +100,11 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       `).run(safe)
       await enqueuSync('agents', id, 'INSERT', safe)
       return { success: true, data: { id } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('agents:update', async (_e, id: string, payload: Record<string, unknown>) => {
-    try {
+  safeHandle(ipcMain, 'agents:update', async (_e, id: string, payload: Record<string, unknown>) => {
+    {
       const perms = currentPerms()
       if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
 
@@ -126,11 +127,11 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       if (fields) db.prepare(`UPDATE agents SET ${fields}, updated_at = datetime('now') WHERE id = @id`).run({ ...update, id })
       await enqueuSync('agents', id, 'UPDATE', { id, ...update })
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('agents:downloadTemplate', async () => {
-    try {
+  safeHandle(ipcMain, 'agents:downloadTemplate', async () => {
+    {
       const perms = currentPerms()
       if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
 
@@ -168,11 +169,11 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
 
       XLSX.writeFile(wb, saveResult.filePath)
       return { success: true, filePath: saveResult.filePath }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
-  ipcMain.handle('agents:importExcel', async () => {
-    try {
+  safeHandle(ipcMain, 'agents:importExcel', async () => {
+    {
       const perms = currentPerms()
       if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
 
@@ -238,7 +239,7 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true, imported, skipped, errors: errors.slice(0, 50) }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
   // Per-agent sales/commission report: header stats, current-month target
@@ -248,8 +249,8 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
   // invoices by agent_code text (case/whitespace-insensitive), never by the
   // agent_id FK alone, so historical invoices predating the agents table
   // still surface correctly.
-  ipcMain.handle('agents:report', (_e, filters: { agentId: string; dateFrom?: string; dateTo?: string; branchId?: string }) => {
-    try {
+  safeHandle(ipcMain, 'agents:report', (_e, filters: { agentId: string; dateFrom?: string; dateTo?: string; branchId?: string }) => {
+    {
       const db = getDb()
       const caller = authUser()
       const perms = currentPerms(caller)
@@ -318,13 +319,13 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       `).all(...params)
 
       return { success: true, data: { agent, stats, targetProgress, products, invoices } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 
   // One row per agent for the list page — LEFT JOINed from agents so agents
   // with zero sales in the range still appear.
-  ipcMain.handle('agents:reportAllSummary', (_e, filters: { dateFrom?: string; dateTo?: string; branchId?: string } = {}) => {
-    try {
+  safeHandle(ipcMain, 'agents:reportAllSummary', (_e, filters: { dateFrom?: string; dateTo?: string; branchId?: string } = {}) => {
+    {
       const db = getDb()
       const caller = authUser()
       const perms = currentPerms(caller)
@@ -354,6 +355,6 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       `).all(...params, ...agentParams)
 
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+    }
   })
 }

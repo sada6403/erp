@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import Store from 'electron-store'
 import { getDb } from '../database'
 import { enqueuSync } from '../services/syncQueue'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -11,9 +12,8 @@ function currentUser() {
 }
 
 export function registerOrderHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('orders:list', (_e, filters: Record<string, unknown> = {}) => {
-    try {
-      const user = currentUser()
+  safeHandle(ipcMain, 'orders:list', (_e, filters: Record<string, unknown> = {}) => {
+    const user = currentUser()
       let sql = `SELECT o.*, b.name branch_name, u.name sales_staff_name,
         (SELECT COUNT(*) FROM customer_order_items oi WHERE oi.order_id=o.id) item_count
         FROM customer_orders o
@@ -25,23 +25,19 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
       else if (user?.branch_id) { sql += ' AND o.branch_id=?'; params.push(user.branch_id) }
       sql += ' ORDER BY o.created_at DESC LIMIT 300'
       return { success: true, data: getDb().prepare(sql).all(...params) }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('orders:get', (_e, id: string) => {
-    try {
-      const db = getDb()
-      const order = db.prepare('SELECT * FROM customer_orders WHERE id=?').get(id)
-      const items = db.prepare(`SELECT oi.*, p.name product_name, p.sku
-        FROM customer_order_items oi JOIN products p ON p.id=oi.product_id
-        WHERE oi.order_id=?`).all(id)
-      return { success: true, data: { ...(order as object), items } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'orders:get', (_e, id: string) => {
+    const db = getDb()
+    const order = db.prepare('SELECT * FROM customer_orders WHERE id=?').get(id)
+    const items = db.prepare(`SELECT oi.*, p.name product_name, p.sku
+      FROM customer_order_items oi JOIN products p ON p.id=oi.product_id
+      WHERE oi.order_id=?`).all(id)
+    return { success: true, data: { ...(order as object), items } }
   })
 
-  ipcMain.handle('orders:create', async (_e, payload) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'orders:create', async (_e, payload) => {
+    const db = getDb()
       const user = currentUser()
       const id = crypto.randomUUID()
       const branchId = payload.branch_id || user?.branch_id
@@ -84,12 +80,10 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
       })
       for (const row of rows) await enqueuSync('customer_order_items', String(row.id), 'INSERT', row)
       return { success: true, data: { id, order_number: orderNumber } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('orders:updateStatus', async (_e, id: string, status: string, details = {}) => {
-    try {
-      const allowed = ['pending','confirmed','processing','preparing','ready_for_delivery','dispatched','in_transit','delivered','cancelled','returned']
+  safeHandle(ipcMain, 'orders:updateStatus', async (_e, id: string, status: string, details = {}) => {
+    const allowed = ['pending','confirmed','processing','preparing','ready_for_delivery','dispatched','in_transit','delivered','cancelled','returned']
       if (!allowed.includes(status)) throw new Error('Invalid order status')
       const user = currentUser()
       const patch: Record<string, unknown> = { status, ...details }
@@ -105,6 +99,5 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
         .run({ id, ...patch })
       await enqueuSync('customer_orders', id, 'UPDATE', { id, ...patch })
       return { success: true }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 }

@@ -61,15 +61,20 @@ export default function TrackTransferPage() {
     const key = q.trim()
     if (!key) return
     if (!silent) { setLoading(true); setError('') }
-    const res = await window.api.stocks.trackTransfer(key) as { success: boolean; data?: { transfer: Transfer; history: HistoryRow[] }; error?: string }
-    if (res.success && res.data) {
-      setTransfer(res.data.transfer)
-      setHistory(res.data.history || [])
-      setError('')
-    } else if (!silent) {
-      setTransfer(null); setHistory([]); setError(res.error || 'Not found')
+    try {
+      const res = await window.api.stocks.trackTransfer(key) as { success: boolean; data?: { transfer: Transfer; history: HistoryRow[] }; error?: string }
+      if (res.success && res.data) {
+        setTransfer(res.data.transfer)
+        setHistory(res.data.history || [])
+        setError('')
+      } else if (!silent) {
+        setTransfer(null); setHistory([]); setError(res.error || 'Not found')
+      }
+    } catch (e: any) {
+      if (!silent) { setTransfer(null); setHistory([]); setError(e?.message || 'Failed to track transfer') }
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }, [])
 
   // Live auto-refresh every 5s while a transfer is on screen and not yet finished.
@@ -87,13 +92,18 @@ export default function TrackTransferPage() {
   const act = async (status: string, payload: Record<string, unknown> = {}, okMsg = 'Updated') => {
     if (!transfer) return
     setBusy(true)
-    const res = await window.api.stocks.updateTransfer(transfer.id, status, payload) as { success: boolean; error?: string }
-    setBusy(false)
-    if (res.success) {
-      toast.success(okMsg)
-      setDispatchOpen(false); setReceiveOpen(false)
-      track(transfer.transfer_number)
-    } else toast.error(res.error || 'Failed')
+    try {
+      const res = await window.api.stocks.updateTransfer(transfer.id, status, payload) as { success: boolean; error?: string }
+      if (res.success) {
+        toast.success(okMsg)
+        setDispatchOpen(false); setReceiveOpen(false)
+        track(transfer.transfer_number)
+      } else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update transfer')
+    } finally {
+      setBusy(false)
+    }
   }
 
   const onReject = () => {
@@ -105,9 +115,13 @@ export default function TrackTransferPage() {
   }
   const doPrint = async () => {
     if (!transfer) return
-    const r = await window.api.printer.printTransfer(transfer as unknown as Record<string, unknown>) as { success: boolean; error?: string }
-    if (r?.success) toast.success('Transfer note sent to printer / save as PDF')
-    else toast.error(r?.error || 'Print failed')
+    try {
+      const r = await window.api.printer.printTransfer(transfer as unknown as Record<string, unknown>) as { success: boolean; error?: string }
+      if (r?.success) toast.success('Transfer note sent to printer / save as PDF')
+      else toast.error(r?.error || 'Print failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Print failed')
+    }
   }
 
   const t = transfer

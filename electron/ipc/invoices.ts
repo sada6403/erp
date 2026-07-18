@@ -6,6 +6,7 @@ import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
 import { redeemCouponInTransaction, reverseCouponForInvoice, type CouponRedemptionResult } from './coupons'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -60,18 +61,15 @@ function defaultBranchId() {
 
 export function registerInvoiceHandlers(ipcMain: IpcMain) {
   // Get next bill number preview
-  ipcMain.handle('invoices:nextNumber', (_e, billType: BillType = 'RETAIL') => {
-    try {
-      const user = getAuthUser()
-      const branchId = (user?.branch_id as string) || defaultBranchId()
-      const number = getNextBillNumber(branchId, billType)
-      return { success: true, data: number }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'invoices:nextNumber', (_e, billType: BillType = 'RETAIL') => {
+    const user = getAuthUser()
+    const branchId = (user?.branch_id as string) || defaultBranchId()
+    const number = getNextBillNumber(branchId, billType)
+    return { success: true, data: number }
   })
 
   // Create invoice — handles all 3 bill types
-  ipcMain.handle('invoices:create', async (_e, payload) => {
-    try {
+  safeHandle(ipcMain, 'invoices:create', async (_e, payload) => {
       const db = getDb()
       const user = getAuthUser()
       const branchId = payload.branch_id || (user?.branch_id as string) || defaultBranchId()
@@ -327,12 +325,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true, data: { id, invoice_number: invoiceNumber, bill_type: billType } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Convert QUOTATION → RETAIL (deducts stock, changes bill_type)
-  ipcMain.handle('invoices:convert', async (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'invoices:convert', async (_e, id: string) => {
       const db = getDb()
       const user = getAuthUser()
       const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id) as Record<string, unknown>
@@ -391,12 +387,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       }
       return { success: true, data: { invoice_number: newNumber } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Approve a CREDIT bill (manager only, cannot be same as creator)
-  ipcMain.handle('invoices:approveCreditBill', async (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'invoices:approveCreditBill', async (_e, id: string) => {
       const db = getDb()
       const user = getAuthUser()
       const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(id) as Record<string, unknown>
@@ -417,12 +411,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('invoices', id as string, 'UPDATE', { id, approved_by: user?.id, status: 'completed' })
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Add payment to a CREDIT bill
-  ipcMain.handle('invoices:addCreditPayment', async (_e, payload: { invoice_id: string; amount: number; method: string; reference?: string }) => {
-    try {
+  safeHandle(ipcMain, 'invoices:addCreditPayment', async (_e, payload: { invoice_id: string; amount: number; method: string; reference?: string }) => {
       const db = getDb()
       const user = getAuthUser()
       const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(payload.invoice_id) as Record<string, unknown>
@@ -485,11 +477,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('invoices:list', (_e, filters: Record<string, unknown> = {}) => {
-    try {
+  safeHandle(ipcMain, 'invoices:list', (_e, filters: Record<string, unknown> = {}) => {
       const db = getDb()
       const user = getAuthUser()
       const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
@@ -518,11 +508,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (filters.date_to)    { sql += ' AND date(i.created_at) <= ?'; params.push(filters.date_to) }
       sql += ' ORDER BY i.created_at DESC LIMIT 500'
       return { success: true, data: db.prepare(sql).all(...params) }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('invoices:get', (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'invoices:get', (_e, id: string) => {
       const db = getDb()
       const invoice = db.prepare(`
         SELECT i.*, c.name as customer_name, u.name as cashier_name, a.name as approver_name
@@ -544,21 +532,17 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const ledger = db.prepare('SELECT * FROM credit_ledger WHERE invoice_id = ?').all(id)
 
       return { success: true, data: { ...invoice as object, items, payments, ledger } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('invoices:hold', async (_e, id: string) => {
-    try {
+  safeHandle(ipcMain, 'invoices:hold', async (_e, id: string) => {
       const db = getDb()
       db.prepare("UPDATE invoices SET status='held', updated_at=datetime('now') WHERE id=?").run(id)
       await enqueuSync('invoices', id, 'UPDATE', { id, status: 'held' })
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Cancel invoice — restore stock for RETAIL and CREDIT bills
-  ipcMain.handle('invoices:cancel', async (_e, id: string, reason?: string) => {
-    try {
+  safeHandle(ipcMain, 'invoices:cancel', async (_e, id: string, reason?: string) => {
       const db = getDb()
       const user = getAuthUser()
       const invoice = db.prepare('SELECT * FROM invoices WHERE id=?').get(id) as Record<string, unknown>
@@ -628,7 +612,6 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         await enqueuSync('coupon_redemptions', reversal.redemptionId, 'INSERT', reversal.redemptionRow)
       }
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Corrects a single line item's quantity/price on an already-completed
@@ -636,10 +619,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
   // changes, no void (that stays on invoices:cancel). Non-admins must supply
   // an edit_request_id from an approved editRequests row; it's re-validated
   // and consumed inside this same transaction so there's no check-then-use race.
-  ipcMain.handle('invoices:applyEdit', async (_e, id: string, payload: {
+  safeHandle(ipcMain, 'invoices:applyEdit', async (_e, id: string, payload: {
     item_id: string; new_quantity: number; new_unit_price: number; edit_request_id?: string
   }) => {
-    try {
       const db = getDb()
       const user = getAuthUser()
       const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
@@ -752,11 +734,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         await enqueuSync('edit_requests', payload.edit_request_id, 'UPDATE', { id: payload.edit_request_id, status: 'consumed' })
       }
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('invoices:listHeld', (_e) => {
-    try {
+  safeHandle(ipcMain, 'invoices:listHeld', (_e) => {
       const db = getDb()
       const user = getAuthUser()
       const rows = db.prepare(`
@@ -766,12 +746,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         ORDER BY i.updated_at DESC LIMIT 5
       `).all((user?.branch_id as string) || defaultBranchId())
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // List pending-approval credit bills
-  ipcMain.handle('invoices:pendingApproval', (_e) => {
-    try {
+  safeHandle(ipcMain, 'invoices:pendingApproval', (_e) => {
       const db = getDb()
       const user = getAuthUser()
       const rows = db.prepare(`
@@ -783,12 +761,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         ORDER BY i.created_at DESC
       `).all((user?.branch_id as string) || defaultBranchId())
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Get credit summary for a customer
-  ipcMain.handle('invoices:creditSummary', (_e, customerId: string) => {
-    try {
+  safeHandle(ipcMain, 'invoices:creditSummary', (_e, customerId: string) => {
       const db = getDb()
       const customer = db.prepare('SELECT credit_limit, outstanding_due FROM customers WHERE id=?')
         .get(customerId) as { credit_limit: number; outstanding_due: number } | undefined
@@ -806,6 +782,5 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           available_credit: Math.max(0, (customer?.credit_limit || 0) - ledger.balance),
         }
       }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 }

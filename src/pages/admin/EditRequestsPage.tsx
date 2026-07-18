@@ -37,10 +37,15 @@ export default function EditRequestsPage() {
 
   const load = useCallback(async () => {
     setLoading(true)
-    const res = await window.api.editRequests.list({ status })
-    if (res.success) setRows(res.data as Row[])
-    else toast.error(res.error || 'Failed to load edit requests')
-    setLoading(false)
+    try {
+      const res = await window.api.editRequests.list({ status })
+      if (res.success) setRows(res.data as Row[])
+      else toast.error(res.error || 'Failed to load edit requests')
+    } catch {
+      toast.error('Failed to load edit requests')
+    } finally {
+      setLoading(false)
+    }
   }, [status])
 
   useEffect(() => { load() }, [load])
@@ -48,15 +53,20 @@ export default function EditRequestsPage() {
   const submitReview = async () => {
     if (!reviewing) return
     setSaving(true)
-    const res = await window.api.editRequests.review(reviewing.row.id as string, reviewing.action, notes)
-    setSaving(false)
-    if (res.success) {
-      toast.success(reviewing.action === 'approve' ? 'Request approved' : 'Request rejected')
-      setReviewing(null)
-      setNotes('')
-      load()
-    } else {
-      toast.error(res.error || 'Failed to review request')
+    try {
+      const res = await window.api.editRequests.review(reviewing.row.id as string, reviewing.action, notes)
+      if (res.success) {
+        toast.success(reviewing.action === 'approve' ? 'Request approved' : 'Request rejected')
+        setReviewing(null)
+        setNotes('')
+        load()
+      } else {
+        toast.error(res.error || 'Failed to review request')
+      }
+    } catch {
+      toast.error('Failed to review request')
+    } finally {
+      setSaving(false)
     }
   }
 

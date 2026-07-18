@@ -135,11 +135,12 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Branches', icon: GitBranch, perm: 'branches',
     items: [
-      { to: '/admin/branches', label: 'Branches', perm: 'branches' },
+      { to: '/admin/branches', label: 'Branches', perm: 'branches', adminOnly: true },
+      { to: '/admin/branch-inspect', label: 'Branch Inspect', adminOnly: true },
       { to: '/admin/audit-logs', label: 'Audit Logs', perm: 'branches' },
       { to: '/admin/edit-requests', label: 'Edit Requests', adminOnly: true },
       { to: '/admin/sync', label: 'Sync Monitor', adminOnly: true },
-      { to: '/admin/operations', label: 'Operations Hub', perm: 'branches' },
+      { to: '/admin/operations', label: 'Operations Hub' },
     ]
   },
   {
@@ -598,7 +599,7 @@ export default function AppLayout() {
             {profile.kind !== 'cashier' && (
               <SidebarLink
                 to={homeRoute}
-                end={profile.kind === 'owner'}
+                end={profile.kind === 'owner' || profile.kind === 'branchManager' || profile.kind === 'subBranchManager'}
                 icon={LayoutDashboard}
                 label={homeLabel}
                 collapsed={!sidebarOpen}

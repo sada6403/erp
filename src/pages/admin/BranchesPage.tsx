@@ -24,16 +24,24 @@ export default function BranchesPage() {
   const [deleting, setDeleting] = useState(false)
 
   const load = async () => {
-    const [branchRes, userRes] = await Promise.all([
-      window.api.admin.branches.list(),
-      window.api.admin.users.list(),
-    ])
-    if (branchRes.success) {
-      const data = branchRes.data as Record<string,unknown>[]
-      setBranches(data)
+    try {
+      const [branchRes, userRes] = await Promise.all([
+        window.api.admin.branches.list(),
+        window.api.admin.users.list(),
+      ])
+      if (branchRes.success) {
+        const data = branchRes.data as Record<string,unknown>[]
+        setBranches(data)
+      } else {
+        toast.error(branchRes.error || 'Failed to load branches')
+      }
+      if (userRes.success) setUsers(userRes.data as Record<string,unknown>[])
+      else toast.error(userRes.error || 'Failed to load users')
+      return branchRes.success ? branchRes.data as Record<string,unknown>[] : null
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load branches')
+      return null
     }
-    if (userRes.success) setUsers(userRes.data as Record<string,unknown>[])
-    return branchRes.success ? branchRes.data as Record<string,unknown>[] : null
   }
 
   useEffect(() => { load() }, [])
@@ -89,17 +97,19 @@ export default function BranchesPage() {
                   {b.is_active
                     ? <CheckCircle size={14} className="text-green-400" />
                     : <XCircle size={14} className="text-red-400" />}
-                  <button
-                    onClick={async () => {
-                      const fresh = await load()
-                      const freshB = fresh?.find((x: Record<string,unknown>) => x.id === b.id) ?? b
-                      setEditing(freshB); setShowForm(true)
-                    }}
-                    className="btn-ghost btn-sm p-1.5"
-                    title="Edit branch"
-                  >
-                    <Edit2 size={13} />
-                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={async () => {
+                        const fresh = await load()
+                        const freshB = fresh?.find((x: Record<string,unknown>) => x.id === b.id) ?? b
+                        setEditing(freshB); setShowForm(true)
+                      }}
+                      className="btn-ghost btn-sm p-1.5"
+                      title="Edit branch"
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                  )}
                   {isAdmin && !isMain(b) && (
                     <button
                       onClick={() => setDeleteTarget(b)}
@@ -238,6 +248,8 @@ function BranchForm({
       }
       toast.success(branch ? 'Branch updated' : 'Branch created')
       onSave()
+    } catch (err: any) {
+      toast.error(err.message || 'Save failed')
     } finally { setSaving(false) }
   }
 

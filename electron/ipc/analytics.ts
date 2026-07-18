@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import Store from 'electron-store'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -11,8 +12,7 @@ function isSuperAdmin(user: Record<string, unknown>): boolean {
 }
 
 export function registerAnalyticsHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('analytics:salesSummary', (_e, filters: Record<string, unknown> = {}) => {
-    try {
+  safeHandle(ipcMain, 'analytics:salesSummary', (_e, filters: Record<string, unknown> = {}) => {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const superAdmin = isSuperAdmin(user)
@@ -48,11 +48,9 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
           `).all(dateFrom, dateTo)
 
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('analytics:revenue', (_e, filters: Record<string, unknown> = {}) => {
-    try {
+  safeHandle(ipcMain, 'analytics:revenue', (_e, filters: Record<string, unknown> = {}) => {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const superAdmin = isSuperAdmin(user)
@@ -78,14 +76,12 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
         : db.prepare(`SELECT ROUND(SUM(outstanding_due),2) as total FROM customers`).get()
 
       return { success: true, data: { today, month, outstanding } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Net profit (sell price − buy price, i.e. sales − COGS) and installment
   // totals for the selected date range, so Analytics can show profit rather
   // than just raw sales revenue.
-  ipcMain.handle('analytics:profitSummary', (_e, filters: Record<string, unknown> = {}) => {
-    try {
+  safeHandle(ipcMain, 'analytics:profitSummary', (_e, filters: Record<string, unknown> = {}) => {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const superAdmin = isSuperAdmin(user)
@@ -146,11 +142,9 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
           installment_pending: installmentPending.pending_total,
         },
       }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('analytics:topProducts', (_e, filters: Record<string, unknown> = {}) => {
-    try {
+  safeHandle(ipcMain, 'analytics:topProducts', (_e, filters: Record<string, unknown> = {}) => {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const superAdmin = isSuperAdmin(user)
@@ -183,11 +177,9 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
           `).all(limit)
 
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('analytics:branchPerformance', (_e, filters: Record<string, unknown> = {}) => {
-    try {
+  safeHandle(ipcMain, 'analytics:branchPerformance', (_e, filters: Record<string, unknown> = {}) => {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const superAdmin = isSuperAdmin(user)
@@ -217,11 +209,9 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
             ORDER BY total_revenue DESC
           `).all()
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('analytics:dailyReport', (_e, date: string) => {
-    try {
+  safeHandle(ipcMain, 'analytics:dailyReport', (_e, date: string) => {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const branchId = user?.branch_id || 'b1111111-1111-4111-8111-111111111111'
@@ -241,6 +231,5 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
       `).all(branchId, date)
 
       return { success: true, data: { summary, byMethod } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 }

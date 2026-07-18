@@ -8,6 +8,7 @@ import Store from 'electron-store'
 import fs from 'fs'
 import { insertStockMovement } from '../services/stockMovement'
 import { createNotification } from './notifications'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -96,9 +97,8 @@ function auditTransferAction(
 }
 
 export function registerStockHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('stocks:list', (_e, branchId?: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:list', (_e, branchId?: string) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const bid = branchId || user?.branch_id || 'b1111111-1111-4111-8111-111111111111'
       const rows = db.prepare(`
@@ -125,12 +125,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ORDER BY p.name
       `).all(bid, bid, bid)
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:lowStock', (_e, branchId?: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:lowStock', (_e, branchId?: string) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const bid = branchId || user?.branch_id || 'b1111111-1111-4111-8111-111111111111'
       const rows = db.prepare(`
@@ -154,23 +152,19 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ORDER BY COALESCE(SUM(COALESCE(s.quantity, 0)), 0) ASC, p.name
       `).all(bid, bid, bid)
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:get', (_e, productId: string) => {
-    try {
-      const db = getDb()
-      const user = store.get('auth_user') as Record<string, unknown>
-      const row = db.prepare(`
-        SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
-      `).get(productId, user?.branch_id || 'b1111111-1111-4111-8111-111111111111')
-      return { success: true, data: row }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'stocks:get', (_e, productId: string) => {
+    const db = getDb()
+    const user = store.get('auth_user') as Record<string, unknown>
+    const row = db.prepare(`
+      SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
+    `).get(productId, user?.branch_id || 'b1111111-1111-4111-8111-111111111111')
+    return { success: true, data: row }
   })
 
-  ipcMain.handle('stocks:adjust', async (_e, payload) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:adjust', async (_e, payload) => {
+    const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
 
@@ -210,7 +204,6 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       await enqueuSync('stocks', `${product_id}-${branch_id}`, 'UPDATE', payload)
       if (movement) await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Ad-hoc "correct this stock number" action (InventoryPage's manual adjust
@@ -218,12 +211,11 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   // form save — that path must stay ungated). Non-admins must supply an
   // edit_request_id from an approved editRequests row; it's re-validated and
   // consumed inside this same transaction so there's no check-then-use race.
-  ipcMain.handle('stocks:adjustCorrection', async (_e, payload: {
+  safeHandle(ipcMain, 'stocks:adjustCorrection', async (_e, payload: {
     product_id: string; branch_id: string; warehouse_id?: string
     quantity: number; reason: string; edit_request_id?: string
   }) => {
-    try {
-      const db = getDb()
+    const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
       const isAdmin = Boolean(currentPerms().all)
@@ -286,12 +278,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         await enqueuSync('edit_requests', payload.edit_request_id, 'UPDATE', { id: payload.edit_request_id, status: 'consumed' })
       }
       return { success: true }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:transfer', async (_e, payload) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:transfer', async (_e, payload) => {
+    const db = getDb()
       const id = crypto.randomUUID()
       const user = store.get('auth_user') as Record<string, unknown>
       const transferNumber = `TRF-${Date.now().toString(36).toUpperCase()}`
@@ -337,12 +327,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       )
       await enqueuSync('stock_transfers', id, 'INSERT', record)
       return { success: true, data: { id, transfer_number: transferNumber } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:listTransfers', (_e, filters: Record<string, unknown> = {}) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:listTransfers', (_e, filters: Record<string, unknown> = {}) => {
+    const db = getDb()
       let sql = `
         SELECT st.*, p.name as product_name, p.sku,
                p.barcode, p.unit,
@@ -366,12 +354,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       sql += ' ORDER BY st.initiated_at DESC LIMIT 200'
       const rows = db.prepare(sql).all(...params)
       return { success: true, data: rows }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:getTransfer', (_e, id: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:getTransfer', (_e, id: string) => {
+    const db = getDb()
       const transfer = db.prepare(`
         SELECT st.*, p.name as product_name, p.sku, p.barcode, p.unit,
                fb.name as from_branch_name, fb.address as from_branch_address,
@@ -418,12 +404,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ORDER BY h.created_at DESC
       `).all(id)
       return { success: true, data: { ...transfer, printLogs, receiveLogs, mismatches, history } }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:logTransferPrint', async (_e, id: string, payload: Record<string, unknown> = {}) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:logTransferPrint', async (_e, id: string, payload: Record<string, unknown> = {}) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!transfer) throw new Error('Transfer not found')
@@ -448,12 +432,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       })()
       await enqueuSync('stock_transfers', id, 'UPDATE', { id, print_count: copyNo })
       return { success: true, data: log }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:movements', (_e, filters: Record<string, unknown> = {}) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:movements', (_e, filters: Record<string, unknown> = {}) => {
+    const db = getDb()
       let sql = `
         SELECT sm.*, p.name AS product_name, p.sku,
                fb.name AS from_branch_name, tb.name AS to_branch_name,
@@ -480,12 +462,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (filters.movement_type) { sql += ' AND sm.movement_type = ?'; params.push(filters.movement_type) }
       sql += ' ORDER BY sm.created_at DESC LIMIT 1000'
       return { success: true, data: db.prepare(sql).all(...params) }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:availability', (_e, productId: string) => {
-    try {
-      const rows = getDb().prepare(`
+  safeHandle(ipcMain, 'stocks:availability', (_e, productId: string) => {
+    const rows = getDb().prepare(`
         SELECT
           COALESCE(s.id, '') AS id,
           p.id AS product_id,
@@ -504,12 +484,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ORDER BY available_quantity DESC, b.name
       `).all(productId)
       return { success: true, data: rows }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:updateTransfer', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:updateTransfer', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!transfer) throw new Error('Transfer not found')
@@ -807,13 +785,11 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       )
 
       return { success: true }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
   // Full handover timeline for one transfer (who did what, when) — read the audit trail
-  ipcMain.handle('stocks:transferHistory', (_e, transferId: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:transferHistory', (_e, transferId: string) => {
+    const db = getDb()
       const rows = db.prepare(`
         SELECT h.id, h.status, h.notes, h.quantity, h.created_at,
                u.name  AS actor_name,
@@ -827,13 +803,11 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ORDER BY h.created_at ASC, h.id ASC
       `).all(transferId)
       return { success: true, data: rows }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
   // Track a single transfer by tracking number (or id) — full detail + live timeline
-  ipcMain.handle('stocks:trackTransfer', (_e, query: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:trackTransfer', (_e, query: string) => {
+    const db = getDb()
       const q = String(query || '').trim()
       if (!q) return { success: false, error: 'Enter a tracking number' }
       const t = db.prepare(`
@@ -860,12 +834,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         WHERE h.transfer_id = ? ORDER BY h.created_at ASC, h.id ASC
       `).all(t.id)
       return { success: true, data: { transfer: t, history } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stocks:reportMismatch', async (_e, id: string, payload: Record<string, unknown> = {}) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:reportMismatch', async (_e, id: string, payload: Record<string, unknown> = {}) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!transfer) throw new Error('Transfer not found')
@@ -921,13 +893,11 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         { event: 'mismatch_reported', transfer_id: id, transfer_number: transfer.transfer_number, status: 'under_admin_review' }
       )
       return { success: true, data: mismatch }
-    } catch (err: unknown) { return { success: false, error: (err as Error).message } }
   })
 
   // Multi-branch summary for admin overview
-  ipcMain.handle('stocks:branchSummary', () => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:branchSummary', () => {
+    const db = getDb()
       const rows = db.prepare(`
         SELECT
           b.id, b.name, b.code, b.address, b.is_active,
@@ -995,13 +965,11 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ORDER BY b.name
       `).all()
       return { success: true, data: rows }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
   // Branch stock with product details (low-stock items first)
-  ipcMain.handle('stocks:branchDetail', (_e, branchId: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stocks:branchDetail', (_e, branchId: string) => {
+    const db = getDb()
       const rows = db.prepare(`
         SELECT
           MIN(s.id) AS id,
@@ -1032,34 +1000,47 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           p.name
       `).all(branchId, branchId)
       return { success: true, data: rows }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stockCounts:list', () => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stockCounts:list', () => {
+    const db = getDb()
+      const isGlobal = Boolean(currentPerms().all)
       const branchId = currentBranchId()
-      const rows = db.prepare(`
-        SELECT scs.*, b.name as branch_name, w.name as warehouse_name,
-          COUNT(sci.id) as item_count,
-          SUM(CASE WHEN sci.counted_qty IS NOT NULL AND sci.counted_qty != sci.system_qty THEN 1 ELSE 0 END) as variance_count
-        FROM stock_count_sessions scs
-        LEFT JOIN branches b ON b.id = scs.branch_id
-        LEFT JOIN warehouses w ON w.id = scs.warehouse_id
-        LEFT JOIN stock_count_items sci ON sci.session_id = scs.id
-        WHERE scs.branch_id = ?
-        GROUP BY scs.id
-        ORDER BY scs.created_at DESC
-      `).all(branchId)
+      const rows = isGlobal
+        ? db.prepare(`
+            SELECT scs.*, b.name as branch_name, w.name as warehouse_name,
+              COUNT(sci.id) as item_count,
+              SUM(CASE WHEN sci.counted_qty IS NOT NULL AND sci.counted_qty != sci.system_qty THEN 1 ELSE 0 END) as variance_count
+            FROM stock_count_sessions scs
+            LEFT JOIN branches b ON b.id = scs.branch_id
+            LEFT JOIN warehouses w ON w.id = scs.warehouse_id
+            LEFT JOIN stock_count_items sci ON sci.session_id = scs.id
+            GROUP BY scs.id
+            ORDER BY scs.created_at DESC
+          `).all()
+        : db.prepare(`
+            SELECT scs.*, b.name as branch_name, w.name as warehouse_name,
+              COUNT(sci.id) as item_count,
+              SUM(CASE WHEN sci.counted_qty IS NOT NULL AND sci.counted_qty != sci.system_qty THEN 1 ELSE 0 END) as variance_count
+            FROM stock_count_sessions scs
+            LEFT JOIN branches b ON b.id = scs.branch_id
+            LEFT JOIN warehouses w ON w.id = scs.warehouse_id
+            LEFT JOIN stock_count_items sci ON sci.session_id = scs.id
+            WHERE scs.branch_id = ?
+            GROUP BY scs.id
+            ORDER BY scs.created_at DESC
+          `).all(branchId)
       return { success: true, data: rows }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stockCounts:create', async (_e, payload: Record<string, unknown> = {}) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stockCounts:create', async (_e, payload: Record<string, unknown> = {}) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
-      const branchId = currentBranchId()
+      const isGlobal = Boolean(currentPerms().all)
+      // Non-admins are always scoped to their own branch — an explicit
+      // branch_id from a non-admin caller is ignored. Admins may target
+      // any branch, defaulting to their own if none is given.
+      const branchId = isGlobal && payload.branch_id ? String(payload.branch_id) : currentBranchId()
       const id = crypto.randomUUID()
       db.transaction(() => {
         db.prepare(`
@@ -1084,12 +1065,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       })()
       await enqueuSync('stock_count_sessions', id, 'INSERT', { id, branch_id: branchId, notes: payload.notes || null })
       return { success: true, data: { id } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stockCounts:get', (_e, id: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stockCounts:get', (_e, id: string) => {
+    const db = getDb()
       const session = db.prepare(`
         SELECT scs.*, b.name as branch_name, w.name as warehouse_name
         FROM stock_count_sessions scs
@@ -1106,24 +1085,20 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ORDER BY p.name
       `).all(id)
       return { success: true, data: { ...session, items } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stockCounts:updateItem', async (_e, sessionId: string, itemId: string, countedQty: number) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stockCounts:updateItem', async (_e, sessionId: string, itemId: string, countedQty: number) => {
+    const db = getDb()
       db.prepare(`
         UPDATE stock_count_items SET counted_qty = ?, updated_at = datetime('now')
         WHERE id = ? AND session_id = ?
       `).run(countedQty, itemId, sessionId)
       await enqueuSync('stock_count_items', itemId, 'UPDATE', { id: itemId, session_id: sessionId, counted_qty: countedQty })
       return { success: true }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stockCounts:finalize', async (_e, id: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'stockCounts:finalize', async (_e, id: string) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const session = db.prepare('SELECT * FROM stock_count_sessions WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!session) return { success: false, error: 'Stock count not found' }
@@ -1170,20 +1145,16 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       }
       return { success: true }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stockCounts:cancel', async (_e, id: string) => {
-    try {
-      getDb().prepare(`UPDATE stock_count_sessions SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
-      await enqueuSync('stock_count_sessions', id, 'UPDATE', { id, status: 'cancelled' })
-      return { success: true }
-    } catch (err) { return { success: false, error: (err as Error).message } }
+  safeHandle(ipcMain, 'stockCounts:cancel', async (_e, id: string) => {
+    getDb().prepare(`UPDATE stock_count_sessions SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
+    await enqueuSync('stock_count_sessions', id, 'UPDATE', { id, status: 'cancelled' })
+    return { success: true }
   })
 
-  ipcMain.handle('stockCounts:exportCsv', async (_e, sessionId: string) => {
-    try {
-      const result = await dialog.showSaveDialog({
+  safeHandle(ipcMain, 'stockCounts:exportCsv', async (_e, sessionId: string) => {
+    const result = await dialog.showSaveDialog({
         title: 'Export Stock Count CSV',
         defaultPath: `stock-count-${new Date().toISOString().slice(0, 10)}.csv`,
         filters: [{ name: 'CSV', extensions: ['csv'] }]
@@ -1202,12 +1173,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const csv = [headers.join(','), ...rows.map(row => headers.map(h => csvCell(row[h])).join(','))].join('\r\n')
       fs.writeFileSync(result.filePath, csv, 'utf8')
       return { success: true, data: { exported: rows.length, path: result.filePath } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
-  ipcMain.handle('stockCounts:importCsv', async (_e, sessionId: string) => {
-    try {
-      const { filePaths } = await dialog.showOpenDialog({
+  safeHandle(ipcMain, 'stockCounts:importCsv', async (_e, sessionId: string) => {
+    const { filePaths } = await dialog.showOpenDialog({
         title: 'Import Stock Count CSV',
         filters: [{ name: 'CSV', extensions: ['csv'] }],
         properties: ['openFile']
@@ -1250,6 +1219,5 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         }
       })()
       return { success: true, data: { imported } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 }

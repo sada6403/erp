@@ -24,15 +24,23 @@ export default function ExpensesPage() {
 
   const load = async () => {
     setLoading(true)
-    const [e, c, s] = await Promise.all([
-      window.api.admin.expenses.list(Object.fromEntries(Object.entries(filters).filter(([,v]) => v))),
-      window.api.admin.expenseCategories.list(),
-      window.api.admin.suppliers.list(),
-    ])
-    if (e.success) setExpenses(e.data as Expense[])
-    if (c.success) setCategories(c.data as ExpCat[])
-    if (s.success) setSuppliers(s.data as Record<string,unknown>[])
-    setLoading(false)
+    try {
+      const [e, c, s] = await Promise.all([
+        window.api.admin.expenses.list(Object.fromEntries(Object.entries(filters).filter(([,v]) => v))),
+        window.api.admin.expenseCategories.list(),
+        window.api.admin.suppliers.list(),
+      ])
+      if (e.success) setExpenses(e.data as Expense[])
+      else toast.error(e.error || 'Failed to load expenses')
+      if (c.success) setCategories(c.data as ExpCat[])
+      else toast.error(c.error || 'Failed to load expense categories')
+      if (s.success) setSuppliers(s.data as Record<string,unknown>[])
+      else toast.error(s.error || 'Failed to load suppliers')
+    } catch {
+      toast.error('Failed to load expenses')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -162,9 +170,10 @@ function ExpenseForm({ categories, suppliers, onClose, onSave, onCategoryCreated
   const [users, setUsers] = useState<Record<string,unknown>[]>([])
 
   useEffect(() => {
-    window.api.admin.users.list().then((r: { success: boolean; data: unknown }) => {
+    window.api.admin.users.list().then((r: { success: boolean; data: unknown; error?: string }) => {
       if (r.success) setUsers(r.data as Record<string,unknown>[])
-    })
+      else toast.error(r.error || 'Failed to load users')
+    }).catch(() => toast.error('Failed to load users'))
   }, [])
 
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -172,38 +181,47 @@ function ExpenseForm({ categories, suppliers, onClose, onSave, onCategoryCreated
 
   const addCategory = async () => {
     if (!newCatName.trim()) return
-    const res = await window.api.admin.expenseCategories.create({ name: newCatName.trim() })
-    if (res.success) {
-      const id = (res.data as {id: string}).id
-      onCategoryCreated(id, newCatName.trim())
-      setForm(p => ({...p, category_id: id}))
-      setShowAddCat(false)
-      setNewCatName('')
-      toast.success('Category created')
-    } else toast.error(String(res.error))
+    try {
+      const res = await window.api.admin.expenseCategories.create({ name: newCatName.trim() })
+      if (res.success) {
+        const id = (res.data as {id: string}).id
+        onCategoryCreated(id, newCatName.trim())
+        setForm(p => ({...p, category_id: id}))
+        setShowAddCat(false)
+        setNewCatName('')
+        toast.success('Category created')
+      } else toast.error(String(res.error))
+    } catch {
+      toast.error('Failed to create category')
+    }
   }
 
   const save = async () => {
     if (!form.category_id) { toast.error('Expense category is required'); return }
     if (!form.amount)      { toast.error('Expense amount is required');    return }
     setSaving(true)
-    const paidAmt = Number(form.payment_amount) || 0
-    const res = await window.api.admin.expenses.create({
-      category_id:    form.category_id,
-      supplier_id:    form.supplier_id || null,
-      amount:         Number(form.amount),
-      paid_amount:    paidAmt,
-      payment_method: form.payment_method || null,
-      payment_date:   form.payment_date || null,
-      payment_due:    form.payment_due || null,
-      paid_by:        form.paid_by || null,
-      description:    form.description || null,
-      notes:          form.notes || null,
-      created_by:     user?.id || null,
-    })
-    setSaving(false)
-    if (res.success) { toast.success('Expense recorded'); onSave() }
-    else toast.error(String(res.error))
+    try {
+      const paidAmt = Number(form.payment_amount) || 0
+      const res = await window.api.admin.expenses.create({
+        category_id:    form.category_id,
+        supplier_id:    form.supplier_id || null,
+        amount:         Number(form.amount),
+        paid_amount:    paidAmt,
+        payment_method: form.payment_method || null,
+        payment_date:   form.payment_date || null,
+        payment_due:    form.payment_due || null,
+        paid_by:        form.paid_by || null,
+        description:    form.description || null,
+        notes:          form.notes || null,
+        created_by:     user?.id || null,
+      })
+      if (res.success) { toast.success('Expense recorded'); onSave() }
+      else toast.error(String(res.error))
+    } catch {
+      toast.error('Failed to record expense')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (

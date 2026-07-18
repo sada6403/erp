@@ -31,56 +31,79 @@ export default function BackupPage() {
 
   const load = async () => {
     setLoading(true)
-    const [listRes, statsRes] = await Promise.all([
-      window.api.backup.list() as Promise<{ success: boolean; data: BackupInfo[] }>,
-      window.api.backup.getStats() as Promise<{ success: boolean; data: BackupStats }>,
-    ])
-    if (listRes.success) setBackups(listRes.data)
-    if (statsRes.success) setStats(statsRes.data)
-    setLoading(false)
+    try {
+      const [listRes, statsRes] = await Promise.all([
+        window.api.backup.list() as Promise<{ success: boolean; data: BackupInfo[] }>,
+        window.api.backup.getStats() as Promise<{ success: boolean; data: BackupStats }>,
+      ])
+      if (listRes.success) setBackups(listRes.data)
+      if (statsRes.success) setStats(statsRes.data)
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to load backups')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
 
   const runBackup = async () => {
     setRunning(true)
-    const res = await window.api.backup.run() as {
-      success: boolean; filename?: string; error?: string
-      s3Url?: string; s3Error?: string
-    }
-    setRunning(false)
-    if (res.success) {
-      if (res.s3Url) {
-        toast.success(`Backup saved & uploaded to S3 ✓`)
-      } else if (res.s3Error) {
-        toast.success(`Local backup saved: ${res.filename}`)
-        toast.error(`S3 upload failed: ${res.s3Error}`, { duration: 6000 })
-      } else {
-        toast.success(`Backup saved: ${res.filename}`)
+    try {
+      const res = await window.api.backup.run() as {
+        success: boolean; filename?: string; error?: string
+        s3Url?: string; s3Error?: string
       }
-      load()
-    } else {
-      toast.error(`Backup failed: ${res.error}`)
+      if (res.success) {
+        if (res.s3Url) {
+          toast.success(`Backup saved & uploaded to S3 ✓`)
+        } else if (res.s3Error) {
+          toast.success(`Local backup saved: ${res.filename}`)
+          toast.error(`S3 upload failed: ${res.s3Error}`, { duration: 6000 })
+        } else {
+          toast.success(`Backup saved: ${res.filename}`)
+        }
+        load()
+      } else {
+        toast.error(`Backup failed: ${res.error}`)
+      }
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Backup failed')
+    } finally {
+      setRunning(false)
     }
   }
 
   const deleteBackup = async (b: BackupInfo) => {
     if (!confirm(`Delete "${b.filename}"?`)) return
     setDeleting(b.filepath)
-    const res = await window.api.backup.delete(b.filepath) as { success: boolean; error?: string }
-    setDeleting(null)
-    if (res.success) { toast.success('Backup deleted'); load() }
-    else toast.error(res.error || 'Delete failed')
+    try {
+      const res = await window.api.backup.delete(b.filepath) as { success: boolean; error?: string }
+      if (res.success) { toast.success('Backup deleted'); load() }
+      else toast.error(res.error || 'Delete failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Delete failed')
+    } finally {
+      setDeleting(null)
+    }
   }
 
   const exportBackup = async (b: BackupInfo) => {
-    const res = await window.api.backup.export(b.filepath) as { success: boolean; error?: string }
-    if (res.success) toast.success('Backup exported')
-    else if (res.error !== 'Cancelled') toast.error(res.error || 'Export failed')
+    try {
+      const res = await window.api.backup.export(b.filepath) as { success: boolean; error?: string }
+      if (res.success) toast.success('Backup exported')
+      else if (res.error !== 'Cancelled') toast.error(res.error || 'Export failed')
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Export failed')
+    }
   }
 
   const openFolder = async () => {
-    await window.api.backup.openFolder()
+    try {
+      await window.api.backup.openFolder()
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to open folder')
+    }
   }
 
   return (

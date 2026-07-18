@@ -3,12 +3,12 @@ import { getDb } from '../database'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
+import { safeHandle } from './ipcHandler'
 
 interface TableStat { name: string; count: number }
 
 export function registerMonitorHandlers(): void {
-  ipcMain.handle('monitor:health', () => {
-    try {
+  safeHandle(ipcMain, 'monitor:health', () => {
       const db = getDb()
       const userDataPath = app.getPath('userData')
       const dbPath = path.join(userDataPath, 'pos-erp.db')
@@ -88,29 +88,18 @@ export function registerMonitorHandlers(): void {
           },
         }
       }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
   })
 
-  ipcMain.handle('monitor:vacuum', () => {
-    try {
-      const db = getDb()
-      db.exec('VACUUM')
-      return { success: true }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
+  safeHandle(ipcMain, 'monitor:vacuum', () => {
+    const db = getDb()
+    db.exec('VACUUM')
+    return { success: true }
   })
 
-  ipcMain.handle('monitor:integrity', () => {
-    try {
-      const db = getDb()
-      const result = db.prepare(`PRAGMA integrity_check`).all() as { integrity_check: string }[]
-      const passed = result.length === 1 && result[0].integrity_check === 'ok'
-      return { success: true, data: { passed, details: result.map(r => r.integrity_check) } }
-    } catch (err) {
-      return { success: false, error: String(err) }
-    }
+  safeHandle(ipcMain, 'monitor:integrity', () => {
+    const db = getDb()
+    const result = db.prepare(`PRAGMA integrity_check`).all() as { integrity_check: string }[]
+    const passed = result.length === 1 && result[0].integrity_check === 'ok'
+    return { success: true, data: { passed, details: result.map(r => r.integrity_check) } }
   })
 }

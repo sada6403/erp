@@ -3,9 +3,16 @@ import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import { Plus, ArrowLeft, CheckCircle, XCircle, ClipboardList, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/store/authStore'
 
 type Session = Record<string, unknown>
 type CountItem = Record<string, unknown>
+
+function getPerms(u: unknown): Record<string, unknown> {
+  const user = u as Record<string, unknown>
+  return (user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>
+    || user?.permissions as Record<string, unknown> || {}
+}
 
 export default function StockCountPage() {
   const [sessions, setSessions]       = useState<Session[]>([])
@@ -38,26 +45,44 @@ export default function StockCountPage() {
 
   const openSession = async (id: string) => {
     setDetailLoading(true)
-    const res = await window.api.stockCounts.get(id)
-    if (res.success) setActiveSession(res.data as Session & { items: CountItem[] })
-    setDetailLoading(false)
+    try {
+      const res = await window.api.stockCounts.get(id)
+      if (res.success) setActiveSession(res.data as Session & { items: CountItem[] })
+      else toast.error(res.error || 'Failed to load session')
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to load session')
+    } finally {
+      setDetailLoading(false)
+    }
   }
 
   const handleFinalize = async (id: string) => {
-    const res = await window.api.stockCounts.finalize(id)
-    if (res.success) {
-      toast.success('Stock count finalized — adjustments applied')
-      setActiveSession(null)
-      load()
+    try {
+      const res = await window.api.stockCounts.finalize(id)
+      if (res.success) {
+        toast.success('Stock count finalized — adjustments applied')
+        setActiveSession(null)
+        load()
+      } else {
+        toast.error(res.error || 'Failed to finalize')
+      }
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to finalize')
     }
   }
 
   const handleCancel = async (id: string) => {
-    const res = await window.api.stockCounts.cancel(id)
-    if (res.success) {
-      toast.success('Stock count cancelled')
-      setActiveSession(null)
-      load()
+    try {
+      const res = await window.api.stockCounts.cancel(id)
+      if (res.success) {
+        toast.success('Stock count cancelled')
+        setActiveSession(null)
+        load()
+      } else {
+        toast.error(res.error || 'Failed to cancel')
+      }
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to cancel')
     }
   }
 
@@ -334,18 +359,46 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => void }) {
+  const { user } = useAuthStore()
+  const perms = getPerms(user)
+  const isAdmin = Boolean(perms.all)
+  const u = user as unknown as Record<string, unknown>
+  const myBranchId = String(u?.branch_id ?? '')
+
   const [notes, setNotes] = useState('')
+  const [branches, setBranches] = useState<Record<string, unknown>[]>([])
+  const [branchId, setBranchId] = useState('')
   const [saving, setSaving] = useState(false)
 
+  useEffect(() => {
+    if (!isAdmin) return
+    window.api.admin.branches.list().then((res: { success: boolean; data?: Record<string, unknown>[] }) => {
+      if (res.success) {
+        setBranches(res.data || [])
+        setBranchId(myBranchId || (res.data?.[0]?.id as string) || '')
+      } else {
+        toast.error('Failed to load branches')
+      }
+    }).catch((err: Error) => toast.error(err.message || 'Failed to load branches'))
+  }, [isAdmin])
+
+  const myBranchName = String((user as unknown as { branch?: { name?: string } })?.branch?.name || 'your branch')
+
   const save = async () => {
+    if (isAdmin && !branchId) { toast.error('Select a branch'); return }
     setSaving(true)
-    const res = await window.api.stockCounts.create({ notes })
-    setSaving(false)
-    if (res.success) {
-      toast.success('Stock count session created')
-      onSave()
-    } else {
-      toast.error('Failed to create session')
+    try {
+      const res = await window.api.stockCounts.create({ notes, branch_id: isAdmin ? branchId : undefined })
+      if (res.success) {
+        toast.success('Stock count session created')
+        onSave()
+      } else {
+        toast.error(res.error || 'Failed to create session')
+      }
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to create session')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -366,6 +419,18 @@ function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => v
         <p className="text-sm text-slate-400">
           A new count session will be created with all current products. Enter the physical count for each item, then finalize to apply variances.
         </p>
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Branch</label>
+          {isAdmin ? (
+            <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input">
+              {branches.map(b => (
+                <option key={b.id as string} value={b.id as string}>{b.name as string}</option>
+              ))}
+            </select>
+          ) : (
+            <p className="text-sm text-slate-300">{myBranchName}</p>
+          )}
+        </div>
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Notes (optional)</label>
           <input

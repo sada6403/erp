@@ -47,14 +47,21 @@ export default function UsersPage() {
   const callerBranchId = currentUser?.branch?.id
 
   const load = async () => {
-    const [u, r, b] = await Promise.all([
-      window.api.admin.users.list(),
-      window.api.admin.roles.list(),
-      window.api.admin.branches.list(),
-    ])
-    if (u.success) setUsers(u.data as Record<string,unknown>[])
-    if (r.success) setRoles(r.data as Role[])
-    if (b.success) setBranches(b.data as Record<string,unknown>[])
+    try {
+      const [u, r, b] = await Promise.all([
+        window.api.admin.users.list(),
+        window.api.admin.roles.list(),
+        window.api.admin.branches.list(),
+      ])
+      if (u.success) setUsers(u.data as Record<string,unknown>[])
+      else toast.error(u.error || 'Failed to load users')
+      if (r.success) setRoles(r.data as Role[])
+      else toast.error(r.error || 'Failed to load roles')
+      if (b.success) setBranches(b.data as Record<string,unknown>[])
+      else toast.error(b.error || 'Failed to load branches')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load users/roles/branches')
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -85,44 +92,65 @@ export default function UsersPage() {
       toast.error('Cannot deactivate admin accounts'); return
     }
     if (!confirm(`Deactivate user "${u.name}"? They will not be able to login until re-activated.`)) return
-    const res = await window.api.admin.users.delete(u.id as string)
-    if (res.success) { toast.success('User deactivated'); load() }
-    else toast.error(res.error || 'Failed')
+    try {
+      const res = await window.api.admin.users.delete(u.id as string)
+      if (res.success) { toast.success('User deactivated'); load() }
+      else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to deactivate user')
+    }
   }
 
   const toggleActive = async (u: Record<string,unknown>, active: boolean) => {
     if (u.id === SUPER_ADMIN_ID) { toast.error('Cannot change super admin status'); return }
-    const res = await window.api.admin.users.toggleActive(u.id as string, active)
-    if (res.success) { toast.success(active ? `${u.name} enabled` : `${u.name} disabled`); load() }
-    else toast.error(res.error || 'Failed')
+    try {
+      const res = await window.api.admin.users.toggleActive(u.id as string, active)
+      if (res.success) { toast.success(active ? `${u.name} enabled` : `${u.name} disabled`); load() }
+      else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update user status')
+    }
   }
 
   const downloadUserTemplate = async () => {
-    const res = await window.api.admin.users.downloadTemplate()
-    if (res.success) toast.success('Template saved')
-    else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+    try {
+      const res = await window.api.admin.users.downloadTemplate()
+      if (res.success) toast.success('Template saved')
+      else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save template')
+    }
   }
 
   const bulkImportUsers = async () => {
     setImporting(true)
-    const res = await window.api.admin.users.importExcel()
-    setImporting(false)
-    if (res.cancelled) return
-    if (!res.success) { toast.error(res.error || 'Import failed'); return }
-    if (res.imported) toast.success(`Imported ${res.imported} employee(s)`)
-    if (res.skipped) {
-      toast.error(`Skipped ${res.skipped} row(s)${res.errors?.[0] ? ` — e.g. ${res.errors[0]}` : ''}`, { duration: 6000 })
+    try {
+      const res = await window.api.admin.users.importExcel()
+      if (res.cancelled) return
+      if (!res.success) { toast.error(res.error || 'Import failed'); return }
+      if (res.imported) toast.success(`Imported ${res.imported} employee(s)`)
+      if (res.skipped) {
+        toast.error(`Skipped ${res.skipped} row(s)${res.errors?.[0] ? ` — e.g. ${res.errors[0]}` : ''}`, { duration: 6000 })
+      }
+      if (res.imported) load()
+    } catch (e: any) {
+      toast.error(e?.message || 'Import failed')
+    } finally {
+      setImporting(false)
     }
-    if (res.imported) load()
   }
 
   const deleteRole = async (role: Role) => {
     if (role.name === 'Company Admin') { toast.error('Cannot delete Company Admin role'); return }
     if ((roleUsage[role.id] || 0) > 0) { toast.error('Role is assigned to users'); return }
     if (!confirm(`Delete role "${role.name}"?`)) return
-    const res = await window.api.admin.roles.delete(role.id)
-    if (res.success) { toast.success('Role deleted'); load() }
-    else toast.error(res.error || 'Failed')
+    try {
+      const res = await window.api.admin.roles.delete(role.id)
+      if (res.success) { toast.success('Role deleted'); load() }
+      else toast.error(res.error || 'Failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete role')
+    }
   }
 
   return (
@@ -619,15 +647,20 @@ function UserForm({
       payload.password = crypto.randomUUID()
     }
 
-    const res = user
-      ? await window.api.admin.users.update(user.id as string, payload)
-      : await window.api.admin.users.create(payload)
-    setSaving(false)
-    if (res.success) {
-      toast.success(user ? 'User updated' : 'User created')
-      onSave()
-    } else {
-      toast.error(String(res.error || 'Save failed'))
+    try {
+      const res = user
+        ? await window.api.admin.users.update(user.id as string, payload)
+        : await window.api.admin.users.create(payload)
+      if (res.success) {
+        toast.success(user ? 'User updated' : 'User created')
+        onSave()
+      } else {
+        toast.error(String(res.error || 'Save failed'))
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Save failed')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -784,12 +817,17 @@ function RoleForm({ role, onClose, onSave }: { role: Role | null; onClose: () =>
     const cleanPermissions = Object.fromEntries(Object.entries(permissions).filter(([, v]) => v))
     setSaving(true)
     const payload = { name: name.trim(), permissions: cleanPermissions }
-    const res = role
-      ? await window.api.admin.roles.update(role.id, payload)
-      : await window.api.admin.roles.create(payload)
-    setSaving(false)
-    if (res.success) { toast.success(role ? 'Role updated' : 'Role created'); onSave() }
-    else toast.error(String(res.error || 'Save failed'))
+    try {
+      const res = role
+        ? await window.api.admin.roles.update(role.id, payload)
+        : await window.api.admin.roles.create(payload)
+      if (res.success) { toast.success(role ? 'Role updated' : 'Role created'); onSave() }
+      else toast.error(String(res.error || 'Save failed'))
+    } catch (e: any) {
+      toast.error(e?.message || 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -882,27 +920,38 @@ function UserActionsModal({
     if (newPassword.length < 8) { toast.error('Password must be at least 8 characters'); return }
     if (newPassword !== confirmPassword) { toast.error('Passwords do not match'); return }
     setSaving(true)
-    const res = await window.api.admin.users.resetPassword(user.id as string, newPassword)
-    if (res?.success) {
-      if (forceChange) {
-        await window.api.admin.users.forcePasswordChange(user.id as string, true)
+    try {
+      const res = await window.api.admin.users.resetPassword(user.id as string, newPassword)
+      if (res?.success) {
+        if (forceChange) {
+          const fcRes = await window.api.admin.users.forcePasswordChange(user.id as string, true)
+          if (!fcRes?.success) toast.error(fcRes?.error || 'Password reset, but failed to set force-change flag')
+        }
+        toast.success(`Password reset for ${user.name}${forceChange ? ' — they must change it on next login' : ''}`)
+        onDone()
+      } else {
+        toast.error(res?.error || 'Failed to reset password')
+        setSaving(false)
       }
-      toast.success(`Password reset for ${user.name}${forceChange ? ' — they must change it on next login' : ''}`)
-      onDone()
-    } else {
-      toast.error(res?.error || 'Failed to reset password')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to reset password')
       setSaving(false)
     }
   }
 
   const toggleForceChange = async (force: boolean) => {
     setSaving(true)
-    const res = await window.api.admin.users.forcePasswordChange(user.id as string, force)
-    if (res?.success) {
-      toast.success(force ? 'User must change password on next login' : 'Force password change removed')
-      onDone()
-    } else {
-      toast.error(res?.error || 'Failed')
+    try {
+      const res = await window.api.admin.users.forcePasswordChange(user.id as string, force)
+      if (res?.success) {
+        toast.success(force ? 'User must change password on next login' : 'Force password change removed')
+        onDone()
+      } else {
+        toast.error(res?.error || 'Failed')
+        setSaving(false)
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update force-change flag')
       setSaving(false)
     }
   }
@@ -1026,10 +1075,15 @@ function UserActionsModal({
                   <button
                     onClick={async () => {
                       setSaving(true)
-                      const active = !Boolean(user.is_active)
-                      const res = await window.api.admin.users.toggleActive(user.id as string, active)
-                      if (res?.success) { toast.success(active ? 'Account enabled' : 'Account disabled'); onDone() }
-                      else { toast.error(res?.error || 'Failed'); setSaving(false) }
+                      try {
+                        const active = !Boolean(user.is_active)
+                        const res = await window.api.admin.users.toggleActive(user.id as string, active)
+                        if (res?.success) { toast.success(active ? 'Account enabled' : 'Account disabled'); onDone() }
+                        else { toast.error(res?.error || 'Failed'); setSaving(false) }
+                      } catch (e: any) {
+                        toast.error(e?.message || 'Failed to update account status')
+                        setSaving(false)
+                      }
                     }}
                     disabled={saving}
                     className={`px-3 py-1.5 rounded text-xs font-medium ${(user.is_active as number) ? 'bg-red-600/20 border border-red-600/30 text-red-300 hover:bg-red-600/30' : 'bg-green-600/20 border border-green-600/30 text-green-300 hover:bg-green-600/30'}`}
@@ -1063,13 +1117,18 @@ function ChangePinModal({ user, onClose, onDone }: {
     if (!/^\d{4,6}$/.test(pin)) { toast.error('PIN must be 4-6 digits'); return }
     if (pin !== confirmPin) { toast.error('PINs do not match'); return }
     setSaving(true)
-    const res = await window.api.admin.users.update(user.id as string, { pin })
-    setSaving(false)
-    if (res?.success) {
-      toast.success(`PIN updated for ${user.name}. It will work on all POS devices after sync.`)
-      onDone()
-    } else {
-      toast.error(String(res?.error || 'Failed to update PIN'))
+    try {
+      const res = await window.api.admin.users.update(user.id as string, { pin })
+      if (res?.success) {
+        toast.success(`PIN updated for ${user.name}. It will work on all POS devices after sync.`)
+        onDone()
+      } else {
+        toast.error(String(res?.error || 'Failed to update PIN'))
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to update PIN')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -1136,13 +1195,18 @@ function HardDeleteUserModal({ user, onClose, onDone }: {
   const submit = async () => {
     if (!canConfirm) return
     setLoading(true)
-    const res = await window.api.admin.users.hardDelete(user.id as string)
-    setLoading(false)
-    if (res.success) {
-      toast.success(`User "${user.name}" permanently deleted`)
-      onDone()
-    } else {
-      toast.error(res.error || 'Failed')
+    try {
+      const res = await window.api.admin.users.hardDelete(user.id as string)
+      if (res.success) {
+        toast.success(`User "${user.name}" permanently deleted`)
+        onDone()
+      } else {
+        toast.error(res.error || 'Failed')
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to delete user')
+    } finally {
+      setLoading(false)
     }
   }
 

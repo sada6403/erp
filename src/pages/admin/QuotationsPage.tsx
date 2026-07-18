@@ -17,8 +17,13 @@ export default function QuotationsPage() {
 
   const load = async () => {
     setLoading(true)
-    const res = await window.api.invoices.list({ bill_type: 'QUOTATION' })
-    if (res.success) setQuotes(res.data as Record<string, unknown>[])
+    try {
+      const res = await window.api.invoices.list({ bill_type: 'QUOTATION' })
+      if (res.success) setQuotes(res.data as Record<string, unknown>[])
+      else toast.error(String(res.error || 'Failed to load quotations'))
+    } catch (err) {
+      toast.error('Failed to load quotations: ' + String(err))
+    }
     setLoading(false)
   }
 
@@ -26,20 +31,28 @@ export default function QuotationsPage() {
 
   const handleConvert = async (id: string, invNum: string) => {
     if (!confirm(`Convert quotation ${invNum} to a retail invoice? Stock will be deducted.`)) return
-    const res = await window.api.invoices.convert(id)
-    if (res.success) {
-      toast.success(`Quotation converted — Invoice ${(res.data as Record<string, unknown>).invoice_number}`)
-      load()
-    } else {
-      toast.error(String(res.error))
+    try {
+      const res = await window.api.invoices.convert(id)
+      if (res.success) {
+        toast.success(`Quotation converted — Invoice ${(res.data as Record<string, unknown>).invoice_number}`)
+        load()
+      } else {
+        toast.error(String(res.error))
+      }
+    } catch (err) {
+      toast.error('Failed to convert quotation: ' + String(err))
     }
   }
 
   const handleCancel = async (id: string) => {
     if (!confirm('Cancel this quotation?')) return
-    const res = await window.api.invoices.cancel(id)
-    if (res.success) { toast.success('Quotation cancelled'); load() }
-    else toast.error(String(res.error))
+    try {
+      const res = await window.api.invoices.cancel(id)
+      if (res.success) { toast.success('Quotation cancelled'); load() }
+      else toast.error(String(res.error))
+    } catch (err) {
+      toast.error('Failed to cancel quotation: ' + String(err))
+    }
   }
 
   const visible = quotes.filter(q => {

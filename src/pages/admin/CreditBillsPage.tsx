@@ -27,28 +27,42 @@ export default function CreditBillsPage() {
 
   const load = async () => {
     setLoading(true)
-    const res = await window.api.invoices.list({ bill_type: 'CREDIT' })
-    if (res.success) setBills(res.data as Invoice[])
-    setLoading(false)
+    try {
+      const res = await window.api.invoices.list({ bill_type: 'CREDIT' })
+      if (res.success) setBills(res.data as Invoice[])
+      else toast.error(String(res.error || 'Failed to load credit bills'))
+    } catch {
+      toast.error('Failed to load credit bills')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
 
   const handleApprove = async (invoice: Invoice) => {
-    const res = await window.api.invoices.approveCreditBill(String(invoice.id))
-    if (res.success) {
-      toast.success(`Credit bill ${invoice.invoice_number} approved`)
-      load()
-    } else {
-      toast.error(String(res.error))
+    try {
+      const res = await window.api.invoices.approveCreditBill(String(invoice.id))
+      if (res.success) {
+        toast.success(`Credit bill ${invoice.invoice_number} approved`)
+        load()
+      } else {
+        toast.error(String(res.error))
+      }
+    } catch {
+      toast.error('Failed to approve credit bill')
     }
   }
 
   const handleCancel = async (invoice: Invoice) => {
     if (!confirm(`Cancel credit bill ${invoice.invoice_number}? Stock will be restored.`)) return
-    const res = await window.api.invoices.cancel(String(invoice.id))
-    if (res.success) { toast.success('Credit bill cancelled'); load() }
-    else toast.error(String(res.error))
+    try {
+      const res = await window.api.invoices.cancel(String(invoice.id))
+      if (res.success) { toast.success('Credit bill cancelled'); load() }
+      else toast.error(String(res.error))
+    } catch {
+      toast.error('Failed to cancel credit bill')
+    }
   }
 
   const openPayment = (invoice: Invoice) => {
@@ -63,15 +77,19 @@ export default function CreditBillsPage() {
     if (!selected) return
     const amount = parseFloat(payAmount)
     if (!amount || amount <= 0) { toast.error('Enter a valid amount'); return }
-    const res = await window.api.invoices.addCreditPayment(String(selected.id), {
-      amount, payment_method: payMethod, notes: payNote
-    })
-    if (res.success) {
-      toast.success('Payment recorded')
-      setShowPayment(false)
-      load()
-    } else {
-      toast.error(String(res.error))
+    try {
+      const res = await window.api.invoices.addCreditPayment(String(selected.id), {
+        amount, payment_method: payMethod, notes: payNote
+      })
+      if (res.success) {
+        toast.success('Payment recorded')
+        setShowPayment(false)
+        load()
+      } else {
+        toast.error(String(res.error))
+      }
+    } catch {
+      toast.error('Failed to record payment')
     }
   }
 

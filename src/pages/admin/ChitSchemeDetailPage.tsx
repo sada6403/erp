@@ -27,42 +27,60 @@ export default function ChitSchemeDetailPage() {
   const load = async () => {
     if (!id) return
     setLoading(true)
-    const res = await window.api.chits.get(id)
-    if (res.success) {
-      setScheme(res.data.scheme)
-      setMembers(res.data.members)
-      setDraws(res.data.draws)
-      setSummary(res.data.contributionSummary)
-    } else {
-      toast.error(res.error || 'Failed to load chit scheme')
+    try {
+      const res = await window.api.chits.get(id)
+      if (res.success) {
+        setScheme(res.data.scheme)
+        setMembers(res.data.members)
+        setDraws(res.data.draws)
+        setSummary(res.data.contributionSummary)
+      } else {
+        toast.error(res.error || 'Failed to load chit scheme')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to load chit scheme')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => { load() }, [id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const downloadTemplate = async () => {
-    const res = await window.api.chits.members.downloadTemplate()
-    if (res.success) toast.success('Template saved')
-    else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+    try {
+      const res = await window.api.chits.members.downloadTemplate()
+      if (res.success) toast.success('Template saved')
+      else if (!res.cancelled) toast.error(res.error || 'Failed to save template')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save template')
+    }
   }
 
   const bulkImport = async () => {
     if (!id) return
     setImporting(true)
-    const res = await window.api.chits.members.importExcel(id)
-    setImporting(false)
-    if (res.cancelled) return
-    if (!res.success) { toast.error(res.error || 'Import failed'); return }
-    if (res.imported) toast.success(`Imported ${res.imported} member(s)`)
-    if (res.skipped) toast.error(`Skipped ${res.skipped} row(s)${res.errors?.[0] ? ` — e.g. ${res.errors[0]}` : ''}`, { duration: 6000 })
-    if (res.imported) load()
+    try {
+      const res = await window.api.chits.members.importExcel(id)
+      if (res.cancelled) return
+      if (!res.success) { toast.error(res.error || 'Import failed'); return }
+      if (res.imported) toast.success(`Imported ${res.imported} member(s)`)
+      if (res.skipped) toast.error(`Skipped ${res.skipped} row(s)${res.errors?.[0] ? ` — e.g. ${res.errors[0]}` : ''}`, { duration: 6000 })
+      if (res.imported) load()
+    } catch (err: any) {
+      toast.error(err.message || 'Import failed')
+    } finally {
+      setImporting(false)
+    }
   }
 
   const removeMember = async (memberId: string) => {
-    const res = await window.api.chits.members.remove(memberId)
-    if (res.success) { toast.success('Member removed'); load() }
-    else toast.error(res.error || 'Could not remove member')
+    try {
+      const res = await window.api.chits.members.remove(memberId)
+      if (res.success) { toast.success('Member removed'); load() }
+      else toast.error(res.error || 'Could not remove member')
+    } catch (err: any) {
+      toast.error(err.message || 'Could not remove member')
+    }
   }
 
   if (loading || !scheme) {
@@ -238,6 +256,10 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
   useEffect(() => {
     window.api.chits.draws.eligible(schemeId, cycleNo).then((res: Row) => {
       if (res.success) setEligible(res.data as Row[])
+      else toast.error(String(res.error || 'Failed to load eligible members'))
+      setLoading(false)
+    }).catch((err: any) => {
+      toast.error(err.message || 'Failed to load eligible members')
       setLoading(false)
     })
   }, [schemeId, cycleNo])
@@ -245,13 +267,18 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
   const conduct = async () => {
     if (!isFinalCycle && method === 'manual_pick' && !winnerId) { toast.error('Select a member'); return }
     setConducting(true)
-    const res = await window.api.chits.draws.conduct(schemeId, cycleNo, { method, winnerMemberId: winnerId })
-    setConducting(false)
-    if (res.success) {
-      toast.success(isFinalCycle ? `Final settlement: ${res.data.settledCount} member(s) received their product` : 'Draw completed')
-      onSave()
-    } else {
-      toast.error(String(res.error || 'Draw failed'))
+    try {
+      const res = await window.api.chits.draws.conduct(schemeId, cycleNo, { method, winnerMemberId: winnerId })
+      if (res.success) {
+        toast.success(isFinalCycle ? `Final settlement: ${res.data.settledCount} member(s) received their product` : 'Draw completed')
+        onSave()
+      } else {
+        toast.error(String(res.error || 'Draw failed'))
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Draw failed')
+    } finally {
+      setConducting(false)
     }
   }
 
@@ -296,10 +323,15 @@ function RecordContributionModal({ member, schemeId, onClose, onSave }: { member
   const save = async () => {
     if (amount <= 0) { toast.error('Enter a valid amount'); return }
     setSaving(true)
-    const res = await window.api.chits.contributions.record(member.id, { amount, method, reference })
-    setSaving(false)
-    if (res.success) { toast.success(res.data.status === 'approved' ? 'Contribution recorded' : 'Contribution submitted for verification'); onSave() }
-    else toast.error(String(res.error || 'Failed to record contribution'))
+    try {
+      const res = await window.api.chits.contributions.record(member.id, { amount, method, reference })
+      if (res.success) { toast.success(res.data.status === 'approved' ? 'Contribution recorded' : 'Contribution submitted for verification'); onSave() }
+      else toast.error(String(res.error || 'Failed to record contribution'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to record contribution')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -331,10 +363,15 @@ function EarlyRedeemModal({ member, minAmount, onClose, onSave }: { member: Row;
   const save = async () => {
     if (amount < minAmount) { toast.error(`Minimum early redemption amount is Rs.${money(minAmount)}`); return }
     setSaving(true)
-    const res = await window.api.chits.members.earlyRedeem(member.id, { amount, method })
-    setSaving(false)
-    if (res.success) { toast.success('Product released — remaining balance will be collected via installments'); onSave() }
-    else toast.error(String(res.error || 'Early redemption failed'))
+    try {
+      const res = await window.api.chits.members.earlyRedeem(member.id, { amount, method })
+      if (res.success) { toast.success('Product released — remaining balance will be collected via installments'); onSave() }
+      else toast.error(String(res.error || 'Early redemption failed'))
+    } catch (err: any) {
+      toast.error(err.message || 'Early redemption failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (

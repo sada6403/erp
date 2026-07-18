@@ -3,6 +3,7 @@ import { getDb } from '../database'
 import Store from 'electron-store'
 import { CloudApi } from '../services/cloudApi'
 import { decryptSecret } from './settings'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -16,53 +17,45 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 }
 
 export function registerSyncHandlers(ipcMain: IpcMain) {
-  ipcMain.handle('sync:status', () => {
-    try {
+  safeHandle(ipcMain, 'sync:status', () => {
+    {
       const db = getDb()
       const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
       const failed = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='failed'").get() as { c: number }).c
       const last = db.prepare("SELECT synced_at FROM sync_queue WHERE status='synced' ORDER BY synced_at DESC LIMIT 1").get() as { synced_at: string } | undefined
       return { success: true, data: { pending, failed, last_sync: last?.synced_at } }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('sync:queueCount', () => {
-    try {
+  safeHandle(ipcMain, 'sync:queueCount', () => {
+    {
       const db = getDb()
       const row = db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }
       return { success: true, data: row.c }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('sync:trigger', async () => {
-    try {
+  safeHandle(ipcMain, 'sync:trigger', async () => {
+    {
       const { getSyncService } = await import('../services/syncService')
       const service = getSyncService()
       await service.runOnce()
       return { success: true }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('sync:resetFailed', () => {
-    try {
+  safeHandle(ipcMain, 'sync:resetFailed', () => {
+    {
       const db = getDb()
       const result = db.prepare(`
         UPDATE sync_queue SET status='pending', attempts=0, last_error=NULL
         WHERE status IN ('failed','processing')
       `).run()
       return { success: true, data: result.changes }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('sync:diagnose', async () => {
+  safeHandle(ipcMain, 'sync:diagnose', async () => {
     const steps: { step: string; ok: boolean; detail: string }[] = []
     const settings = store.get('app_settings') as Record<string, unknown> | undefined
     const url = String(settings?.cloud_api_url || '').trim()
@@ -130,8 +123,8 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     return { success: true, data: steps }
   })
 
-  ipcMain.handle('sync:fixInvoices', () => {
-    try {
+  safeHandle(ipcMain, 'sync:fixInvoices', () => {
+    {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const cashierId = (user?.id as string) || 'u9999999-9999-4999-8999-999999999999'
@@ -157,22 +150,18 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
         }
       }
       return { success: true, data: items.length }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('sync:discardItem', (_event, id: string) => {
-    try {
+  safeHandle(ipcMain, 'sync:discardItem', (_event, id: string) => {
+    {
       getDb().prepare('DELETE FROM sync_queue WHERE id = ?').run(id)
       return { success: true }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
     }
   })
 
-  ipcMain.handle('sync:queue', () => {
-    try {
+  safeHandle(ipcMain, 'sync:queue', () => {
+    {
       const rows = getDb().prepare(`
         SELECT id, table_name, operation, status, attempts, last_error, created_at, synced_at
         FROM sync_queue
@@ -181,8 +170,6 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
         LIMIT 100
       `).all()
       return { success: true, data: rows }
-    } catch (err: unknown) {
-      return { success: false, error: (err as Error).message }
     }
   })
 }

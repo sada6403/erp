@@ -125,8 +125,13 @@ export default function RolesPage() {
   const isSuperAdmin = Boolean(myPerms.all)
 
   const load = async () => {
-    const res = await window.api.admin.roles.list()
-    if (res.success) setRoles(res.data as Role[])
+    try {
+      const res = await window.api.admin.roles.list()
+      if (res.success) setRoles(res.data as Role[])
+      else toast.error(res.error || 'Failed to load roles')
+    } catch (err) {
+      toast.error('Failed to load roles: ' + String(err))
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -196,15 +201,21 @@ export default function RolesPage() {
       } else {
         toast.error(res.error || 'Failed to save role')
       }
+    } catch (err) {
+      toast.error('Failed to save role: ' + String(err))
     } finally { setSaving(false) }
   }
 
   const deleteRole = async (r: Role) => {
     if (r.id === SUPER_ADMIN_ROLE_ID) { toast.error('Cannot delete Company Admin role'); return }
     if (!confirm(`Delete role "${r.name}"? Users with this role must be reassigned first.`)) return
-    const res = await window.api.admin.roles.delete(r.id)
-    if (res.success) { toast.success('Role deleted'); load() }
-    else toast.error(res.error || 'Delete failed')
+    try {
+      const res = await window.api.admin.roles.delete(r.id)
+      if (res.success) { toast.success('Role deleted'); load() }
+      else toast.error(res.error || 'Delete failed')
+    } catch (err) {
+      toast.error('Failed to delete role: ' + String(err))
+    }
   }
 
   const isLocked = (r: Role) => r.id === SUPER_ADMIN_ROLE_ID

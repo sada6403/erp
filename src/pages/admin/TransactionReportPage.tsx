@@ -131,12 +131,14 @@ export default function TransactionReportPage() {
 
   // Load branch / cashier dropdowns
   useEffect(() => {
-    window.api?.admin.branches.list().then((r: { success: boolean; data: Array<{ id: string; name: string }> }) => {
+    window.api?.admin.branches.list().then((r: { success: boolean; data: Array<{ id: string; name: string }>; error?: string }) => {
       if (r?.success) setBranches(r.data)
-    })
-    window.api?.admin.users.list().then((r: { success: boolean; data: Array<{ id: string; name: string }> }) => {
+      else toast.error(r?.error || 'Failed to load branches')
+    }).catch((e: any) => toast.error(e?.message || 'Failed to load branches'))
+    window.api?.admin.users.list().then((r: { success: boolean; data: Array<{ id: string; name: string }>; error?: string }) => {
       if (r?.success) setCashiers(r.data)
-    })
+      else toast.error(r?.error || 'Failed to load cashiers')
+    }).catch((e: any) => toast.error(e?.message || 'Failed to load cashiers'))
   }, [])
 
   const load = useCallback(async (pg = page) => {
@@ -159,6 +161,8 @@ export default function TransactionReportPage() {
       if (res?.success) {
         setRows(res.data)
         setTotal(res.total)
+      } else {
+        toast.error(res?.error || 'Failed to load transactions')
       }
       const agentRes = await window.api?.reports.agentCommissions({
         ...filters,
@@ -171,6 +175,9 @@ export default function TransactionReportPage() {
         agentCode: filters.agentCode || undefined,
       })
       if (agentRes?.success) setAgentCommissions(agentRes.data)
+      else toast.error(agentRes?.error || 'Failed to load agent commissions')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load transactions')
     } finally {
       setLoading(false)
     }
@@ -189,96 +196,125 @@ export default function TransactionReportPage() {
   const openDetail = async (id: string) => {
     setDetailLoading(true)
     setDetail(null)
-    const res = await window.api?.reports.transactionDetail(id)
-    if (res?.success) setDetail(res.data)
-    setDetailLoading(false)
+    try {
+      const res = await window.api?.reports.transactionDetail(id)
+      if (res?.success) setDetail(res.data)
+      else toast.error(res?.error || 'Failed to load transaction detail')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to load transaction detail')
+    } finally {
+      setDetailLoading(false)
+    }
   }
 
   const exportCsv = async () => {
     setExporting(true)
-    await window.api?.reports.exportTransactionsCsv({
-      ...filters,
-      search: filters.search || undefined,
-      dateFrom: filters.dateFrom || undefined,
-      dateTo: filters.dateTo || undefined,
-      branchId: filters.branchId || undefined,
-      cashierId: filters.cashierId || undefined,
-      status: filters.status || undefined,
-    })
-    setExporting(false)
+    try {
+      const res = await window.api?.reports.exportTransactionsCsv({
+        ...filters,
+        search: filters.search || undefined,
+        dateFrom: filters.dateFrom || undefined,
+        dateTo: filters.dateTo || undefined,
+        branchId: filters.branchId || undefined,
+        cashierId: filters.cashierId || undefined,
+        status: filters.status || undefined,
+      })
+      if (!res?.success) toast.error(res?.error || 'CSV export failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'CSV export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const fetchAllTransactionRows = async () => {
-    const res = await window.api?.reports.transactions({
-      ...filters,
-      search: filters.search || undefined,
-      dateFrom: filters.dateFrom || undefined,
-      dateTo: filters.dateTo || undefined,
-      branchId: filters.branchId || undefined,
-      cashierId: filters.cashierId || undefined,
-      paymentMethod: filters.paymentMethod || undefined,
-      status: filters.status || undefined,
-      billType: filters.billType || undefined,
-      agentCode: filters.agentCode || undefined,
-      limit: 50000,
-      offset: 0,
-    })
-    if (!res?.success) return null
-    return (res.data as TxRow[]).map(r => ({
-      'Bill No': r.invoice_number,
-      'Date & Time': fmtDate(r.created_at),
-      'Type': r.bill_type,
-      'Status': r.status,
-      'Branch': r.branch_name ?? '',
-      'Cashier': r.cashier_name ?? '',
-      'Customer': r.customer_name ?? '',
-      'Phone': r.customer_phone ?? '',
-      'Payment Method': r.payment_methods ?? '',
-      'Agent Code': r.agent_code ?? '',
-      'Agent Name': r.agent_name ?? '',
-      'Commission %': r.agent_commission_pct ?? 0,
-      'Commission Amount': r.agent_commission_amount ?? 0,
-      'Subtotal': r.subtotal,
-      'Discount': r.discount_amount,
-      'Tax': r.tax_amount,
-      'Total': r.total_amount,
-      'Paid': r.paid_amount,
-      'Balance': r.due_amount,
-    }))
+    try {
+      const res = await window.api?.reports.transactions({
+        ...filters,
+        search: filters.search || undefined,
+        dateFrom: filters.dateFrom || undefined,
+        dateTo: filters.dateTo || undefined,
+        branchId: filters.branchId || undefined,
+        cashierId: filters.cashierId || undefined,
+        paymentMethod: filters.paymentMethod || undefined,
+        status: filters.status || undefined,
+        billType: filters.billType || undefined,
+        agentCode: filters.agentCode || undefined,
+        limit: 50000,
+        offset: 0,
+      })
+      if (!res?.success) { toast.error(res?.error || 'Failed to fetch transactions for export'); return null }
+      return (res.data as TxRow[]).map(r => ({
+        'Bill No': r.invoice_number,
+        'Date & Time': fmtDate(r.created_at),
+        'Type': r.bill_type,
+        'Status': r.status,
+        'Branch': r.branch_name ?? '',
+        'Cashier': r.cashier_name ?? '',
+        'Customer': r.customer_name ?? '',
+        'Phone': r.customer_phone ?? '',
+        'Payment Method': r.payment_methods ?? '',
+        'Agent Code': r.agent_code ?? '',
+        'Agent Name': r.agent_name ?? '',
+        'Commission %': r.agent_commission_pct ?? 0,
+        'Commission Amount': r.agent_commission_amount ?? 0,
+        'Subtotal': r.subtotal,
+        'Discount': r.discount_amount,
+        'Tax': r.tax_amount,
+        'Total': r.total_amount,
+        'Paid': r.paid_amount,
+        'Balance': r.due_amount,
+      }))
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to fetch transactions for export')
+      return null
+    }
   }
 
   const exportExcel = async () => {
     setExporting(true)
-    const xlsRows = await fetchAllTransactionRows()
-    if (xlsRows) {
-      await window.api?.reports.exportExcel({
-        filename: `transactions-${new Date().toISOString().slice(0, 10)}`,
-        sheets: [{ name: 'Transactions', rows: xlsRows }],
-      })
+    try {
+      const xlsRows = await fetchAllTransactionRows()
+      if (xlsRows) {
+        const res = await window.api?.reports.exportExcel({
+          filename: `transactions-${new Date().toISOString().slice(0, 10)}`,
+          sheets: [{ name: 'Transactions', rows: xlsRows }],
+        })
+        if (!res?.success) toast.error(res?.error || 'Excel export failed')
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Excel export failed')
+    } finally {
+      setExporting(false)
     }
-    setExporting(false)
   }
 
   const exportPdf = async () => {
     setExporting(true)
-    const pdfRows = await fetchAllTransactionRows()
-    await window.api?.reports.exportPdf({
-      filename: `transactions-${new Date().toISOString().slice(0, 10)}`,
-      title: 'Transaction Report',
-      metadata: {
-        'Date Range': `${filters.dateFrom || 'Start'} to ${filters.dateTo || 'Today'}`,
-        'Status': filters.status || 'All',
-        'Generated Time': new Date().toLocaleString(),
-      },
-      summary: [
-        ['Bills', total],
-        ['Total Sales', (pdfRows || []).reduce((sum, r) => sum + Number(r['Total'] || 0), 0)],
-        ['Total Paid', (pdfRows || []).reduce((sum, r) => sum + Number(r['Paid'] || 0), 0)],
-        ['Balance', (pdfRows || []).reduce((sum, r) => sum + Number(r['Balance'] || 0), 0)],
-      ],
-      rows: pdfRows || [],
-    })
-    setExporting(false)
+    try {
+      const pdfRows = await fetchAllTransactionRows()
+      const res = await window.api?.reports.exportPdf({
+        filename: `transactions-${new Date().toISOString().slice(0, 10)}`,
+        title: 'Transaction Report',
+        metadata: {
+          'Date Range': `${filters.dateFrom || 'Start'} to ${filters.dateTo || 'Today'}`,
+          'Status': filters.status || 'All',
+          'Generated Time': new Date().toLocaleString(),
+        },
+        summary: [
+          ['Bills', total],
+          ['Total Sales', (pdfRows || []).reduce((sum, r) => sum + Number(r['Total'] || 0), 0)],
+          ['Total Paid', (pdfRows || []).reduce((sum, r) => sum + Number(r['Paid'] || 0), 0)],
+          ['Balance', (pdfRows || []).reduce((sum, r) => sum + Number(r['Balance'] || 0), 0)],
+        ],
+        rows: pdfRows || [],
+      })
+      if (!res?.success) toast.error(res?.error || 'PDF export failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'PDF export failed')
+    } finally {
+      setExporting(false)
+    }
   }
 
   const printAgentCommissions = () => {
@@ -820,8 +856,13 @@ function InvoiceItemEditCell({ invoiceId, item, isAdmin, onDone }: {
 
   const checkUnlock = async () => {
     if (isAdmin) return
-    const res = await window.api.editRequests.checkUnlocked('invoices', invoiceId)
-    if (res.success) setUnlock(res.data)
+    try {
+      const res = await window.api.editRequests.checkUnlocked('invoices', invoiceId)
+      if (res.success) setUnlock(res.data)
+      else toast.error(res.error || 'Failed to check edit-unlock status')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to check edit-unlock status')
+    }
   }
 
   const openEditor = async () => {
@@ -831,29 +872,39 @@ function InvoiceItemEditCell({ invoiceId, item, isAdmin, onDone }: {
 
   const save = async () => {
     setSaving(true)
-    const res = await window.api.invoices.applyEdit(invoiceId, {
-      item_id: item.id, new_quantity: qty, new_unit_price: price,
-      edit_request_id: unlock?.request_id || undefined,
-    })
-    setSaving(false)
-    if (!res.success) { toast.error(res.error || 'Correction failed'); return }
-    setOpen(false)
-    setUnlock(null)
-    toast.success('Invoice item corrected')
-    onDone()
+    try {
+      const res = await window.api.invoices.applyEdit(invoiceId, {
+        item_id: item.id, new_quantity: qty, new_unit_price: price,
+        edit_request_id: unlock?.request_id || undefined,
+      })
+      if (!res.success) { toast.error(res.error || 'Correction failed'); return }
+      setOpen(false)
+      setUnlock(null)
+      toast.success('Invoice item corrected')
+      onDone()
+    } catch (e: any) {
+      toast.error(e?.message || 'Correction failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const requestEdit = async () => {
     if (!reason.trim()) { toast.error('Enter a reason for the request'); return }
     setSaving(true)
-    const res = await window.api.editRequests.create({
-      target_table: 'invoices', target_record_id: invoiceId, reason,
-      requested_changes: { item_id: item.id, new_quantity: qty, new_unit_price: price },
-    })
-    setSaving(false)
-    if (!res.success) { toast.error(res.error || 'Could not submit request'); return }
-    toast.success('Edit request submitted — waiting for admin approval')
-    await checkUnlock()
+    try {
+      const res = await window.api.editRequests.create({
+        target_table: 'invoices', target_record_id: invoiceId, reason,
+        requested_changes: { item_id: item.id, new_quantity: qty, new_unit_price: price },
+      })
+      if (!res.success) { toast.error(res.error || 'Could not submit request'); return }
+      toast.success('Edit request submitted — waiting for admin approval')
+      await checkUnlock()
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not submit request')
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (!open) {

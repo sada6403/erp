@@ -91,17 +91,28 @@ export default function POSPage() {
   }, [cart.items.length])
 
   const loadInvoiceNumber = async (type: BillType = 'RETAIL') => {
-    const res = await window.api.invoices.nextNumber(type)
-    if (res.success) setInvoiceNumber(res.data as string)
+    try {
+      const res = await window.api.invoices.nextNumber(type)
+      if (res.success) setInvoiceNumber(res.data as string)
+      else toast.error(res.error || 'Failed to generate invoice number')
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to generate invoice number')
+    }
   }
 
   const loadCategories = async () => {
-    const res = await window.api.admin.categories.list()
-    if (res.success) {
-      setCategories([
-        { id: '', name: 'All' },
-        ...(res.data as { id: string; name: string }[]).filter(c => c.id),
-      ])
+    try {
+      const res = await window.api.admin.categories.list()
+      if (res.success) {
+        setCategories([
+          { id: '', name: 'All' },
+          ...(res.data as { id: string; name: string }[]).filter(c => c.id),
+        ])
+      } else {
+        toast.error(res.error || 'Failed to load categories')
+      }
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to load categories')
     }
   }
 
@@ -257,31 +268,35 @@ export default function POSPage() {
   const handleScannerSubmit = async () => {
     const code = searchQuery.trim()
     if (!code) return
-    const res = await window.api.products.searchSku(code)
-    if (res.success && res.data) {
-      const product = res.data as Product
-      if ((!product.stock || product.stock <= 0) && cart.billType !== 'QUOTATION') {
-        setSearchQuery(product.sku || code)
-        toast.error('Out of stock in this branch. Check other branches below.')
-        return
-      }
-      handleProductSelect(product)
-      setSearchQuery('')
-      searchRef.current?.focus()
-      return
-    }
-    // Gift coupon scanned at the POS — show issued-to / balance / expiry
-    if (/^CPN-/i.test(code)) {
-      const cres = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> } }
-      if (cres.success && cres.data?.coupon) {
-        setCouponPeek({ ...cres.data.coupon, __valid: cres.data.valid, __reason: cres.data.reason || null })
+    try {
+      const res = await window.api.products.searchSku(code)
+      if (res.success && res.data) {
+        const product = res.data as Product
+        if ((!product.stock || product.stock <= 0) && cart.billType !== 'QUOTATION') {
+          setSearchQuery(product.sku || code)
+          toast.error('Out of stock in this branch. Check other branches below.')
+          return
+        }
+        handleProductSelect(product)
         setSearchQuery('')
+        searchRef.current?.focus()
         return
       }
-      toast.error('Coupon not found')
-      return
+      // Gift coupon scanned at the POS — show issued-to / balance / expiry
+      if (/^CPN-/i.test(code)) {
+        const cres = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> } }
+        if (cres.success && cres.data?.coupon) {
+          setCouponPeek({ ...cres.data.coupon, __valid: cres.data.valid, __reason: cres.data.reason || null })
+          setSearchQuery('')
+          return
+        }
+        toast.error('Coupon not found')
+        return
+      }
+      toast.error('Barcode not found')
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to look up barcode')
     }
-    toast.error('Barcode not found')
   }
 
   const handleCustomerSelect = (customer: Customer) => {
@@ -662,7 +677,7 @@ function CreditInfoBadge({ customerId }: { customerId: string }) {
   useEffect(() => {
     window.api.invoices.creditSummary(customerId).then((res: { success: boolean; data: unknown }) => {
       if (res.success) setInfo(res.data as typeof info)
-    })
+    }).catch(() => {})
   }, [customerId])
 
   if (!info) return null

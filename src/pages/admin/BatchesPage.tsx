@@ -3,6 +3,13 @@ import PageHeader from '@/components/shared/PageHeader'
 import { Package, AlertTriangle, Clock, Search, Plus, ChevronDown, ChevronUp } from 'lucide-react'
 import toast from 'react-hot-toast'
 import Modal from '@/components/shared/Modal'
+import { useAuthStore } from '@/store/authStore'
+
+function getPerms(u: unknown): Record<string, unknown> {
+  const user = u as Record<string, unknown>
+  return (user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>
+    || user?.permissions as Record<string, unknown> || {}
+}
 
 interface Batch {
   id: string
@@ -46,15 +53,22 @@ export default function BatchesPage() {
 
   const load = async () => {
     setLoading(true)
-    const filters: Record<string, unknown> = {}
-    if (filter === 'expiring') filters.expiring_days = 30
-    const res = await window.api.batches.list(filters) as { success: boolean; data: Batch[] }
-    if (res.success) {
-      let data = res.data
-      if (filter === 'expired') data = data.filter(b => b.expiry_date && new Date(b.expiry_date) < new Date())
-      setBatches(data)
+    try {
+      const filters: Record<string, unknown> = {}
+      if (filter === 'expiring') filters.expiring_days = 30
+      const res = await window.api.batches.list(filters) as { success: boolean; data: Batch[]; error?: string }
+      if (res.success) {
+        let data = res.data
+        if (filter === 'expired') data = data.filter(b => b.expiry_date && new Date(b.expiry_date) < new Date())
+        setBatches(data)
+      } else {
+        toast.error(res.error || 'Failed to load batches')
+      }
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to load batches')
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
   }
 
   useEffect(() => { load() }, [filter])
@@ -184,18 +198,37 @@ export default function BatchesPage() {
 }
 
 function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+  const { user } = useAuthStore()
+  const perms = getPerms(user)
+  const isAdmin = Boolean(perms.all)
+  const u = user as unknown as Record<string, unknown>
+  const myBranchId = String(u?.branch_id ?? '')
+
   const [products, setProducts]   = useState<{ id: string; name: string; sku: string }[]>([])
   const [productSearch, setProductSearch] = useState('')
+  const [branches, setBranches]   = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving]       = useState(false)
   const [form, setForm]           = useState({
     product_id: '', batch_number: '', serial_number: '',
-    expiry_date: '', mfg_date: '', quantity: 1, cost_price: 0,
+    expiry_date: '', mfg_date: '', quantity: 1, cost_price: 0, branch_id: '',
   })
 
   useEffect(() => {
     window.api.products.list({}).then((r: { success: boolean; data: { id: string; name: string; sku: string }[] }) => {
       if (r.success) setProducts(r.data)
-    })
+    }).catch(() => toast.error('Failed to load products'))
+    if (isAdmin) {
+      window.api.admin.branches.list().then((r: { success: boolean; data?: { id: string; name: string }[] }) => {
+        if (r.success) {
+          setBranches(r.data || [])
+          setForm(f => ({ ...f, branch_id: myBranchId || r.data?.[0]?.id || '' }))
+        } else {
+          toast.error('Failed to load branches')
+        }
+      }).catch(() => toast.error('Failed to load branches'))
+    } else {
+      setForm(f => ({ ...f, branch_id: myBranchId }))
+    }
   }, [])
 
   const filteredProducts = products.filter(p =>
@@ -204,12 +237,18 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
 
   const save = async () => {
     if (!form.product_id) { toast.error('Select a product'); return }
+    if (!form.branch_id) { toast.error('Select a branch'); return }
     if (form.quantity <= 0) { toast.error('Quantity must be > 0'); return }
     setSaving(true)
-    const res = await window.api.batches.create(form) as { success: boolean; error?: string }
-    setSaving(false)
-    if (res.success) { toast.success('Batch added'); onSaved() }
-    else toast.error(res.error || 'Failed to add batch')
+    try {
+      const res = await window.api.batches.create(form) as { success: boolean; error?: string }
+      if (res.success) { toast.success('Batch added'); onSaved() }
+      else toast.error(res.error || 'Failed to add batch')
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to add batch')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -243,6 +282,18 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
                 </div>
               )}
             </>
+          )}
+        </div>
+        <div>
+          <label className="label">Branch *</label>
+          {isAdmin ? (
+            <select value={form.branch_id} onChange={e => setForm(prev => ({ ...prev, branch_id: e.target.value }))} className="input">
+              {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          ) : (
+            <div className="input flex items-center" style={{ color: 'var(--text-2)' }}>
+              {(user as unknown as { branch?: { name?: string } })?.branch?.name || 'Your branch'}
+            </div>
           )}
         </div>
         <div className="grid grid-cols-2 gap-3">

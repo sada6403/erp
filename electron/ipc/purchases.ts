@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
+import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
@@ -45,9 +46,8 @@ function getNextPONumber(branchId: string): string {
 
 export function registerPurchaseHandlers(ipcMain: IpcMain) {
   // List POs with optional filters
-  ipcMain.handle('purchases:list', (_e, filters: Record<string, unknown> = {}) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'purchases:list', (_e, filters: Record<string, unknown> = {}) => {
+    const db = getDb()
       let sql = `
         SELECT po.*, s.name as supplier_name, b.name as branch_name,
                u.name as created_by_name,
@@ -63,13 +63,11 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       if (filters.supplier_id) { sql += ' AND po.supplier_id=?'; params.push(filters.supplier_id) }
       sql += ' ORDER BY po.created_at DESC LIMIT 200'
       return { success: true, data: db.prepare(sql).all(...params) }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
   // Get single PO with items
-  ipcMain.handle('purchases:get', (_e, id: string) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'purchases:get', (_e, id: string) => {
+    const db = getDb()
       const po = db.prepare(`
         SELECT po.*, s.name as supplier_name, b.name as branch_name
         FROM purchase_orders po
@@ -83,13 +81,11 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
         LEFT JOIN products p ON p.id = pi.product_id
         WHERE pi.po_id=?`).all(id)
       return { success: true, data: { ...po as object, items } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
   // Create PO (starts as DRAFT)
-  ipcMain.handle('purchases:create', async (_e, payload) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'purchases:create', async (_e, payload) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       if (!payload.supplier_id)       throw new Error('Supplier is required')
       if (!payload.items?.length)     throw new Error('At least one item is required')
@@ -153,13 +149,11 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('purchase_orders', id, 'INSERT', po)
       return { success: true, data: { id, po_number } }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
   // Update PO status (DRAFT→SENT→PARTIAL/RECEIVED/CANCELLED)
-  ipcMain.handle('purchases:updateStatus', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'purchases:updateStatus', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const po = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!po) throw new Error('Purchase order not found')
@@ -247,13 +241,11 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('purchase_orders', id, 'UPDATE', { id, ...patch })
       return { success: true }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 
   // Update draft PO (add/remove/edit items before sending)
-  ipcMain.handle('purchases:update', async (_e, id: string, payload: Record<string, unknown>) => {
-    try {
-      const db = getDb()
+  safeHandle(ipcMain, 'purchases:update', async (_e, id: string, payload: Record<string, unknown>) => {
+    const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const po = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!po) throw new Error('Purchase order not found')
@@ -289,6 +281,5 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('purchase_orders', id, 'UPDATE', { id, ...payload })
       return { success: true }
-    } catch (err) { return { success: false, error: (err as Error).message } }
   })
 }

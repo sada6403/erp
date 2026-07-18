@@ -21,8 +21,13 @@ export default function SecurityPage() {
   const checkStatus = async () => {
     if (!userId) return
     setChecking(true)
-    const res = await window.api.auth.twoFa.status(userId) as { success: boolean; data?: { enabled: boolean } }
-    if (res.success) setTwoFaEnabled(res.data?.enabled ?? false)
+    try {
+      const res = await window.api.auth.twoFa.status(userId) as { success: boolean; data?: { enabled: boolean }; error?: string }
+      if (res.success) setTwoFaEnabled(res.data?.enabled ?? false)
+      else toast.error(res.error || 'Failed to check 2FA status')
+    } catch (err) {
+      toast.error('Failed to check 2FA status: ' + String(err))
+    }
     setChecking(false)
   }
 
@@ -31,53 +36,65 @@ export default function SecurityPage() {
   const startSetup = async () => {
     if (!userId) return
     setLoading(true)
-    const res = await window.api.auth.twoFa.setup(userId) as {
-      success: boolean
-      data?: { secret: string; qrDataUrl: string }
-      error?: string
+    try {
+      const res = await window.api.auth.twoFa.setup(userId) as {
+        success: boolean
+        data?: { secret: string; qrDataUrl: string }
+        error?: string
+      }
+      if (res.success && res.data) {
+        setSecret(res.data.secret)
+        setQrDataUrl(res.data.qrDataUrl)
+        setStep('setup')
+      } else {
+        toast.error(res.error || 'Setup failed')
+      }
+    } catch (err) {
+      toast.error('Setup failed: ' + String(err))
     }
     setLoading(false)
-    if (res.success && res.data) {
-      setSecret(res.data.secret)
-      setQrDataUrl(res.data.qrDataUrl)
-      setStep('setup')
-    } else {
-      toast.error(res.error || 'Setup failed')
-    }
   }
 
   const confirmSetup = async () => {
     if (!userId || otp.length !== 6) { toast.error('Enter 6-digit code'); return }
     setLoading(true)
-    const res = await window.api.auth.twoFa.confirm(userId, otp) as { success: boolean; error?: string }
-    setLoading(false)
-    if (res.success) {
-      toast.success('2FA enabled successfully!')
-      setTwoFaEnabled(true)
-      setStep('status')
-      setOtp('')
-      setSecret('')
-      setQrDataUrl('')
-    } else {
-      toast.error(res.error || 'Invalid code')
-      setOtp('')
+    try {
+      const res = await window.api.auth.twoFa.confirm(userId, otp) as { success: boolean; error?: string }
+      if (res.success) {
+        toast.success('2FA enabled successfully!')
+        setTwoFaEnabled(true)
+        setStep('status')
+        setOtp('')
+        setSecret('')
+        setQrDataUrl('')
+      } else {
+        toast.error(res.error || 'Invalid code')
+        setOtp('')
+      }
+    } catch (err) {
+      toast.error('Failed to confirm 2FA setup: ' + String(err))
     }
+    setLoading(false)
   }
 
   const disable2FA = async () => {
     if (!userId || otp.length !== 6) { toast.error('Enter 6-digit code'); return }
     setLoading(true)
-    const res = await window.api.auth.twoFa.disable(userId, otp) as { success: boolean; error?: string }
-    setLoading(false)
-    if (res.success) {
-      toast.success('2FA disabled')
-      setTwoFaEnabled(false)
-      setStep('status')
-      setOtp('')
-    } else {
-      toast.error(res.error || 'Invalid code')
-      setOtp('')
+    try {
+      const res = await window.api.auth.twoFa.disable(userId, otp) as { success: boolean; error?: string }
+      if (res.success) {
+        toast.success('2FA disabled')
+        setTwoFaEnabled(false)
+        setStep('status')
+        setOtp('')
+      } else {
+        toast.error(res.error || 'Invalid code')
+        setOtp('')
+      }
+    } catch (err) {
+      toast.error('Failed to disable 2FA: ' + String(err))
     }
+    setLoading(false)
   }
 
   const copySecret = () => {
