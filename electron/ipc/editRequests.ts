@@ -9,7 +9,7 @@ import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
-const ALLOWED_TARGET_TABLES = new Set(['invoices', 'stocks'])
+const ALLOWED_TARGET_TABLES = new Set(['invoices', 'stocks', 'products'])
 const APPROVAL_WINDOW_HOURS = 48
 
 function authUser(): Record<string, unknown> {
@@ -48,6 +48,14 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
           return { success: false, error: 'Only completed invoices need an edit request — this one is still editable directly' }
         }
         branchId = invoice.branch_id || null
+      } else if (payload.target_table === 'products') {
+        if (payload.target_record_id !== 'new') {
+          const productRow = db.prepare('SELECT id FROM products WHERE id=?').get(payload.target_record_id) as { id?: string } | undefined
+          if (!productRow) return { success: false, error: 'Product not found' }
+        }
+        // Products aren't branch-scoped (and a 'new' product doesn't exist yet) —
+        // record the requester's own branch for admin filtering/visibility.
+        branchId = (user.branch_id as string) || null
       } else {
         // target_record_id for stocks is `${product_id}-${branch_id}`
         const row = db.prepare('SELECT id, branch_id FROM stocks WHERE (product_id || "-" || branch_id) = ?')
@@ -82,10 +90,13 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
       `).run(row)
       await enqueuSync('edit_requests', id, 'INSERT', row)
 
+      const targetLabel = payload.target_table === 'invoices' ? 'completed invoice'
+        : payload.target_table === 'products' ? (payload.target_record_id === 'new' ? 'new product' : 'product')
+        : 'stock record'
       createNotification(
         'info',
         'Edit request submitted',
-        `${String(user.name || 'A user')} requested to edit a ${payload.target_table === 'invoices' ? 'completed invoice' : 'stock record'}.`,
+        `${String(user.name || 'A user')} requested to edit a ${targetLabel}.`,
         { event: 'edit_request_submitted', edit_request_id: id, target_table: payload.target_table }
       )
 

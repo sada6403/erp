@@ -20,6 +20,7 @@ function describeChanges(row: Row): string {
     const changes = JSON.parse(String(row.requested_changes || '{}')) as Record<string, unknown>
     if (row.target_table === 'stocks') return `New quantity: ${changes.new_quantity}`
     if (row.target_table === 'invoices') return `Qty ${changes.new_quantity} @ Rs.${changes.new_unit_price}`
+    if (row.target_table === 'products') return row.target_record_id === 'new' ? 'New product (see reason)' : 'Full product edit (see reason)'
     return JSON.stringify(changes)
   } catch { return '—' }
 }
@@ -108,7 +109,7 @@ export default function EditRequestsPage() {
                   <td className="table-cell">
                     <span className="inline-flex items-center gap-1 text-xs">
                       {r.target_table === 'invoices' ? <FileEdit size={12} /> : <Package size={12} />}
-                      {r.target_table === 'invoices' ? 'Invoice' : 'Stock'}
+                      {r.target_table === 'invoices' ? 'Invoice' : r.target_table === 'products' ? 'Product' : 'Stock'}
                     </span>
                   </td>
                   <td className="table-cell font-mono text-xs">{String(r.target_record_id).slice(0, 24)}</td>

@@ -4,7 +4,7 @@ import Modal from '@/components/shared/Modal'
 import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
-  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw
+  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw, Clock
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
@@ -30,6 +30,7 @@ export default function ProductsPage() {
   const [brandFilter, setBrandFilter] = useState('')
   const [showForm, setShowForm]     = useState(false)
   const [editing, setEditing]       = useState<Product | null>(null)
+  const [editRequestId, setEditRequestId] = useState<string | undefined>(undefined)
   const [loading, setLoading]       = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
@@ -210,9 +211,10 @@ export default function ProductsPage() {
             <button onClick={() => setShowNormalizeConfirm(true)} className="btn-secondary btn-sm gap-1.5">
               <RefreshCw size={14} /> Normalize Catalog
             </button>
-            <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn-primary btn-sm gap-1.5">
-              <Plus size={14} /> Add Product
-            </button>
+            <AddProductBtn
+              isAdmin={isCompanyAdmin}
+              onAdd={(reqId) => { setEditing(null); setEditRequestId(reqId); setShowForm(true) }}
+            />
           </div>
         }
       />
@@ -313,8 +315,11 @@ export default function ProductsPage() {
                   </td>
                   <td className="table-cell px-3">
                     <div className="flex gap-1">
-                      <button onClick={() => { setEditing(p); setShowForm(true) }}
-                        className="btn-ghost btn-sm p-1.5" style={{ color: 'var(--brand-primary)' }} title="Edit"><Edit2 size={13} /></button>
+                      <EditProductBtn
+                        product={p}
+                        isAdmin={isCompanyAdmin}
+                        onEdit={(editRequestId) => { setEditing(p); setEditRequestId(editRequestId); setShowForm(true) }}
+                      />
                       <button onClick={() => toggleActive(p)} className="btn-ghost btn-sm p-1.5" title={p.is_active ? 'Deactivate' : 'Activate'}>
                         {p.is_active ? <ToggleRight size={14} className="text-green-400" /> : <ToggleLeft size={14} />}
                       </button>
@@ -341,8 +346,9 @@ export default function ProductsPage() {
           product={editing}
           categories={categories}
           suppliers={suppliers}
-          onClose={() => setShowForm(false)}
-          onSave={() => { setShowForm(false); load() }}
+          editRequestId={editRequestId}
+          onClose={() => { setShowForm(false); setEditRequestId(undefined) }}
+          onSave={() => { setShowForm(false); setEditRequestId(undefined); load() }}
           onCategoryCreated={load}
         />
       )}
@@ -490,11 +496,185 @@ function QuickCategoryModal({ allCategories, onClose, onCreated }: {
   )
 }
 
+// ─── Edit button: admins edit directly, non-admins must request approval ────
+function EditProductBtn({ product, isAdmin, onEdit }: {
+  product: Product
+  isAdmin: boolean
+  onEdit: (editRequestId: string | undefined) => void
+}) {
+  const [checking, setChecking] = useState(false)
+  const [requesting, setRequesting] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [reason, setReason] = useState('')
+
+  const click = async () => {
+    if (isAdmin) { onEdit(undefined); return }
+    setChecking(true)
+    try {
+      const res = await window.api.editRequests.checkUnlocked('products', product.id)
+      if (!res.success) { toast.error(res.error || 'Failed to check edit permission'); return }
+      const data = res.data as { unlocked: boolean; pending: boolean; request_id: string | null }
+      if (data.unlocked) { onEdit(data.request_id || undefined); return }
+      if (data.pending) { setPending(true); return }
+      setRequesting(true)
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to check edit permission')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const submitRequest = async () => {
+    if (!reason.trim()) { toast.error('Enter a reason for the request'); return }
+    setChecking(true)
+    try {
+      const res = await window.api.editRequests.create({
+        target_table: 'products',
+        target_record_id: product.id,
+        reason: reason.trim(),
+        requested_changes: {},
+      })
+      if (!res.success) { toast.error(res.error || 'Could not submit request'); return }
+      toast.success('Edit request submitted — waiting for admin approval')
+      setRequesting(false)
+      setPending(true)
+    } catch (err) {
+      toast.error((err as Error).message || 'Could not submit request')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  if (pending) {
+    return (
+      <span className="inline-flex items-center gap-1 text-xs px-1.5" style={{ color: 'var(--text-3)' }} title="Waiting for admin approval">
+        <Clock size={13} /> Pending
+      </span>
+    )
+  }
+
+  if (requesting) {
+    return (
+      <Modal title={`Request to edit "${product.name}"`} onClose={() => setRequesting(false)}
+        footer={<>
+          <button onClick={() => setRequesting(false)} className="btn-secondary">Cancel</button>
+          <button onClick={submitRequest} disabled={checking} className="btn-primary">
+            {checking ? 'Submitting...' : 'Submit Request'}
+          </button>
+        </>}>
+        <div className="space-y-3">
+          <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+            Editing this product requires Company Admin approval. Explain what you want to change and why.
+          </p>
+          <div>
+            <label className="label">Purpose / reason for editing *</label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-24 resize-none"
+              placeholder="e.g. Selling price needs correction, wrong category assigned..." autoFocus />
+          </div>
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <button onClick={click} disabled={checking} className="btn-ghost btn-sm p-1.5" style={{ color: 'var(--brand-primary)' }} title={isAdmin ? 'Edit' : 'Request edit'}>
+      {isAdmin ? <Edit2 size={13} /> : <Lock size={13} />}
+    </button>
+  )
+}
+
+// ─── "Add Product" button: admins add directly, non-admins must request ─────
+function AddProductBtn({ isAdmin, onAdd }: {
+  isAdmin: boolean
+  onAdd: (editRequestId: string | undefined) => void
+}) {
+  const [checking, setChecking] = useState(false)
+  const [requesting, setRequesting] = useState(false)
+  const [pending, setPending] = useState(false)
+  const [reason, setReason] = useState('')
+
+  const click = async () => {
+    if (isAdmin) { onAdd(undefined); return }
+    setChecking(true)
+    try {
+      const res = await window.api.editRequests.checkUnlocked('products', 'new')
+      if (!res.success) { toast.error(res.error || 'Failed to check permission'); return }
+      const data = res.data as { unlocked: boolean; pending: boolean; request_id: string | null }
+      if (data.unlocked) { onAdd(data.request_id || undefined); return }
+      if (data.pending) { setPending(true); return }
+      setRequesting(true)
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to check permission')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const submitRequest = async () => {
+    if (!reason.trim()) { toast.error('Enter a reason for the request'); return }
+    setChecking(true)
+    try {
+      const res = await window.api.editRequests.create({
+        target_table: 'products',
+        target_record_id: 'new',
+        reason: reason.trim(),
+        requested_changes: {},
+      })
+      if (!res.success) { toast.error(res.error || 'Could not submit request'); return }
+      toast.success('Request submitted — waiting for admin approval')
+      setRequesting(false)
+      setPending(true)
+    } catch (err) {
+      toast.error((err as Error).message || 'Could not submit request')
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  if (pending) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs px-2 py-1.5" style={{ color: 'var(--text-3)' }} title="Waiting for admin approval">
+        <Clock size={14} /> Pending approval
+      </span>
+    )
+  }
+
+  if (requesting) {
+    return (
+      <Modal title="Request to add a new product" onClose={() => setRequesting(false)}
+        footer={<>
+          <button onClick={() => setRequesting(false)} className="btn-secondary">Cancel</button>
+          <button onClick={submitRequest} disabled={checking} className="btn-primary">
+            {checking ? 'Submitting...' : 'Submit Request'}
+          </button>
+        </>}>
+        <div className="space-y-3">
+          <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+            Adding a new product requires Company Admin approval. Explain what product you want to add and why.
+          </p>
+          <div>
+            <label className="label">Purpose / reason *</label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-24 resize-none"
+              placeholder="e.g. New chair model arrived from supplier, needs to be listed..." autoFocus />
+          </div>
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <button onClick={click} disabled={checking} className="btn-primary btn-sm gap-1.5">
+      {isAdmin ? <Plus size={14} /> : <Lock size={14} />} Add Product
+    </button>
+  )
+}
+
 // ─── Main Product Form ───────────────────────────────────────────────────────
-function ProductForm({ product, categories, suppliers, onClose, onSave, onCategoryCreated }: {
+function ProductForm({ product, categories, suppliers, editRequestId, onClose, onSave, onCategoryCreated }: {
   product: Product | null
   categories: Category[]
   suppliers: Supplier[]
+  editRequestId?: string
   onClose: () => void
   onSave: () => void
   onCategoryCreated: () => void
@@ -595,12 +775,12 @@ function ProductForm({ product, categories, suppliers, onClose, onSave, onCatego
       }
       let productId = ''
       if (product) {
-        const res = await window.api.products.update(product.id, payload) as { success: boolean; error?: string }
+        const res = await window.api.products.update(product.id, { ...payload, edit_request_id: editRequestId }) as { success: boolean; error?: string }
         if (!res.success) { toast.error(res.error || 'Failed to update product'); return }
         productId = product.id
         toast.success('Product updated')
       } else {
-        const res = await window.api.products.create(payload)
+        const res = await window.api.products.create({ ...payload, edit_request_id: editRequestId })
         if (!res.success) { toast.error(res.error || 'Failed'); return }
         productId = (res.data as { id: string }).id
         toast.success('Product created')

@@ -217,42 +217,95 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       return { success: true, data: row || null }
   })
 
+  // Branch Managers must submit a "new product" edit request (target_record_id
+  // 'new', scoped per-user) and have it approved before they can create a
+  // product; the approval is re-validated and consumed inside the same
+  // transaction as the insert. Admins create directly, as before.
   safeHandle(ipcMain, 'products:create', async (_e, payload) => {
       const db = getDb()
       const id = crypto.randomUUID()
       const authUser = getAuthUser()
+      const isAdmin = isSuperAdmin(authUser)
+      const { edit_request_id, ...rest } = (payload || {}) as Record<string, unknown> & { edit_request_id?: string }
+
+      if (!isAdmin && !edit_request_id) {
+        return { success: false, error: 'No approved edit request found — please request approval first' }
+      }
+
       // Super admin creates global products (branch_id = NULL); branch users tag to their branch
-      const branch_id = isSuperAdmin(authUser) ? null : (authUser?.branch_id as string || null)
-      const category = payload?.category_id
-        ? db.prepare('SELECT name FROM categories WHERE id=?').get(payload.category_id) as { name?: string } | undefined
+      const branch_id = isAdmin ? null : (authUser?.branch_id as string || null)
+      const category = rest?.category_id
+        ? db.prepare('SELECT name FROM categories WHERE id=?').get(rest.category_id) as { name?: string } | undefined
         : undefined
-      const sku = buildSku(db, (payload as Record<string, unknown>)?.brand || '', category?.name || (payload as Record<string, unknown>)?.name || '', (payload as Record<string, unknown>)?.sku)
+      const sku = buildSku(db, (rest as Record<string, unknown>)?.brand || '', category?.name || (rest as Record<string, unknown>)?.name || '', (rest as Record<string, unknown>)?.sku)
 
-      db.prepare(`
-        INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
-          image_url, unit, cost_price, selling_price, tax_rate, min_stock_level)
-        VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
-          @image_url, @unit, @cost_price, @selling_price, @tax_rate, @min_stock_level)
-      `).run({ id, branch_id, ...payload, sku })
+      db.transaction(() => {
+        if (!isAdmin) {
+          const request = db.prepare(`
+            SELECT id FROM edit_requests
+            WHERE id=? AND status='approved' AND approved_expires_at > datetime('now')
+              AND requested_by=? AND target_table='products' AND target_record_id='new'
+          `).get(edit_request_id, authUser?.id) as { id: string } | undefined
+          if (!request) throw new Error('Edit request no longer valid — please request approval again')
+          db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
+            .run(request.id)
+        }
+        db.prepare(`
+          INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
+            image_url, unit, cost_price, selling_price, tax_rate, min_stock_level)
+          VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
+            @image_url, @unit, @cost_price, @selling_price, @tax_rate, @min_stock_level)
+        `).run({ id, branch_id, ...rest, sku })
+      })()
 
-      await enqueuSync('products', id, 'INSERT', { id, branch_id, ...payload, sku })
+      await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku })
+      if (!isAdmin && edit_request_id) {
+        await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
+      }
       return { success: true, data: { id } }
   })
 
+  // Branch Managers must submit an edit request and have it approved by a
+  // Company Admin before they can update a product; the approval is
+  // re-validated and consumed inside the same transaction as the update so
+  // there's no check-then-use race. Admins update directly, as before.
   safeHandle(ipcMain, 'products:update', async (_e, id: string, payload) => {
       const db = getDb()
-      const nextPayload = { ...(payload as Record<string, unknown>) }
+      const { edit_request_id, ...rest } = payload as Record<string, unknown> & { edit_request_id?: string }
+      const nextPayload = { ...rest }
       if (!String(nextPayload.sku || '').trim()) {
         const category = nextPayload.category_id
           ? db.prepare('SELECT name FROM categories WHERE id=?').get(nextPayload.category_id) as { name?: string } | undefined
           : undefined
         nextPayload.sku = buildSku(db, nextPayload.brand || '', category?.name || nextPayload.name || '', nextPayload.sku)
       }
+
+      const caller = getAuthUser()
+      const isAdmin = isSuperAdmin(caller)
+      if (!isAdmin && !edit_request_id) {
+        return { success: false, error: 'No approved edit request found — please request approval first' }
+      }
+
       const fields = Object.keys(nextPayload).map(k => `${k} = @${k}`).join(', ')
-      db.prepare(`UPDATE products SET ${fields}, updated_at = datetime('now') WHERE id = @id`)
-        .run({ ...nextPayload, id })
+      db.transaction(() => {
+        if (!isAdmin) {
+          const request = db.prepare(`
+            SELECT id FROM edit_requests
+            WHERE id=? AND status='approved' AND approved_expires_at > datetime('now')
+              AND requested_by=? AND target_table='products' AND target_record_id=?
+          `).get(edit_request_id, caller?.id, id) as { id: string } | undefined
+          if (!request) throw new Error('Edit request no longer valid — please request approval again')
+          db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
+            .run(request.id)
+        }
+        db.prepare(`UPDATE products SET ${fields}, updated_at = datetime('now') WHERE id = @id`)
+          .run({ ...nextPayload, id })
+      })()
 
       await enqueuSync('products', id, 'UPDATE', { id, ...nextPayload })
+      if (!isAdmin && edit_request_id) {
+        await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
+      }
       return { success: true }
   })
 
