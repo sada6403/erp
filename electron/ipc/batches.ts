@@ -3,6 +3,19 @@ import { getDb } from '../database'
 import { randomUUID } from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { safeHandle } from './ipcHandler'
+import Store from 'electron-store'
+
+const store = new Store()
+
+function authUser(): Record<string, unknown> {
+  return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+}
+
+function currentPerms(caller: Record<string, unknown> = authUser()): Record<string, unknown> {
+  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller.permissions as Record<string, unknown>)
+    || {}
+}
 
 interface BatchRow {
   id: string
@@ -49,11 +62,18 @@ export function registerBatchHandlers() {
     return { success: true, data: row }
   })
 
+  // Non-admins are always scoped to their own branch — the client's branch_id
+  // is ignored to prevent a manager from tagging a batch to a branch they
+  // don't manage. Admins keep the existing behavior (explicit branch_id, or
+  // null for a global/unassigned batch).
   safeHandle(ipcMain, 'batches:create', async (_e, payload: Partial<BatchRow> & { product_id: string }) => {
     const db = getDb()
     const id = randomUUID()
+    const caller = authUser()
+    const isAdmin = Boolean(currentPerms(caller).all)
+    const branch_id = isAdmin ? (payload.branch_id ?? null) : ((caller.branch_id as string) ?? null)
     const row = {
-      id, product_id: payload.product_id, branch_id: payload.branch_id ?? null,
+      id, product_id: payload.product_id, branch_id,
       batch_number: payload.batch_number ?? null, serial_number: payload.serial_number ?? null,
       expiry_date: payload.expiry_date ?? null, mfg_date: payload.mfg_date ?? null,
       quantity: payload.quantity ?? 0, cost_price: payload.cost_price ?? 0,

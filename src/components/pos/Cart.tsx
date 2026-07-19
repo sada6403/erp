@@ -4,11 +4,20 @@ import { ShoppingCart, Trash2, Plus, Minus, Tag, ChevronDown, AlertTriangle } fr
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
 
-function getMaxDiscount(roleName: string): number {
+// Legacy fallback for roles nobody has explicitly configured yet via
+// Admin → Discounts → Max Discount Limits (role.permissions.max_discount_pct).
+function legacyMaxDiscount(roleName: string): number {
   const lower = roleName.toLowerCase()
   if (lower.includes('cashier')) return 5
   if (lower.includes('manager')) return 15
   return 100
+}
+
+function getMaxDiscount(user: { role?: { name?: string; permissions?: Record<string, unknown> } } | null): number {
+  const roleName = user?.role?.name || 'Cashier'
+  const perms = user?.role?.permissions || {}
+  if (perms.all) return 100
+  return typeof perms.max_discount_pct === 'number' ? perms.max_discount_pct : legacyMaxDiscount(roleName)
 }
 
 interface Props {
@@ -22,7 +31,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx }: Props) {
   const [showDiscount, setShowDiscount] = useState(false)
 
   const roleName = (user?.role as { name?: string } | null)?.name || 'Cashier'
-  const maxDiscount = getMaxDiscount(roleName)
+  const maxDiscount = getMaxDiscount(user as { role?: { name?: string; permissions?: Record<string, unknown> } } | null)
 
   // Clamp focusedIdx to valid range
   const activeFocusedIdx = focusedIdx >= 0 && focusedIdx < cart.items.length ? focusedIdx : cart.items.length - 1
@@ -34,9 +43,11 @@ export default function Cart({ focusedIdx = -1, onFocusIdx }: Props) {
   }, [])
 
   const handleItemDiscount = (productId: string, pct: number) => {
-    if (pct > maxDiscount) {
-      toast.error(`Max ${maxDiscount}% discount allowed for ${roleName}. Ask a manager to override.`)
-      cart.setItemDiscount(productId, maxDiscount)
+    const item = cart.items.find(i => i.product.id === productId)
+    const allowed = Math.max(maxDiscount, item?.auto_discount_pct ?? 0)
+    if (pct > allowed) {
+      toast.error(`Max ${allowed}% discount allowed for ${roleName}. Ask a manager to override.`)
+      cart.setItemDiscount(productId, allowed)
       return
     }
     cart.setItemDiscount(productId, pct)

@@ -634,3 +634,25 @@ CREATE TABLE IF NOT EXISTS coupon_redemptions (
 CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_coupon  ON coupon_redemptions(coupon_id);
 CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_invoice ON coupon_redemptions(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_branch  ON coupon_redemptions(branch_id);
+
+-- ─── DISCOUNTS ────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS discounts (
+  id                  TEXT PRIMARY KEY,
+  name                TEXT NOT NULL,
+  type                TEXT NOT NULL CHECK (type IN ('percentage','flat')),
+  value               REAL NOT NULL,               -- % (0-100) or flat Rs amount
+  max_discount_amount REAL,                        -- Rs cap; NULL = uncapped
+  scope               TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all','product')),
+  product_id          TEXT REFERENCES products(id),-- set when scope='product'
+  branch_id           TEXT REFERENCES branches(id),-- NULL = all branches (global)
+  is_active           INTEGER NOT NULL DEFAULT 1,
+  valid_from          TEXT,
+  valid_until         TEXT,
+  created_by          TEXT REFERENCES users(id),
+  created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at           TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_discounts_product ON discounts(product_id);
+CREATE INDEX IF NOT EXISTS idx_discounts_branch  ON discounts(branch_id);

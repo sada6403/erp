@@ -714,30 +714,80 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'admin:categories:list', () => {
     return { success: true, data: getDb().prepare('SELECT * FROM categories ORDER BY sort_order, name').all() }
   })
+  // Branch Managers must submit an edit request and have it approved by a
+  // Company Admin before they can create or update a category; the approval
+  // is re-validated and consumed inside the same transaction as the write.
+  // Admins write directly, as before.
   safeHandle(ipcMain, 'admin:categories:create', async (_e, p) => {
-    const perms = currentPerms()
-    if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
+    const caller = authUser()
+    const isAdmin = Boolean(currentPerms(caller).all)
+    const { edit_request_id, ...rest } = (p || {}) as Record<string, unknown> & { edit_request_id?: string }
+    if (!isAdmin && !edit_request_id) {
+      return { success: false, error: 'No approved edit request found — please request approval first' }
+    }
+
+    const db = getDb()
     const id = crypto.randomUUID()
-    const name = titleCase(p.name)
-    const shortCode = String(p.short_code || '').trim() || categoryCodeFromName(name)
-    getDb().prepare(`INSERT INTO categories (id,parent_id,name,description,sort_order,short_code)
-      VALUES (?,?,?,?,?,?)`)
-      .run(id, p.parent_id||null, name, p.description||null, p.sort_order||0, shortCode)
-    await enqueuSync('categories', id, 'INSERT', { id, ...p })
+    const name = titleCase(rest.name)
+    const shortCode = String(rest.short_code || '').trim() || categoryCodeFromName(name)
+
+    db.transaction(() => {
+      if (!isAdmin) {
+        const request = db.prepare(`
+          SELECT id FROM edit_requests
+          WHERE id=? AND status='approved' AND approved_expires_at > datetime('now')
+            AND requested_by=? AND target_table='categories' AND target_record_id='new'
+        `).get(edit_request_id, caller?.id) as { id: string } | undefined
+        if (!request) throw new Error('Edit request no longer valid — please request approval again')
+        db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
+          .run(request.id)
+      }
+      db.prepare(`INSERT INTO categories (id,parent_id,name,description,sort_order,short_code)
+        VALUES (?,?,?,?,?,?)`)
+        .run(id, rest.parent_id||null, name, rest.description||null, rest.sort_order||0, shortCode)
+    })()
+
+    await enqueuSync('categories', id, 'INSERT', { id, ...rest })
+    if (!isAdmin && edit_request_id) {
+      await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
+    }
     return { success: true, data: { id } }
   })
   safeHandle(ipcMain, 'admin:categories:update', async (_e, id: string, p) => {
-    const perms = currentPerms()
-    if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
-    const payload = { ...(p as Record<string, unknown>) }
+    const caller = authUser()
+    const isAdmin = Boolean(currentPerms(caller).all)
+    const { edit_request_id, ...rest } = (p || {}) as Record<string, unknown> & { edit_request_id?: string }
+    if (!isAdmin && !edit_request_id) {
+      return { success: false, error: 'No approved edit request found — please request approval first' }
+    }
+
+    const payload = { ...rest }
     if (payload.name !== undefined) payload.name = titleCase(payload.name)
     if (payload.short_code !== undefined) {
       payload.short_code = String(payload.short_code || '').trim() || categoryCodeFromName(payload.name || '')
     }
     if (payload.parent_id === '') payload.parent_id = null
+
+    const db = getDb()
     const fields = Object.keys(payload).map(k=>`${k}=@${k}`).join(',')
-    getDb().prepare(`UPDATE categories SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...payload,id})
+    db.transaction(() => {
+      if (!isAdmin) {
+        const request = db.prepare(`
+          SELECT id FROM edit_requests
+          WHERE id=? AND status='approved' AND approved_expires_at > datetime('now')
+            AND requested_by=? AND target_table='categories' AND target_record_id=?
+        `).get(edit_request_id, caller?.id, id) as { id: string } | undefined
+        if (!request) throw new Error('Edit request no longer valid — please request approval again')
+        db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
+          .run(request.id)
+      }
+      if (fields) db.prepare(`UPDATE categories SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...payload,id})
+    })()
+
     await enqueuSync('categories', id, 'UPDATE', { id, ...payload })
+    if (!isAdmin && edit_request_id) {
+      await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
+    }
     return { success: true }
   })
   safeHandle(ipcMain, 'admin:categories:delete', async (_e, id: string) => {

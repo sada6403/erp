@@ -9,7 +9,7 @@ import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
-const ALLOWED_TARGET_TABLES = new Set(['invoices', 'stocks', 'products'])
+const ALLOWED_TARGET_TABLES = new Set(['invoices', 'stocks', 'products', 'categories'])
 const APPROVAL_WINDOW_HOURS = 48
 
 function authUser(): Record<string, unknown> {
@@ -56,6 +56,13 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
         // Products aren't branch-scoped (and a 'new' product doesn't exist yet) —
         // record the requester's own branch for admin filtering/visibility.
         branchId = (user.branch_id as string) || null
+      } else if (payload.target_table === 'categories') {
+        if (payload.target_record_id !== 'new') {
+          const catRow = db.prepare('SELECT id FROM categories WHERE id=?').get(payload.target_record_id) as { id?: string } | undefined
+          if (!catRow) return { success: false, error: 'Category not found' }
+        }
+        // Categories aren't branch-scoped either — same as products.
+        branchId = (user.branch_id as string) || null
       } else {
         // target_record_id for stocks is `${product_id}-${branch_id}`
         const row = db.prepare('SELECT id, branch_id FROM stocks WHERE (product_id || "-" || branch_id) = ?')
@@ -92,6 +99,7 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
 
       const targetLabel = payload.target_table === 'invoices' ? 'completed invoice'
         : payload.target_table === 'products' ? (payload.target_record_id === 'new' ? 'new product' : 'product')
+        : payload.target_table === 'categories' ? (payload.target_record_id === 'new' ? 'new category' : 'category')
         : 'stock record'
       createNotification(
         'info',

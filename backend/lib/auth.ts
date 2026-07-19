@@ -93,6 +93,26 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_coupon_redemptions_branch (branch_id),
        INDEX idx_coupon_redemptions_updated (updated_at)
      )`,
+    `CREATE TABLE IF NOT EXISTS discounts (
+       id                  CHAR(36)      NOT NULL PRIMARY KEY,
+       name                VARCHAR(255)  NOT NULL,
+       type                VARCHAR(20)   NOT NULL,
+       value               DECIMAL(14,2) NOT NULL DEFAULT 0,
+       max_discount_amount DECIMAL(14,2) NULL,
+       scope               VARCHAR(20)   NOT NULL DEFAULT 'all',
+       product_id          CHAR(36)      NULL,
+       branch_id           CHAR(36)      NULL,
+       is_active           BOOLEAN       NOT NULL DEFAULT 1,
+       valid_from          DATETIME      NULL,
+       valid_until         DATETIME      NULL,
+       created_by          CHAR(36)      NULL,
+       created_at          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at          DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at           DATETIME      NULL,
+       INDEX idx_discounts_product (product_id),
+       INDEX idx_discounts_branch (branch_id),
+       INDEX idx_discounts_updated (updated_at)
+     )`,
     `CREATE TABLE IF NOT EXISTS suppliers (
        id         CHAR(36)     NOT NULL PRIMARY KEY,
        name       VARCHAR(255) NOT NULL,
@@ -665,6 +685,7 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        id                    CHAR(36)      NOT NULL PRIMARY KEY,
        scheme_id             CHAR(36)      NOT NULL,
        customer_id           CHAR(36)      NOT NULL,
+       agent_id              CHAR(36)      NULL,
        join_order            INT           NOT NULL,
        is_early_redemption   BOOLEAN       NOT NULL DEFAULT 0,
        redemption_type       VARCHAR(20)   NULL,
@@ -681,8 +702,13 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        UNIQUE KEY uq_chit_members_scheme_order (scheme_id, join_order),
        FOREIGN KEY (scheme_id) REFERENCES chit_schemes(id) ON DELETE CASCADE,
        INDEX idx_chit_members_customer (customer_id),
-       INDEX idx_chit_members_status (status)
+       INDEX idx_chit_members_status (status),
+       INDEX idx_chit_members_agent (agent_id)
      )`,
+    // Already-provisioned tenants pre-date the agent_id column above — the
+    // CREATE TABLE IF NOT EXISTS is a no-op for them, so add it explicitly.
+    `ALTER TABLE chit_members ADD COLUMN agent_id CHAR(36) NULL`,
+    `ALTER TABLE chit_members ADD INDEX idx_chit_members_agent (agent_id)`,
     `CREATE TABLE IF NOT EXISTS chit_draws (
        id               CHAR(36)     NOT NULL PRIMARY KEY,
        scheme_id        CHAR(36)     NOT NULL,

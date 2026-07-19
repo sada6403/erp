@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useCartStore } from '@/store/cartStore'
+import { useAuthStore } from '@/store/authStore'
 import { useKeyboard, POS_SHORTCUTS } from '@/hooks/useKeyboard'
 import type { Product, Customer } from '@/types'
 import type { BillType } from '@/store/cartStore'
@@ -38,6 +39,7 @@ const TYPE_INACTIVE = 'pos-segment-inactive'
 
 export default function POSPage() {
   const cart = useCartStore()
+  const { user } = useAuthStore()
   const [searchQuery, setSearchQuery]   = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [showPayment, setShowPayment]   = useState(false)
@@ -48,11 +50,13 @@ export default function POSPage() {
   const [invoiceNumber, setInvoiceNumber] = useState<string>('')
   const [categories, setCategories]     = useState<{ id: string; name: string }[]>([])
   const [cartFocusedIdx, setCartFocusedIdx] = useState(-1)
+  const [discountRules, setDiscountRules] = useState<Record<string, unknown>[]>([])
   const searchRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     loadInvoiceNumber(cart.billType)
     loadCategories()
+    loadDiscountRules()
     searchRef.current?.focus()
   }, [])
 
@@ -115,6 +119,38 @@ export default function POSPage() {
       toast.error((err as Error).message || 'Failed to load categories')
     }
   }
+
+  const loadDiscountRules = async () => {
+    try {
+      const res = await window.api.discounts.activeMap()
+      if (res.success) setDiscountRules(res.data as Record<string, unknown>[])
+    } catch { /* auto-discount is a bonus, POS still works without it */ }
+  }
+
+  // Most specific active rule wins: product+own-branch > product+global >
+  // all-products+own-branch > all-products+global. Mirrors the server-side
+  // resolver in electron/ipc/discounts.ts so client/server never disagree.
+  const resolveAutoDiscountPct = useCallback((product: Product): number => {
+    if (!discountRules.length || !product.selling_price) return 0
+    const branchId = ((user as { branch_id?: string } | null)?.branch_id) || null
+    let bestSpec = -1
+    let bestPct = 0
+    for (const r of discountRules) {
+      if (!r.is_active) continue
+      const isProductRule = r.scope === 'product'
+      if (isProductRule && r.product_id !== product.id) continue
+      const branchMatch = r.branch_id != null && r.branch_id === branchId
+      const spec = isProductRule && branchMatch ? 4 : isProductRule ? 3 : branchMatch ? 2 : 1
+      let pct = r.type === 'percentage' ? Number(r.value) : (Number(r.value) / product.selling_price) * 100
+      pct = Math.max(0, Math.min(100, pct))
+      if (r.max_discount_amount != null) {
+        const capPct = Math.max(0, (Number(r.max_discount_amount) / product.selling_price) * 100)
+        pct = Math.min(pct, capPct)
+      }
+      if (spec > bestSpec || (spec === bestSpec && pct > bestPct)) { bestSpec = spec; bestPct = pct }
+    }
+    return bestPct
+  }, [discountRules, user])
 
   const newInvoice = useCallback(() => {
     cart.clear()
@@ -259,11 +295,11 @@ export default function POSPage() {
         return
       }
     }
-    cart.addItem(product)
+    cart.addItem(product, 1, resolveAutoDiscountPct(product))
     // Auto-focus the newly added item (it will be last)
     setCartFocusedIdx(cart.items.length) // items hasn't updated yet, so this = new last index
     toast.success(`${product.name} added`, { duration: 900, position: 'bottom-right' })
-  }, [cart])
+  }, [cart, resolveAutoDiscountPct])
 
   const handleScannerSubmit = async () => {
     const code = searchQuery.trim()

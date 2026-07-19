@@ -68,6 +68,8 @@ const api = {
     update: (id: string, payload: unknown) => ipcRenderer.invoke('customers:update', id, payload),
     installments: (id: string)  => ipcRenderer.invoke('customers:installments', id),
     history:      (id: string)  => ipcRenderer.invoke('customers:history', id),
+    chitMemberships:    (id: string)  => ipcRenderer.invoke('customers:chitMemberships', id),
+    findByPhoneOrNic:   (payload: unknown) => ipcRenderer.invoke('customers:findByPhoneOrNic', payload),
     importExcel:      ()        => ipcRenderer.invoke('customers:importExcel'),
     downloadTemplate: ()        => ipcRenderer.invoke('customers:downloadTemplate'),
   },
@@ -91,6 +93,7 @@ const api = {
     create:  (payload: unknown)  => ipcRenderer.invoke('chits:create', payload),
     update:  (id: string, payload: unknown) => ipcRenderer.invoke('chits:update', id, payload),
     reports: (filters?: unknown) => ipcRenderer.invoke('chits:reports', filters),
+    customersList: (filters?: unknown) => ipcRenderer.invoke('chits:customers:list', filters),
     members: {
       add:              (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:add', schemeId, payload),
       remove:           (memberId: string)                   => ipcRenderer.invoke('chits:members:remove', memberId),
@@ -228,6 +231,7 @@ const api = {
   printer: {
     printReceipt: (payload: unknown) => ipcRenderer.invoke('printer:printReceipt', payload),
     printInvoice: (payload: unknown) => ipcRenderer.invoke('printer:printInvoice', payload),
+    exportInvoicePdf: (payload: unknown) => ipcRenderer.invoke('printer:exportInvoicePdf', payload),
     printTransfer:(payload: unknown) => ipcRenderer.invoke('printer:printTransfer', payload),
     printCoupon:  (payload: unknown) => ipcRenderer.invoke('printer:printCoupon', payload),
     emailInvoice: (payload: unknown) => ipcRenderer.invoke('printer:emailInvoice', payload),
@@ -291,6 +295,16 @@ const api = {
     validate: (code: string)                  => ipcRenderer.invoke('coupons:validate', code),
     void:     (id: string, reason?: string)   => ipcRenderer.invoke('coupons:void', id, reason),
     reports:  (filters?: unknown)             => ipcRenderer.invoke('coupons:reports', filters),
+  },
+
+  // Discounts (admin-managed product/branch discount rules)
+  discounts: {
+    list:         (filters?: unknown)            => ipcRenderer.invoke('discounts:list', filters),
+    activeMap:    (branchId?: string)             => ipcRenderer.invoke('discounts:activeMap', branchId),
+    create:       (payload: unknown)              => ipcRenderer.invoke('discounts:create', payload),
+    update:       (id: string, payload: unknown)  => ipcRenderer.invoke('discounts:update', id, payload),
+    toggleActive: (id: string, active: boolean)   => ipcRenderer.invoke('discounts:toggleActive', id, active),
+    delete:       (id: string)                    => ipcRenderer.invoke('discounts:delete', id),
   },
 
   // Batch / Serial / Expiry Tracking

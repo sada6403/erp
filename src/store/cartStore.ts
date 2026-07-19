@@ -12,7 +12,7 @@ interface CartState {
   validUntil: string   // for QUOTATION — expiry date
   dueDate: string      // for CREDIT — payment due date
 
-  addItem: (product: Product, quantity?: number) => void
+  addItem: (product: Product, quantity?: number, autoDiscountPct?: number) => void
   removeItem: (productId: string) => void
   updateQty: (productId: string, qty: number) => void
   setItemDiscount: (productId: string, pct: number) => void
@@ -76,7 +76,7 @@ export const useCartStore = create<CartState>((set, get) => ({
   taxAmount:      0,
   total:          0,
 
-  addItem: (product, quantity = 1) => {
+  addItem: (product, quantity = 1, autoDiscountPct) => {
     const { items, globalDiscount } = get()
     const existing = items.find(i => i.product.id === product.id)
     let newItems: CartItem[]
@@ -88,13 +88,15 @@ export const useCartStore = create<CartState>((set, get) => ({
           : i
       )
     } else {
+      const floor = Math.max(0, Math.min(100, autoDiscountPct || 0))
       const newItem = calcLine({
         product, quantity,
         unit_price:      product.selling_price,
-        discount_pct:    0,
+        discount_pct:    floor,
         discount_amount: 0,
         tax_amount:      0,
         line_total:      0,
+        auto_discount_pct: floor || undefined,
       })
       newItems = [...items, newItem]
     }

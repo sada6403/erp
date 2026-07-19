@@ -291,6 +291,7 @@ export interface CartItem {
   discount_amount: number
   tax_amount: number
   line_total: number
+  auto_discount_pct?: number   // admin-applied discount floor — exempt from the cashier's role cap
 }
 
 export interface Cart {
