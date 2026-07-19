@@ -665,9 +665,23 @@ export async function createTenant(params: {
 
 // ─── Change company status ────────────────────────────────────────────────────
 export async function setCompanyStatus(
-  companyId: string, status: 'active' | 'suspended' | 'cancelled' | 'trial'
+  companyId: string, status: 'active' | 'suspended' | 'cancelled' | 'trial',
+  opts?: { reason?: string; actorId?: string }
 ): Promise<void> {
-  await pool.query(`UPDATE companies SET status = ? WHERE id = ?`, [status, companyId])
+  if (status === 'suspended') {
+    await pool.query(
+      `UPDATE companies SET status = ?, suspension_reason = ?, suspended_at = NOW(), suspended_by = ? WHERE id = ?`,
+      [status, opts?.reason?.trim() || null, opts?.actorId || null, companyId]
+    )
+  } else if (status === 'active') {
+    // Reactivating clears the suspension trail — data itself was never touched
+    await pool.query(
+      `UPDATE companies SET status = ?, suspension_reason = NULL, suspended_at = NULL, suspended_by = NULL WHERE id = ?`,
+      [status, companyId]
+    )
+  } else {
+    await pool.query(`UPDATE companies SET status = ? WHERE id = ?`, [status, companyId])
+  }
 }
 
 // ─── Paginated company list ───────────────────────────────────────────────────

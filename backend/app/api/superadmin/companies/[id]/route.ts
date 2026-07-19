@@ -30,7 +30,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if ('error' in auth) return auth.error
 
   const body = await req.json()
-  const { status, name, email, phone, address, notes, regenerate_api_key,
+  const { status, suspensionReason, name, email, phone, address, notes, regenerate_api_key,
           regenerate_company_key,
           maxBranches, maxUsers, maxPosDevices, maxStorageGb,
           brandColor, brandLogoUrl,
@@ -39,7 +39,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { rows: [old] } = await pool.query(`SELECT * FROM companies WHERE id = ?`, [companyId])
   if (!old) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  if (status) await setCompanyStatus(companyId, status)
+  if (status === 'suspended' && !String(suspensionReason ?? '').trim()) {
+    return NextResponse.json({ error: 'A reason is required to suspend a company' }, { status: 400 })
+  }
+
+  if (status) await setCompanyStatus(companyId, status, { reason: suspensionReason, actorId: auth.payload.sub })
 
   const setClauses: string[] = []
   const vals: unknown[] = []
