@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, shell, protocol, net } from 'electron'
+import { app, BrowserWindow, ipcMain, shell, protocol, net, Menu } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'path'
 import { pathToFileURL } from 'url'
@@ -25,6 +25,7 @@ import { registerCommunicationHandlers, startReminderScheduler } from './ipc/com
 import { registerLoyaltyHandlers } from './ipc/loyalty'
 import { registerCouponHandlers } from './ipc/coupons'
 import { registerBatchHandlers } from './ipc/batches'
+import { registerDiscountHandlers } from './ipc/discounts'
 import { registerBranchTransferHandlers } from './ipc/branchTransfers'
 import { registerBackupHandlers } from './ipc/backup'
 import { registerMonitorHandlers } from './ipc/monitor'
@@ -79,6 +80,12 @@ function getWindowIconPath() {
 }
 
 function createWindow() {
+  // No File/Edit/View/Window/Help bar — Electron's default menu ships a
+  // "Reload"/"Force Reload" item (and Ctrl+R/Ctrl+Shift+R accelerators)
+  // that fully reloads the renderer on a stray click, wiping whatever the
+  // cashier/manager was doing. Not appropriate for a POS terminal anyway.
+  Menu.setApplicationMenu(null)
+
   const iconPath = getWindowIconPath()
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -166,6 +173,7 @@ async function bootstrap() {
   registerLoyaltyHandlers()
   registerCouponHandlers()
   registerBatchHandlers()
+  registerDiscountHandlers()
   registerBranchTransferHandlers(ipcMain)
   registerBackupHandlers()
   registerMonitorHandlers()

@@ -6,7 +6,7 @@ import {
   Truck, Settings, LogOut, Wifi, WifiOff, AlertCircle, UserCog,
   FileText, ShoppingCart, Receipt, Sun, Moon, ChevronDown,
   ChevronRight, ShoppingBag, Menu, Building2, Shield, HardDrive,
-  Activity, Download, RefreshCw, Ticket, Coins, type LucideIcon
+  Activity, Download, RefreshCw, Ticket, Coins, Percent, type LucideIcon
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
@@ -86,7 +86,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Chit Fund Management', icon: Coins, perm: 'customers', module: 'customers',
     items: [
       { to: '/admin/chits', label: 'Chit Schemes', perm: 'customers' },
-      { to: '/admin/customers', label: 'Customers', perm: 'customers' },
+      { to: '/admin/chit-customers', label: 'Customers', perm: 'customers' },
       { to: '/admin/agents', label: 'Agent Management', perm: 'employees' },
     ]
   },
@@ -102,6 +102,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Sell', icon: ShoppingBag, perm: 'pos', module: 'pos',
     items: [
+      { to: '/admin/bills', label: 'Bills', perm: 'pos' },
       { to: '/admin/orders', label: 'Orders', perm: 'pos' },
       { to: '/admin/quotations', label: 'Quotations', perm: 'pos' },
       { to: '/admin/credit-bills', label: 'Credit Bills', perm: 'reports' },
@@ -115,6 +116,13 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/coupons', label: 'Coupon Management', perm: 'coupons' },
       { to: '/admin/coupon-reports', label: 'Coupon Reports', perm: 'coupons' },
+    ]
+  },
+  {
+    // Fully admin-only — RequireSuperAdmin also gates the route itself.
+    label: 'Discounts', icon: Percent, adminOnly: true,
+    items: [
+      { to: '/admin/discounts', label: 'Discount Management', adminOnly: true },
     ]
   },
   { label: 'Deliveries', icon: Truck, perm: 'deliveries', module: 'deliveries', items: [{ to: '/admin/deliveries', label: 'Deliveries', perm: 'deliveries' }] },

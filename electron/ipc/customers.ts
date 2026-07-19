@@ -51,6 +51,26 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
     return { success: true, data: db.prepare('SELECT * FROM customers WHERE id = ?').get(id) }
   })
 
+  // Match an existing customer by phone OR NIC — used to avoid creating
+  // duplicate customer records (e.g. when enrolling someone into a chit
+  // scheme who is already a walk-in customer). Returns up to 5 matches;
+  // if phone and NIC each match a different person, both are returned so
+  // the caller can disambiguate rather than silently picking one.
+  safeHandle(ipcMain, 'customers:findByPhoneOrNic', (_e, payload: { phone?: string; nic?: string }) => {
+    const db = getDb()
+    const phone = String(payload?.phone || '').trim()
+    const nic = String(payload?.nic || '').trim()
+    if (!phone && !nic) return { success: true, data: [] }
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (phone) { conditions.push('phone = ?'); params.push(phone) }
+    if (nic)   { conditions.push('nic = ?'); params.push(nic) }
+    const rows = db.prepare(`
+      SELECT * FROM customers WHERE ${conditions.join(' OR ')} ORDER BY name LIMIT 5
+    `).all(...params)
+    return { success: true, data: rows }
+  })
+
   safeHandle(ipcMain, 'customers:create', async (_e, payload) => {
     const db = getDb()
       const authUser = store.get('auth_user') as Record<string, unknown> | undefined
@@ -198,6 +218,30 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
       GROUP BY i.id ORDER BY i.created_at DESC LIMIT 50
     `).all(id)
     return { success: true, data: invoices }
+  })
+
+  // Every Chit Fund scheme this customer belongs to, with enough context
+  // (product, branch, agent) to answer "what is this person buying, where,
+  // and through which agent" without leaving the customer's own record.
+  safeHandle(ipcMain, 'customers:chitMemberships', (_e, id: string) => {
+    const db = getDb()
+    const rows = db.prepare(`
+      SELECT m.id, m.scheme_id, m.join_order, m.status, m.contributions_paid,
+        m.is_early_redemption, m.won_cycle_no,
+        cs.scheme_number, cs.name as scheme_name, cs.chit_value, cs.contribution_amount,
+        b.name as branch_name,
+        p.name as product_name,
+        COALESCE(ma.name, sa.name) as agent_name, COALESCE(ma.code, sa.code) as agent_code
+      FROM chit_members m
+      JOIN chit_schemes cs ON cs.id = m.scheme_id
+      LEFT JOIN branches b ON b.id = cs.branch_id
+      LEFT JOIN products p ON p.id = cs.product_id
+      LEFT JOIN agents sa ON sa.id = cs.agent_id
+      LEFT JOIN agents ma ON ma.id = m.agent_id
+      WHERE m.customer_id = ?
+      ORDER BY m.created_at DESC
+    `).all(id)
+    return { success: true, data: rows }
   })
 
   safeHandle(ipcMain, 'customers:installments', (_e, id: string) => {

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import type { Customer } from '@/types'
-import { Plus, Search, Edit2, Eye, Upload, FileDown } from 'lucide-react'
+import { Plus, Search, Edit2, Eye, Upload, FileDown, Coins } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { validateCustomer } from '@/lib/validateCustomer'
 
@@ -12,6 +12,7 @@ export default function CustomersPage() {
   const [showForm, setShowForm]   = useState(false)
   const [editing, setEditing]     = useState<Customer | null>(null)
   const [viewing, setViewing]     = useState<Customer | null>(null)
+  const [enrolling, setEnrolling] = useState<Customer | null>(null)
   const [loading, setLoading]     = useState(true)
   const [importing, setImporting] = useState(false)
 
@@ -124,6 +125,7 @@ export default function CustomersPage() {
                   <div className="flex gap-1">
                     <button onClick={() => setViewing(c)} className="btn-ghost btn-sm p-1.5"><Eye size={13} /></button>
                     <button onClick={() => { setEditing(c); setShowForm(true) }} className="btn-ghost btn-sm p-1.5"><Edit2 size={13} /></button>
+                    <button onClick={() => setEnrolling(c)} className="btn-ghost btn-sm p-1.5" title="Add to Chit Scheme"><Coins size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -138,7 +140,85 @@ export default function CustomersPage() {
       {viewing && (
         <CustomerHistory customer={viewing} onClose={() => setViewing(null)} />
       )}
+      {enrolling && (
+        <EnrollInChitModal customer={enrolling} onClose={() => setEnrolling(null)} onSave={() => setEnrolling(null)} />
+      )}
     </div>
+  )
+}
+
+function EnrollInChitModal({ customer, onClose, onSave }: { customer: Customer; onClose: () => void; onSave: () => void }) {
+  const [schemes, setSchemes] = useState<Record<string, unknown>[]>([])
+  const [agents, setAgents] = useState<Record<string, unknown>[]>([])
+  const [schemeId, setSchemeId] = useState('')
+  const [agentId, setAgentId] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    Promise.all([
+      window.api.chits.list({ status: 'active' }),
+      window.api.agents.list({}),
+    ]).then(([schemesRes, agentsRes]: [{ success: boolean; data?: Record<string, unknown>[]; error?: string }, { success: boolean; data?: Record<string, unknown>[]; error?: string }]) => {
+      if (schemesRes.success) {
+        const open = (schemesRes.data || []).filter(s => Number(s.members_enrolled ?? 0) < Number(s.member_count ?? 0))
+        setSchemes(open)
+      } else {
+        toast.error(schemesRes.error || 'Failed to load chit schemes')
+      }
+      if (agentsRes.success) setAgents(agentsRes.data || [])
+    }).catch(() => toast.error('Failed to load chit schemes')).finally(() => setLoading(false))
+  }, [])
+
+  const scheme = schemes.find(s => s.id === schemeId)
+  useEffect(() => { if (scheme) setAgentId((scheme.agent_id as string) || '') }, [schemeId])
+
+  const save = async () => {
+    if (!schemeId) { toast.error('Select a chit scheme'); return }
+    setSaving(true)
+    try {
+      const res = await window.api.chits.members.add(schemeId, { customer_id: customer.id, agent_id: agentId || undefined })
+      if (res.success) { toast.success('Customer added to chit scheme'); onSave() }
+      else toast.error(res.error || 'Failed to add to scheme')
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to add to scheme')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Add "${customer.name}" to a Chit Scheme`} onClose={onClose}
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving || loading} className="btn-primary">{saving ? 'Adding...' : 'Add to Scheme'}</button></>}>
+      <div className="space-y-3">
+        {loading ? (
+          <p className="text-sm text-slate-500">Loading schemes...</p>
+        ) : schemes.length === 0 ? (
+          <p className="text-sm text-slate-500">No open chit schemes with available slots right now.</p>
+        ) : (
+          <>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Chit Scheme *</label>
+              <select value={schemeId} onChange={e => setSchemeId(e.target.value)} className="input">
+                <option value="">— Select a scheme —</option>
+                {schemes.map(s => (
+                  <option key={s.id as string} value={s.id as string}>
+                    {(s.scheme_number as string)} — {(s.name as string)} ({(s.members_enrolled as number) ?? 0}/{(s.member_count as number) ?? 0})
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Agent (optional — defaults to scheme's agent)</label>
+              <select value={agentId} onChange={e => setAgentId(e.target.value)} className="input">
+                <option value="">— Use scheme default —</option>
+                {agents.map(a => <option key={a.id as string} value={a.id as string}>{(a.code as string)} — {(a.name as string)}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
   )
 }
 
@@ -191,6 +271,7 @@ function CustomerForm({ customer, onClose, onSave }: { customer: Customer | null
 function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: () => void }) {
   const [invoices, setInvoices] = useState<Record<string,unknown>[]>([])
   const [installments, setInstallments] = useState<Record<string,unknown>[]>([])
+  const [chitMemberships, setChitMemberships] = useState<Record<string,unknown>[]>([])
 
   useEffect(() => {
     window.api.customers.history(customer.id).then((r: any) => {
@@ -201,6 +282,10 @@ function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: (
       if (r.success) setInstallments(r.data as Record<string,unknown>[])
       else toast.error(r.error || 'Failed to load installments')
     }).catch(() => toast.error('Failed to load installments'))
+    window.api.customers.chitMemberships(customer.id).then((r: any) => {
+      if (r.success) setChitMemberships(r.data as Record<string,unknown>[])
+      else toast.error(r.error || 'Failed to load chit memberships')
+    }).catch(() => toast.error('Failed to load chit memberships'))
   }, [customer.id])
 
   return (
@@ -232,6 +317,28 @@ function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: (
                 <div key={inst.id as string} className="flex items-center justify-between px-3 py-2 rounded-lg" style={{ background: 'var(--bg-page)', border: '1px solid var(--border)' }}>
                   <div><p className="text-xs font-mono font-semibold" style={{ color: 'var(--text-1)' }}>{inst.invoice_number as string}</p><p className="text-xs" style={{ color: 'var(--text-3)' }}>Due: {inst.next_due_date as string}</p></div>
                   <div className="text-right"><p className="text-sm font-bold text-red-400">Rs.{Number(inst.due_amount).toLocaleString()}</p><span className={`badge-${inst.status === 'active' ? 'green' : inst.status === 'overdue' ? 'red' : 'gray'} text-xs`}>{inst.status as string}</span></div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {chitMemberships.length > 0 && (
+          <div>
+            <h3 className="text-sm font-semibold mb-2">Chit Memberships</h3>
+            <div className="space-y-2">
+              {chitMemberships.map(cm => (
+                <div key={cm.id as string} className="px-3 py-2 rounded-lg" style={{ background: 'var(--bg-page)', border: '1px solid var(--border)' }}>
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-mono font-semibold" style={{ color: 'var(--text-1)' }}>{cm.scheme_number as string} — {cm.scheme_name as string}</p>
+                    <span className={`badge-${cm.status === 'redeemed' ? 'green' : cm.status === 'withdrawn' ? 'gray' : 'blue'} text-xs`}>{cm.status as string}</span>
+                  </div>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                    {(cm.product_name as string) || 'No product set'} · {(cm.branch_name as string) || 'No branch'} · Agent: {(cm.agent_name as string) || '—'}
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                    Join order #{cm.join_order as number} · Paid Rs.{Number(cm.contributions_paid).toLocaleString()} of Rs.{Number(cm.chit_value).toLocaleString()}
+                  </p>
                 </div>
               ))}
             </div>

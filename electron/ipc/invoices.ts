@@ -6,6 +6,7 @@ import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
 import { redeemCouponInTransaction, reverseCouponForInvoice, type CouponRedemptionResult } from './coupons'
+import { resolveApplicableDiscount } from './discounts'
 import { safeHandle } from './ipcHandler'
 
 const store = new Store()
@@ -55,6 +56,24 @@ function getAuthUser() {
   return store.get('auth_user') as Record<string, unknown>
 }
 
+// Legacy fallback for roles nobody has explicitly configured yet via
+// Admin → Discounts → Max Discount Limits (mirrors src/components/pos/Cart.tsx).
+function legacyMaxDiscount(roleName: string): number {
+  const lower = roleName.toLowerCase()
+  if (lower.includes('cashier')) return 5
+  if (lower.includes('manager')) return 15
+  return 100
+}
+
+// Returns null when the caller is unrestricted (Company Admin — perms.all).
+function resolveMaxDiscountPct(user: Record<string, unknown>): number | null {
+  const role = user?.role as Record<string, unknown> | undefined
+  const perms = (role?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+  if (perms.all) return null
+  if (typeof perms.max_discount_pct === 'number') return perms.max_discount_pct
+  return legacyMaxDiscount(String(role?.name || 'Cashier'))
+}
+
 function defaultBranchId() {
   return 'b1111111-1111-4111-8111-111111111111'
 }
@@ -88,6 +107,31 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const agentCommissionAmount = agentCode || agentName
         ? Number(((Number(payload.total_amount || 0) * agentCommissionPct) / 100).toFixed(2))
         : 0
+
+      // --- Discount cap validation (server-side; the client-side cap in
+      // Cart.tsx can be bypassed by a modified renderer) ---
+      const maxDiscountPct = resolveMaxDiscountPct(user)
+      if (maxDiscountPct !== null) {
+        const TOLERANCE = 0.5 // absorb client-side rounding
+        let itemDiscountTotal = 0
+        for (const item of (payload.items || [])) {
+          const unitPrice = Number(item.unit_price || 0)
+          const pct = Number(item.discount_pct || 0)
+          itemDiscountTotal += Number(item.discount_amount || 0)
+          if (unitPrice <= 0) continue
+          const auto = resolveApplicableDiscount(db, item.product_id, unitPrice, branchId)
+          const allowed = Math.max(maxDiscountPct, auto?.pct || 0)
+          if (pct > allowed + TOLERANCE) {
+            return { success: false, error: `Discount ${pct}% on an item exceeds your allowed limit (${allowed.toFixed(1)}%)` }
+          }
+        }
+        const subtotal = Number(payload.subtotal || 0)
+        const globalDiscountAmount = Number(payload.discount_amount || 0) - itemDiscountTotal
+        const globalDiscountPct = subtotal > 0 ? (globalDiscountAmount / subtotal) * 100 : 0
+        if (globalDiscountPct > maxDiscountPct + TOLERANCE) {
+          return { success: false, error: `Overall discount ${globalDiscountPct.toFixed(1)}% exceeds your allowed limit (${maxDiscountPct}%)` }
+        }
+      }
 
       // --- Credit bill validation ---
       if (billType === 'CREDIT') {

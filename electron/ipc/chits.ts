@@ -32,6 +32,25 @@ function money(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100
 }
 
+// A member's own agent (if assigned) earns commission at that agent's own
+// default rate; otherwise commission falls back to the scheme-wide rate —
+// keeps existing single-agent schemes working unchanged.
+function resolveCommissionPct(
+  db: ReturnType<typeof getDb>,
+  member: { agent_id?: unknown } | undefined,
+  scheme: { agent_commission_pct?: unknown }
+): number {
+  const memberAgentId = member?.agent_id as string | undefined
+  if (memberAgentId) {
+    const agent = db.prepare('SELECT default_commission_pct FROM agents WHERE id=?')
+      .get(memberAgentId) as { default_commission_pct?: number } | undefined
+    if (agent?.default_commission_pct !== undefined && agent.default_commission_pct !== null) {
+      return Number(agent.default_commission_pct)
+    }
+  }
+  return Number(scheme.agent_commission_pct) || 0
+}
+
 function addMonths(date: string, months: number): string {
   const d = new Date(`${date}T00:00:00`)
   d.setMonth(d.getMonth() + months)
@@ -195,10 +214,12 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
     const members = db.prepare(`
       SELECT m.*, c.name as customer_name, c.phone as customer_phone,
-        i.status as repayment_status, i.due_amount as repayment_due
+        i.status as repayment_status, i.due_amount as repayment_due,
+        ma.name as member_agent_name, ma.code as member_agent_code
       FROM chit_members m
       LEFT JOIN customers c ON c.id = m.customer_id
       LEFT JOIN installments i ON i.id = m.installment_id
+      LEFT JOIN agents ma ON ma.id = m.agent_id
       WHERE m.scheme_id = ?
       ORDER BY m.join_order
     `).all(id)
@@ -300,6 +321,28 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (enrolled.c >= Number(scheme.member_count)) return { success: false, error: 'This chit scheme is already full' }
 
     let customerId = String(payload.customer_id || '')
+
+    // No explicit customer_id supplied — try to match an existing customer
+    // by phone or NIC before creating a new one, so enrolling someone who's
+    // already a walk-in customer doesn't create a duplicate record.
+    if (!customerId) {
+      const phone = String(payload.customer_phone || '').trim()
+      const nic = String(payload.customer_nic || '').trim()
+      if (phone || nic) {
+        const conditions: string[] = []
+        const params: unknown[] = []
+        if (phone) { conditions.push('phone = ?'); params.push(phone) }
+        if (nic)   { conditions.push('nic = ?'); params.push(nic) }
+        const matched = db.prepare(`SELECT id FROM customers WHERE ${conditions.join(' OR ')} LIMIT 1`).get(...params) as { id: string } | undefined
+        if (matched) customerId = matched.id
+      }
+    }
+
+    if (customerId) {
+      const already = db.prepare(`SELECT id FROM chit_members WHERE scheme_id=? AND customer_id=?`).get(schemeId, customerId)
+      if (already) return { success: false, error: 'This customer is already enrolled in this scheme' }
+    }
+
     const enqueue: Array<{ table: string; id: string; row: Record<string, unknown> }> = []
 
     const memberId = crypto.randomUUID()
@@ -323,16 +366,16 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
       const isEarly = nextOrder <= Number(scheme.early_redemption_count)
       const memberRow = {
-        id: memberId, scheme_id: schemeId, customer_id: customerId, join_order: nextOrder,
+        id: memberId, scheme_id: schemeId, customer_id: customerId, agent_id: payload.agent_id || null, join_order: nextOrder,
         is_early_redemption: isEarly ? 1 : 0, redemption_type: null, won_cycle_no: null,
         product_received_at: null, contributions_paid: 0, installment_id: null,
         status: 'active', eligibility_note: null,
       }
       db.prepare(`
         INSERT INTO chit_members
-          (id, scheme_id, customer_id, join_order, is_early_redemption, redemption_type,
+          (id, scheme_id, customer_id, agent_id, join_order, is_early_redemption, redemption_type,
            won_cycle_no, product_received_at, contributions_paid, installment_id, status, eligibility_note)
-        VALUES (@id,@scheme_id,@customer_id,@join_order,@is_early_redemption,@redemption_type,
+        VALUES (@id,@scheme_id,@customer_id,@agent_id,@join_order,@is_early_redemption,@redemption_type,
            @won_cycle_no,@product_received_at,@contributions_paid,@installment_id,@status,@eligibility_note)
       `).run(memberRow)
       enqueue.push({ table: 'chit_members', id: memberId, row: memberRow })
@@ -359,9 +402,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'chits:members:list', (_e, schemeId: string) => {
     const db = getDb()
     const rows = db.prepare(`
-      SELECT m.*, c.name as customer_name, c.phone as customer_phone
+      SELECT m.*, c.name as customer_name, c.phone as customer_phone,
+        ma.name as member_agent_name, ma.code as member_agent_code
       FROM chit_members m
       LEFT JOIN customers c ON c.id = m.customer_id
+      LEFT JOIN agents ma ON ma.id = m.agent_id
       WHERE m.scheme_id = ?
       ORDER BY m.join_order
     `).all(schemeId)
@@ -382,11 +427,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
     const wb = XLSX.utils.book_new()
     const sample = [
-      { 'Customer Name': 'Kamala Perera', 'Phone': '0771234567', 'Email': '', 'NIC': '', 'Address': '' },
-      { 'Customer Name': '', 'Phone': '', 'Email': '', 'NIC': '', 'Address': '' },
+      { 'Customer Name': 'Kamala Perera', 'Phone': '0771234567', 'Email': '', 'NIC': '', 'Address': '', 'Agent Code': '' },
+      { 'Customer Name': '', 'Phone': '', 'Email': '', 'NIC': '', 'Address': '', 'Agent Code': '' },
     ]
     const ws = XLSX.utils.json_to_sheet(sample)
-    ws['!cols'] = [{ wch: 22 }, { wch: 16 }, { wch: 26 }, { wch: 16 }, { wch: 30 }]
+    ws['!cols'] = [{ wch: 22 }, { wch: 16 }, { wch: 26 }, { wch: 16 }, { wch: 30 }, { wch: 14 }]
     XLSX.utils.book_append_sheet(wb, ws, 'Members')
 
     const instructions = XLSX.utils.aoa_to_sheet([
@@ -396,7 +441,9 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       ['Email', 'No', 'Must be a valid email if provided'],
       ['NIC', 'No', 'Sri Lankan NIC format if provided'],
       ['Address', 'No', 'Free text'],
+      ['Agent Code', 'No', 'Must match an existing agent\'s code exactly if provided — leave blank to use the scheme\'s default agent'],
       [],
+      ['If a phone or NIC already matches an existing customer, that customer is reused instead of creating a duplicate.'],
       ['Members are enrolled in the order rows appear in this file. Join order determines early-redemption eligibility.'],
       ['Upload this file from the Chit Fund scheme page → Bulk Import Members.'],
     ])
@@ -432,6 +479,10 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     let nextOrder = (db.prepare('SELECT COALESCE(MAX(join_order),0) as m FROM chit_members WHERE scheme_id=?').get(schemeId) as { m: number }).m
     const capacity = Number(scheme.member_count) - (db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status != 'withdrawn'`).get(schemeId) as { c: number }).c
 
+    // Pre-load agents once (not per row) for the optional "Agent Code" column.
+    const agentRows = db.prepare('SELECT id, code FROM agents').all() as { id: string; code: string }[]
+    const agentByCode = new Map(agentRows.map(a => [a.code.toUpperCase().trim(), a.id]))
+
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i]
       const rowNum = i + 2
@@ -440,6 +491,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       const email = importCell(row, 'Email')
       const nic = importCell(row, 'NIC')
       const address = importCell(row, 'Address')
+      const agentCode = importCell(row, 'Agent Code', 'Agent')
 
       if (!name && !phone) continue // fully blank row
       if (imported >= capacity) { errors.push(`Row ${rowNum}: skipped — chit scheme is full`); skipped++; continue }
@@ -448,34 +500,56 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       if (!PHONE_RE.test(phone)) { errors.push(`Row ${rowNum}: invalid phone "${phone}"`); skipped++; continue }
       if (email && !EMAIL_RE.test(email)) { errors.push(`Row ${rowNum}: invalid email "${email}"`); skipped++; continue }
       if (nic && !NIC_RE.test(nic)) { errors.push(`Row ${rowNum}: invalid NIC "${nic}"`); skipped++; continue }
+      let agentId: string | null = null
+      if (agentCode) {
+        const matched = agentByCode.get(agentCode.toUpperCase().trim())
+        if (!matched) { errors.push(`Row ${rowNum}: unknown agent code "${agentCode}"`); skipped++; continue }
+        agentId = matched
+      }
 
       try {
-        const customerId = crypto.randomUUID()
-        const customerRow = {
-          id: customerId, branch_id: scheme.branch_id, name, phone,
-          email: email || null, address: address || null, nic: nic || null,
-          notes: 'Created from Chit Fund bulk import',
+        // Look up an existing customer by phone or NIC before creating a
+        // fresh one, same rule as the single-add flow.
+        let customerId = ''
+        const matchConditions: string[] = []
+        const matchParams: unknown[] = []
+        if (phone) { matchConditions.push('phone = ?'); matchParams.push(phone) }
+        if (nic)   { matchConditions.push('nic = ?'); matchParams.push(nic) }
+        const matched = matchConditions.length
+          ? db.prepare(`SELECT id FROM customers WHERE ${matchConditions.join(' OR ')} LIMIT 1`).get(...matchParams) as { id: string } | undefined
+          : undefined
+        if (matched) {
+          customerId = matched.id
+          const already = db.prepare(`SELECT id FROM chit_members WHERE scheme_id=? AND customer_id=?`).get(schemeId, customerId)
+          if (already) { errors.push(`Row ${rowNum}: this customer is already enrolled in this scheme`); skipped++; continue }
+        } else {
+          customerId = crypto.randomUUID()
+          const customerRow = {
+            id: customerId, branch_id: scheme.branch_id, name, phone,
+            email: email || null, address: address || null, nic: nic || null,
+            notes: 'Created from Chit Fund bulk import',
+          }
+          db.prepare(`
+            INSERT INTO customers (id, branch_id, name, phone, email, address, nic, notes)
+            VALUES (@id,@branch_id,@name,@phone,@email,@address,@nic,@notes)
+          `).run(customerRow)
+          await enqueuSync('customers', customerId, 'INSERT', customerRow)
         }
-        db.prepare(`
-          INSERT INTO customers (id, branch_id, name, phone, email, address, nic, notes)
-          VALUES (@id,@branch_id,@name,@phone,@email,@address,@nic,@notes)
-        `).run(customerRow)
-        await enqueuSync('customers', customerId, 'INSERT', customerRow)
 
         nextOrder += 1
         const memberId = crypto.randomUUID()
         const isEarly = nextOrder <= Number(scheme.early_redemption_count)
         const memberRow = {
-          id: memberId, scheme_id: schemeId, customer_id: customerId, join_order: nextOrder,
+          id: memberId, scheme_id: schemeId, customer_id: customerId, agent_id: agentId, join_order: nextOrder,
           is_early_redemption: isEarly ? 1 : 0, redemption_type: null, won_cycle_no: null,
           product_received_at: null, contributions_paid: 0, installment_id: null,
           status: 'active', eligibility_note: null,
         }
         db.prepare(`
           INSERT INTO chit_members
-            (id, scheme_id, customer_id, join_order, is_early_redemption, redemption_type,
+            (id, scheme_id, customer_id, agent_id, join_order, is_early_redemption, redemption_type,
              won_cycle_no, product_received_at, contributions_paid, installment_id, status, eligibility_note)
-          VALUES (@id,@scheme_id,@customer_id,@join_order,@is_early_redemption,@redemption_type,
+          VALUES (@id,@scheme_id,@customer_id,@agent_id,@join_order,@is_early_redemption,@redemption_type,
              @won_cycle_no,@product_received_at,@contributions_paid,@installment_id,@status,@eligibility_note)
         `).run(memberRow)
         await enqueuSync('chit_members', memberId, 'INSERT', memberRow)
@@ -637,7 +711,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const enqueue: Array<{ table: string; id: string; row: Record<string, unknown>; op: 'INSERT' | 'UPDATE' }> = []
 
     db.transaction(() => {
-      const commission = money(amount * Number(scheme.agent_commission_pct) / 100)
+      const commission = money(amount * resolveCommissionPct(db, member, scheme) / 100)
       const contributionRow = {
         id: contributionId, scheme_id: member.scheme_id, member_id: memberId, cycle_no: null,
         contribution_type: 'early_redemption', amount, method: payload.method || 'cash',
@@ -699,7 +773,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (amount <= 0) return { success: false, error: 'Enter a valid amount' }
     const method = String(payload.method || 'cash')
     const status = method === 'bank_transfer' ? 'pending_verification' : 'approved'
-    const commission = money(amount * Number(scheme.agent_commission_pct) / 100)
+    const commission = money(amount * resolveCommissionPct(db, member, scheme) / 100)
     const contributionId = crypto.randomUUID()
 
     const row = {
@@ -745,7 +819,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         .run(caller.id || null, notes || null, contributionId)
     } else {
       const scheme = db.prepare('SELECT * FROM chit_schemes WHERE id=?').get(contribution.scheme_id) as Record<string, unknown>
-      const commission = money(Number(contribution.amount) * Number(scheme.agent_commission_pct) / 100)
+      const member = db.prepare('SELECT agent_id FROM chit_members WHERE id=?').get(contribution.member_id) as { agent_id?: unknown } | undefined
+      const commission = money(Number(contribution.amount) * resolveCommissionPct(db, member, scheme) / 100)
       db.transaction(() => {
         db.prepare(`UPDATE chit_contributions SET status='approved', verified_by=?, verified_at=datetime('now'), commission_amount=?, updated_at=datetime('now') WHERE id=?`)
           .run(caller.id || null, commission, contributionId)
@@ -806,6 +881,45 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       FROM chit_schemes cs
       ${where}
       ORDER BY cs.created_at DESC
+    `).all(...params)
+    return { success: true, data: rows }
+  })
+
+  // Customers who are enrolled in at least one Chit Fund scheme — a
+  // dedicated view distinct from the general customer list, since these
+  // customers need scheme/product/agent context that plain "customers"
+  // doesn't carry. One row per customer (not per membership); a customer
+  // in multiple schemes shows an aggregate scheme count plus a combined
+  // list of scheme names/agents for quick scanning.
+  safeHandle(ipcMain, 'chits:customers:list', (_e, filters: { search?: string; branchId?: string } = {}) => {
+    const db = getDb()
+    const conditions: string[] = []
+    const params: unknown[] = []
+    if (filters.branchId) { conditions.push('cs.branch_id = ?'); params.push(filters.branchId) }
+    if (filters.search) {
+      conditions.push('(c.name LIKE ? OR c.phone LIKE ? OR c.nic LIKE ?)')
+      params.push(`%${filters.search}%`, `%${filters.search}%`, `%${filters.search}%`)
+    }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
+
+    const rows = db.prepare(`
+      SELECT c.id, c.name, c.phone, c.email, c.nic, c.address, c.outstanding_due, c.loyalty_points,
+        COUNT(DISTINCT m.id) as scheme_count,
+        COALESCE(SUM(m.contributions_paid), 0) as total_contributions_paid,
+        GROUP_CONCAT(DISTINCT cs.name) as scheme_names,
+        GROUP_CONCAT(DISTINCT COALESCE(ma.name, sa.name)) as agent_names,
+        GROUP_CONCAT(DISTINCT b.name) as branch_names,
+        GROUP_CONCAT(DISTINCT p.name) as product_names
+      FROM customers c
+      JOIN chit_members m ON m.customer_id = c.id
+      JOIN chit_schemes cs ON cs.id = m.scheme_id
+      LEFT JOIN branches b ON b.id = cs.branch_id
+      LEFT JOIN products p ON p.id = cs.product_id
+      LEFT JOIN agents sa ON sa.id = cs.agent_id
+      LEFT JOIN agents ma ON ma.id = m.agent_id
+      ${where}
+      GROUP BY c.id
+      ORDER BY c.name
     `).all(...params)
     return { success: true, data: rows }
   })

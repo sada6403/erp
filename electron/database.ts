@@ -615,6 +615,7 @@ function runMigrations(): void {
       id                    TEXT PRIMARY KEY,
       scheme_id             TEXT NOT NULL REFERENCES chit_schemes(id),
       customer_id           TEXT NOT NULL REFERENCES customers(id),
+      agent_id              TEXT REFERENCES agents(id),
       join_order            INTEGER NOT NULL,
       is_early_redemption   INTEGER NOT NULL DEFAULT 0,
       redemption_type       TEXT,
@@ -633,6 +634,11 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_chit_members_scheme   ON chit_members(scheme_id);
     CREATE INDEX IF NOT EXISTS idx_chit_members_customer ON chit_members(customer_id);
     CREATE INDEX IF NOT EXISTS idx_chit_members_status   ON chit_members(status);
+  `)
+  if (!hasColumn('chit_members', 'agent_id')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
+  }
+  db.exec(`
 
     CREATE TABLE IF NOT EXISTS chit_draws (
       id                TEXT PRIMARY KEY,
@@ -1136,6 +1142,29 @@ function runMigrations(): void {
       }
     }
   } catch { /* roles table not ready — seed covers fresh installs */ }
+
+  // ── Discounts: admin-managed product/branch discount rules ─────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS discounts (
+      id                  TEXT PRIMARY KEY,
+      name                TEXT NOT NULL,
+      type                TEXT NOT NULL CHECK (type IN ('percentage','flat')),
+      value               REAL NOT NULL,
+      max_discount_amount REAL,
+      scope               TEXT NOT NULL DEFAULT 'all' CHECK (scope IN ('all','product')),
+      product_id          TEXT REFERENCES products(id),
+      branch_id           TEXT REFERENCES branches(id),
+      is_active           INTEGER NOT NULL DEFAULT 1,
+      valid_from          TEXT,
+      valid_until         TEXT,
+      created_by          TEXT REFERENCES users(id),
+      created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at           TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_discounts_product ON discounts(product_id);
+    CREATE INDEX IF NOT EXISTS idx_discounts_branch  ON discounts(branch_id);
+  `)
 }
 
 function seedDefaultData() {

@@ -265,12 +265,12 @@ export function registerReportHandlers() {
           b.name as branch_name,
           c.name as customer_name, c.phone as customer_phone,
           u.name as cashier_name,
-          GROUP_CONCAT(DISTINCT p2.method || ':' || p2.amount, '|') as payments_raw
+          (SELECT GROUP_CONCAT(x.method || ':' || x.amount, '|')
+             FROM (SELECT DISTINCT method, amount FROM payments WHERE invoice_id = i.id) x) as payments_raw
         FROM invoices i
         LEFT JOIN branches b ON b.id = i.branch_id
         LEFT JOIN customers c ON c.id = i.customer_id
         LEFT JOIN users u ON u.id = i.cashier_id
-        LEFT JOIN payments p2 ON p2.invoice_id = i.id
         ${where}
         GROUP BY i.id
         ORDER BY i.created_at DESC

@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
-import { FileText, RefreshCw, Search } from 'lucide-react'
+import { FileText, RefreshCw, Search, Eye } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
+import InvoiceDetailModal from '@/components/shared/InvoiceDetailModal'
 import toast from 'react-hot-toast'
 
 function statusBadge(status: string) {
-  if (status === 'QUOTATION') return <span className="badge-yellow">Quotation</span>
+  // A quotation's real status is 'draft' until converted/cancelled — bill_type
+  // (not status) is what holds 'QUOTATION'. Once converted, invoices:convert
+  // rewrites bill_type to RETAIL in place, so a 'converted' status never
+  // actually occurs on a bill_type='QUOTATION' row; kept as a harmless no-op.
+  if (status === 'draft') return <span className="badge-yellow">Quotation</span>
   if (status === 'converted') return <span className="badge-green">Converted</span>
   if (status === 'cancelled') return <span className="badge-red">Cancelled</span>
   return <span className="badge-blue">{status}</span>
@@ -14,6 +19,7 @@ export default function QuotationsPage() {
   const [quotes, setQuotes]   = useState<Record<string, unknown>[]>([])
   const [search, setSearch]   = useState('')
   const [loading, setLoading] = useState(false)
+  const [viewingId, setViewingId] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -96,7 +102,7 @@ export default function QuotationsPage() {
           </thead>
           <tbody>
             {visible.map(q => (
-              <tr className="table-row" key={String(q.id)}>
+              <tr className="table-row cursor-pointer" key={String(q.id)} onClick={() => setViewingId(String(q.id))}>
                 <td className="table-cell font-mono text-xs text-amber-400">{String(q.invoice_number)}</td>
                 <td className="table-cell">
                   <p className="font-medium">{String(q.customer_name || 'Walk-in')}</p>
@@ -117,22 +123,30 @@ export default function QuotationsPage() {
                 </td>
                 <td className="table-cell">{statusBadge(String(q.status))}</td>
                 <td className="table-cell">
-                  {q.status === 'QUOTATION' && (
-                    <div className="flex gap-2">
-                      <button
-                        className="btn-primary btn-sm gap-1"
-                        onClick={() => handleConvert(String(q.id), String(q.invoice_number))}
-                      >
-                        <FileText size={12} /> Convert
-                      </button>
-                      <button
-                        className="btn-ghost btn-sm text-red-400"
-                        onClick={() => handleCancel(String(q.id))}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  )}
+                  <div className="flex gap-2">
+                    <button
+                      className="btn-ghost btn-sm gap-1"
+                      onClick={e => { e.stopPropagation(); setViewingId(String(q.id)) }}
+                    >
+                      <Eye size={12} /> View
+                    </button>
+                    {q.status === 'draft' && (
+                      <>
+                        <button
+                          className="btn-primary btn-sm gap-1"
+                          onClick={e => { e.stopPropagation(); handleConvert(String(q.id), String(q.invoice_number)) }}
+                        >
+                          <FileText size={12} /> Convert
+                        </button>
+                        <button
+                          className="btn-ghost btn-sm text-red-400"
+                          onClick={e => { e.stopPropagation(); handleCancel(String(q.id)) }}
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -144,6 +158,10 @@ export default function QuotationsPage() {
           </tbody>
         </table>
       </div>
+
+      {viewingId && (
+        <InvoiceDetailModal invoiceId={viewingId} onClose={() => setViewingId(null)} />
+      )}
     </div>
   )
 }

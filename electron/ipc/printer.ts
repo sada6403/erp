@@ -1,5 +1,5 @@
 import type { IpcMain, WebContentsPrintOptions } from 'electron'
-import { BrowserWindow, shell, app } from 'electron'
+import { BrowserWindow, shell, app, dialog } from 'electron'
 import Store from 'electron-store'
 import path from 'path'
 import fs from 'fs'
@@ -46,6 +46,7 @@ interface PaymentLine {
 
 interface InvoicePayload {
   invoice_number: string
+  bill_type?: string
   invoice_design?: string
   invoice_date?: string
   cashier_name?: string
@@ -86,6 +87,54 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
     const design = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
     await printHtml(html, design, selectedPaperType(settings, design))
     return { success: true }
+  })
+
+  // Save the same letterhead invoice/quotation document (logo, company
+  // name, items, totals, footer) as a PDF file instead of sending it to a
+  // printer — mirrors reports:exportPdf's exact save-dialog + hidden-window
+  // + printToPDF pattern, just fed buildInvoiceHtml's richer document layout.
+  safeHandle(ipcMain, 'printer:exportInvoicePdf', async (_e, payload: InvoicePayload) => {
+    let tmpPath: string | undefined
+    let pdfWin: BrowserWindow | undefined
+    try {
+      const win = BrowserWindow.getFocusedWindow()
+      if (!win) return { success: false, error: 'No window' }
+
+      const docWord = payload.bill_type === 'QUOTATION' ? 'Quotation' : 'Invoice'
+      const saveResult = await dialog.showSaveDialog(win, {
+        title: `Save ${docWord} PDF`,
+        defaultPath: `${docWord}-${payload.invoice_number}.pdf`,
+        filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
+      })
+      if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true }
+
+      const settings = store.get('app_settings') as Record<string, unknown> || {}
+      const html = await buildInvoiceHtml(payload, settings)
+      tmpPath = path.join(app.getPath('temp'), `${docWord.toLowerCase()}-${Date.now()}.html`)
+      fs.writeFileSync(tmpPath, html, 'utf-8')
+
+      pdfWin = new BrowserWindow({
+        width: 900,
+        height: 1200,
+        show: false,
+        webPreferences: { contextIsolation: true, nodeIntegration: false },
+      })
+      const loadedPdfWin = pdfWin
+      await loadedPdfWin.loadFile(tmpPath)
+      const pdfBuffer = await loadedPdfWin.webContents.printToPDF({
+        printBackground: true,
+        pageSize: 'A4',
+        margins: { top: 0.3, bottom: 0.3, left: 0.3, right: 0.3 },
+      })
+
+      fs.writeFileSync(saveResult.filePath, pdfBuffer)
+      return { success: true, filePath: saveResult.filePath }
+    } catch (err) {
+      return { success: false, error: (err as Error).message }
+    } finally {
+      if (pdfWin) pdfWin.close()
+      if (tmpPath) { try { fs.unlinkSync(tmpPath) } catch { /* best effort */ } }
+    }
   })
 
   safeHandle(ipcMain, 'printer:printTransfer', async (_e, payload: Record<string, unknown>) => {
@@ -533,6 +582,9 @@ async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string
   const currency       = (settings.currency_symbol as string) || 'Rs.'
   const taxLabel       = (settings.tax_label       as string) || 'VAT'
   const branchName     = (settings.branch_name     as string) || ''
+  const isQuotation    = payload.bill_type === 'QUOTATION'
+  const docWord        = isQuotation ? 'Quotation' : 'Invoice'
+  const docSubtitle    = isQuotation ? 'Price Quotation' : 'Official Tax Invoice'
   const activeDesign   = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
   const paperType      = selectedPaperType(settings, activeDesign)
   const logoUrl        = String(invoiceSetting(settings, activeDesign, 'logo_url', ''))
@@ -584,7 +636,7 @@ async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string
   const dotMatrix = paperType === 'dot_matrix'
   const pageWidth = dotMatrix ? '920px' : paperType === '80mm' ? '302px' : paperType === '58mm' ? '220px' : paperType === 'A5' ? '559px' : '794px'
   const pageMinHeight = paperType === '80mm' || paperType === '58mm' || dotMatrix ? 'auto' : paperType === 'A5' ? '780px' : '1100px'
-  const pagePadding = dotMatrix ? '24px 36px' : paperType === '80mm' || paperType === '58mm' ? '14px' : '48px'
+  const pagePadding = dotMatrix ? '24px 36px' : paperType === '80mm' || paperType === '58mm' ? '6px 10px' : '48px'
   const compact = paperType === '80mm' || paperType === '58mm'
   const thermal = activeDesign === 'thermal'
   const printPageSize = dotMatrix ? '241mm 279mm' : paperType === '58mm' ? '58mm 297mm' : paperType === '80mm' ? '80mm 297mm' : paperType === 'A5' ? 'A5' : 'A4'
@@ -640,7 +692,7 @@ async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Invoice ${esc(payload.invoice_number)}</title>
+<title>${docWord} ${esc(payload.invoice_number)}</title>
 <style>
 @page{size:${printPageSize};margin:0}
 *{margin:0;padding:0;box-sizing:border-box}
@@ -722,14 +774,14 @@ td{padding:11px 14px;font-size:12px;color:#374151}
 .qr svg{width:100%;height:100%;display:block}
 .sig{width:190px;margin:24px auto 0;border-top:1px solid #6b7280;padding-top:5px;font-size:10px;color:#4b5563}
 ${compact ? `
-.hdr{display:block;text-align:center;margin-bottom:10px}.brand{justify-content:center;gap:8px}.inv-right{text-align:center;margin-top:6px}
-.logo{width:42px;height:42px;border-radius:9px}.co-name{font-size:17px}.co-sub{font-size:8px}.inv-word{font-size:18px;letter-spacing:1px;color:#111}.inv-num{font-size:10px}
-.gbar{height:2px;margin:10px 0}.two{display:block;margin-bottom:12px}.meta-box{min-width:0;margin-top:8px;padding:8px;border-radius:6px}
-.info-box h4{font-size:8px}.info-box p,.mrow,.mv{font-size:9px}.ml{font-size:7px}
-table{margin-bottom:12px}th,td{padding:5px 3px;font-size:8px}.pname{font-size:9px}.psku{font-size:7px}
-.bottom{display:block;margin-bottom:12px}.pay-box{padding:9px;margin-bottom:8px;border-radius:6px}.pay-box h4{font-size:8px}.badge{font-size:8px;padding:3px 8px}.prow{font-size:9px;padding:3px 0}.tot-box{width:100%}
-.trow{font-size:10px;padding:5px 0}.trow.grand{padding:9px 10px;border-radius:6px}.trow.grand .tl,.trow.grand .tv{font-size:13px}.note{padding:7px 9px;margin-bottom:12px}.note p,.foot .contact{font-size:8px}.foot{padding-top:10px}.foot .ty{font-size:12px}
-.barcode{max-width:210px}.barcode svg{height:40px}.qr{width:104px;height:104px}
+.hdr{display:block;text-align:center;margin-bottom:6px}.brand{justify-content:center;gap:8px}.inv-right{text-align:center;margin-top:4px}
+.logo{width:42px;height:42px;border-radius:9px}.co-name{font-size:18px}.co-sub{font-size:9px}.inv-word{font-size:18px;letter-spacing:1px;color:#111}.inv-num{font-size:10px}
+.gbar{height:2px;margin:6px 0}.two{display:block;margin-bottom:8px}.meta-box{min-width:0;margin-top:6px;padding:6px;border-radius:6px}
+.info-box h4{font-size:9px}.info-box p{font-size:10px;line-height:1.3}.mrow{padding:2px 0}.mv{font-size:10px}.ml{font-size:8px}
+table{margin-bottom:8px}th,td{padding:4px 3px;font-size:9px}.pname{font-size:10px}.psku{font-size:8px}
+.bottom{display:block;margin-bottom:8px}.pay-box{padding:8px;margin-bottom:6px;border-radius:6px}.pay-box h4{font-size:9px}.badge{font-size:9px;padding:3px 8px}.prow{font-size:10px;padding:2px 0}.tot-box{width:100%}
+.trow{font-size:11px;padding:4px 0}.trow.grand{padding:8px 10px;border-radius:6px}.trow.grand .tl,.trow.grand .tv{font-size:14px}.note{padding:6px 8px;margin-bottom:8px}.note p,.foot .contact{font-size:9px}.foot{padding-top:8px}.foot .ty{font-size:13px}
+.barcode{margin:6px auto 2px;max-width:130px}.barcode svg{height:28px}.bc-num{font-size:9px;margin-bottom:4px}.qr{width:72px;height:72px;margin:6px auto}
 ` : ''}
 ${dotMatrix ? `
 body{font-family:'Courier New',monospace}.page{font-family:'Courier New',monospace}
@@ -785,12 +837,12 @@ tbody tr:nth-child(even){background:#fff!important}
       </div>` : ''}
       <div>
         ${showCompany ? `<div class="co-name">${esc(companyName)}</div>` : ''}
-        <div class="co-sub">Official Tax Invoice</div>
+        <div class="co-sub">${esc(docSubtitle)}</div>
         ${headerMessage ? `<div class="co-sub">${esc(headerMessage)}</div>` : ''}
       </div>
     </div>
     <div class="inv-right">
-      <div class="inv-word">Invoice</div>
+      <div class="inv-word">${docWord}</div>
       <div class="inv-num"># ${esc(payload.invoice_number)}</div>
     </div>
   </div>

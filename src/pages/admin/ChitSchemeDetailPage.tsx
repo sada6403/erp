@@ -133,19 +133,20 @@ export default function ChitSchemeDetailPage() {
           <table className="w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
-                {['#', 'Customer', 'Phone', 'Early?', 'Contributions Paid', 'Status', 'Won Cycle', ''].map(h => (
+                {['#', 'Customer', 'Phone', 'Agent', 'Early?', 'Contributions Paid', 'Status', 'Won Cycle', ''].map(h => (
                   <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {members.length === 0 ? (
-                <tr><td colSpan={8} className="text-center py-16 text-slate-500">No members enrolled yet</td></tr>
+                <tr><td colSpan={9} className="text-center py-16 text-slate-500">No members enrolled yet</td></tr>
               ) : members.map(m => (
                 <tr key={m.id as string} className="table-row">
                   <td className="table-cell text-slate-400">{m.join_order as number}</td>
                   <td className="table-cell font-medium">{(m.customer_name as string) || '—'}</td>
                   <td className="table-cell text-slate-400">{(m.customer_phone as string) || '—'}</td>
+                  <td className="table-cell text-slate-400">{(m.member_agent_name as string) || (scheme.agent_name as string) || '—'}</td>
                   <td className="table-cell">{m.is_early_redemption ? <span className="badge-blue">Yes</span> : '—'}</td>
                   <td className="table-cell">Rs.{money(m.contributions_paid)}</td>
                   <td className="table-cell">
@@ -197,7 +198,8 @@ export default function ChitSchemeDetailPage() {
       </div>
 
       {showAddMember && (
-        <AddMemberModal schemeId={id!} onClose={() => setShowAddMember(false)} onSave={() => { setShowAddMember(false); load() }} />
+        <AddMemberModal schemeId={id!} defaultAgentId={(scheme.agent_id as string) || ''} schemeBranchId={(scheme.branch_id as string) || ''}
+          onClose={() => setShowAddMember(false)} onSave={() => { setShowAddMember(false); load() }} />
       )}
       {showDraw && (
         <ConductDrawModal schemeId={id!} cycleNo={nextCycle} isFinalCycle={isFinalCycle}
@@ -215,16 +217,49 @@ export default function ChitSchemeDetailPage() {
   )
 }
 
-function AddMemberModal({ schemeId, onClose, onSave }: { schemeId: string; onClose: () => void; onSave: () => void }) {
+function AddMemberModal({ schemeId, defaultAgentId, onClose, onSave }: {
+  schemeId: string; defaultAgentId: string; schemeBranchId: string; onClose: () => void; onSave: () => void
+}) {
   const [form, setForm] = useState({ customer_name: '', customer_phone: '', customer_email: '', customer_nic: '', customer_address: '' })
   const [saving, setSaving] = useState(false)
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(p => ({ ...p, [k]: e.target.value }))
 
+  const [query, setQuery] = useState('')
+  const [matches, setMatches] = useState<Row[]>([])
+  const [searching, setSearching] = useState(false)
+  const [selectedCustomer, setSelectedCustomer] = useState<Row | null>(null)
+
+  const [agents, setAgents] = useState<Row[]>([])
+  const [agentId, setAgentId] = useState(defaultAgentId || '')
+
+  useEffect(() => {
+    window.api.agents.list({}).then((res: { success: boolean; data?: Row[] }) => {
+      if (res.success) setAgents(res.data || [])
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!query.trim() || selectedCustomer) { setMatches([]); return }
+    const t = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const res = await window.api.customers.search(query.trim())
+        if (res.success) setMatches(res.data as Row[])
+      } catch { /* ignore */ } finally { setSearching(false) }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [query, selectedCustomer])
+
   const save = async () => {
-    if (!form.customer_name.trim()) { toast.error('Customer name is required'); return }
-    if (!form.customer_phone.trim()) { toast.error('Phone is required'); return }
+    if (!selectedCustomer) {
+      if (!form.customer_name.trim()) { toast.error('Customer name is required'); return }
+      if (!form.customer_phone.trim()) { toast.error('Phone is required'); return }
+    }
     setSaving(true)
-    const res = await window.api.chits.members.add(schemeId, form)
+    const payload = selectedCustomer
+      ? { customer_id: selectedCustomer.id, agent_id: agentId || undefined }
+      : { ...form, agent_id: agentId || undefined }
+    const res = await window.api.chits.members.add(schemeId, payload)
     setSaving(false)
     if (res.success) { toast.success('Member added'); onSave() }
     else toast.error(String(res.error || 'Failed to add member'))
@@ -234,11 +269,49 @@ function AddMemberModal({ schemeId, onClose, onSave }: { schemeId: string; onClo
     <Modal title="Add Chit Member" onClose={onClose}
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Add Member'}</button></>}>
       <div className="space-y-3">
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Customer Name *</label><input value={form.customer_name} onChange={f('customer_name')} className="input" /></div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Phone *</label><input value={form.customer_phone} onChange={f('customer_phone')} className="input" /></div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Email</label><input value={form.customer_email} onChange={f('customer_email')} className="input" /></div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">NIC</label><input value={form.customer_nic} onChange={f('customer_nic')} className="input" /></div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Address</label><input value={form.customer_address} onChange={f('customer_address')} className="input" /></div>
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Find existing customer (optional)</label>
+          {selectedCustomer ? (
+            <div className="flex items-center justify-between input">
+              <span className="text-sm">{(selectedCustomer.name as string)} — {(selectedCustomer.phone as string) || 'no phone'}</span>
+              <button type="button" onClick={() => { setSelectedCustomer(null); setQuery('') }} className="text-xs text-brand-400 hover:underline">Change</button>
+            </div>
+          ) : (
+            <>
+              <input value={query} onChange={e => setQuery(e.target.value)} className="input" placeholder="Search by name, phone, NIC..." />
+              {searching && <p className="text-xs text-slate-500 mt-1">Searching...</p>}
+              {matches.length > 0 && (
+                <div className="mt-1 rounded-lg border overflow-hidden max-h-40 overflow-y-auto" style={{ borderColor: 'var(--border)' }}>
+                  {matches.map(m => (
+                    <button key={m.id as string} type="button"
+                      onClick={() => { setSelectedCustomer(m); setMatches([]) }}
+                      className="w-full flex items-center justify-between px-3 py-2 hover:bg-[var(--bg-soft)] text-left text-sm">
+                      <span>{m.name as string}</span>
+                      <span className="text-xs text-slate-500 font-mono">{(m.phone as string) || '—'}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        {!selectedCustomer && (
+          <>
+            <p className="text-xs text-slate-500">No match? Enter new customer details below.</p>
+            <div><label className="block text-xs font-medium text-slate-400 mb-1">Customer Name *</label><input value={form.customer_name} onChange={f('customer_name')} className="input" /></div>
+            <div><label className="block text-xs font-medium text-slate-400 mb-1">Phone *</label><input value={form.customer_phone} onChange={f('customer_phone')} className="input" /></div>
+            <div><label className="block text-xs font-medium text-slate-400 mb-1">Email</label><input value={form.customer_email} onChange={f('customer_email')} className="input" /></div>
+            <div><label className="block text-xs font-medium text-slate-400 mb-1">NIC</label><input value={form.customer_nic} onChange={f('customer_nic')} className="input" /></div>
+            <div><label className="block text-xs font-medium text-slate-400 mb-1">Address</label><input value={form.customer_address} onChange={f('customer_address')} className="input" /></div>
+          </>
+        )}
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Agent (optional — defaults to scheme's agent)</label>
+          <select value={agentId} onChange={e => setAgentId(e.target.value)} className="input">
+            <option value="">— Use scheme default —</option>
+            {agents.map(a => <option key={a.id as string} value={a.id as string}>{(a.code as string)} — {(a.name as string)}</option>)}
+          </select>
+        </div>
       </div>
     </Modal>
   )

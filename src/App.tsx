@@ -19,6 +19,7 @@ import AnalyticsPage from '@/pages/admin/AnalyticsPage'
 import DeliveriesPage from '@/pages/admin/DeliveriesPage'
 import InstallmentsPage from '@/pages/admin/InstallmentsPage'
 import ChitSchemesPage from '@/pages/admin/ChitSchemesPage'
+import ChitCustomersPage from '@/pages/admin/ChitCustomersPage'
 import ChitSchemeDetailPage from '@/pages/admin/ChitSchemeDetailPage'
 import AuditLogsPage from '@/pages/admin/AuditLogsPage'
 import EditRequestsPage from '@/pages/admin/EditRequestsPage'
@@ -30,6 +31,7 @@ import StockCountPage from '@/pages/admin/StockCountPage'
 import OrdersPage from '@/pages/admin/OrdersPage'
 import StockLookupPage from '@/pages/admin/StockLookupPage'
 import QuotationsPage from '@/pages/admin/QuotationsPage'
+import BillsPage from '@/pages/admin/BillsPage'
 import CreditBillsPage from '@/pages/admin/CreditBillsPage'
 import PurchaseOrdersPage from '@/pages/admin/PurchaseOrdersPage'
 import ExpensesPage from '@/pages/admin/ExpensesPage'
@@ -44,6 +46,7 @@ import BranchTransferForm from '@/pages/admin/BranchTransferForm'
 import BranchTransferView from '@/pages/admin/BranchTransferView'
 import BatchesPage from '@/pages/admin/BatchesPage'
 import CouponsPage from '@/pages/admin/CouponsPage'
+import DiscountsPage from '@/pages/admin/DiscountsPage'
 import CouponReportsPage from '@/pages/admin/CouponReportsPage'
 import BackupPage from '@/pages/admin/BackupPage'
 import SecurityPage from '@/pages/admin/SecurityPage'
@@ -134,6 +137,7 @@ export default function App() {
         <Route path="/admin/stock-count" element={<StockCountPage />} />
         <Route path="/admin/batches" element={<BatchesPage />} />
         <Route path="/admin/stock-lookup" element={<StockLookupPage />} />
+        <Route path="/admin/bills" element={<BillsPage />} />
         <Route path="/admin/orders" element={<OrdersPage />} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
@@ -151,6 +155,7 @@ export default function App() {
         <Route path="/admin/installments" element={<RequireModule module="installments"><InstallmentsPage /></RequireModule>} />
         <Route path="/admin/chits" element={<ChitSchemesPage />} />
         <Route path="/admin/chits/:id" element={<ChitSchemeDetailPage />} />
+        <Route path="/admin/chit-customers" element={<ChitCustomersPage />} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
         <Route path="/admin/edit-requests" element={<EditRequestsPage />} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />
@@ -172,6 +177,7 @@ export default function App() {
         <Route path="/admin/reports"        element={<AdvancedReportsPage />} />
         <Route path="/admin/coupons"        element={<CouponsPage />} />
         <Route path="/admin/coupon-reports" element={<CouponReportsPage />} />
+        <Route path="/admin/discounts"      element={<RequireSuperAdmin><DiscountsPage /></RequireSuperAdmin>} />
       </Route>
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
