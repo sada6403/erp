@@ -61,42 +61,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-async function getEnabledModules(companyId: string, packageId: string | null): Promise<string[]> {
-  const ALL_KEYS = ['pos','inventory','customers','reports_basic','reports_full',
-    'installments','multi_branch','purchase_orders','deliveries','expenses','stock_transfers']
-
-  const moduleMap: Record<string, boolean> = {}
-
-  // Package defaults
-  if (packageId) {
-    try {
-      const { rows } = await pool.query(
-        `SELECT module_key, is_enabled FROM package_modules WHERE package_id = ?`,
-        [packageId]
-      )
-      for (const m of rows as { module_key: string; is_enabled: number }[]) {
-        moduleMap[m.module_key] = Boolean(m.is_enabled)
-      }
-    } catch { /* table may not exist yet */ }
-  }
-
-  // Company-level overrides win
-  try {
-    const { rows } = await pool.query(
-      `SELECT module_key, is_enabled FROM company_modules WHERE company_id = ?`,
-      [companyId]
-    )
-    for (const m of rows as { module_key: string; is_enabled: number }[]) {
-      moduleMap[m.module_key] = Boolean(m.is_enabled)
-    }
-  } catch { /* table may not exist yet */ }
-
-  // If no module info at all, return everything (standard plan assumption)
-  if (Object.keys(moduleMap).length === 0) return ALL_KEYS
-
-  return ALL_KEYS.filter(k => moduleMap[k] !== false)
-}
-
 function getSubStatus(endsAt: string | null, graceDays: number, dbStatus: string): string {
   if (!endsAt) return dbStatus ?? 'active'
   const now = new Date()

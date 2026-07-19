@@ -4,6 +4,7 @@ import type { QueryClient } from '@/lib/db'
 import { applySyncOperation } from '@/lib/sync'
 import { syncLimiter } from '@/lib/rateLimit'
 import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
+import { TABLE_MODULE_MAP } from '@/lib/catalog'
 
 export const runtime = 'nodejs'
 
@@ -39,6 +40,11 @@ export async function POST(request: NextRequest) {
       typeof body.record !== 'object' || Array.isArray(body.record)
     ) {
       return NextResponse.json({ error: 'Invalid sync payload' }, { status: 400 })
+    }
+
+    const requiredModule = TABLE_MODULE_MAP[body.table]
+    if (requiredModule && !entitlements.enabledModules.includes(requiredModule)) {
+      return NextResponse.json({ error: `Feature disabled: ${requiredModule}` }, { status: 403 })
     }
 
     // Use a connection from the company's tenant pool

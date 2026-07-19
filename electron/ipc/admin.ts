@@ -10,7 +10,7 @@ import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import * as XLSX from 'xlsx'
-import { safeHandle } from './ipcHandler'
+import { safeHandle, safeHandleModule } from './ipcHandler'
 
 const store = new Store()
 
@@ -761,7 +761,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
 
   // Deliveries
-  safeHandle(ipcMain, 'admin:deliveries:list', (_e, filters: Record<string,unknown> = {}) => {
+  safeHandleModule(ipcMain, 'admin:deliveries:list', 'deliveries', (_e, filters: Record<string,unknown> = {}) => {
     const db = getDb()
     let sql = `SELECT d.*, c.name as customer_name, i.invoice_number, u.name as assigned_name
                FROM deliveries d
@@ -774,7 +774,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     sql += ' ORDER BY d.created_at DESC LIMIT 200'
     return { success: true, data: db.prepare(sql).all(...params) }
   })
-  safeHandle(ipcMain, 'admin:deliveries:update', async (_e, id: string, p) => {
+  safeHandleModule(ipcMain, 'admin:deliveries:update', 'deliveries', async (_e, id: string, p) => {
     const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
     getDb().prepare(`UPDATE deliveries SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
     await enqueuSync('deliveries', id, 'UPDATE', { id, ...p })
@@ -782,17 +782,17 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
 
   // Installments
-  safeHandle(ipcMain, 'admin:installments:calculate', (_e, p: Record<string, unknown>) => {
+  safeHandleModule(ipcMain, 'admin:installments:calculate', 'installments', (_e, p: Record<string, unknown>) => {
     return { success: true, data: calculateInstallment(p) }
   })
 
-  safeHandle(ipcMain, 'admin:installments:plans', () => {
+  safeHandleModule(ipcMain, 'admin:installments:plans', 'installments', () => {
     return { success: true, data: getDb().prepare(`
       SELECT * FROM installment_plans WHERE is_active=1 ORDER BY months
     `).all() }
   })
 
-  safeHandle(ipcMain, 'admin:installments:savePlan', async (_e, p: Record<string, unknown>) => {
+  safeHandleModule(ipcMain, 'admin:installments:savePlan', 'installments', async (_e, p: Record<string, unknown>) => {
     const db = getDb()
     const id = String(p.id || crypto.randomUUID())
     const row = {
@@ -821,7 +821,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: { id } }
   })
 
-  safeHandle(ipcMain, 'admin:installments:createSale', async (_e, p: Record<string, unknown>) => {
+  safeHandleModule(ipcMain, 'admin:installments:createSale', 'installments', async (_e, p: Record<string, unknown>) => {
     const db = getDb()
     const user = authUser()
     const branchId = String(p.branch_id || user.branch_id || defaultBranchId())
@@ -975,7 +975,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: { id: accountId, contract_number: contractNumber, invoice_id: invoiceId } }
   })
 
-  safeHandle(ipcMain, 'admin:installments:list', (_e, filters: Record<string,unknown> = {}) => {
+  safeHandleModule(ipcMain, 'admin:installments:list', 'installments', (_e, filters: Record<string,unknown> = {}) => {
     const db = getDb()
     db.prepare(`
       UPDATE installments SET status='overdue', updated_at=datetime('now')
@@ -1003,7 +1003,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: db.prepare(sql).all(...params) }
   })
 
-  safeHandle(ipcMain, 'admin:installments:get', (_e, id: string) => {
+  safeHandleModule(ipcMain, 'admin:installments:get', 'installments', (_e, id: string) => {
     const db = getDb()
     const inst = db.prepare(`
       SELECT inst.*, c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
@@ -1034,7 +1034,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: { ...inst, schedule, payments, computed_monthly: inst.monthly_amount, overdue_amount: overdue.amount } }
   })
 
-  safeHandle(ipcMain, 'admin:installments:recordPayment', async (_e, id: string, p: Record<string,unknown>) => {
+  safeHandleModule(ipcMain, 'admin:installments:recordPayment', 'installments', async (_e, id: string, p: Record<string,unknown>) => {
     const db = getDb()
     const user = authUser()
     const inst = db.prepare('SELECT * FROM installments WHERE id=?').get(id) as Record<string, unknown> | undefined
@@ -1101,7 +1101,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: { id: paymentId, receipt_number: receiptNumber, status } }
   })
 
-  safeHandle(ipcMain, 'admin:installments:verifyPayment', async (_e, paymentId: string, action: 'approve' | 'reject', notes?: string) => {
+  safeHandleModule(ipcMain, 'admin:installments:verifyPayment', 'installments', async (_e, paymentId: string, action: 'approve' | 'reject', notes?: string) => {
     const db = getDb()
     const user = authUser()
     const payment = db.prepare('SELECT * FROM installment_payments WHERE id=?').get(paymentId) as Record<string, unknown> | undefined
@@ -1159,7 +1159,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true }
   })
 
-  safeHandle(ipcMain, 'admin:installments:pendingTransfers', (_e, filters: Record<string, unknown> = {}) => {
+  safeHandleModule(ipcMain, 'admin:installments:pendingTransfers', 'installments', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
     let sql = `
       SELECT ip.*, inst.contract_number, c.name AS customer_name, c.phone AS customer_phone,
@@ -1176,7 +1176,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: db.prepare(sql).all(...params) }
   })
 
-  safeHandle(ipcMain, 'admin:installments:applyPenalties', () => {
+  safeHandleModule(ipcMain, 'admin:installments:applyPenalties', 'installments', () => {
     const db = getDb()
     let count = 0
     db.transaction(() => {
@@ -1206,7 +1206,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: { applied: count } }
   })
 
-  safeHandle(ipcMain, 'admin:installments:reports', (_e, filters: Record<string, unknown> = {}) => {
+  safeHandleModule(ipcMain, 'admin:installments:reports', 'installments', (_e, filters: Record<string, unknown> = {}) => {
     const caller = authUser()
     const perms = currentPerms(caller)
     const isGlobal = Boolean(perms.all || perms.reports)
@@ -1308,10 +1308,10 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
 
   // Expense Categories
-  safeHandle(ipcMain, 'admin:expenseCategories:list', () => {
+  safeHandleModule(ipcMain, 'admin:expenseCategories:list', 'expenses', () => {
     return { success: true, data: getDb().prepare('SELECT * FROM expense_categories WHERE is_active=1 ORDER BY name').all() }
   })
-  safeHandle(ipcMain, 'admin:expenseCategories:create', async (_e, p: Record<string,unknown>) => {
+  safeHandleModule(ipcMain, 'admin:expenseCategories:create', 'expenses', async (_e, p: Record<string,unknown>) => {
     const id = crypto.randomUUID()
     getDb().prepare('INSERT INTO expense_categories (id,name) VALUES (?,?)').run(id, p.name)
     await enqueuSync('expense_categories', id, 'INSERT', { id, name: p.name })
@@ -1319,7 +1319,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
 
   // Expenses
-  safeHandle(ipcMain, 'admin:expenses:list', (_e, filters: Record<string,unknown> = {}) => {
+  safeHandleModule(ipcMain, 'admin:expenses:list', 'expenses', (_e, filters: Record<string,unknown> = {}) => {
     const db = getDb()
     let sql = `
       SELECT e.*, ec.name as category_name, s.name as supplier_name,
@@ -1338,7 +1338,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     sql += ' ORDER BY e.created_at DESC LIMIT 500'
     return { success: true, data: db.prepare(sql).all(...params) }
   })
-  safeHandle(ipcMain, 'admin:expenses:create', async (_e, p: Record<string,unknown>) => {
+  safeHandleModule(ipcMain, 'admin:expenses:create', 'expenses', async (_e, p: Record<string,unknown>) => {
     const db = getDb()
     const id = crypto.randomUUID()
     const paid = Number(p.paid_amount ?? p.amount)
@@ -1354,7 +1354,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     await enqueuSync('expenses', id, 'INSERT', { id, ...p })
     return { success: true, data: { id } }
   })
-  safeHandle(ipcMain, 'admin:expenses:update', async (_e, id: string, p: Record<string,unknown>) => {
+  safeHandleModule(ipcMain, 'admin:expenses:update', 'expenses', async (_e, id: string, p: Record<string,unknown>) => {
     const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
     getDb().prepare(`UPDATE expenses SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
     await enqueuSync('expenses', id, 'UPDATE', { id, ...p })

@@ -1,4 +1,5 @@
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
+import { hasModule } from '../services/licenseService'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Handler = (event: IpcMainInvokeEvent, ...args: any[]) => any
@@ -20,5 +21,20 @@ export function safeHandle(ipcMain: IpcMain, channel: string, fn: Handler) {
     } catch (err) {
       return { success: false, error: (err as Error)?.message ?? String(err) }
     }
+  })
+}
+
+/**
+ * Same as safeHandle, but rejects with a plan-restriction error before ever
+ * calling fn when the company's cached license doesn't include moduleKey.
+ * Fails open (allows the call) if no license has been cached yet — see
+ * hasModule() in services/licenseService.ts for why.
+ */
+export function safeHandleModule(ipcMain: IpcMain, channel: string, moduleKey: string, fn: Handler) {
+  safeHandle(ipcMain, channel, async (event: IpcMainInvokeEvent, ...args: unknown[]) => {
+    if (!hasModule(moduleKey)) {
+      return { success: false, error: 'Feature not available on your current plan' }
+    }
+    return fn(event, ...args)
   })
 }

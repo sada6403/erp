@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import LoginPage from '@/pages/LoginPage'
 import AppLayout from '@/components/layout/AppLayout'
+import RequireModule from '@/components/shared/RequireModule'
 import POSPage from '@/pages/pos/POSPage'
 import AdminDashboard from '@/pages/admin/AdminDashboard'
 import ProductsPage from '@/pages/admin/ProductsPage'
@@ -136,8 +137,8 @@ export default function App() {
         <Route path="/admin/orders" element={<OrdersPage />} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
-        <Route path="/admin/purchase-orders" element={<PurchaseOrdersPage />} />
-        <Route path="/admin/expenses" element={<ExpensesPage />} />
+        <Route path="/admin/purchase-orders" element={<RequireModule module="purchase_orders"><PurchaseOrdersPage /></RequireModule>} />
+        <Route path="/admin/expenses" element={<RequireModule module="expenses"><ExpensesPage /></RequireModule>} />
         <Route path="/admin/branches" element={<RequireSuperAdmin><BranchesPage /></RequireSuperAdmin>} />
         <Route path="/admin/branch-inspect" element={<RequireSuperAdmin><BranchInspectPage /></RequireSuperAdmin>} />
         <Route path="/admin/branch-inspect/:branchId" element={<RequireSuperAdmin><BranchInspectDetailPage /></RequireSuperAdmin>} />
@@ -146,8 +147,8 @@ export default function App() {
         <Route path="/admin/categories" element={<CategoriesPage />} />
         <Route path="/admin/suppliers" element={<SuppliersPage />} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
-        <Route path="/admin/deliveries" element={<DeliveriesPage />} />
-        <Route path="/admin/installments" element={<InstallmentsPage />} />
+        <Route path="/admin/deliveries" element={<RequireModule module="deliveries"><DeliveriesPage /></RequireModule>} />
+        <Route path="/admin/installments" element={<RequireModule module="installments"><InstallmentsPage /></RequireModule>} />
         <Route path="/admin/chits" element={<ChitSchemesPage />} />
         <Route path="/admin/chits/:id" element={<ChitSchemeDetailPage />} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
@@ -159,11 +160,11 @@ export default function App() {
         <Route path="/admin/returns" element={<ReturnsPage />} />
         <Route path="/admin/cash-register" element={<CashRegisterPage />} />
         <Route path="/admin/stock-requests" element={<StockRequestsPage />} />
-        <Route path="/admin/stock-transfers" element={<StockTransfersPage />} />
-        <Route path="/admin/track-transfer" element={<TrackTransferPage />} />
-        <Route path="/admin/branch-transfers" element={<BranchTransfersPage />} />
-        <Route path="/admin/branch-transfers/new" element={<BranchTransferForm />} />
-        <Route path="/admin/branch-transfers/:id" element={<BranchTransferView />} />
+        <Route path="/admin/stock-transfers" element={<RequireModule module="stock_transfers"><StockTransfersPage /></RequireModule>} />
+        <Route path="/admin/track-transfer" element={<RequireModule module="stock_transfers"><TrackTransferPage /></RequireModule>} />
+        <Route path="/admin/branch-transfers" element={<RequireModule module="stock_transfers"><BranchTransfersPage /></RequireModule>} />
+        <Route path="/admin/branch-transfers/new" element={<RequireModule module="stock_transfers"><BranchTransferForm /></RequireModule>} />
+        <Route path="/admin/branch-transfers/:id" element={<RequireModule module="stock_transfers"><BranchTransferView /></RequireModule>} />
         <Route path="/admin/backup"         element={<RequireSuperAdmin><BackupPage /></RequireSuperAdmin>} />
         <Route path="/admin/security"       element={<SecurityPage />} />
         <Route path="/admin/system-health"  element={<RequireSuperAdmin><SystemHealthPage /></RequireSuperAdmin>} />

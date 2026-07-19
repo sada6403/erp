@@ -4,7 +4,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
-import { safeHandle } from './ipcHandler'
+import { safeHandleModule } from './ipcHandler'
 
 const store = new Store()
 
@@ -34,7 +34,7 @@ function logTransferAction(db: ReturnType<typeof getDb>, transferId: string, act
 
 export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   // Create new branch transfer
-  safeHandle(ipcMain, 'branchTransfers:create', async (_e, payload: Record<string, any>) => {
+  safeHandleModule(ipcMain, 'branchTransfers:create', 'stock_transfers', async (_e, payload: Record<string, any>) => {
     {
       const db = getDb()
       const transferId = crypto.randomUUID()
@@ -141,7 +141,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   })
 
   // List branch transfers
-  safeHandle(ipcMain, 'branchTransfers:list', (_e, filters: Record<string, any> = {}) => {
+  safeHandleModule(ipcMain, 'branchTransfers:list', 'stock_transfers', (_e, filters: Record<string, any> = {}) => {
     {
       const db = getDb()
       let sql = `
@@ -174,7 +174,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   })
 
   // Get transfer by ID with items, logs, mismatches
-  safeHandle(ipcMain, 'branchTransfers:getById', (_e, id: string) => {
+  safeHandleModule(ipcMain, 'branchTransfers:getById', 'stock_transfers', (_e, id: string) => {
     {
       const db = getDb()
       const transfer = db.prepare(`
@@ -228,7 +228,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   })
 
   // Update status (e.g. dispatch)
-  safeHandle(ipcMain, 'branchTransfers:updateStatus', async (_e, id: string, status: string, payload: any = {}) => {
+  safeHandleModule(ipcMain, 'branchTransfers:updateStatus', 'stock_transfers', async (_e, id: string, status: string, payload: any = {}) => {
     {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
@@ -291,7 +291,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   })
 
   // Receive transfer items
-  safeHandle(ipcMain, 'branchTransfers:receive', async (_e, id: string, payload: any) => {
+  safeHandleModule(ipcMain, 'branchTransfers:receive', 'stock_transfers', async (_e, id: string, payload: any) => {
     {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
@@ -405,7 +405,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   })
 
   // Report mismatch specifically
-  safeHandle(ipcMain, 'branchTransfers:reportMismatch', async (_e, id: string, payload: any) => {
+  safeHandleModule(ipcMain, 'branchTransfers:reportMismatch', 'stock_transfers', async (_e, id: string, payload: any) => {
     {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
@@ -451,7 +451,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   })
 
   // Log print
-  safeHandle(ipcMain, 'branchTransfers:logPrint', async (_e, id: string) => {
+  safeHandleModule(ipcMain, 'branchTransfers:logPrint', 'stock_transfers', async (_e, id: string) => {
     {
       const db = getDb()
       const logId = crypto.randomUUID()
@@ -468,7 +468,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   })
 
   // Resolve mismatch
-  safeHandle(ipcMain, 'branchTransfers:resolveMismatch', async (_e, id: string, payload: any) => {
+  safeHandleModule(ipcMain, 'branchTransfers:resolveMismatch', 'stock_transfers', async (_e, id: string, payload: any) => {
     {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>

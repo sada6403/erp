@@ -29,6 +29,34 @@ export const MODULE_DEFINITIONS: ModuleDefinition[] = [
   { key: 'white_label',     name: 'White Label',                  sort: 13 },
 ]
 
+// Maps sync-pushed table names (see ALLOWED_TABLES in lib/sync.ts) to the
+// optional module that owns them, for per-table enforcement in sync/push.
+// Core tables (products, invoices, customers, stocks, ...) are intentionally
+// left out — they stay always-allowed, same as the always-on modules already
+// behave in resolveEntitlements().
+export const TABLE_MODULE_MAP: Record<string, string> = {
+  purchase_orders: 'purchase_orders',
+  purchase_items:  'purchase_orders',
+
+  deliveries: 'deliveries',
+
+  expenses:           'expenses',
+  expense_categories: 'expenses',
+
+  installments:           'installments',
+  installment_payments:   'installments',
+  installment_plans:      'installments',
+  installment_schedule:   'installments',
+  installment_reminders:  'installments',
+
+  stock_transfers:             'stock_transfers',
+  branch_transfers:            'stock_transfers',
+  branch_transfer_items:       'stock_transfers',
+  branch_transfer_mismatches:  'stock_transfers',
+  branch_transfer_logs:        'stock_transfers',
+  branch_transfer_prints:      'stock_transfers',
+}
+
 export const FEATURE_DEFINITIONS: FeatureDefinition[] = [
   {
     key: 'pos.billing.create',

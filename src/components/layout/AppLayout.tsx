@@ -341,7 +341,7 @@ function SidebarLink({ to, icon: Icon, label, collapsed, end = false }: {
 
 export default function AppLayout() {
 
-  const { user, logout } = useAuthStore()
+  const { user, logout, setEnabledModules: setAuthEnabledModules } = useAuthStore()
   const { status, triggerSync } = useSyncStatus()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -414,7 +414,10 @@ export default function AppLayout() {
               if (brand.lock_reason) setLockReason(brand.lock_reason as 'suspended' | 'cancelled')
               setLockDetail(typeof brand.suspension_reason === 'string' ? brand.suspension_reason : null)
             }
-            if (Array.isArray(brand?.modules)) setEnabledModules(brand.modules as string[])
+            if (Array.isArray(brand?.modules)) {
+              setEnabledModules(brand.modules as string[])
+              setAuthEnabledModules(brand.modules as string[])
+            }
           } catch { /* offline — cached color stays */ }
         }
       }

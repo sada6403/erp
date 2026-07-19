@@ -2,25 +2,12 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { pool } from '@/lib/db'
 import { randomUUID } from 'crypto'
+import { MODULE_DEFINITIONS } from '@/lib/catalog'
 
 type Params = { params: Promise<{ id: string }> }
 
-// All modules the platform supports (source of truth)
-const ALL_MODULES = [
-  { key: 'pos',            name: 'POS / Billing',                sort: 1  },
-  { key: 'inventory',      name: 'Inventory Management',          sort: 2  },
-  { key: 'customers',      name: 'Customer Management',           sort: 3  },
-  { key: 'reports_basic',  name: 'Basic Reports',                 sort: 4  },
-  { key: 'installments',   name: 'Installments & Credit',         sort: 5  },
-  { key: 'multi_branch',   name: 'Multi-Branch Management',       sort: 6  },
-  { key: 'purchase_orders',name: 'Purchase Orders',               sort: 7  },
-  { key: 'deliveries',     name: 'Delivery Management',           sort: 8  },
-  { key: 'expenses',       name: 'Expense Tracking',              sort: 9  },
-  { key: 'reports_full',   name: 'Advanced Reports & Analytics',  sort: 10 },
-  { key: 'stock_transfers',name: 'Inter-Branch Stock Transfers',  sort: 11 },
-  { key: 'api_access',     name: 'API Access',                    sort: 12 },
-  { key: 'white_label',    name: 'White Label',                   sort: 13 },
-]
+// All modules the platform supports (single source of truth — backend/lib/catalog.ts)
+const ALL_MODULES = MODULE_DEFINITIONS
 
 export async function GET(_req: NextRequest, { params }: Params) {
   const { id: companyId } = await params
@@ -62,16 +49,21 @@ export async function GET(_req: NextRequest, { params }: Params) {
     }
   } catch { /* table not yet created — no overrides */ }
 
-  // Merge: company override wins, then package, then false
+  // Merge: company override wins, then explicit package default, then
+  // enabled-by-default (matches resolveEntitlements() in lib/entitlements.ts —
+  // a module is only considered disabled when something explicitly says so).
+  // `from_package` stays a display badge for "the package explicitly sets
+  // this" — it does not affect the enabled-by-default fallback below.
   const result = ALL_MODULES.map(m => {
-    const fromPackage  = pkgModuleMap[m.key] ?? false
+    const inPackage    = m.key in pkgModuleMap
     const hasOverride  = m.key in compModuleMap
-    const isEnabled    = hasOverride ? compModuleMap[m.key] : fromPackage
+    const effectiveDefault = inPackage ? pkgModuleMap[m.key] : true
+    const isEnabled    = hasOverride ? compModuleMap[m.key] : effectiveDefault
     return {
       module_key:  m.key,
       module_name: m.name,
       sort_order:  m.sort,
-      from_package: fromPackage,
+      from_package: inPackage && pkgModuleMap[m.key],
       has_override: hasOverride,
       is_enabled:   isEnabled,
     }

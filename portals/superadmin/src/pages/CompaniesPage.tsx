@@ -24,7 +24,6 @@ export default function CompaniesPage() {
   const [showResetPw, setShowResetPw] = useState<Company | null>(null)
   const [showImpersonate, setShowImpersonate] = useState<Company | null>(null)
   const [showApiKey, setShowApiKey] = useState<Company | null>(null)
-  const [showModules, setShowModules] = useState<Company | null>(null)
   const [showCapabilities, setShowCapabilities] = useState<Company | null>(null)
   const [showDevices, setShowDevices] = useState<Company | null>(null)
   const [showBranding, setShowBranding] = useState<Company | null>(null)
@@ -159,11 +158,7 @@ export default function CompaniesPage() {
                       onClick={() => setShowBranding(c)}>
                       <Palette className="w-3.5 h-3.5" />
                     </button>
-                    <button title="Manage Modules" className="p-1.5 rounded hover:bg-indigo-900/40 text-indigo-400"
-                      onClick={() => setShowModules(c)}>
-                      <LayoutGrid className="w-3.5 h-3.5" />
-                    </button>
-                    <button title="Capabilities (features / limits / license)" className="p-1.5 rounded hover:bg-slate-900/40 text-slate-300"
+                    <button title="Feature Management & Capabilities" className="p-1.5 rounded hover:bg-slate-900/40 text-slate-300"
                       onClick={() => setShowCapabilities(c)}>
                       <Settings2 className="w-3.5 h-3.5" />
                     </button>
@@ -228,7 +223,6 @@ export default function CompaniesPage() {
       {showImpersonate && <ImpersonateModal company={showImpersonate} onClose={() => setShowImpersonate(null)} />}
 
       {showApiKey && <ApiKeyModal company={showApiKey} onClose={() => setShowApiKey(null)} onRegenerated={load} />}
-      {showModules && <ModulesModal company={showModules} onClose={() => setShowModules(null)} />}
       {showCapabilities && <CompanyCapabilitiesModal company={showCapabilities} onClose={() => setShowCapabilities(null)} onSaved={load} />}
       {showDevices && <DevicesModal company={showDevices} onClose={() => setShowDevices(null)} />}
       {showBranding && <BrandingModal company={showBranding} onClose={() => setShowBranding(null)} onSaved={load} />}
@@ -559,138 +553,13 @@ function ApiKeyModal({ company, onClose, onRegenerated }: {
   )
 }
 
-// ─── Modules Modal ────────────────────────────────────────────────────────────
-type ModuleRow = {
-  module_key: string; module_name: string; sort_order: number
-  from_package: boolean; has_override: boolean; is_enabled: boolean
-}
-
+// Grouping for the Feature Management tab inside CompanyCapabilitiesModal below.
 const MODULE_GROUPS: Record<string, string[]> = {
   'Core':       ['pos', 'inventory', 'customers'],
   'Finance':    ['installments', 'expenses', 'purchase_orders'],
   'Operations': ['deliveries', 'stock_transfers', 'multi_branch'],
   'Reporting':  ['reports_basic', 'reports_full'],
   'Advanced':   ['api_access', 'white_label'],
-}
-
-function ModulesModal({ company, onClose }: { company: Company; onClose: () => void }) {
-  const [mods, setMods]       = useState<ModuleRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [toggling, setToggling] = useState<string | null>(null)
-  const [error, setError]     = useState('')
-
-  useEffect(() => {
-    modulesApi.list(company.id)
-      .then(d => { setMods(d as ModuleRow[]); setLoading(false) })
-      .catch(err => { setError(err.message); setLoading(false) })
-  }, [company.id])
-
-  async function toggle(moduleKey: string, current: boolean) {
-    setToggling(moduleKey)
-    try {
-      await modulesApi.toggle(company.id, moduleKey, !current)
-      setMods(prev => prev.map(m =>
-        m.module_key === moduleKey
-          ? { ...m, is_enabled: !current, has_override: true }
-          : m
-      ))
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to toggle module')
-    }
-    setToggling(null)
-  }
-
-  const modMap = Object.fromEntries(mods.map(m => [m.module_key, m]))
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-          <div className="flex items-center gap-2">
-            <LayoutGrid className="w-4 h-4 text-indigo-400" />
-            <h2 className="font-semibold text-white">Modules — {company.name}</h2>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-5 space-y-5">
-          {error && (
-            <div className="bg-red-900/30 border border-red-700/50 rounded px-4 py-2 text-red-400 text-sm">{error}</div>
-          )}
-
-          <div className="flex items-center gap-4 text-xs text-gray-500">
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> Included in package
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" /> Manually overridden
-            </span>
-          </div>
-
-          {loading ? (
-            <div className="space-y-3">
-              {[...Array(6)].map((_, i) => (
-                <div key={i} className="h-12 bg-gray-800/50 rounded-lg animate-pulse" />
-              ))}
-            </div>
-          ) : (
-            Object.entries(MODULE_GROUPS).map(([group, keys]) => (
-              <div key={group}>
-                <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">{group}</p>
-                <div className="space-y-2">
-                  {keys.map(key => {
-                    const m = modMap[key]
-                    if (!m) return null
-                    const isToggling = toggling === key
-                    const badgeColor = m.has_override
-                      ? 'bg-purple-900/40 text-purple-300 border-purple-700/40'
-                      : m.from_package
-                        ? 'bg-blue-900/40 text-blue-300 border-blue-700/40'
-                        : ''
-                    const badgeLabel = m.has_override
-                      ? 'override'
-                      : m.from_package ? 'package' : ''
-                    return (
-                      <div key={key} className="flex items-center justify-between px-4 py-3 bg-gray-800/40 rounded-lg border border-gray-800">
-                        <div className="flex items-center gap-3">
-                          <div>
-                            <p className="text-sm font-medium text-white">{m.module_name}</p>
-                            {badgeLabel && (
-                              <span className={`text-xs px-1.5 py-0.5 rounded border ${badgeColor}`}>
-                                {badgeLabel}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => toggle(key, m.is_enabled)}
-                          disabled={isToggling}
-                          className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none disabled:opacity-50 ${
-                            m.is_enabled ? 'bg-indigo-600' : 'bg-gray-700'
-                          }`}
-                        >
-                          <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ${
-                            m.is_enabled ? 'translate-x-5' : 'translate-x-0'
-                          }`} />
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="px-5 py-4 border-t border-gray-800 flex justify-between items-center">
-          <p className="text-xs text-gray-500">
-            Changes take effect immediately on next POS sync.
-          </p>
-          <button className="btn-primary" onClick={onClose}>Done</button>
-        </div>
-      </div>
-    </div>
-  )
 }
 
 // ─── Devices Modal ────────────────────────────────────────────────────────────
@@ -1150,7 +1019,7 @@ function CompanyCapabilitiesModal({ company, onClose, onSaved }: {
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: 'overview', label: 'Overview', icon: <BadgeInfo className="w-3.5 h-3.5" /> },
-    { key: 'modules', label: 'Modules', icon: <LayoutGrid className="w-3.5 h-3.5" /> },
+    { key: 'modules', label: 'Feature Management', icon: <LayoutGrid className="w-3.5 h-3.5" /> },
     { key: 'features', label: 'Features', icon: <FileText className="w-3.5 h-3.5" /> },
     { key: 'limits', label: 'Limits', icon: <Sliders className="w-3.5 h-3.5" /> },
     { key: 'devices', label: 'Devices', icon: <Monitor className="w-3.5 h-3.5" /> },
@@ -1226,21 +1095,53 @@ function CompanyCapabilitiesModal({ company, onClose, onSaved }: {
           )}
 
           {tab === 'modules' && (
-            <div className="space-y-2">
-              {moduleRows.map(row => (
-                <div key={String(row.module_key)} className="flex items-center justify-between px-4 py-3 rounded-lg border border-gray-800 bg-gray-800/30">
-                  <div>
-                    <p className="text-sm font-medium text-white">{String(row.module_name ?? row.module_key)}</p>
-                    <p className="text-xs text-gray-500">{String(row.module_key)}</p>
+            <div className="space-y-5">
+              <div className="flex items-center gap-4 text-xs text-gray-500">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" /> Included in package
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-2.5 h-2.5 rounded-full bg-purple-500 inline-block" /> Manually overridden
+                </span>
+              </div>
+              {Object.entries(MODULE_GROUPS).map(([group, keys]) => {
+                const rowsInGroup = keys
+                  .map(key => moduleRows.find(row => String(row.module_key) === key))
+                  .filter((row): row is Record<string, unknown> => Boolean(row))
+                if (!rowsInGroup.length) return null
+                return (
+                  <div key={group}>
+                    <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-2">{group}</p>
+                    <div className="space-y-2">
+                      {rowsInGroup.map(row => {
+                        const hasOverride = Boolean(row.has_override)
+                        const fromPackage = Boolean(row.from_package)
+                        const badgeLabel = hasOverride ? 'override' : fromPackage ? 'package' : ''
+                        const badgeColor = hasOverride
+                          ? 'bg-purple-900/40 text-purple-300 border-purple-700/40'
+                          : 'bg-blue-900/40 text-blue-300 border-blue-700/40'
+                        return (
+                          <div key={String(row.module_key)} className="flex items-center justify-between px-4 py-3 rounded-lg border border-gray-800 bg-gray-800/30">
+                            <div>
+                              <p className="text-sm font-medium text-white">{String(row.module_name ?? row.module_key)}</p>
+                              {badgeLabel && (
+                                <span className={`text-xs px-1.5 py-0.5 rounded border ${badgeColor}`}>{badgeLabel}</span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => toggleModule(row)}
+                              disabled={saving === String(row.module_key)}
+                              className={`relative inline-flex h-6 w-11 flex-shrink-0 rounded-full border-2 border-transparent transition-colors ${Boolean(row.is_enabled) ? 'bg-indigo-600' : 'bg-gray-700'}`}>
+                              <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${Boolean(row.is_enabled) ? 'translate-x-5' : 'translate-x-0'}`} />
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <button
-                    onClick={() => toggleModule(row)}
-                    disabled={saving === String(row.module_key)}
-                    className={`relative inline-flex h-6 w-11 rounded-full border-2 border-transparent transition-colors ${Boolean(row.is_enabled) ? 'bg-indigo-600' : 'bg-gray-700'}`}>
-                    <span className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${Boolean(row.is_enabled) ? 'translate-x-5' : 'translate-x-0'}`} />
-                  </button>
-                </div>
-              ))}
+                )
+              })}
+              <p className="text-xs text-gray-500">Changes take effect immediately on next POS sync.</p>
             </div>
           )}
 

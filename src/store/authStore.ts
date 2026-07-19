@@ -9,13 +9,23 @@ interface AuthState {
   pinLogin: (pin: string, branchId?: string) => Promise<{ success: boolean; error?: string }>
   logout: () => Promise<void>
   init: () => Promise<void>
+  setEnabledModules: (modules: string[]) => void
 }
 
 export const useAuthStore = create<AuthState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       isLoading: true,
+
+      // Called from AppLayout's periodic /api/brand poll so a superadmin
+      // toggling a module takes effect for any page reading this store,
+      // not just the sidebar nav that originally fetched it.
+      setEnabledModules: (modules) => {
+        const user = get().user
+        if (!user) return
+        set({ user: { ...user, enabledModules: modules } })
+      },
 
       init: async () => {
         set({ isLoading: true })

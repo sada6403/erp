@@ -4,7 +4,11 @@ import { decryptSecret } from '../ipc/settings'
 
 const store = new Store()
 const LICENSE_KEY = 'license_data'
-const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000 // 6 hours
+// Was 6h — too slow for module/feature toggles (main-process IPC guards read
+// this cache) to take effect in any reasonable time. 5 min keeps enforcement
+// close to what the 30s renderer-side /api/brand poll already achieves for
+// nav-hiding, without hammering the API.
+const CHECK_INTERVAL_MS = 5 * 60 * 1000 // 5 minutes
 
 export type LicenseData = {
   sub_status:   string   // 'active' | 'grace' | 'expired'
@@ -12,6 +16,7 @@ export type LicenseData = {
   max_users:    number
   max_branches: number
   modules:      string[] // e.g. ['pos', 'inventory', 'customers', ...]
+  features:     string[] // fine-grained feature keys, e.g. ['reports.sales.export', ...]
   checked_at:   number   // epoch ms
 }
 
@@ -35,6 +40,14 @@ export function isAppLocked(): boolean {
   return getCachedLicense()?.is_locked ?? false
 }
 
+// Fail-open when no license has been cached yet (e.g. first launch, offline) —
+// same default already used by getMaxUsers/getMaxBranches/getEnabledModules
+// above, so a network hiccup doesn't lock the business out of its own POS.
+export function hasModule(moduleKey: string): boolean {
+  const modules = getCachedLicense()?.modules
+  return modules ? modules.includes(moduleKey) : true
+}
+
 export async function fetchAndCacheLicense(): Promise<LicenseData | null> {
   const settings = (store.get('app_settings') as Record<string, unknown>) ?? {}
   const apiUrl = String(settings.cloud_api_url ?? '').trim()
@@ -52,11 +65,12 @@ export async function fetchAndCacheLicense(): Promise<LicenseData | null> {
       max_users:    Number(data.max_users    ?? 999),
       max_branches: Number(data.max_branches ?? 999),
       modules:      Array.isArray(data.modules) ? (data.modules as string[]) : [],
+      features:     Array.isArray(data.features) ? (data.features as string[]) : [],
       checked_at:   Date.now(),
     }
 
     store.set(LICENSE_KEY, license)
-    console.log(`[License] Cached: status=${license.sub_status}, locked=${license.is_locked}, modules=${license.modules.length}`)
+    console.log(`[License] Cached: status=${license.sub_status}, locked=${license.is_locked}, modules=${license.modules.length}, features=${license.features.length}`)
     return license
   } catch {
     return getCachedLicense()

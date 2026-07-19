@@ -4,7 +4,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
-import { safeHandle } from './ipcHandler'
+import { safeHandleModule } from './ipcHandler'
 
 const store = new Store()
 
@@ -46,7 +46,7 @@ function getNextPONumber(branchId: string): string {
 
 export function registerPurchaseHandlers(ipcMain: IpcMain) {
   // List POs with optional filters
-  safeHandle(ipcMain, 'purchases:list', (_e, filters: Record<string, unknown> = {}) => {
+  safeHandleModule(ipcMain, 'purchases:list', 'purchase_orders', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
       let sql = `
         SELECT po.*, s.name as supplier_name, b.name as branch_name,
@@ -66,7 +66,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   })
 
   // Get single PO with items
-  safeHandle(ipcMain, 'purchases:get', (_e, id: string) => {
+  safeHandleModule(ipcMain, 'purchases:get', 'purchase_orders', (_e, id: string) => {
     const db = getDb()
       const po = db.prepare(`
         SELECT po.*, s.name as supplier_name, b.name as branch_name
@@ -84,7 +84,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   })
 
   // Create PO (starts as DRAFT)
-  safeHandle(ipcMain, 'purchases:create', async (_e, payload) => {
+  safeHandleModule(ipcMain, 'purchases:create', 'purchase_orders', async (_e, payload) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       if (!payload.supplier_id)       throw new Error('Supplier is required')
@@ -152,7 +152,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   })
 
   // Update PO status (DRAFT→SENT→PARTIAL/RECEIVED/CANCELLED)
-  safeHandle(ipcMain, 'purchases:updateStatus', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
+  safeHandleModule(ipcMain, 'purchases:updateStatus', 'purchase_orders', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const po = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown> | undefined
@@ -244,7 +244,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   })
 
   // Update draft PO (add/remove/edit items before sending)
-  safeHandle(ipcMain, 'purchases:update', async (_e, id: string, payload: Record<string, unknown>) => {
+  safeHandleModule(ipcMain, 'purchases:update', 'purchase_orders', async (_e, id: string, payload: Record<string, unknown>) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const po = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown> | undefined
