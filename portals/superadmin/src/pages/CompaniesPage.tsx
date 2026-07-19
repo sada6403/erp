@@ -52,8 +52,16 @@ export default function CompaniesPage() {
   useEffect(() => { pkgApi.list().then(r => setPkgs(r as Pkg[])) }, [])
 
   async function changeStatus(id: string, status: string) {
-    if (!confirm(`Set company to ${status}?`)) return
-    await api.update(id, { status })
+    if (status === 'suspended') {
+      const reason = window.prompt('Reason for suspending this company (required — shown in audit log & on their POS lock screen):')
+      if (reason === null) return // cancelled
+      if (!reason.trim()) { alert('A reason is required to suspend a company.'); return }
+      if (!confirm(`Suspend this company now?\n\nReason: ${reason.trim()}`)) return
+      await api.update(id, { status, suspensionReason: reason.trim() })
+    } else {
+      if (!confirm(`Set company to ${status}?`)) return
+      await api.update(id, { status })
+    }
     load()
   }
 
@@ -121,7 +129,10 @@ export default function CompaniesPage() {
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <span className={STATUS_BADGE[c.status] ?? ''}>{c.status}</span>
+                  <span className={STATUS_BADGE[c.status] ?? ''}
+                    title={c.status === 'suspended' && c.suspension_reason ? `Reason: ${c.suspension_reason}` : undefined}>
+                    {c.status}
+                  </span>
                 </td>
                 <td className="px-4 py-3 text-gray-400 text-xs">
                   {c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : '—'}
@@ -1550,6 +1561,18 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
                   <span className="text-white">{company.sub_ends_at ? new Date(company.sub_ends_at).toLocaleDateString() : '—'}</span>
                 </div>
               </div>
+
+              {company.status === 'suspended' && company.suspension_reason && (
+                <div className="bg-red-900/20 border border-red-900/40 rounded-lg px-4 py-3 text-sm space-y-1">
+                  <div className="text-red-400 font-medium flex items-center gap-1.5">
+                    <Ban className="w-3.5 h-3.5" /> Suspension reason
+                  </div>
+                  <p className="text-gray-300">{company.suspension_reason}</p>
+                  {company.suspended_at && (
+                    <p className="text-xs text-gray-500">Since {new Date(company.suspended_at).toLocaleString()}</p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="label">Change Package</label>

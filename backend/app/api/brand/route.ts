@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     const { rows } = await pool.query(
       `SELECT c.id as company_id, c.name, c.email, c.phone, c.address,
               c.brand_color, c.brand_logo_url,
-              c.status as company_status,
+              c.status as company_status, c.suspension_reason,
               c.max_users, c.max_branches, c.max_pos_devices,
               s.ends_at as sub_ends_at, s.status as sub_status,
               s.package_id, p.grace_period_days
@@ -48,6 +48,7 @@ export async function GET(req: NextRequest) {
       sub_ends_at:    c.sub_ends_at    ?? null,
       is_locked:      c.company_status === 'suspended' || c.company_status === 'cancelled',
       lock_reason:    c.company_status === 'cancelled' ? 'cancelled' : (c.company_status === 'suspended' ? 'suspended' : null),
+      suspension_reason: c.company_status === 'suspended' ? (c.suspension_reason ?? null) : null,
       max_users:      Number(c.max_users    ?? 10),
       max_branches:   Number(c.max_branches ?? 3),
       modules:        entitlements.enabledModules,

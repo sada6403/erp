@@ -359,6 +359,7 @@ export default function AppLayout() {
   const [subEndsAt, setSubEndsAt] = useState<string | null>(null)
   const [isLocked, setIsLocked] = useState(false)
   const [lockReason, setLockReason] = useState<'suspended' | 'cancelled' | null>(null)
+  const [lockDetail, setLockDetail] = useState<string | null>(null)
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null)
   const sidebarNavRef = useRef<HTMLElement | null>(null)
   const brand401CountRef = useRef(0)
@@ -419,6 +420,7 @@ export default function AppLayout() {
             if (brand?.is_locked) {
               setIsLocked(Boolean(brand.is_locked))
               if (brand.lock_reason) setLockReason(brand.lock_reason as 'suspended' | 'cancelled')
+              setLockDetail(typeof brand.suspension_reason === 'string' ? brand.suspension_reason : null)
             }
             if (Array.isArray(brand?.modules)) setEnabledModules(brand.modules as string[])
           } catch { /* offline — cached color stays */ }
@@ -499,6 +501,11 @@ export default function AppLayout() {
               ? 'Your company account has been cancelled. All cloud access has been removed. Please contact your service provider if this was a mistake.'
               : 'Your company account has been suspended. Please contact your service provider to restore access.'}
           </p>
+          {!isCancelled && lockDetail && (
+            <p className="text-xs px-3 py-2 rounded-lg" style={{ background: 'var(--bg-card)', color: 'var(--text-2)' }}>
+              Reason: {lockDetail}
+            </p>
+          )}
           <p className="text-xs mt-2 font-mono px-3 py-1.5 rounded-lg inline-block" style={{ background: 'var(--bg-card)', color: 'var(--text-2)' }}>
             {String(branding.company_name || 'Your Company')}
           </p>
