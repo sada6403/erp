@@ -7,24 +7,10 @@ export async function POST(req: NextRequest) {
   const auth = requireSuperAdmin(req)
   if ('error' in auth) return auth.error
 
-  const body = await req.json() as { action: string; olderThanDays?: number }
+  const body = await req.json() as { action: string }
 
-  // ── Clear old audit logs ──────────────────────────────────────────────────
-  if (body.action === 'clearAuditLogs') {
-    const days = Math.max(7, Number(body.olderThanDays) || 90)
-    const { rows } = await pool.query(
-      `SELECT COUNT(*) as cnt FROM saas_audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)`,
-      [days]
-    )
-    const count = Number((rows[0] as Record<string, number>).cnt)
-    await pool.query(
-      `DELETE FROM saas_audit_logs WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)`,
-      [days]
-    )
-    await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
-      actorName: auth.payload.name, action: 'danger.clearAuditLogs', newValues: { days, deleted: count } })
-    return NextResponse.json({ ok: true, deleted: count })
-  }
+  // Audit logs (saas_audit_logs) are append-only by design — no action here
+  // may delete or modify them, so the trail stays trustworthy.
 
   // ── Purge all cancelled companies ─────────────────────────────────────────
   if (body.action === 'purgeCancelledCompanies') {

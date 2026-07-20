@@ -57,9 +57,6 @@ export default function SettingsPage() {
   }
 
   // Danger zone
-  const [auditDays,    setAuditDays]    = useState('90')
-  const [auditLoading, setAuditLoading] = useState(false)
-  const [auditResult,  setAuditResult]  = useState<string | null>(null)
   const [purgeConfirm, setPurgeConfirm] = useState(false)
   const [purgeLoading, setPurgeLoading] = useState(false)
   const [purgeResult,  setPurgeResult]  = useState<string | null>(null)
@@ -146,18 +143,6 @@ export default function SettingsPage() {
       setPwMsg({ ok: false, text: err instanceof Error ? err.message : 'Failed' })
     }
     setPwSaving(false)
-  }
-
-  async function clearAuditLogs() {
-    const days = Math.max(7, Number(auditDays) || 90)
-    setAuditLoading(true); setAuditResult(null)
-    try {
-      const r = await dangerApi.clearAuditLogs(days)
-      setAuditResult(`✓ Deleted ${r.deleted} log entries older than ${days} days`)
-    } catch (err) {
-      setAuditResult(`✗ ${err instanceof Error ? err.message : 'Failed'}`)
-    }
-    setAuditLoading(false)
   }
 
   async function purgeCancelled() {
@@ -558,46 +543,6 @@ export default function SettingsPage() {
       {/* ── Danger Zone Tab ───────────────────────────────────────────────────── */}
       {tab === 'danger' && (
         <div className="max-w-2xl space-y-5">
-
-          {/* Clear Audit Logs */}
-          <div className="card space-y-4">
-            <div className="flex items-center gap-2 pb-3 border-b border-gray-800">
-              <Trash2 className="w-4 h-4 text-yellow-400" />
-              <div>
-                <h2 className="font-semibold text-white text-sm">Clear Old Audit Logs</h2>
-                <p className="text-xs text-gray-500">Remove audit log entries older than a specified number of days</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex-1">
-                <label className="label">Delete logs older than (days)</label>
-                <div className="flex gap-2 mt-1">
-                  {['30', '90', '180', '365'].map(d => (
-                    <button key={d} type="button"
-                      onClick={() => setAuditDays(d)}
-                      className={`px-3 py-1.5 rounded text-sm border transition-colors ${
-                        auditDays === d ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-gray-700 text-gray-400 hover:text-white'
-                      }`}>
-                      {d}d
-                    </button>
-                  ))}
-                  <input className="input w-24 text-sm" type="number" min="7"
-                    value={auditDays} onChange={e => setAuditDays(e.target.value)} />
-                </div>
-              </div>
-            </div>
-            {auditResult && (
-              <p className={`text-sm ${auditResult.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>
-                {auditResult}
-              </p>
-            )}
-            <button
-              className="btn-ghost text-sm text-yellow-400 hover:text-yellow-300 flex items-center gap-1.5"
-              onClick={clearAuditLogs} disabled={auditLoading}>
-              <Trash2 className="w-3.5 h-3.5" />
-              {auditLoading ? 'Clearing…' : `Clear Logs Older Than ${auditDays} Days`}
-            </button>
-          </div>
 
           {/* Purge Cancelled Companies */}
           <div className="card space-y-4" style={{ borderColor: 'rgba(239,68,68,0.3)' }}>

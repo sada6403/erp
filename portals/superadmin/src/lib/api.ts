@@ -166,10 +166,6 @@ export const me = {
 
 // ─── Danger Zone ─────────────────────────────────────────────────────────────
 export const danger = {
-  clearAuditLogs: (olderThanDays: number) =>
-    request<{ ok: boolean; deleted: number }>('/api/superadmin/danger', {
-      method: 'POST', body: JSON.stringify({ action: 'clearAuditLogs', olderThanDays }),
-    }),
   purgeCancelledCompanies: () =>
     request<{ ok: boolean; purged: number; errors: string[] }>('/api/superadmin/danger', {
       method: 'POST', body: JSON.stringify({ action: 'purgeCancelledCompanies' }),
