@@ -247,6 +247,39 @@ CREATE TABLE IF NOT EXISTS sync_logs (
   INDEX idx_sync_device  (device_id)
 );
 
+-- ─── COMPANY BACKUPS ──────────────────────────────────────────────────────────
+-- Metadata for encrypted mysqldump backups of a company's own tenant schema.
+-- The dump files themselves live on disk (BACKUP_STORAGE_DIR), not in this DB.
+CREATE TABLE IF NOT EXISTS company_backups (
+  id                CHAR(36)     NOT NULL PRIMARY KEY,
+  company_id        CHAR(36)     NOT NULL,
+  backup_type       VARCHAR(20)  NOT NULL DEFAULT 'manual',
+  status            VARCHAR(20)  NOT NULL DEFAULT 'pending',
+  file_name         VARCHAR(255) NULL,
+  file_size_bytes   BIGINT       NULL,
+  error_message     TEXT         NULL,
+  created_by        CHAR(36)     NULL,
+  download_count    INT          NOT NULL DEFAULT 0,
+  last_downloaded_at DATETIME    NULL,
+  restored_at       DATETIME     NULL,
+  restored_by       CHAR(36)     NULL,
+  created_at        DATETIME     NOT NULL DEFAULT NOW(),
+  completed_at      DATETIME     NULL,
+  FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+  INDEX idx_backups_company (company_id),
+  INDEX idx_backups_status  (status)
+);
+
+CREATE TABLE IF NOT EXISTS company_backup_schedules (
+  company_id   CHAR(36)    NOT NULL PRIMARY KEY,
+  enabled      BOOLEAN     NOT NULL DEFAULT 0,
+  frequency    VARCHAR(20) NOT NULL DEFAULT 'daily',
+  last_run_at  DATETIME    NULL,
+  updated_by   CHAR(36)    NULL,
+  updated_at   DATETIME    NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+);
+
 -- ─── SEED: Package modules ────────────────────────────────────────────────────
 -- Starter modules
 INSERT IGNORE INTO package_modules (id, package_id, module_key, module_name, is_enabled, sort_order)

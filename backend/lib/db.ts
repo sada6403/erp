@@ -33,7 +33,10 @@ interface WrappedPool {
   connect(): Promise<QueryClient>
 }
 
-function getConfig(database?: string): PoolOptions {
+// Exported so callers that need to shell out to the mysql/mysqldump CLI
+// (backup.ts) can reuse the exact same host/port/user/password resolution
+// instead of re-parsing DATABASE_URL themselves.
+export function getConfig(database?: string): PoolOptions {
   if (process.env.DATABASE_URL) {
     const url = new URL(process.env.DATABASE_URL)
     return {

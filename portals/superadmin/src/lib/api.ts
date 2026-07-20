@@ -112,6 +112,50 @@ export const devices = {
     }),
 }
 
+// ─── Company Backups ──────────────────────────────────────────────────────────
+export type BackupRow = {
+  id: string; backup_type: string; status: string
+  file_name: string | null; file_size_bytes: number | null; error_message: string | null
+  created_by: string | null; download_count: number; last_downloaded_at: string | null
+  restored_at: string | null; restored_by: string | null
+  created_at: string; completed_at: string | null
+}
+export type BackupSchedule = { enabled: boolean; frequency: 'daily' | 'weekly'; last_run_at: string | null }
+
+export const backups = {
+  list:   (companyId: string) => request<BackupRow[]>(`/api/superadmin/companies/${companyId}/backups`),
+  create: (companyId: string) =>
+    request<{ ok: boolean; backupId: string }>(`/api/superadmin/companies/${companyId}/backups`, { method: 'POST' }),
+  restore: (companyId: string, backupId: string, confirmCompanyName: string) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/backups/${backupId}/restore`, {
+      method: 'POST', body: JSON.stringify({ confirmCompanyName }),
+    }),
+  getSchedule: (companyId: string) => request<BackupSchedule>(`/api/superadmin/companies/${companyId}/backup-schedule`),
+  setSchedule: (companyId: string, enabled: boolean, frequency: 'daily' | 'weekly') =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/backup-schedule`, {
+      method: 'PATCH', body: JSON.stringify({ enabled, frequency }),
+    }),
+  // Bypasses request() — that helper always does res.json(), but a download is a binary Blob.
+  download: async (companyId: string, backupId: string, fileName: string) => {
+    const res = await fetch(`${BASE}/api/superadmin/companies/${companyId}/backups/${backupId}/download`, {
+      headers: { Authorization: `Bearer ${_access}` },
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error ?? 'Download failed')
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
+}
+
 // ─── Company Modules ──────────────────────────────────────────────────────────
 export const modules = {
   list:   (companyId: string) => request<unknown[]>(`/api/superadmin/companies/${companyId}/modules`),

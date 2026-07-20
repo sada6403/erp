@@ -1,6 +1,6 @@
 import React, { useEffect, useState, FormEvent } from 'react'
-import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, impersonate as impersonateApi, settings as settingsApi, audit as auditApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo } from 'lucide-react'
+import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, impersonate as impersonateApi, settings as settingsApi, audit as auditApi } from '../lib/api'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw } from 'lucide-react'
 
 type Company = Record<string, string>
 type Pkg = { id: string; name: string }
@@ -26,6 +26,7 @@ export default function CompaniesPage() {
   const [showApiKey, setShowApiKey] = useState<Company | null>(null)
   const [showCapabilities, setShowCapabilities] = useState<Company | null>(null)
   const [showDevices, setShowDevices] = useState<Company | null>(null)
+  const [showBackups, setShowBackups] = useState<Company | null>(null)
   const [showBranding, setShowBranding] = useState<Company | null>(null)
   const [showCompanyKey, setShowCompanyKey] = useState<Company | null>(null)
   const [error, setError] = useState('')
@@ -154,6 +155,10 @@ export default function CompaniesPage() {
                       onClick={() => setShowDevices(c)}>
                       <Smartphone className="w-3.5 h-3.5" />
                     </button>
+                    <button title="Backups" className="p-1.5 rounded hover:bg-teal-900/40 text-teal-400"
+                      onClick={() => setShowBackups(c)}>
+                      <Database className="w-3.5 h-3.5" />
+                    </button>
                     <button title="Branding (logo & color)" className="p-1.5 rounded hover:bg-pink-900/40 text-pink-400"
                       onClick={() => setShowBranding(c)}>
                       <Palette className="w-3.5 h-3.5" />
@@ -225,6 +230,7 @@ export default function CompaniesPage() {
       {showApiKey && <ApiKeyModal company={showApiKey} onClose={() => setShowApiKey(null)} onRegenerated={load} />}
       {showCapabilities && <CompanyCapabilitiesModal company={showCapabilities} onClose={() => setShowCapabilities(null)} onSaved={load} />}
       {showDevices && <DevicesModal company={showDevices} onClose={() => setShowDevices(null)} />}
+      {showBackups && <BackupsModal company={showBackups} onClose={() => setShowBackups(null)} />}
       {showBranding && <BrandingModal company={showBranding} onClose={() => setShowBranding(null)} onSaved={load} />}
       {showCompanyKey && <CompanyKeyModal company={showCompanyKey} onClose={() => setShowCompanyKey(null)} onUpdated={load} />}
     </div>
@@ -713,6 +719,234 @@ function DevicesModal({ company, onClose }: { company: Company; onClose: () => v
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-800 flex justify-end">
+          <button className="btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Backups Modal ────────────────────────────────────────────────────────────
+const BACKUP_STATUS_BADGE: Record<string, string> = {
+  pending:   'badge-yellow',
+  completed: 'badge-green',
+  failed:    'badge-red',
+}
+
+function formatBytes(n: number | null): string {
+  if (!n) return '—'
+  const units = ['B', 'KB', 'MB', 'GB']
+  let v = n, i = 0
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`
+}
+
+function BackupsModal({ company, onClose }: { company: Company; onClose: () => void }) {
+  const [list, setList]         = useState<BackupRow[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [creating, setCreating] = useState(false)
+  const [error, setError]       = useState('')
+  const [schedule, setSchedule] = useState<BackupSchedule>({ enabled: false, frequency: 'daily', last_run_at: null })
+  const [savingSchedule, setSavingSchedule] = useState(false)
+  const [restoreTarget, setRestoreTarget]   = useState<BackupRow | null>(null)
+  const [restoreConfirmText, setRestoreConfirmText] = useState('')
+  const [restoring, setRestoring] = useState(false)
+
+  async function load() {
+    setLoading(true)
+    try {
+      const [rows, sched] = await Promise.all([
+        backupsApi.list(company.id),
+        backupsApi.getSchedule(company.id),
+      ])
+      setList(rows)
+      setSchedule(sched)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load')
+    }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [company.id])
+
+  // A pending backup means work is happening server-side — poll until it settles.
+  useEffect(() => {
+    if (!list.some(b => b.status === 'pending')) return
+    const t = setTimeout(load, 3000)
+    return () => clearTimeout(t)
+  }, [list])
+
+  async function handleCreate() {
+    setCreating(true); setError('')
+    try {
+      await backupsApi.create(company.id)
+      load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start backup')
+    }
+    setCreating(false)
+  }
+
+  async function handleDownload(b: BackupRow) {
+    setError('')
+    try {
+      await backupsApi.download(company.id, b.id, b.file_name ?? `${company.name}-backup.sql.gz.enc`)
+      load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed')
+    }
+  }
+
+  async function handleScheduleToggle(enabled: boolean) {
+    setSavingSchedule(true)
+    try {
+      const updated = await backupsApi.setSchedule(company.id, enabled, schedule.frequency)
+      setSchedule(s => ({ ...s, enabled: updated.ok ? enabled : s.enabled }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update schedule')
+    }
+    setSavingSchedule(false)
+  }
+
+  async function handleFrequencyChange(frequency: 'daily' | 'weekly') {
+    setSavingSchedule(true)
+    try {
+      await backupsApi.setSchedule(company.id, schedule.enabled, frequency)
+      setSchedule(s => ({ ...s, frequency }))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update schedule')
+    }
+    setSavingSchedule(false)
+  }
+
+  async function handleRestoreConfirm() {
+    if (!restoreTarget) return
+    setRestoring(true); setError('')
+    try {
+      await backupsApi.restore(company.id, restoreTarget.id, restoreConfirmText.trim())
+      setRestoreTarget(null)
+      setRestoreConfirmText('')
+      load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Restore failed')
+    }
+    setRestoring(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <Database className="w-4 h-4 text-teal-400" />
+            <h2 className="font-semibold text-white">Backups — {company.name}</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {error && <div className="bg-red-900/30 border border-red-700/50 rounded px-4 py-2 text-red-400 text-sm">{error}</div>}
+
+          {/* Manual backup + schedule */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-gray-800/40 rounded-lg border border-gray-800 px-4 py-3">
+            <button className="btn-primary flex items-center gap-1.5 text-sm" onClick={handleCreate} disabled={creating}>
+              <Database className="w-4 h-4" />{creating ? 'Starting…' : 'Create Manual Backup'}
+            </button>
+            <div className="flex items-center gap-3 text-sm">
+              <label className="flex items-center gap-2 text-gray-300">
+                <input type="checkbox" checked={schedule.enabled} disabled={savingSchedule}
+                  onChange={e => handleScheduleToggle(e.target.checked)} />
+                Automatic backup
+              </label>
+              <select className="input text-sm py-1" value={schedule.frequency} disabled={savingSchedule || !schedule.enabled}
+                onChange={e => handleFrequencyChange(e.target.value as 'daily' | 'weekly')}>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </div>
+          </div>
+          {schedule.enabled && schedule.last_run_at && (
+            <p className="text-xs text-gray-500 -mt-2">Last automatic run: {new Date(schedule.last_run_at).toLocaleString()}</p>
+          )}
+
+          {/* Restore confirmation panel */}
+          {restoreTarget && (
+            <div className="bg-red-900/20 border border-red-700/50 rounded-lg p-4 space-y-3">
+              <p className="text-sm text-red-300 font-medium flex items-center gap-1.5">
+                <AlertTriangle className="w-4 h-4" /> This will overwrite {company.name}'s current data
+              </p>
+              <p className="text-xs text-gray-400">
+                A safety backup of the current state is taken automatically first, but this action still
+                replaces live data immediately. Type <span className="font-mono text-white">{company.name}</span> to confirm.
+              </p>
+              <input className="input w-full" value={restoreConfirmText} onChange={e => setRestoreConfirmText(e.target.value)}
+                placeholder={company.name} />
+              <div className="flex gap-2">
+                <button className="btn-primary bg-red-600 hover:bg-red-500 text-sm" disabled={restoring || restoreConfirmText.trim() !== company.name}
+                  onClick={handleRestoreConfirm}>
+                  {restoring ? 'Restoring…' : 'Confirm Restore'}
+                </button>
+                <button className="btn-ghost text-sm" onClick={() => { setRestoreTarget(null); setRestoreConfirmText('') }}>Cancel</button>
+              </div>
+            </div>
+          )}
+
+          {/* History */}
+          {loading ? (
+            <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 bg-gray-800/50 rounded-lg animate-pulse" />)}</div>
+          ) : list.length === 0 ? (
+            <p className="text-center py-8 text-gray-500 text-sm">No backups yet. Create one above.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500 uppercase tracking-wide">
+                    <th className="pb-2 pr-3">Date</th>
+                    <th className="pb-2 pr-3">Type</th>
+                    <th className="pb-2 pr-3">Status</th>
+                    <th className="pb-2 pr-3">Size</th>
+                    <th className="pb-2 pr-3">Downloads</th>
+                    <th className="pb-2 pr-3">Restore Status</th>
+                    <th className="pb-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map(b => (
+                    <tr key={b.id} className="border-t border-gray-800">
+                      <td className="py-2 pr-3 text-gray-300 whitespace-nowrap">{new Date(b.created_at).toLocaleString()}</td>
+                      <td className="py-2 pr-3 text-gray-400">{b.backup_type}</td>
+                      <td className="py-2 pr-3"><span className={BACKUP_STATUS_BADGE[b.status] ?? ''}>{b.status}</span></td>
+                      <td className="py-2 pr-3 text-gray-400">{formatBytes(b.file_size_bytes)}</td>
+                      <td className="py-2 pr-3 text-gray-400">{b.download_count}</td>
+                      <td className="py-2 pr-3 text-gray-400">
+                        {b.restored_at ? `Restored ${new Date(b.restored_at).toLocaleDateString()}` : '—'}
+                      </td>
+                      <td className="py-2 flex items-center gap-1.5 justify-end">
+                        {b.status === 'completed' && (
+                          <>
+                            <button title="Download" className="p-1.5 rounded hover:bg-teal-900/40 text-teal-400"
+                              onClick={() => handleDownload(b)}>
+                              <Download className="w-3.5 h-3.5" />
+                            </button>
+                            <button title="Restore" className="p-1.5 rounded hover:bg-red-900/40 text-red-400"
+                              onClick={() => { setRestoreTarget(b); setRestoreConfirmText('') }}>
+                              <RotateCcw className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                        {b.status === 'failed' && b.error_message && (
+                          <span className="text-xs text-red-400" title={b.error_message}>failed</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
         </div>

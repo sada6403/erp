@@ -1,6 +1,7 @@
 import type { NextRequest } from 'next/server'
 import { verifyAccessToken, type TokenPayload, type Portal } from './jwt'
 import { NextResponse } from 'next/server'
+import { timingSafeEqual } from 'crypto'
 
 // ─── Extract bearer token from Authorization header ───────────────────────────
 export function extractToken(req: NextRequest): string | null {
@@ -58,6 +59,20 @@ export function requirePermission(
     return { error: NextResponse.json({ error: `Forbidden: requires ${permission} permission` }, { status: 403 }) }
   }
   return result
+}
+
+// ─── Require the cron shared secret (for VPS-crontab-triggered routes with ────
+// no human session available, e.g. scheduled backups) ─────────────────────────
+export function requireCronSecret(req: NextRequest): { ok: true } | { error: NextResponse } {
+  const expected = process.env.CRON_SECRET
+  const received = req.headers.get('x-cron-secret')
+  if (!expected || !received) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
+  const expectedBuffer = Buffer.from(expected)
+  const receivedBuffer = Buffer.from(received)
+  const match = expectedBuffer.length === receivedBuffer.length
+    && timingSafeEqual(expectedBuffer, receivedBuffer)
+  if (!match) return { error: NextResponse.json({ error: 'Unauthorized' }, { status: 401 }) }
+  return { ok: true }
 }
 
 // ─── RBAC role definitions ────────────────────────────────────────────────────
