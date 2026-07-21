@@ -16,6 +16,18 @@ const TABS: { id: Tab; label: string; danger?: boolean }[] = [
 
 const DEFAULT_COLOR = '#2563eb'
 
+function Field({ label, value, onChange, type = 'text', placeholder = '' }: {
+  label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string
+}) {
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <input className="input" type={type} placeholder={placeholder}
+        value={value} onChange={e => onChange(e.target.value)} />
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const [tab, setTab]         = useState<Tab>('branding')
   const [data, setData]       = useState<Record<string, unknown>>({})
@@ -158,16 +170,6 @@ export default function SettingsPage() {
     setPurgeLoading(false)
   }
 
-  const Field = ({ label, k, type = 'text', placeholder = '' }: {
-    label: string; k: string; type?: string; placeholder?: string
-  }) => (
-    <div>
-      <label className="label">{label}</label>
-      <input className="input" type={type} placeholder={placeholder}
-        value={section[k] ?? ''} onChange={e => set(k, e.target.value)} />
-    </div>
-  )
-
   const currentColor = section['primary_color'] || DEFAULT_COLOR
   const isSettingsTab = (['branding','smtp','sms','defaults'] as Tab[]).includes(tab)
 
@@ -196,10 +198,10 @@ export default function SettingsPage() {
 
           {/* ── Branding ─────────────────────────────────────────────────────── */}
           {tab === 'branding' && <>
-            <Field label="App Name"      k="app_name"      placeholder="Enterprise POS ERP" />
-            <Field label="Tagline"       k="tagline"       placeholder="The SaaS ERP for modern retail" />
-            <Field label="Support Email" k="support_email" type="email" placeholder="support@yourdomain.com" />
-            <Field label="Logo URL"      k="logo_url"      placeholder="https://yourdomain.com/logo.png" />
+            <Field label="App Name"      value={section.app_name ?? ''} onChange={v => set('app_name', v)}      placeholder="Enterprise POS ERP" />
+            <Field label="Tagline"       value={section.tagline ?? ''} onChange={v => set('tagline', v)}       placeholder="The SaaS ERP for modern retail" />
+            <Field label="Support Email" value={section.support_email ?? ''} onChange={v => set('support_email', v)} type="email" placeholder="support@yourdomain.com" />
+            <Field label="Logo URL"      value={section.logo_url ?? ''} onChange={v => set('logo_url', v)}      placeholder="https://yourdomain.com/logo.png" />
 
             <div>
               <label className="label">Primary Color</label>
@@ -226,12 +228,12 @@ export default function SettingsPage() {
 
           {/* ── SMTP ─────────────────────────────────────────────────────────── */}
           {tab === 'smtp' && <>
-            <Field label="SMTP Host"  k="host"       placeholder="smtp.gmail.com" />
-            <Field label="Port"       k="port"       type="number" placeholder="587" />
-            <Field label="Username"   k="user"       placeholder="you@gmail.com" />
-            <Field label="Password"   k="pass"       type="password" placeholder="••••••" />
-            <Field label="From Name"  k="from_name"  placeholder="Enterprise POS ERP" />
-            <Field label="From Email" k="from_email" type="email" placeholder="noreply@yourdomain.com" />
+            <Field label="SMTP Host"  value={section.host ?? ''} onChange={v => set('host', v)}       placeholder="smtp.gmail.com" />
+            <Field label="Port"       value={section.port ?? ''} onChange={v => set('port', v)}       type="number" placeholder="587" />
+            <Field label="Username"   value={section.user ?? ''} onChange={v => set('user', v)}       placeholder="you@gmail.com" />
+            <Field label="Password"   value={section.pass ?? ''} onChange={v => set('pass', v)}       type="password" placeholder="••••••" />
+            <Field label="From Name"  value={section.from_name ?? ''} onChange={v => set('from_name', v)}  placeholder="Enterprise POS ERP" />
+            <Field label="From Email" value={section.from_email ?? ''} onChange={v => set('from_email', v)} type="email" placeholder="noreply@yourdomain.com" />
 
             <div className="border-t border-gray-700 pt-4">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3 flex items-center gap-2">
@@ -291,9 +293,9 @@ export default function SettingsPage() {
                 <option value="none">Disabled</option>
               </select>
             </div>
-            <Field label="Account SID / API Key" k="account_sid" />
-            <Field label="Auth Token"             k="auth_token" type="password" placeholder="••••••" />
-            <Field label="From Number"            k="from_number" placeholder="+1234567890" />
+            <Field label="Account SID / API Key" value={section.account_sid ?? ''} onChange={v => set('account_sid', v)} />
+            <Field label="Auth Token"             value={section.auth_token ?? ''} onChange={v => set('auth_token', v)} type="password" placeholder="••••••" />
+            <Field label="From Number"            value={section.from_number ?? ''} onChange={v => set('from_number', v)} placeholder="+1234567890" />
           </>}
 
           {/* ── Defaults ─────────────────────────────────────────────────────── */}
@@ -301,10 +303,10 @@ export default function SettingsPage() {
             <p className="text-xs text-gray-500">
               These values auto-fill when creating a new company. Change them once and all future companies use the new defaults.
             </p>
-            <Field label="Trial Days"       k="trial_days"       type="number" placeholder="14" />
-            <Field label="Default Timezone" k="default_timezone" placeholder="Asia/Colombo" />
-            <Field label="Default Currency" k="default_currency" placeholder="LKR" />
-            <Field label="Default Country"  k="default_country"  placeholder="LK" />
+            <Field label="Trial Days"       value={section.trial_days ?? ''} onChange={v => set('trial_days', v)}       type="number" placeholder="14" />
+            <Field label="Default Timezone" value={section.default_timezone ?? ''} onChange={v => set('default_timezone', v)} placeholder="Asia/Colombo" />
+            <Field label="Default Currency" value={section.default_currency ?? ''} onChange={v => set('default_currency', v)} placeholder="LKR" />
+            <Field label="Default Country"  value={section.default_country ?? ''} onChange={v => set('default_country', v)}  placeholder="LK" />
           </>}
 
           {/* Save row */}
