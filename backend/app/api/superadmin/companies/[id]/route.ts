@@ -33,7 +33,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { status, suspensionReason, name, email, phone, address, notes, regenerate_api_key,
           regenerate_company_key,
           maxBranches, maxUsers, maxPosDevices, maxStorageGb,
-          brandColor, brandLogoUrl,
+          brandColor, brandLogoUrl, loginLogoUrl,
           subscriptionEndsAt, newPackageId, extendTrialDays,
           lock, lockReason } = body
 
@@ -65,6 +65,16 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
       actorName: auth.payload.name, action: 'company.unlock',
       resource: 'companies', resourceId: companyId, companyId })
+  }
+
+  if (loginLogoUrl !== undefined) {
+    let branding: Record<string, unknown> = {}
+    const existing = (old as Record<string, unknown>).branding_json
+    if (existing) {
+      try { branding = JSON.parse(String(existing)) as Record<string, unknown> } catch { /* ignore */ }
+    }
+    branding.login_logo_url = loginLogoUrl || null
+    await pool.query(`UPDATE companies SET branding_json = ? WHERE id = ?`, [JSON.stringify(branding), companyId])
   }
 
   const setClauses: string[] = []

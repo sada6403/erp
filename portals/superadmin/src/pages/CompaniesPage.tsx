@@ -2012,6 +2012,10 @@ function BrandingModal({ company, onClose, onSaved }: {
 }) {
   const [color, setColor]     = useState(company.brand_color || '#2563eb')
   const [logoUrl, setLogoUrl] = useState(company.brand_logo_url || '')
+  const [loginLogoUrl, setLoginLogoUrl] = useState(() => {
+    try { return JSON.parse(company.branding_json || '{}').login_logo_url || '' }
+    catch { return '' }
+  })
   const [saving, setSaving]   = useState(false)
   const [error, setError]     = useState('')
   const [saved, setSaved]     = useState(false)
@@ -2032,7 +2036,7 @@ function BrandingModal({ company, onClose, onSaved }: {
   async function handleSave() {
     setSaving(true); setError('')
     try {
-      await api.update(company.id, { brandColor: color || null, brandLogoUrl: logoUrl || null })
+      await api.update(company.id, { brandColor: color || null, brandLogoUrl: logoUrl || null, loginLogoUrl: loginLogoUrl || null })
       setSaved(true)
       onSaved()
       setTimeout(() => { setSaved(false); onClose() }, 1200)
@@ -2115,6 +2119,24 @@ function BrandingModal({ company, onClose, onSaved }: {
             {logoUrl && (
               <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
                 <img src={logoUrl} alt="" className="h-8 rounded border border-gray-700 bg-gray-800 object-contain" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                <span>Logo preview</span>
+              </div>
+            )}
+          </div>
+
+          {/* Login Screen Logo */}
+          <div>
+            <label className="label mb-1 block">Login Screen Logo URL</label>
+            <p className="text-xs text-gray-500 mb-2">Shown on the POS login screen. Falls back to the Company Logo above if left blank.</p>
+            <input
+              className="input w-full text-sm"
+              placeholder="https://example.com/login-logo.png"
+              value={loginLogoUrl}
+              onChange={e => setLoginLogoUrl(e.target.value)}
+            />
+            {loginLogoUrl && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-gray-400">
+                <img src={loginLogoUrl} alt="" className="h-8 rounded border border-gray-700 bg-gray-800 object-contain" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
                 <span>Logo preview</span>
               </div>
             )}
