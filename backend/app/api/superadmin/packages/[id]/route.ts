@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { pool } from '@/lib/db'
-import { FEATURE_DEFINITIONS } from '@/lib/catalog'
+import { FEATURE_DEFINITIONS, MODULE_DEFINITIONS } from '@/lib/catalog'
 import { randomUUID } from 'crypto'
 
 type Params = { params: Promise<{ id: string }> }
@@ -24,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const body = await req.json()
   const {
     name, description, monthly_price, annual_price, trial_days, sort_order,
-    max_branches, max_users, max_products, features, is_active,
+    max_branches, max_users, max_products, features, modules, is_active,
   } = body
 
   const setClauses: string[] = []
@@ -59,6 +59,24 @@ export async function PATCH(req: NextRequest, { params }: Params) {
         `INSERT INTO plan_features (id, plan_id, feature_key, is_enabled, created_at)
          VALUES (?, ?, ?, ?, NOW())`,
         [randomUUID(), packageId, def.key, featureMap.get(def.key) ? 1 : 0]
+      )
+    }
+  }
+
+  // Mirrors the features sync above, but for package_modules — the table
+  // resolveEntitlements() actually uses for real module-level enforcement.
+  if (modules !== undefined) {
+    const moduleMap = new Map<string, boolean>()
+    for (const def of MODULE_DEFINITIONS) {
+      const raw = (modules as Record<string, unknown>)[def.key]
+      moduleMap.set(def.key, raw === undefined ? true : Boolean(raw))
+    }
+    await pool.query(`DELETE FROM package_modules WHERE package_id = ?`, [packageId])
+    for (const def of MODULE_DEFINITIONS) {
+      await pool.query(
+        `INSERT INTO package_modules (id, package_id, module_key, module_name, is_enabled, sort_order, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        [randomUUID(), packageId, def.key, def.name, moduleMap.get(def.key) ? 1 : 0, def.sort]
       )
     }
   }

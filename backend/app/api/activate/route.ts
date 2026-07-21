@@ -39,8 +39,9 @@ export async function POST(req: NextRequest) {
            FROM companies c
            LEFT JOIN company_subscriptions s ON s.company_id = c.id AND s.status IN ('active','trial','grace')
            LEFT JOIN packages p ON p.id = s.package_id
-           WHERE c.company_key = ?`,
-          [company_key]
+           WHERE c.company_key = ?
+              OR (c.previous_company_key = ? AND c.previous_company_key_expires_at > NOW())`,
+          [company_key, company_key]
         )
       )
 

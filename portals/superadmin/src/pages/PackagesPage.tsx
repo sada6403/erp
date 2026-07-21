@@ -13,8 +13,34 @@ type Pkg = {
   max_products: number
   trial_days: number
   features: Record<string, boolean | string>
+  modules: Record<string, boolean>
   is_active: boolean
   sort_order: number
+}
+
+// Mirrors MODULE_DEFINITIONS in backend/lib/catalog.ts — no plain module
+// catalog endpoint exists yet (only the company-scoped one), and this list
+// is small/stable, so it's kept in sync by hand like MODULE_GROUPS already
+// is in CompaniesPage.tsx.
+const MODULE_CATALOG: { key: string; name: string }[] = [
+  { key: 'pos',             name: 'POS / Billing' },
+  { key: 'inventory',       name: 'Inventory Management' },
+  { key: 'customers',       name: 'Customer Management' },
+  { key: 'reports_basic',   name: 'Basic Reports' },
+  { key: 'installments',    name: 'Installments & Credit' },
+  { key: 'multi_branch',    name: 'Multi-Branch Management' },
+  { key: 'purchase_orders', name: 'Purchase Orders' },
+  { key: 'deliveries',      name: 'Delivery Management' },
+  { key: 'expenses',        name: 'Expense Tracking' },
+  { key: 'reports_full',    name: 'Advanced Reports & Analytics' },
+  { key: 'stock_transfers', name: 'Inter-Branch Stock Transfers' },
+  { key: 'api_access',      name: 'API Access' },
+  { key: 'white_label',     name: 'White Label' },
+]
+
+function moduleEnabled(pkg: Pkg, key: string) {
+  const value = pkg.modules?.[key]
+  return value === undefined ? true : Boolean(value)
 }
 
 type FeatureDef = {
@@ -200,6 +226,29 @@ function FeatureMatrix({
   )
 }
 
+function ModuleMatrix({
+  modules,
+  setModules,
+}: {
+  modules: Record<string, boolean>
+  setModules: Dispatch<SetStateAction<Record<string, boolean>>>
+}) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+      {MODULE_CATALOG.map(mod => (
+        <label key={mod.key} className="flex items-center gap-3 rounded-lg border border-gray-800 bg-gray-800/30 px-3 py-2">
+          <input
+            type="checkbox"
+            checked={modules[mod.key] ?? true}
+            onChange={e => setModules(prev => ({ ...prev, [mod.key]: e.target.checked }))}
+          />
+          <span className="text-sm text-white">{mod.name}</span>
+        </label>
+      ))}
+    </div>
+  )
+}
+
 function CreatePackageModal({ catalog, onClose, onCreated }: { catalog: FeatureDef[]; onClose: () => void; onCreated: () => void }) {
   const [name, setName] = useState('')
   const [description, setDesc] = useState('')
@@ -210,6 +259,8 @@ function CreatePackageModal({ catalog, onClose, onCreated }: { catalog: FeatureD
   const [maxProducts, setMaxProducts] = useState('500')
   const [trialDays, setTrialDays] = useState('14')
   const [features, setFeatures] = useState<Record<string, boolean>>(DEFAULT_FEATURES)
+  const [modules, setModules] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(MODULE_CATALOG.map(m => [m.key, true])))
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -239,6 +290,7 @@ function CreatePackageModal({ catalog, onClose, onCreated }: { catalog: FeatureD
         max_products: Number(maxProducts),
         trial_days: Number(trialDays),
         features,
+        modules,
       })
       onCreated()
       onClose()
@@ -273,6 +325,17 @@ function CreatePackageModal({ catalog, onClose, onCreated }: { catalog: FeatureD
               Feature Access
             </div>
             <FeatureMatrix catalog={catalog} features={features} setFeatures={setFeatures} />
+          </div>
+          <div className="border-t border-gray-800 pt-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-gray-500">
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Module Access
+            </div>
+            <p className="text-xs text-gray-500 -mt-2">
+              What this package tier actually restricts — sync/API access is blocked for a disabled
+              module, not just the toggle in Feature Management.
+            </p>
+            <ModuleMatrix modules={modules} setModules={setModules} />
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" className="btn-ghost flex-1" onClick={onClose}>Cancel</button>
@@ -309,6 +372,8 @@ function EditPackageModal({ catalog, pkg, onClose, onSaved }: {
     }
     return next
   })
+  const [modules, setModules] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(MODULE_CATALOG.map(m => [m.key, moduleEnabled(pkg, m.key)])))
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -331,6 +396,7 @@ function EditPackageModal({ catalog, pkg, onClose, onSaved }: {
         max_products: Number(form.max_products),
         sort_order: Number(form.sort_order),
         features,
+        modules,
       })
       setSaved(true)
       onSaved()
@@ -373,6 +439,17 @@ function EditPackageModal({ catalog, pkg, onClose, onSaved }: {
               Feature Matrix
             </div>
             <FeatureMatrix catalog={catalog} features={features} setFeatures={setFeatures} />
+          </div>
+          <div className="border-t border-gray-800 pt-4 space-y-3">
+            <div className="flex items-center gap-2 text-xs uppercase tracking-wider text-gray-500">
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              Module Access
+            </div>
+            <p className="text-xs text-gray-500 -mt-2">
+              What this package tier actually restricts — sync/API access is blocked for a disabled
+              module, not just the toggle in Feature Management.
+            </p>
+            <ModuleMatrix modules={modules} setModules={setModules} />
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" className="btn-ghost flex-1" onClick={onClose}>Cancel</button>

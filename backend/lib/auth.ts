@@ -814,9 +814,14 @@ export async function resolveCompany(req: NextRequest): Promise<CompanyContext |
   const apiKey = req.headers.get('x-api-key')
   if (!apiKey) return null
 
+  // Also accept a just-regenerated key's previous value while its grace
+  // period is still active, so rotating a key doesn't instantly lock out a
+  // device that hasn't picked up the new one yet.
   const { rows } = await pool.query(
-    `SELECT id, db_schema, name, slug, status, admin_locked FROM companies WHERE api_key = ?`,
-    [apiKey]
+    `SELECT id, db_schema, name, slug, status, admin_locked FROM companies
+     WHERE api_key = ?
+        OR (previous_api_key = ? AND previous_api_key_expires_at > NOW())`,
+    [apiKey, apiKey]
   )
   if (!rows.length) return null
 

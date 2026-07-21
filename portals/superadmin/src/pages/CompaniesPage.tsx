@@ -499,10 +499,13 @@ function ApiKeyModal({ company, onClose, onRegenerated }: {
   onRegenerated: () => void
 }) {
   const [apiKey, setApiKey]     = useState(company.api_key ?? '')
+  const [graceExpiresAt, setGraceExpiresAt] = useState(company.previous_api_key_expires_at ?? '')
   const [copied, setCopied]     = useState(false)
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
   const [confirmed, setConfirmed] = useState(false)
+
+  const graceActive = Boolean(graceExpiresAt) && new Date(graceExpiresAt) > new Date()
 
   async function handleCopy() {
     await navigator.clipboard.writeText(apiKey)
@@ -516,10 +519,24 @@ function ApiKeyModal({ company, onClose, onRegenerated }: {
     try {
       const updated = await api.update(company.id, { regenerate_api_key: true }) as Company
       setApiKey(updated.api_key ?? '')
+      setGraceExpiresAt(updated.previous_api_key_expires_at ?? '')
       setConfirmed(false)
       onRegenerated()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to regenerate')
+    }
+    setLoading(false)
+  }
+
+  async function handleRevokeOld() {
+    if (!confirm('Revoke the old key immediately? Any device still using it will lose access right now.')) return
+    setLoading(true); setError('')
+    try {
+      await api.update(company.id, { revoke_previous_api_key: true })
+      setGraceExpiresAt('')
+      onRegenerated()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke')
     }
     setLoading(false)
   }
@@ -567,9 +584,19 @@ function ApiKeyModal({ company, onClose, onRegenerated }: {
             </div>
           </div>
 
+          {graceActive && (
+            <div className="bg-yellow-900/20 border border-yellow-700/40 rounded-lg px-4 py-3 text-sm text-yellow-300 flex items-center justify-between gap-3">
+              <span>Old key still works until {new Date(graceExpiresAt).toLocaleString()} (grace period for devices that haven't updated yet).</span>
+              <button className="btn-ghost text-xs text-red-400 hover:text-red-300 flex-shrink-0" onClick={handleRevokeOld} disabled={loading}>
+                Revoke now
+              </button>
+            </div>
+          )}
+
           <div className="border-t border-gray-800 pt-4">
             <p className="text-xs text-gray-500 mb-3">
-              Regenerating will invalidate the current key. All POS branches will lose sync until they update to the new key.
+              Regenerating creates a new key immediately; the old key keeps working for 48 hours so
+              branches have time to update, then stops automatically (or revoke it early above).
             </p>
             {confirmed ? (
               <div className="flex gap-2">
@@ -1202,19 +1229,36 @@ function CompanyKeyModal({ company, onClose, onUpdated }: {
   company: Company; onClose: () => void; onUpdated: () => void
 }) {
   const [key, setKey]       = useState<string>(company.company_key || '')
+  const [graceExpiresAt, setGraceExpiresAt] = useState(company.previous_company_key_expires_at ?? '')
   const [loading, setLoading] = useState(false)
   const [copied, setCopied]   = useState(false)
   const [error, setError]     = useState('')
 
+  const graceActive = Boolean(graceExpiresAt) && new Date(graceExpiresAt) > new Date()
+
   async function generate() {
-    if (!confirm('Generate a new Company Activation Key? The old key will stop working immediately.')) return
+    if (!confirm('Generate a new Company Activation Key? The old key keeps working for 48h for anyone mid-activation, then stops.')) return
     setLoading(true); setError('')
     try {
       const updated = await api.update(company.id, { regenerate_company_key: true }) as Company
       setKey(updated.company_key || '')
+      setGraceExpiresAt(updated.previous_company_key_expires_at ?? '')
       onUpdated()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed')
+    }
+    setLoading(false)
+  }
+
+  async function revokeOld() {
+    if (!confirm('Revoke the old activation key immediately?')) return
+    setLoading(true); setError('')
+    try {
+      await api.update(company.id, { revoke_previous_company_key: true })
+      setGraceExpiresAt('')
+      onUpdated()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to revoke')
     }
     setLoading(false)
   }
@@ -1268,10 +1312,22 @@ function CompanyKeyModal({ company, onClose, onUpdated }: {
 
           {error && <p className="text-sm text-red-400">{error}</p>}
 
+          {graceActive && (
+            <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 p-3 flex items-center justify-between gap-3">
+              <p className="text-xs text-yellow-400">
+                Old key still works until {new Date(graceExpiresAt).toLocaleString()}.
+              </p>
+              <button className="btn-ghost text-xs text-red-400 hover:text-red-300 flex-shrink-0" onClick={revokeOld} disabled={loading}>
+                Revoke now
+              </button>
+            </div>
+          )}
+
           <div className="rounded-lg bg-yellow-500/10 border border-yellow-500/20 p-3">
             <p className="text-xs text-yellow-400">
-              ⚠️ Regenerating the key will immediately invalidate the old key.
-              All new activations must use the new key. Existing active devices are unaffected.
+              ⚠️ Regenerating creates a new key immediately; the old key keeps working for 48 hours
+              (or revoke it early above). Already-activated devices are never affected by this —
+              only new activations need the current key.
             </p>
           </div>
         </div>

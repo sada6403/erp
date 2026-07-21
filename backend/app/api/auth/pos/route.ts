@@ -13,10 +13,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing API key' }, { status: 401 })
   }
 
-  // Look up company by API key regardless of status so we can give a clear error
+  // Look up company by API key regardless of status so we can give a clear error.
+  // Also accept a just-regenerated key's previous value during its grace period.
   const { rows: compRows } = await pool.query(
-    `SELECT id, db_schema, name, slug, status FROM companies WHERE api_key = ?`,
-    [apiKey]
+    `SELECT id, db_schema, name, slug, status FROM companies
+     WHERE api_key = ?
+        OR (previous_api_key = ? AND previous_api_key_expires_at > NOW())`,
+    [apiKey, apiKey]
   )
 
   if (!compRows.length) {

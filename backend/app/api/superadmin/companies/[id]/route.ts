@@ -31,7 +31,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const body = await req.json()
   const { status, suspensionReason, name, email, phone, address, notes, regenerate_api_key,
-          regenerate_company_key,
+          regenerate_company_key, revoke_previous_api_key, revoke_previous_company_key,
           maxBranches, maxUsers, maxPosDevices, maxStorageGb,
           brandColor, brandLogoUrl, loginLogoUrl,
           subscriptionEndsAt, newPackageId, extendTrialDays,
@@ -84,8 +84,17 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (phone)                   { setClauses.push('phone = ?')            ; vals.push(phone) }
   if (address)                 { setClauses.push('address = ?')          ; vals.push(address) }
   if (notes !== undefined)     { setClauses.push('notes = ?')            ; vals.push(notes) }
-  if (regenerate_api_key)      { setClauses.push('api_key = ?')          ; vals.push(randomUUID()) }
-  if (regenerate_company_key)  { setClauses.push('company_key = ?')      ; vals.push(randomUUID()) }
+  const KEY_GRACE_HOURS = 48
+  if (regenerate_api_key) {
+    setClauses.push('previous_api_key = ?', 'previous_api_key_expires_at = DATE_ADD(NOW(), INTERVAL ? HOUR)', 'api_key = ?')
+    vals.push((old as Record<string, string>).api_key, KEY_GRACE_HOURS, randomUUID())
+  }
+  if (regenerate_company_key) {
+    setClauses.push('previous_company_key = ?', 'previous_company_key_expires_at = DATE_ADD(NOW(), INTERVAL ? HOUR)', 'company_key = ?')
+    vals.push((old as Record<string, string>).company_key, KEY_GRACE_HOURS, randomUUID())
+  }
+  if (revoke_previous_api_key)     { setClauses.push('previous_api_key = NULL, previous_api_key_expires_at = NULL') }
+  if (revoke_previous_company_key) { setClauses.push('previous_company_key = NULL, previous_company_key_expires_at = NULL') }
   if (maxBranches   != null)   { setClauses.push('max_branches = ?')     ; vals.push(Number(maxBranches)) }
   if (maxUsers      != null)   { setClauses.push('max_users = ?')        ; vals.push(Number(maxUsers)) }
   if (maxPosDevices != null)   { setClauses.push('max_pos_devices = ?')  ; vals.push(Number(maxPosDevices)) }

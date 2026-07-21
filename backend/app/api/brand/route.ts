@@ -20,8 +20,9 @@ export async function GET(req: NextRequest) {
        LEFT JOIN company_subscriptions s ON s.company_id = c.id AND s.status IN ('active','trial','grace')
        LEFT JOIN packages p ON p.id = s.package_id
        WHERE c.api_key = ?
+          OR (c.previous_api_key = ? AND c.previous_api_key_expires_at > NOW())
        LIMIT 1`,
-      [apiKey]
+      [apiKey, apiKey]
     )
 
     if (!rows.length) {
