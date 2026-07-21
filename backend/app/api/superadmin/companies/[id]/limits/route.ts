@@ -67,6 +67,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     action: 'company.limits.update',
     resource: 'company_limits',
     resourceId: companyId,
+    companyId,
     newValues: { max_users, max_branches, max_pos_devices, max_storage_gb },
   })
 

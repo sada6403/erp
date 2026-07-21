@@ -3,11 +3,12 @@ import type { NextRequest } from 'next/server'
 import { pool, tenantPool } from './db'
 
 export type CompanyContext = {
-  id:       string
-  dbSchema: string
-  name:     string
-  slug:     string
-  tp:       ReturnType<typeof tenantPool>
+  id:          string
+  dbSchema:    string
+  name:        string
+  slug:        string
+  adminLocked: boolean
+  tp:          ReturnType<typeof tenantPool>
 }
 
 declare global { var _posErpTenantCompatibility: Set<string> | undefined }
@@ -814,7 +815,7 @@ export async function resolveCompany(req: NextRequest): Promise<CompanyContext |
   if (!apiKey) return null
 
   const { rows } = await pool.query(
-    `SELECT id, db_schema, name, slug, status FROM companies WHERE api_key = ?`,
+    `SELECT id, db_schema, name, slug, status, admin_locked FROM companies WHERE api_key = ?`,
     [apiKey]
   )
   if (!rows.length) return null
@@ -832,11 +833,12 @@ export async function resolveCompany(req: NextRequest): Promise<CompanyContext |
   await ensureTenantCompatibility(c.db_schema)
 
   return {
-    id:       c.id,
-    dbSchema: c.db_schema,
-    name:     c.name,
-    slug:     c.slug,
-    tp:       tenantPool(c.db_schema),
+    id:          c.id,
+    dbSchema:    c.db_schema,
+    name:        c.name,
+    slug:        c.slug,
+    adminLocked: Boolean(Number(c.admin_locked)),
+    tp:          tenantPool(c.db_schema),
   }
 }
 

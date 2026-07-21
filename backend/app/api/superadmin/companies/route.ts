@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
 
   await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
     actorName: auth.payload.name, action: 'company.create',
-    resource: 'companies', resourceId: result.companyId,
+    resource: 'companies', resourceId: result.companyId, companyId: result.companyId,
     newValues: { name, email, adminEmail, slug: result.slug } })
 
   return NextResponse.json({ ...result, company_key: result.companyKey, adminEmail }, { status: 201 })

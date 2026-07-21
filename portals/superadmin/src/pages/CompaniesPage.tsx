@@ -1,6 +1,6 @@
 import React, { useEffect, useState, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, impersonate as impersonateApi, settings as settingsApi, audit as auditApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw } from 'lucide-react'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock } from 'lucide-react'
 
 type Company = Record<string, string>
 type Pkg = { id: string; name: string }
@@ -61,6 +61,21 @@ export default function CompaniesPage() {
     } else {
       if (!confirm(`Set company to ${status}?`)) return
       await api.update(id, { status })
+    }
+    load()
+  }
+
+  async function toggleLock(c: Company) {
+    const isLocked = c.admin_locked === '1' || c.admin_locked === 'true'
+    if (isLocked) {
+      if (!confirm(`Unlock ${c.name}? Staff/permission changes will sync again.`)) return
+      await api.update(c.id, { lock: false })
+    } else {
+      const reason = window.prompt('Reason for locking this company (required — staff/permission changes stop syncing, POS sales keep working):')
+      if (reason === null) return
+      if (!reason.trim()) { alert('A reason is required to lock a company.'); return }
+      if (!confirm(`Lock ${c.name} now?\n\nReason: ${reason.trim()}`)) return
+      await api.update(c.id, { lock: true, lockReason: reason.trim() })
     }
     load()
   }
@@ -129,10 +144,17 @@ export default function CompaniesPage() {
                   </div>
                 </td>
                 <td className="px-4 py-3">
-                  <span className={STATUS_BADGE[c.status] ?? ''}
-                    title={c.status === 'suspended' && c.suspension_reason ? `Reason: ${c.suspension_reason}` : undefined}>
-                    {c.status}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={STATUS_BADGE[c.status] ?? ''}
+                      title={c.status === 'suspended' && c.suspension_reason ? `Reason: ${c.suspension_reason}` : undefined}>
+                      {c.status}
+                    </span>
+                    {(c.admin_locked === '1' || c.admin_locked === 'true') && (
+                      <span className="badge-yellow" title={c.lock_reason ? `Locked — ${c.lock_reason}` : 'Locked'}>
+                        🔒 Locked
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-4 py-3 text-gray-400 text-xs">
                   {c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : '—'}
@@ -182,6 +204,17 @@ export default function CompaniesPage() {
                       <button title="Suspend" className="p-1.5 rounded hover:bg-yellow-900/40 text-yellow-400"
                         onClick={() => changeStatus(c.id, 'suspended')}>
                         <Ban className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    {(c.admin_locked === '1' || c.admin_locked === 'true') ? (
+                      <button title={`Unlock${c.lock_reason ? ' — ' + c.lock_reason : ''}`} className="p-1.5 rounded hover:bg-orange-900/40 text-orange-400"
+                        onClick={() => toggleLock(c)}>
+                        <Lock className="w-3.5 h-3.5" />
+                      </button>
+                    ) : (
+                      <button title="Lock (freeze staff/permission changes, POS keeps working)" className="p-1.5 rounded hover:bg-gray-700/60 text-gray-400"
+                        onClick={() => toggleLock(c)}>
+                        <Unlock className="w-3.5 h-3.5" />
                       </button>
                     )}
                     <button title="Reset Company Admin Password" className="p-1.5 rounded hover:bg-amber-900/40 text-amber-400"
@@ -629,6 +662,20 @@ function DevicesModal({ company, onClose }: { company: Company; onClose: () => v
     catch (err) { setError(err instanceof Error ? err.message : 'Failed') }
   }
 
+  async function handleDeactivateAll() {
+    if (!confirm(`Deactivate all ${activeCount} active device(s)? Every POS on this account will lose access.`)) return
+    try { await devicesApi.deactivateAll(company.id); load() }
+    catch (err) { setError(err instanceof Error ? err.message : 'Failed') }
+  }
+
+  async function handleReactivateAll() {
+    const inactiveCount = devList.filter(d => d.status === 'deactivated' && d.device_id).length
+    if (!inactiveCount) return
+    if (!confirm(`Re-enable ${inactiveCount} previously-activated device(s)?`)) return
+    try { await devicesApi.reactivateAll(company.id); load() }
+    catch (err) { setError(err instanceof Error ? err.message : 'Failed') }
+  }
+
   async function copyKey(key: string) {
     await navigator.clipboard.writeText(key)
     setCopied(true); setTimeout(() => setCopied(false), 2000)
@@ -648,6 +695,19 @@ function DevicesModal({ company, onClose }: { company: Company; onClose: () => v
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
         </div>
+
+        {devList.length > 0 && (
+          <div className="flex items-center gap-2 px-5 py-2 border-b border-gray-800 bg-gray-800/20">
+            <button className="btn-ghost text-xs text-yellow-400 hover:text-yellow-300 flex items-center gap-1"
+              onClick={handleDeactivateAll} disabled={activeCount === 0}>
+              <Ban className="w-3.5 h-3.5" /> Disable All
+            </button>
+            <button className="btn-ghost text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1"
+              onClick={handleReactivateAll} disabled={!devList.some(d => d.status === 'deactivated' && d.device_id)}>
+              <RefreshCw className="w-3.5 h-3.5" /> Enable All
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {error && <div className="bg-red-900/30 border border-red-700/50 rounded px-4 py-2 text-red-400 text-sm">{error}</div>}
@@ -1724,9 +1784,9 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
               </div>
 
               <div>
-                <label className="label">Extend Trial (days)</label>
+                <label className="label">Extend License (days)</label>
                 <div className="flex gap-2">
-                  {['7','14','30'].map(d => (
+                  {['7','30','90'].map(d => (
                     <button key={d} onClick={() => ss('extendDays')(d)}
                       className={`px-3 py-1.5 rounded text-sm border transition-colors ${
                         sub.extendDays === d ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-gray-700 text-gray-400 hover:text-white'

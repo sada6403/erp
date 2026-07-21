@@ -4,7 +4,7 @@ import type { QueryClient } from '@/lib/db'
 import { applySyncOperation } from '@/lib/sync'
 import { syncLimiter } from '@/lib/rateLimit'
 import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
-import { TABLE_MODULE_MAP } from '@/lib/catalog'
+import { TABLE_MODULE_MAP, ADMIN_LOCK_TABLES } from '@/lib/catalog'
 
 export const runtime = 'nodejs'
 
@@ -45,6 +45,10 @@ export async function POST(request: NextRequest) {
     const requiredModule = TABLE_MODULE_MAP[body.table]
     if (requiredModule && !entitlements.enabledModules.includes(requiredModule)) {
       return NextResponse.json({ error: `Feature disabled: ${requiredModule}` }, { status: 403 })
+    }
+
+    if (company.adminLocked && ADMIN_LOCK_TABLES.includes(body.table)) {
+      return NextResponse.json({ error: 'Company is locked: staff/permission changes are frozen' }, { status: 403 })
     }
 
     // Use a connection from the company's tenant pool

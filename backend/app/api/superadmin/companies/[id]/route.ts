@@ -34,7 +34,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
           regenerate_company_key,
           maxBranches, maxUsers, maxPosDevices, maxStorageGb,
           brandColor, brandLogoUrl,
-          subscriptionEndsAt, newPackageId, extendTrialDays } = body
+          subscriptionEndsAt, newPackageId, extendTrialDays,
+          lock, lockReason } = body
 
   const { rows: [old] } = await pool.query(`SELECT * FROM companies WHERE id = ?`, [companyId])
   if (!old) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -44,6 +45,27 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   if (status) await setCompanyStatus(companyId, status, { reason: suspensionReason, actorId: auth.payload.sub })
+
+  if (lock === true) {
+    if (!String(lockReason ?? '').trim()) {
+      return NextResponse.json({ error: 'A reason is required to lock a company' }, { status: 400 })
+    }
+    await pool.query(
+      `UPDATE companies SET admin_locked = 1, lock_reason = ?, locked_at = NOW(), locked_by = ? WHERE id = ?`,
+      [lockReason.trim(), auth.payload.sub, companyId]
+    )
+    await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
+      actorName: auth.payload.name, action: 'company.lock',
+      resource: 'companies', resourceId: companyId, companyId, newValues: { lockReason } })
+  } else if (lock === false) {
+    await pool.query(
+      `UPDATE companies SET admin_locked = 0, lock_reason = NULL, locked_at = NULL, locked_by = NULL WHERE id = ?`,
+      [companyId]
+    )
+    await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
+      actorName: auth.payload.name, action: 'company.unlock',
+      resource: 'companies', resourceId: companyId, companyId })
+  }
 
   const setClauses: string[] = []
   const vals: unknown[] = []
@@ -107,7 +129,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
     actorName: auth.payload.name, action: 'company.update',
-    resource: 'companies', resourceId: companyId,
+    resource: 'companies', resourceId: companyId, companyId,
     oldValues: { status: (old as Record<string,string>).status }, newValues: body })
 
   // Return updated row (including new api_key if regenerated)
@@ -127,7 +149,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
       await deleteTenant(companyId)
       await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
         actorName: auth.payload.name, action: 'company.permanentDelete',
-        resource: 'companies', resourceId: companyId })
+        resource: 'companies', resourceId: companyId, companyId })
     } catch (err) {
       return NextResponse.json({ error: (err as Error).message }, { status: 500 })
     }
@@ -135,7 +157,7 @@ export async function DELETE(req: NextRequest, { params }: Params) {
     await setCompanyStatus(companyId, 'cancelled')
     await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,
       actorName: auth.payload.name, action: 'company.cancel',
-      resource: 'companies', resourceId: companyId })
+      resource: 'companies', resourceId: companyId, companyId })
   }
 
   return NextResponse.json({ ok: true })

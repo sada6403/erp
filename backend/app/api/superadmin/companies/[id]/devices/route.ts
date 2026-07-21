@@ -82,7 +82,7 @@ export async function POST(req: NextRequest, { params }: Params) {
   await auditLog({
     portal: 'superadmin', actorType: 'superadmin',
     actorId: auth.payload.sub, actorName: auth.payload.name,
-    action: 'device.create', resource: 'pos_devices', resourceId: id,
+    action: 'device.create', resource: 'pos_devices', resourceId: id, companyId,
     newValues: { device_name, company_id: companyId, license_key },
   })
 
@@ -95,8 +95,44 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if ('error' in auth) return auth.error
 
   const { device_id: deviceRowId, action, notes } = await req.json()
-  if (!deviceRowId || !action) {
-    return NextResponse.json({ error: 'device_id and action required' }, { status: 400 })
+  if (!action) {
+    return NextResponse.json({ error: 'action required' }, { status: 400 })
+  }
+
+  if (action === 'deactivateAll') {
+    const { rows } = await pool.query(
+      `UPDATE pos_devices SET status = 'deactivated', deactivated_at = NOW()
+       WHERE company_id = ? AND status != 'deactivated'`,
+      [companyId]
+    )
+    const affected = (rows as unknown as { affectedRows?: number }).affectedRows ?? 0
+    await auditLog({
+      portal: 'superadmin', actorType: 'superadmin',
+      actorId: auth.payload.sub, actorName: auth.payload.name,
+      action: 'device.deactivateAll', resource: 'pos_devices', resourceId: companyId,
+      companyId, newValues: { affected },
+    })
+    return NextResponse.json({ ok: true, affected })
+  }
+
+  if (action === 'reactivateAll') {
+    const { rows } = await pool.query(
+      `UPDATE pos_devices SET status = 'active', deactivated_at = NULL
+       WHERE company_id = ? AND status = 'deactivated' AND device_id IS NOT NULL`,
+      [companyId]
+    )
+    const affected = (rows as unknown as { affectedRows?: number }).affectedRows ?? 0
+    await auditLog({
+      portal: 'superadmin', actorType: 'superadmin',
+      actorId: auth.payload.sub, actorName: auth.payload.name,
+      action: 'device.reactivateAll', resource: 'pos_devices', resourceId: companyId,
+      companyId, newValues: { affected },
+    })
+    return NextResponse.json({ ok: true, affected })
+  }
+
+  if (!deviceRowId) {
+    return NextResponse.json({ error: 'device_id required' }, { status: 400 })
   }
 
   if (action === 'deactivate') {
@@ -108,7 +144,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     await auditLog({
       portal: 'superadmin', actorType: 'superadmin',
       actorId: auth.payload.sub, actorName: auth.payload.name,
-      action: 'device.deactivate', resource: 'pos_devices', resourceId: deviceRowId,
+      action: 'device.deactivate', resource: 'pos_devices', resourceId: deviceRowId, companyId,
     })
   } else if (action === 'reset') {
     // Reset device_id so the license can be activated on a new machine
@@ -120,7 +156,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     await auditLog({
       portal: 'superadmin', actorType: 'superadmin',
       actorId: auth.payload.sub, actorName: auth.payload.name,
-      action: 'device.reset', resource: 'pos_devices', resourceId: deviceRowId,
+      action: 'device.reset', resource: 'pos_devices', resourceId: deviceRowId, companyId,
     })
   } else {
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

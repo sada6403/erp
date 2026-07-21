@@ -101,7 +101,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     portal: 'superadmin', actorType: 'superadmin',
     actorId: auth.payload.sub, actorName: auth.payload.name,
     action: is_enabled ? 'module.enable' : 'module.disable',
-    resource: 'company_modules', resourceId: companyId,
+    resource: 'company_modules', resourceId: companyId, companyId,
     newValues: { module_key, is_enabled },
   })
 

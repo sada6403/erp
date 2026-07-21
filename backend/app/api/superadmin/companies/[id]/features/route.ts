@@ -100,6 +100,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     action: is_enabled ? 'feature.enable' : 'feature.disable',
     resource: 'company_feature_overrides',
     resourceId: companyId,
+    companyId,
     newValues: { feature_key, is_enabled },
   })
 

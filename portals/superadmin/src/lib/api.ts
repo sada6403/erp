@@ -110,6 +110,14 @@ export const devices = {
     request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/devices`, {
       method: 'PATCH', body: JSON.stringify({ device_id: deviceRowId, action: 'reset' }),
     }),
+  deactivateAll: (companyId: string) =>
+    request<{ ok: boolean; affected: number }>(`/api/superadmin/companies/${companyId}/devices`, {
+      method: 'PATCH', body: JSON.stringify({ action: 'deactivateAll' }),
+    }),
+  reactivateAll: (companyId: string) =>
+    request<{ ok: boolean; affected: number }>(`/api/superadmin/companies/${companyId}/devices`, {
+      method: 'PATCH', body: JSON.stringify({ action: 'reactivateAll' }),
+    }),
 }
 
 // ─── Company Backups ──────────────────────────────────────────────────────────

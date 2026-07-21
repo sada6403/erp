@@ -57,7 +57,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     await auditLog({
       portal: 'superadmin', actorType: 'superadmin',
       actorId: auth.payload.sub, actorName: auth.payload.name,
-      action: 'company.resetAdminPassword', resource: 'companies', resourceId: companyId,
+      action: 'company.resetAdminPassword', resource: 'companies', resourceId: companyId, companyId,
     })
 
     return NextResponse.json(result)

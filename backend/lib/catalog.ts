@@ -29,6 +29,12 @@ export const MODULE_DEFINITIONS: ModuleDefinition[] = [
   { key: 'white_label',     name: 'White Label',                  sort: 13 },
 ]
 
+// Tables frozen when a company is admin-locked (companies.admin_locked) —
+// separate concept from module gating above: locking a company doesn't
+// change what modules it's licensed for, it freezes staff/permission
+// changes specifically while POS/sales keep working normally.
+export const ADMIN_LOCK_TABLES = ['users', 'roles']
+
 // Maps sync-pushed table names (see ALLOWED_TABLES in lib/sync.ts) to the
 // optional module that owns them, for per-table enforcement in sync/push.
 // Core tables (products, invoices, customers, stocks, ...) are intentionally
