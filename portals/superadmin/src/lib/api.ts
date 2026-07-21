@@ -164,6 +164,45 @@ export const backups = {
   },
 }
 
+// ─── Company Exports ──────────────────────────────────────────────────────────
+export type ExportEntity = 'products' | 'customers' | 'suppliers' | 'users' | 'invoices'
+  | 'purchase_orders' | 'expenses' | 'audit_logs' | 'license_info' | 'full_database'
+export type ExportFormat = 'csv' | 'json' | 'xlsx' | 'pdf' | 'sql'
+export type ExportRow = {
+  id: string; entity: ExportEntity; format: ExportFormat; status: string
+  file_name: string | null; file_size_bytes: number | null; row_count: number | null
+  error_message: string | null; created_by: string | null
+  download_count: number; last_downloaded_at: string | null
+  created_at: string; completed_at: string | null
+}
+
+export const exports_ = {
+  list:   (companyId: string) => request<ExportRow[]>(`/api/superadmin/companies/${companyId}/exports`),
+  create: (companyId: string, entity: ExportEntity, format: ExportFormat) =>
+    request<{ ok: boolean; exportId: string }>(`/api/superadmin/companies/${companyId}/exports`, {
+      method: 'POST', body: JSON.stringify({ entity, format }),
+    }),
+  // Bypasses request() — that helper always does res.json(), but a download is a binary Blob.
+  download: async (companyId: string, exportId: string, fileName: string) => {
+    const res = await fetch(`${BASE}/api/superadmin/companies/${companyId}/exports/${exportId}/download`, {
+      headers: { Authorization: `Bearer ${_access}` },
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }))
+      throw new Error(err.error ?? 'Download failed')
+    }
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  },
+}
+
 // ─── Company Modules ──────────────────────────────────────────────────────────
 export const modules = {
   list:   (companyId: string) => request<unknown[]>(`/api/superadmin/companies/${companyId}/modules`),

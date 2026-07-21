@@ -1,7 +1,7 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ['bcryptjs', 'mysql2', 'better-sqlite3'],
+  serverExternalPackages: ['bcryptjs', 'mysql2', 'better-sqlite3', 'pdfkit'],
   typescript: { ignoreBuildErrors: true },
   eslint: { ignoreDuringBuilds: true },
   async headers() {

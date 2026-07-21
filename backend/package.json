@@ -12,10 +12,12 @@
   "dependencies": {
     "@types/nodemailer": "^8.0.1",
     "bcryptjs": "^2.4.3",
+    "exceljs": "^4.4.0",
     "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.22.5",
     "next": "^15.2.0",
     "nodemailer": "^9.0.1",
+    "pdfkit": "^0.19.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
@@ -23,6 +25,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.7",
     "@types/node": "^20.17.24",
+    "@types/pdfkit": "^0.17.6",
     "@types/react": "^19.0.10",
     "typescript": "^5.8.2"
   }

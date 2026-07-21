@@ -1,6 +1,6 @@
 import React, { useEffect, useState, FormEvent } from 'react'
-import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, impersonate as impersonateApi, settings as settingsApi, audit as auditApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock } from 'lucide-react'
+import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, impersonate as impersonateApi, settings as settingsApi, audit as auditApi } from '../lib/api'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown } from 'lucide-react'
 
 type Company = Record<string, string>
 type Pkg = { id: string; name: string }
@@ -27,6 +27,7 @@ export default function CompaniesPage() {
   const [showCapabilities, setShowCapabilities] = useState<Company | null>(null)
   const [showDevices, setShowDevices] = useState<Company | null>(null)
   const [showBackups, setShowBackups] = useState<Company | null>(null)
+  const [showExports, setShowExports] = useState<Company | null>(null)
   const [showBranding, setShowBranding] = useState<Company | null>(null)
   const [showCompanyKey, setShowCompanyKey] = useState<Company | null>(null)
   const [error, setError] = useState('')
@@ -181,6 +182,10 @@ export default function CompaniesPage() {
                       onClick={() => setShowBackups(c)}>
                       <Database className="w-3.5 h-3.5" />
                     </button>
+                    <button title="Export Data" className="p-1.5 rounded hover:bg-lime-900/40 text-lime-400"
+                      onClick={() => setShowExports(c)}>
+                      <FileDown className="w-3.5 h-3.5" />
+                    </button>
                     <button title="Branding (logo & color)" className="p-1.5 rounded hover:bg-pink-900/40 text-pink-400"
                       onClick={() => setShowBranding(c)}>
                       <Palette className="w-3.5 h-3.5" />
@@ -264,6 +269,7 @@ export default function CompaniesPage() {
       {showCapabilities && <CompanyCapabilitiesModal company={showCapabilities} onClose={() => setShowCapabilities(null)} onSaved={load} />}
       {showDevices && <DevicesModal company={showDevices} onClose={() => setShowDevices(null)} />}
       {showBackups && <BackupsModal company={showBackups} onClose={() => setShowBackups(null)} />}
+      {showExports && <ExportsModal company={showExports} onClose={() => setShowExports(null)} />}
       {showBranding && <BrandingModal company={showBranding} onClose={() => setShowBranding(null)} onSaved={load} />}
       {showCompanyKey && <CompanyKeyModal company={showCompanyKey} onClose={() => setShowCompanyKey(null)} onUpdated={load} />}
     </div>
@@ -1001,6 +1007,178 @@ function BackupsModal({ company, onClose }: { company: Company; onClose: () => v
                         )}
                         {b.status === 'failed' && b.error_message && (
                           <span className="text-xs text-red-400" title={b.error_message}>failed</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-800 flex justify-end">
+          <button className="btn-primary" onClick={onClose}>Done</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Exports Modal ────────────────────────────────────────────────────────────
+const EXPORT_ENTITY_OPTIONS: { value: ExportEntity; label: string }[] = [
+  { value: 'products',        label: 'Products' },
+  { value: 'customers',       label: 'Customers' },
+  { value: 'suppliers',       label: 'Suppliers' },
+  { value: 'users',           label: 'Employees' },
+  { value: 'invoices',        label: 'Sales (Invoices)' },
+  { value: 'purchase_orders', label: 'Purchases (Purchase Orders)' },
+  { value: 'expenses',        label: 'Expenses' },
+  { value: 'audit_logs',      label: 'Audit Logs' },
+  { value: 'license_info',    label: 'License Information' },
+  { value: 'full_database',   label: 'Full Database' },
+]
+
+// Mirrors isValidCombination() in backend/lib/export.ts — PDF only for
+// license_info, SQL only for full_database.
+function formatsFor(entity: ExportEntity): { value: ExportFormat; label: string }[] {
+  if (entity === 'full_database') return [{ value: 'sql', label: 'SQL (plain, not encrypted)' }]
+  if (entity === 'license_info') return [{ value: 'pdf', label: 'PDF' }]
+  return [
+    { value: 'csv', label: 'CSV' },
+    { value: 'json', label: 'JSON' },
+    { value: 'xlsx', label: 'Excel (.xlsx)' },
+  ]
+}
+
+const EXPORT_STATUS_BADGE: Record<string, string> = {
+  pending: 'badge-yellow', completed: 'badge-green', failed: 'badge-red',
+}
+
+function ExportsModal({ company, onClose }: { company: Company; onClose: () => void }) {
+  const [list, setList]         = useState<ExportRow[]>([])
+  const [loading, setLoading]   = useState(true)
+  const [entity, setEntity]     = useState<ExportEntity>('products')
+  const [format, setFormat]     = useState<ExportFormat>('csv')
+  const [creating, setCreating] = useState(false)
+  const [error, setError]       = useState('')
+
+  async function load() {
+    setLoading(true)
+    try { setList(await exportsApi.list(company.id)) }
+    catch (err) { setError(err instanceof Error ? err.message : 'Failed to load') }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [company.id])
+
+  useEffect(() => {
+    if (!list.some(x => x.status === 'pending')) return
+    const t = setTimeout(load, 3000)
+    return () => clearTimeout(t)
+  }, [list])
+
+  useEffect(() => {
+    const valid = formatsFor(entity)
+    if (!valid.some(f => f.value === format)) setFormat(valid[0].value)
+  }, [entity])
+
+  async function handleCreate() {
+    setCreating(true); setError('')
+    try {
+      await exportsApi.create(company.id, entity, format)
+      load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to start export')
+    }
+    setCreating(false)
+  }
+
+  async function handleDownload(x: ExportRow) {
+    setError('')
+    try {
+      await exportsApi.download(company.id, x.id, x.file_name ?? `${company.name}-export.${x.format}`)
+      load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed')
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-3xl max-h-[90vh] flex flex-col">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <FileDown className="w-4 h-4 text-lime-400" />
+            <h2 className="font-semibold text-white">Export Data — {company.name}</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {error && <div className="bg-red-900/30 border border-red-700/50 rounded px-4 py-2 text-red-400 text-sm">{error}</div>}
+
+          <div className="flex flex-wrap items-end gap-3 bg-gray-800/40 rounded-lg border border-gray-800 px-4 py-3">
+            <div>
+              <label className="label mb-1 block">What to export</label>
+              <select className="input text-sm" value={entity} onChange={e => setEntity(e.target.value as ExportEntity)}>
+                {EXPORT_ENTITY_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label mb-1 block">Format</label>
+              <select className="input text-sm" value={format} onChange={e => setFormat(e.target.value as ExportFormat)}>
+                {formatsFor(entity).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <button className="btn-primary flex items-center gap-1.5 text-sm" onClick={handleCreate} disabled={creating}>
+              <FileDown className="w-4 h-4" />{creating ? 'Starting…' : 'Start Export'}
+            </button>
+          </div>
+          {entity === 'full_database' && (
+            <p className="text-xs text-yellow-400 bg-yellow-900/20 border border-yellow-700/30 rounded-lg px-4 py-2">
+              This file is a plain SQL dump — NOT encrypted. Handle it carefully. For a protected copy, use Backups instead.
+            </p>
+          )}
+
+          {loading ? (
+            <div className="space-y-2">{[...Array(3)].map((_, i) => <div key={i} className="h-14 bg-gray-800/50 rounded-lg animate-pulse" />)}</div>
+          ) : list.length === 0 ? (
+            <p className="text-center py-8 text-gray-500 text-sm">No exports yet. Start one above.</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-gray-500 uppercase tracking-wide">
+                    <th className="pb-2 pr-3">Date</th>
+                    <th className="pb-2 pr-3">Entity</th>
+                    <th className="pb-2 pr-3">Format</th>
+                    <th className="pb-2 pr-3">Status</th>
+                    <th className="pb-2 pr-3">Size</th>
+                    <th className="pb-2 pr-3">Rows</th>
+                    <th className="pb-2 pr-3">Downloads</th>
+                    <th className="pb-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {list.map(x => (
+                    <tr key={x.id} className="border-t border-gray-800">
+                      <td className="py-2 pr-3 text-gray-300 whitespace-nowrap">{new Date(x.created_at).toLocaleString()}</td>
+                      <td className="py-2 pr-3 text-gray-400">{EXPORT_ENTITY_OPTIONS.find(o => o.value === x.entity)?.label ?? x.entity}</td>
+                      <td className="py-2 pr-3 text-gray-400 uppercase">{x.format}</td>
+                      <td className="py-2 pr-3"><span className={EXPORT_STATUS_BADGE[x.status] ?? ''}>{x.status}</span></td>
+                      <td className="py-2 pr-3 text-gray-400">{formatBytes(x.file_size_bytes)}</td>
+                      <td className="py-2 pr-3 text-gray-400">{x.row_count ?? '—'}</td>
+                      <td className="py-2 pr-3 text-gray-400">{x.download_count}</td>
+                      <td className="py-2 text-right">
+                        {x.status === 'completed' && (
+                          <button title="Download" className="p-1.5 rounded hover:bg-lime-900/40 text-lime-400"
+                            onClick={() => handleDownload(x)}>
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        {x.status === 'failed' && x.error_message && (
+                          <span className="text-xs text-red-400" title={x.error_message}>failed</span>
                         )}
                       </td>
                     </tr>
