@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
-import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, impersonate as impersonateApi, settings as settingsApi, audit as auditApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical } from 'lucide-react'
+import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi } from '../lib/api'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical } from 'lucide-react'
 
 type MenuItemDef =
   | { type: 'item'; label: string; icon: React.ComponentType<{ className?: string }>; onClick: () => void; danger?: boolean }
@@ -91,7 +91,6 @@ export default function CompaniesPage() {
   const [showEdit, setShowEdit] = useState<Company | null>(null)
   const [showDelete, setShowDelete] = useState<Company | null>(null)
   const [showResetPw, setShowResetPw] = useState<Company | null>(null)
-  const [showImpersonate, setShowImpersonate] = useState<Company | null>(null)
   const [showApiKey, setShowApiKey] = useState<Company | null>(null)
   const [showCapabilities, setShowCapabilities] = useState<Company | null>(null)
   const [showDevices, setShowDevices] = useState<Company | null>(null)
@@ -231,10 +230,6 @@ export default function CompaniesPage() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5">
-                    <button title="Login as Company Admin (Impersonate)" className="p-1.5 rounded hover:bg-orange-900/40 text-orange-400"
-                      onClick={() => setShowImpersonate(c)}>
-                      <LogIn className="w-3.5 h-3.5" />
-                    </button>
                     <button title="Edit Company (Info / Limits / Subscription)" className="p-1.5 rounded hover:bg-gray-700/60 text-gray-300"
                       onClick={() => setShowEdit(c)}>
                       <Edit2 className="w-3.5 h-3.5" />
@@ -302,8 +297,6 @@ export default function CompaniesPage() {
       {showEdit && <EditCompanyModal company={showEdit} pkgs={pkgs} onClose={() => setShowEdit(null)} onSaved={load} />}
       {showDelete && <DeleteCompanyModal company={showDelete} onClose={() => setShowDelete(null)} onDeleted={load} />}
       {showResetPw && <ResetAdminPasswordModal company={showResetPw} onClose={() => setShowResetPw(null)} />}
-      {showImpersonate && <ImpersonateModal company={showImpersonate} onClose={() => setShowImpersonate(null)} />}
-
       {showApiKey && <ApiKeyModal company={showApiKey} onClose={() => setShowApiKey(null)} onRegenerated={load} />}
       {showCapabilities && <CompanyCapabilitiesModal company={showCapabilities} onClose={() => setShowCapabilities(null)} onSaved={load} />}
       {showDevices && <DevicesModal company={showDevices} onClose={() => setShowDevices(null)} />}
@@ -1377,103 +1370,6 @@ function CompanyKeyModal({ company, onClose, onUpdated }: {
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             {key ? 'Regenerate Key' : 'Generate Key'}
           </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ─── Impersonate Modal ────────────────────────────────────────────────────────
-function ImpersonateModal({ company, onClose }: { company: Company; onClose: () => void }) {
-  const [reason,  setReason]  = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error,   setError]   = useState('')
-  const [result,  setResult]  = useState<{ accessToken: string; refreshToken: string } | null>(null)
-  const [copied,  setCopied]  = useState(false)
-
-  async function handleImpersonate() {
-    if (!reason.trim()) { setError('Please enter a reason for auditing purposes.'); return }
-    setLoading(true); setError('')
-    try {
-      const d = await impersonateApi.start(company.id, reason)
-      setResult(d)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed')
-    }
-    setLoading(false)
-  }
-
-  async function copyToken() {
-    if (!result) return
-    await navigator.clipboard.writeText(result.accessToken)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
-          <div className="flex items-center gap-2">
-            <LogIn className="w-4 h-4 text-orange-400" />
-            <h2 className="font-semibold text-white">Impersonate — {company.name}</h2>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
-        </div>
-
-        <div className="p-5 space-y-4">
-          <div className="bg-orange-900/20 border border-orange-700/40 rounded-lg px-4 py-3 text-sm text-orange-300">
-            <p className="font-medium text-orange-200 mb-1">⚠️ Support Access — Fully Audited</p>
-            <p className="text-orange-300/80 text-xs">
-              You will receive a temporary admin token for <strong>{company.name}</strong>.
-              This action is logged with your name, reason, and timestamp.
-            </p>
-          </div>
-
-          {!result ? (
-            <>
-              <div>
-                <label className="label">Reason for access <span className="text-red-400">*</span></label>
-                <input className="input" placeholder="e.g. Customer support request #1234"
-                  value={reason} onChange={e => setReason(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleImpersonate()} />
-              </div>
-              {error && <p className="text-sm text-red-400">{error}</p>}
-              <div className="flex gap-3 pt-1">
-                <button className="btn-ghost flex-1" onClick={onClose}>Cancel</button>
-                <button className="flex-1 px-4 py-2 rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-medium text-sm transition-colors disabled:opacity-50"
-                  onClick={handleImpersonate} disabled={loading}>
-                  {loading ? 'Getting access…' : 'Get Admin Token'}
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="space-y-3">
-              <p className="text-sm text-green-400 font-medium">✓ Access token generated</p>
-              <div>
-                <label className="label">Access Token (expires in 15 min)</label>
-                <div className="flex gap-2">
-                  <code className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-xs text-green-300 font-mono break-all">
-                    {result.accessToken}
-                  </code>
-                  <button className="btn-ghost px-3 text-sm flex-shrink-0" onClick={copyToken}>
-                    <Copy className="w-4 h-4" />
-                    {copied ? ' ✓' : ''}
-                  </button>
-                </div>
-              </div>
-              <div className="text-xs text-gray-500 bg-gray-800/60 rounded-lg px-4 py-3 space-y-1">
-                <p className="font-medium text-gray-400">How to use:</p>
-                <ol className="list-decimal list-inside space-y-0.5">
-                  <li>Open the Admin Portal (company portal URL)</li>
-                  <li>Open browser DevTools → Application → Local Storage</li>
-                  <li>Set <code className="bg-gray-700 px-1 rounded">sa_access</code> = copied token</li>
-                  <li>Refresh the page — you're logged in as their admin</li>
-                </ol>
-              </div>
-              <button className="btn-primary w-full" onClick={onClose}>Done</button>
-            </div>
-          )}
         </div>
       </div>
     </div>

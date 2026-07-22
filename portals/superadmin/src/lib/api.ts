@@ -237,15 +237,6 @@ export const email = {
   runTrialCron: () => request<{ processed: number; results: unknown[] }>('/api/superadmin/cron/trial-expiry', { method: 'POST' }),
 }
 
-// ─── Impersonate ──────────────────────────────────────────────────────────────
-export const impersonate = {
-  start: (company_id: string, reason?: string) =>
-    request<{ accessToken: string; refreshToken: string; company: { id: string; name: string; slug: string } }>(
-      '/api/superadmin/impersonate',
-      { method: 'POST', body: JSON.stringify({ company_id, reason }) }
-    ),
-}
-
 // ─── SuperAdmin Self (profile + password) ────────────────────────────────────
 export const me = {
   get: () => request<{ id: string; name: string; email: string; last_login_at: string }>('/api/superadmin/me'),
