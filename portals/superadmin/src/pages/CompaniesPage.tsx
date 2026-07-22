@@ -1,6 +1,75 @@
-import React, { useEffect, useState, FormEvent } from 'react'
+import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, impersonate as impersonateApi, settings as settingsApi, audit as auditApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown } from 'lucide-react'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, LogIn, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical } from 'lucide-react'
+
+type MenuItemDef =
+  | { type: 'item'; label: string; icon: React.ComponentType<{ className?: string }>; onClick: () => void; danger?: boolean }
+  | { type: 'divider' }
+
+function ActionsMenu({ items }: { items: MenuItemDef[] }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const btnRef  = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    function onDocClick(e: MouseEvent) {
+      const t = e.target as Node
+      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return
+      setOpen(false)
+    }
+    function onEscape(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
+    function onReposition() { setOpen(false) }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('keydown', onEscape)
+    window.addEventListener('scroll', onReposition, true)
+    window.addEventListener('resize', onReposition)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('keydown', onEscape)
+      window.removeEventListener('scroll', onReposition, true)
+      window.removeEventListener('resize', onReposition)
+    }
+  }, [open])
+
+  function toggle() {
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      const menuWidth = 250
+      const left = Math.max(8, Math.min(r.right - menuWidth, window.innerWidth - menuWidth - 8))
+      setPos({ top: r.bottom + 4, left })
+    }
+    setOpen(o => !o)
+  }
+
+  return (
+    <>
+      <button ref={btnRef} title="More actions" type="button"
+        className={`p-1.5 rounded hover:bg-gray-700/60 text-gray-400 hover:text-white ${open ? 'bg-gray-700/60 text-white' : ''}`}
+        onClick={toggle}>
+        <MoreVertical className="w-3.5 h-3.5" />
+      </button>
+      {open && pos && (
+        <div ref={menuRef} style={{ position: 'fixed', top: pos.top, left: pos.left, width: 250, zIndex: 50 }}
+          className="rounded-lg border border-gray-700 bg-gray-900 shadow-xl py-1.5">
+          {items.map((it, i) => it.type === 'divider'
+            ? <div key={i} className="my-1.5 border-t border-gray-800" />
+            : (
+              <button key={i} type="button"
+                onClick={() => { setOpen(false); it.onClick() }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm ${
+                  it.danger ? 'text-red-400 hover:bg-red-950/40 hover:text-red-300' : 'text-gray-200 hover:bg-gray-800 hover:text-white'
+                }`}>
+                <it.icon className="w-4 h-4 flex-shrink-0" />
+                {it.label}
+              </button>
+            ))}
+        </div>
+      )}
+    </>
+  )
+}
 
 type Company = Record<string, string>
 type Pkg = { id: string; name: string }
@@ -170,66 +239,36 @@ export default function CompaniesPage() {
                       onClick={() => setShowEdit(c)}>
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
-                    <button title="Company Activation Key" className="p-1.5 rounded hover:bg-emerald-900/40 text-emerald-400"
-                      onClick={() => setShowCompanyKey(c)}>
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                    </button>
-                    <button title="POS Devices" className="p-1.5 rounded hover:bg-cyan-900/40 text-cyan-400"
-                      onClick={() => setShowDevices(c)}>
-                      <Smartphone className="w-3.5 h-3.5" />
-                    </button>
-                    <button title="Backups" className="p-1.5 rounded hover:bg-teal-900/40 text-teal-400"
-                      onClick={() => setShowBackups(c)}>
-                      <Database className="w-3.5 h-3.5" />
-                    </button>
-                    <button title="Export Data" className="p-1.5 rounded hover:bg-lime-900/40 text-lime-400"
-                      onClick={() => setShowExports(c)}>
-                      <FileDown className="w-3.5 h-3.5" />
-                    </button>
-                    <button title="Branding (logo & color)" className="p-1.5 rounded hover:bg-pink-900/40 text-pink-400"
-                      onClick={() => setShowBranding(c)}>
-                      <Palette className="w-3.5 h-3.5" />
-                    </button>
-                    <button title="Feature Management & Capabilities" className="p-1.5 rounded hover:bg-slate-900/40 text-slate-300"
-                      onClick={() => setShowCapabilities(c)}>
-                      <Settings2 className="w-3.5 h-3.5" />
-                    </button>
-                    <button title="POS API Key (for Electron app)" className="p-1.5 rounded hover:bg-purple-900/40 text-purple-400"
-                      onClick={() => setShowApiKey(c)}>
-                      <Key className="w-3.5 h-3.5" />
-                    </button>
 
-                    {c.status !== 'active' && (
+                    {c.status !== 'active' ? (
                       <button title="Activate" className="p-1.5 rounded hover:bg-green-900/40 text-green-400"
                         onClick={() => changeStatus(c.id, 'active')}>
                         <CheckCircle className="w-3.5 h-3.5" />
                       </button>
-                    )}
-                    {c.status === 'active' && (
+                    ) : (
                       <button title="Suspend" className="p-1.5 rounded hover:bg-yellow-900/40 text-yellow-400"
                         onClick={() => changeStatus(c.id, 'suspended')}>
                         <Ban className="w-3.5 h-3.5" />
                       </button>
                     )}
-                    {(c.admin_locked === '1' || c.admin_locked === 'true') ? (
-                      <button title={`Unlock${c.lock_reason ? ' — ' + c.lock_reason : ''}`} className="p-1.5 rounded hover:bg-orange-900/40 text-orange-400"
-                        onClick={() => toggleLock(c)}>
-                        <Lock className="w-3.5 h-3.5" />
-                      </button>
-                    ) : (
-                      <button title="Lock (freeze staff/permission changes, POS keeps working)" className="p-1.5 rounded hover:bg-gray-700/60 text-gray-400"
-                        onClick={() => toggleLock(c)}>
-                        <Unlock className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                    <button title="Reset Company Admin Password" className="p-1.5 rounded hover:bg-amber-900/40 text-amber-400"
-                      onClick={() => setShowResetPw(c)}>
-                      <KeyRound className="w-3.5 h-3.5" />
-                    </button>
-                    <button title="Permanently Delete Company + All Data" className="p-1.5 rounded hover:bg-red-900/60 text-red-500"
-                      onClick={() => setShowDelete(c)}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+
+                    <ActionsMenu items={[
+                      { type: 'item', label: 'Company Activation Key', icon: ShieldCheck, onClick: () => setShowCompanyKey(c) },
+                      { type: 'item', label: 'POS API Key',            icon: Key,         onClick: () => setShowApiKey(c) },
+                      { type: 'item', label: 'POS Devices',            icon: Smartphone,  onClick: () => setShowDevices(c) },
+                      { type: 'item', label: 'Reset Admin Password',   icon: KeyRound,    onClick: () => setShowResetPw(c) },
+                      { type: 'divider' },
+                      { type: 'item', label: 'Feature Management',     icon: Settings2,   onClick: () => setShowCapabilities(c) },
+                      { type: 'item', label: 'Branding (logo & color)', icon: Palette,    onClick: () => setShowBranding(c) },
+                      { type: 'item', label: 'Backups',                icon: Database,    onClick: () => setShowBackups(c) },
+                      { type: 'item', label: 'Export Data',            icon: FileDown,    onClick: () => setShowExports(c) },
+                      { type: 'divider' },
+                      (c.admin_locked === '1' || c.admin_locked === 'true')
+                        ? { type: 'item', label: `Unlock${c.lock_reason ? ' — ' + c.lock_reason : ''}`, icon: Lock,   onClick: () => toggleLock(c) }
+                        : { type: 'item', label: 'Lock (freeze staff/permission changes)',               icon: Unlock, onClick: () => toggleLock(c) },
+                      { type: 'divider' },
+                      { type: 'item', label: 'Delete Company + All Data', icon: Trash2, danger: true, onClick: () => setShowDelete(c) },
+                    ]} />
                   </div>
                 </td>
               </tr>
