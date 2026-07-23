@@ -23,6 +23,7 @@ export interface InvoiceDetail {
   agent_commission_pct?: number
   agent_commission_amount?: number
   notes: string | null
+  valid_until?: string | null
   created_at: string
   items: Array<{
     id: string

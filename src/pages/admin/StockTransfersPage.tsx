@@ -332,6 +332,7 @@ function deliveryNoteHtml(t: Transfer) {
   return `<!doctype html><html><head><title>Delivery Note ${t.transfer_number}</title>
   <style>
     @page { size: A4; margin: 12mm; }
+    html, body { background:#ffffff; }
     body { font-family: Arial, sans-serif; color:#111827; font-size:12px; }
     .top { display:flex; justify-content:space-between; gap:16px; border-bottom:2px solid #111827; padding-bottom:10px; }
     h1 { margin:0; font-size:20px; letter-spacing:.04em; }
@@ -373,34 +374,59 @@ function deliveryNoteHtml(t: Transfer) {
 }
 
 function DeliveryNoteModal({ t, onClose, onDone }: { t: Transfer; onClose: () => void; onDone: () => void }) {
-  const doPrint = async () => {
+  const [printing, setPrinting] = useState(false)
+  const [savingPdf, setSavingPdf] = useState(false)
+
+  const logPrint = async () => {
     try {
       const logRes = await window.api.stocks.logTransferPrint(t.id, { print_type: Number(t.print_count || 0) > 0 ? 'reprint' : 'print' })
       if (!logRes?.success) toast.error(logRes?.error || 'Failed to log print')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to log print')
     }
-    const win = window.open('', '_blank', 'width=900,height=700')
-    if (!win) { toast.error('Popup blocked'); return }
-    win.document.open()
-    win.document.write(deliveryNoteHtml(t))
-    win.document.close()
-    win.focus()
-    setTimeout(() => win.print(), 300)
-    toast.success('Delivery note print logged')
-    onDone()
   }
+
+  const doPrint = async () => {
+    setPrinting(true)
+    try {
+      await logPrint()
+      const res = await window.api.printer.printDeliveryNote(t)
+      if ((res as { success: boolean }).success) { toast.success('Delivery note sent to printer'); onDone() }
+      else toast.error((res as { error?: string }).error || 'Print failed')
+    } catch (e: any) {
+      toast.error(e?.message || 'Print failed')
+    } finally {
+      setPrinting(false)
+    }
+  }
+
+  const doSavePdf = async () => {
+    setSavingPdf(true)
+    try {
+      const res = await window.api.printer.exportDeliveryNotePdf(t) as { success: boolean; cancelled?: boolean; error?: string }
+      if (res.cancelled) return
+      if (!res.success) { toast.error(res.error || 'Failed to save PDF'); return }
+      await logPrint()
+      toast.success('PDF saved')
+      onDone()
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to save PDF')
+    } finally {
+      setSavingPdf(false)
+    }
+  }
+
   return (
-    <Modal title={`Delivery Note - ${t.transfer_number}`} onClose={onClose}
+    <Modal title={`Delivery Note - ${t.transfer_number}`} onClose={onClose} size="xl"
       footer={<><button className="btn-secondary" onClick={onClose}>Close</button>
-        <button className="btn-secondary flex items-center gap-1.5" onClick={doPrint}><FileText size={14} /> Download PDF</button>
-        <button className="btn-primary flex items-center gap-1.5" onClick={doPrint}><Printer size={14} /> {Number(t.print_count || 0) > 0 ? 'Reprint' : 'Print'}</button></>}>
+        <button className="btn-secondary flex items-center gap-1.5" onClick={doSavePdf} disabled={savingPdf}><FileText size={14} /> {savingPdf ? 'Saving...' : 'Download PDF'}</button>
+        <button className="btn-primary flex items-center gap-1.5" onClick={doPrint} disabled={printing}><Printer size={14} /> {printing ? 'Printing...' : Number(t.print_count || 0) > 0 ? 'Reprint' : 'Print'}</button></>}>
       <div className="space-y-3">
         <div className="p-3 rounded-lg" style={{ background: 'var(--bg-soft)' }}>
           <p className="font-semibold" style={{ color: 'var(--text-1)' }}>{t.from_branch_name} -&gt; {t.to_branch_name}</p>
           <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>{t.product_name} - {t.quantity} {t.unit || 'units'} - Printed {Number(t.print_count || 0)} time(s)</p>
         </div>
-        <iframe title="Delivery note preview" className="w-full h-[520px] rounded-lg border" style={{ borderColor: 'var(--border)' }} srcDoc={deliveryNoteHtml(t)} />
+        <iframe title="Delivery note preview" className="w-full h-[70vh] rounded-lg border" style={{ borderColor: 'var(--border)' }} srcDoc={deliveryNoteHtml(t)} />
       </div>
     </Modal>
   )
@@ -582,15 +608,6 @@ function TransferCard({ t, userId, isAdmin, myBranchId, canApproveRole, onRefres
                 <Printer size={12} /> {Number(t.print_count || 0) > 0 ? 'Reprint Delivery Note' : 'Print Delivery Note'}
               </button>
             )}
-            {canPrint && (
-              <button className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-700 hover:bg-slate-600 text-white flex items-center gap-1"
-                onClick={() => setModal('print')}>
-                <Printer size={12} /> {Number(t.print_count || 0) > 0 ? 'Reprint Delivery Note' : 'Print Delivery Note'}
-              </button>
-            )}
-            <button className="btn-ghost btn-sm p-1.5" onClick={() => setExpanded(e => !e)}>
-              {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </button>
           </div>
         </div>
 

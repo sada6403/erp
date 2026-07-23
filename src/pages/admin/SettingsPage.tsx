@@ -877,6 +877,7 @@ function InvoiceDesigner({ form, f, check }: { form: Record<string, any>; f: (k:
                 <option value="58mm">58mm Thermal</option>
                 <option value="A4">A4</option>
                 <option value="A5">A5</option>
+                <option value="B5">B5</option>
               </select>
             </Field>
             <Field label="Logo URL"><input value={form[k('logo_url')]} onChange={f(k('logo_url'))} className="input" placeholder="Optional logo image URL" /></Field>

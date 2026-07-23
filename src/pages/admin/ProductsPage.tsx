@@ -713,6 +713,11 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
 
   const [uoms, setUoms] = useState<UOMRow[]>([{ uom_name: '', conversion_factor: 1, is_base: true, wastage: 0 }])
   const [stockQty, setStockQty]       = useState(0)
+  // Quick per-product discount % — a shortcut that creates/updates a
+  // scope:'product', global-branch rule via the same Discounts module used
+  // by Admin > Discounts, instead of a separate storage mechanism.
+  const [discountPct, setDiscountPct] = useState(0)
+  const [existingDiscountId, setExistingDiscountId] = useState<string | null>(null)
   const [saving, setSaving]           = useState(false)
   const [uploading, setUploading]     = useState(false)
   const [showAddCategory, setShowAddCategory] = useState(false)
@@ -733,6 +738,11 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
           setUoms(rows.length ? rows : [{ uom_name: '', conversion_factor: 1, is_base: true, wastage: 0 }])
         } else if (!res.success) toast.error(res.error || 'Failed to load UOMs')
       }).catch((err: unknown) => toast.error('Failed to load UOMs: ' + String(err)))
+      window.api.discounts.list({ productId: product.id }).then((res: { success: boolean; data?: Record<string, unknown>[] }) => {
+        if (!res.success || !res.data) return
+        const rule = res.data.find(d => d.scope === 'product' && d.type === 'percentage' && !d.branch_id)
+        if (rule) { setExistingDiscountId(String(rule.id)); setDiscountPct(Number(rule.value) || 0) }
+      }).catch(() => {})
     }
   }, [product])
 
@@ -792,6 +802,19 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
       ])
       if (!stockRes.success) toast.error(stockRes.error || 'Failed to update stock quantity')
       if (!uomRes.success) toast.error(uomRes.error || 'Failed to save units of measure')
+
+      if (discountPct > 0) {
+        const discountRes = existingDiscountId
+          ? await window.api.discounts.update(existingDiscountId, { value: discountPct, is_active: true })
+          : await window.api.discounts.create({
+              name: `${form.name} discount`, type: 'percentage', value: discountPct,
+              scope: 'product', product_id: productId, branch_id: null, is_active: true,
+            })
+        if (!discountRes.success) toast.error(discountRes.error || 'Failed to save product discount')
+      } else if (existingDiscountId) {
+        await window.api.discounts.toggleActive(existingDiscountId, false)
+      }
+
       onSave()
     } catch (err) {
       toast.error('Failed to save product: ' + String(err))
@@ -903,6 +926,12 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
               <div>
                 <label className="label">Tax Rate (%)</label>
                 <input type="number" value={form.tax_rate} onChange={f('tax_rate')} className="input" min="0" max="100" step="0.5" />
+              </div>
+              <div>
+                <label className="label">Discount (%)</label>
+                <input type="number" value={discountPct || ''} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
+                  className="input" min="0" max="100" step="0.5" placeholder="0"
+                  title="Auto-applies at POS. Also manageable per-branch in Admin > Discounts." />
               </div>
               <div>
                 <label className="label">Image</label>

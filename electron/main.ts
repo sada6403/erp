@@ -128,7 +128,10 @@ function createWindow() {
   setTimeout(() => { if (mainWindow && !mainWindow.isVisible()) mainWindow.show() }, 10000)
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url)
+    // window.open('', ...) (e.g. a print-preview popup) resolves to 'about:blank' —
+    // handing that to the OS shell has no registered handler and pops an unwanted
+    // "Get an app to open this link" dialog. Only hand off real http(s) links.
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url)
     return { action: 'deny' }
   })
 

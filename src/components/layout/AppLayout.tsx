@@ -292,32 +292,34 @@ function SidebarGroup({
         <span className="flex-1 text-left truncate">{group.label}</span>
         {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
       </button>
-      {open && (
-        <div className="relative ml-4 mt-1 mb-1 space-y-0.5 pl-3">
-          <span
-            aria-hidden="true"
-            className="absolute left-0 top-0 bottom-0 w-px rounded-full"
-            style={{ background: 'var(--border)' }}
-          />
-          {visibleItems.map(item => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `block px-2.5 py-1.5 rounded-md text-xs transition-colors duration-100 truncate font-semibold ${
-                  isActive ? 'shadow-sm' : 'hover:bg-[var(--bg-soft)]'
-                }`
-              }
-              style={({ isActive }) => isActive
-                ? { color: '#ffffff', background: 'var(--brand-primary)' }
-                : { color: 'var(--text-3)' }
-              }
-            >
-              {item.label}
-            </NavLink>
-          ))}
+      <div className={`grid transition-[grid-template-rows] duration-200 ease-out ${open ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}`}>
+        <div className="overflow-hidden">
+          <div className="relative ml-4 mt-1 mb-1 space-y-0.5 pl-3">
+            <span
+              aria-hidden="true"
+              className="absolute left-0 top-0 bottom-0 w-px rounded-full"
+              style={{ background: 'var(--border)' }}
+            />
+            {visibleItems.map(item => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) =>
+                  `block px-2.5 py-1.5 rounded-md text-xs transition-colors duration-100 truncate font-semibold ${
+                    isActive ? 'shadow-sm' : 'hover:bg-[var(--bg-soft)]'
+                  }`
+                }
+                style={({ isActive }) => isActive
+                  ? { color: '#ffffff', background: 'var(--brand-primary)' }
+                  : { color: 'var(--text-3)' }
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))}
+          </div>
         </div>
-      )}
+      </div>
     </div>
   )
 }
@@ -384,7 +386,15 @@ export default function AppLayout() {
       const res = await window.api.settings.get() as { success: boolean; data?: unknown }
       if (res.success && res.data) {
         const d = res.data as Record<string, unknown>
-        setBranding(d)
+        // Only replace state (and thus reassign the sidebar <img src>) when the
+        // fields actually rendered from `branding` really changed — this poll
+        // runs every 30s forever, and re-setting an identical object here was
+        // causing the logo to visibly reload/flicker on a timer.
+        setBranding(prev =>
+          prev.company_logo_url === d.company_logo_url && prev.company_name === d.company_name
+            ? prev
+            : d
+        )
         const cached = (d.brand_color as string) || '#2563eb'
         applyColor(cached)
 

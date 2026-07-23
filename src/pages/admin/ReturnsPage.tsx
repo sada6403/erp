@@ -360,6 +360,11 @@ export default function ReturnsPage() {
                     </tfoot>
                   </table>
                 </div>
+                {invoiceItems.every(it => it.max_return === 0) ? (
+                  <p className="text-xs mt-1.5 text-amber-500">All items on this invoice have already been fully returned.</p>
+                ) : refundTotal === 0 ? (
+                  <p className="text-xs mt-1.5" style={{ color: 'var(--text-3)' }}>Enter a return quantity for each item to include it in this refund.</p>
+                ) : null}
               </div>
             )}
 

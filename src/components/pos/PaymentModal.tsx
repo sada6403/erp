@@ -6,7 +6,7 @@ import { useKeyboard } from '@/hooks/useKeyboard'
 import type { BillType } from '@/store/cartStore'
 import {
   X, CreditCard, Banknote, Building2, Calendar, Printer, CheckCircle2,
-  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Gift, Keyboard, Handshake, UserPlus, Ticket
+  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Keyboard, Handshake, UserPlus, Ticket
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { PaymentMethod } from '@/types'
@@ -22,11 +22,8 @@ const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.ReactN
   { value: 'cash',          label: 'Cash',         icon: <Banknote size={18} />,    key: 'Ctrl+1' },
   { value: 'card',          label: 'Card',         icon: <CreditCard size={18} />,  key: 'Ctrl+2' },
   { value: 'bank_transfer', label: 'Bank',         icon: <Building2 size={18} />,   key: 'Ctrl+3' },
-  { value: 'gift_voucher',  label: 'Gift Voucher', icon: <Gift size={18} />,        key: 'Ctrl+4' },
-  { value: 'installment',   label: 'Installment',  icon: <Calendar size={18} />,   key: 'Ctrl+5' },
+  { value: 'installment',   label: 'Installment',  icon: <Calendar size={18} />,   key: 'Ctrl+4' },
 ]
-
-type BalancePaymentMethod = Extract<PaymentMethod, 'cash' | 'card' | 'bank_transfer'>
 
 interface PaymentLine {
   method: PaymentMethod
@@ -49,9 +46,6 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [method, setMethod]             = useState<PaymentMethod>('cash')
   const [received, setReceived]         = useState<string>(String(cart.total.toFixed(2)))
   const [reference, setReference]       = useState('')
-  const [balanceMethod, setBalanceMethod] = useState<BalancePaymentMethod>('cash')
-  const [balanceReceived, setBalanceReceived] = useState<string>('0.00')
-  const [balanceReference, setBalanceReference] = useState('')
   const [agentCode, setAgentCode]         = useState('')
   const [agentName, setAgentName]         = useState('')
   const [agentId, setAgentId]             = useState('')
@@ -167,8 +161,12 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const loyaltyDiscount     = usePoints && redeemPoints > 0 ? (redeemPoints / Number(loyaltyCfg?.redeem_points ?? 100)) * Number(loyaltyCfg?.redeem_value ?? 10) : 0
   const totalAfterLoyalty   = Math.max(0, cart.total - loyaltyDiscount)
 
-  // Coupon applies with cash/card/bank payments on retail bills only
-  const couponEligible = billType === 'RETAIL' && method !== 'gift_voucher' && method !== 'installment'
+  // Coupon (gift voucher) is an optional add-on for any retail payment method
+  // except installment — installment sales are created via a separate
+  // admin:installments:createSale path (its own invoice/schedule/ledger
+  // writes) that doesn't thread a coupon redemption through, so applying one
+  // here would show as "applied" without ever actually being redeemed.
+  const couponEligible = billType === 'RETAIL' && method !== 'installment'
   const couponBalance  = couponInfo ? Number(couponInfo.balance || 0) : 0
   const couponApplied  = couponEligible && couponInfo
     ? Number(Math.min(Math.max(0, parseFloat(couponAmount) || 0), couponBalance, totalAfterLoyalty).toFixed(2))
@@ -205,34 +203,19 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     : 0
 
   useEffect(() => {
-    if (method === 'gift_voucher') setReceived(String(totalAfterLoyalty.toFixed(2)))
-    else if (method === 'cash') setReceived(String(totalAfterCoupon.toFixed(2)))
+    if (method === 'cash') setReceived(String(totalAfterCoupon.toFixed(2)))
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [method, cart.total, loyaltyDiscount, couponApplied])
 
   const receivedAmount      = parseFloat(received) || 0
-  const voucherApplied      = method === 'gift_voucher' ? Math.min(Math.max(0, receivedAmount), totalAfterLoyalty) : 0
-  const voucherBalance      = method === 'gift_voucher' ? Math.max(0, totalAfterLoyalty - voucherApplied) : 0
-  const balanceReceivedAmount = parseFloat(balanceReceived) || 0
   const effectivePaidAmount = isCredit || method === 'installment'
     ? 0
-    : method === 'gift_voucher'
-      ? voucherApplied + balanceReceivedAmount
-      : receivedAmount + couponApplied
-  const change = method === 'gift_voucher'
-    ? Math.max(0, balanceReceivedAmount - voucherBalance)
-    : Math.max(0, receivedAmount - totalAfterCoupon)
-
-  useEffect(() => {
-    if (method === 'gift_voucher') setBalanceReceived(voucherBalance.toFixed(2))
-  }, [method, voucherBalance])
+    : receivedAmount + couponApplied
+  const change = Math.max(0, receivedAmount - totalAfterCoupon)
 
   const buildPayments = (): PaymentLine[] | undefined => {
     if (!isRetail || method === 'installment') return undefined
-    if (method !== 'gift_voucher') return [{ method, amount: receivedAmount, reference }]
-    const payments: PaymentLine[] = [{ method: 'gift_voucher', amount: voucherApplied, reference }]
-    if (voucherBalance > 0) payments.push({ method: balanceMethod, amount: balanceReceivedAmount, reference: balanceReference })
-    return payments
+    return [{ method, amount: receivedAmount, reference }]
   }
 
   const buildPayload = (invoiceNum: string) => ({
@@ -260,14 +243,12 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     paid_amount:       method === 'installment' ? Number(downPayment || 0) : effectivePaidAmount,
     change_amount:     change,
     payment_method:    isCredit ? 'credit' : method === 'installment' ? 'installment'
-                        : (method === 'gift_voucher' && voucherBalance > 0) || (couponApplied > 0 && receivedAmount > 0) ? 'split'
+                        : couponApplied > 0 && receivedAmount > 0 ? 'split'
                         : couponApplied > 0 && totalAfterCoupon <= 0 ? 'coupon'
                         : method,
     payment_reference: method === 'installment'
       ? `Down payment — balance Rs.${Math.max(0, cart.total - Number(downPayment || 0)).toFixed(2)}`
-      : method === 'gift_voucher' && voucherBalance > 0
-        ? `Voucher ${reference}${balanceReference ? ` / ${balanceReference}` : ''}`
-        : reference,
+      : reference,
     // Print payload only — the coupon line is display-only here; the real
     // payments row is inserted by the main process during invoices:create.
     payments:          method === 'installment'
@@ -323,26 +304,10 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       return
     }
 
-    if (isRetail && method !== 'installment' && method !== 'gift_voucher' && receivedAmount < totalAfterCoupon) {
+    if (isRetail && method !== 'installment' && receivedAmount < totalAfterCoupon) {
       toast.error('Insufficient payment amount')
       receivedRef.current?.focus()
       receivedRef.current?.select()
-      return
-    }
-    if (isRetail && method === 'gift_voucher' && !reference.trim()) {
-      toast.error('Gift voucher number is required')
-      return
-    }
-    if (isRetail && method === 'gift_voucher' && voucherApplied <= 0) {
-      toast.error('Gift voucher amount must be greater than zero')
-      return
-    }
-    if (isRetail && method === 'gift_voucher' && voucherBalance > 0 && balanceReceivedAmount < voucherBalance) {
-      toast.error('Balance payment amount is insufficient')
-      return
-    }
-    if (isRetail && method === 'gift_voucher' && voucherBalance > 0 && balanceMethod !== 'cash' && !balanceReference.trim()) {
-      toast.error('Balance payment reference is required')
       return
     }
     if (isCredit && !cart.customer) {
@@ -382,7 +347,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
           tax_amount:      i.tax_amount,
           line_total:      i.line_total,
         })),
-        payment: isRetail && method !== 'installment' && method !== 'gift_voucher'
+        payment: isRetail && method !== 'installment'
           ? { method, amount: receivedAmount, reference }
           : undefined,
         payments: buildPayments(),
@@ -428,8 +393,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     } finally {
       setLoading(false)
     }
-  }, [loading, isRetail, isCredit, isQuotation, method, receivedAmount, reference, voucherApplied, voucherBalance,
-      balanceReceivedAmount, balanceMethod, balanceReference, cart, billType, validUntil, dueDate,
+  }, [loading, isRetail, isCredit, isQuotation, method, receivedAmount, reference,
+      cart, billType, validUntil, dueDate,
       effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentCommissionPct, agentCommissionAmount,
       planId, downPayment, plans, couponApplied, couponInfo, totalAfterCoupon])
 
@@ -464,8 +429,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     { key: '1', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('cash');          receivedRef.current?.select() } } },
     { key: '2', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('card');          receivedRef.current?.select() } } },
     { key: '3', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('bank_transfer'); receivedRef.current?.select() } } },
-    { key: '4', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('gift_voucher');  receivedRef.current?.select() } } },
-    { key: '5', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('installment');   receivedRef.current?.select() } } },
+    { key: '4', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('installment');   receivedRef.current?.select() } } },
     // Confirm (fires only when NOT in an input — handled directly on input below)
     { key: 'Enter', handler: () => { if (done) onSuccess(); else handleConfirm() } },
     // Success screen print shortcuts
@@ -867,7 +831,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               {method !== 'installment' && (
                 <div>
                   <label className="label">
-                    {method === 'gift_voucher' ? 'Gift Voucher Amount' : 'Amount Received'}
+                    Amount Received
                     <span className="text-[10px] font-normal ml-1" style={{ color: 'var(--text-3)' }}>— press Enter to confirm</span>
                   </label>
                   <input
@@ -883,7 +847,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                       }
                     }}
                     className="input text-2xl font-bold text-center h-14"
-                    min={method === 'gift_voucher' ? 0 : totalAfterCoupon}
+                    min={totalAfterCoupon}
                     step="0.01"
                     autoFocus
                   />
@@ -962,88 +926,19 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               )}
 
               {/* Reference field */}
-              {(method === 'card' || method === 'bank_transfer' || method === 'gift_voucher') && (
+              {(method === 'card' || method === 'bank_transfer') && (
                 <div>
-                  <label className="label">
-                    {method === 'gift_voucher' ? 'Gift Voucher No.' : 'Reference / Approval No.'}
-                  </label>
+                  <label className="label">Reference / Approval No.</label>
                   <input type="text" value={reference} onChange={e => setReference(e.target.value)}
                     className="input"
-                    placeholder={method === 'gift_voucher' ? 'e.g. GV-2026-0001' : 'e.g. AUTH123456'}
+                    placeholder="e.g. AUTH123456"
                     onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleConfirm() } }}
                   />
                 </div>
               )}
 
-              {/* Gift voucher balance section */}
-              {method === 'gift_voucher' && (
-                <div className="rounded-xl p-4 space-y-3 border border-slate-700" style={{ background: 'var(--bg-soft)' }}>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="rounded-lg bg-green-500/10 border border-green-500/30 px-3 py-2">
-                      <p className="text-xs text-green-300">Voucher Applied</p>
-                      <p className="text-xl font-bold text-green-400">Rs.{voucherApplied.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
-                    </div>
-                    <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-3 py-2">
-                      <p className="text-xs text-amber-300">Balance to Pay</p>
-                      <p className="text-xl font-bold text-amber-300">Rs.{voucherBalance.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>
-                    </div>
-                  </div>
-
-                  {voucherBalance > 0 && (
-                    <>
-                      <div>
-                        <label className="label">Balance Payment Method</label>
-                        <div className="grid grid-cols-3 gap-2">
-                          {[
-                            { value: 'cash', label: 'Cash', icon: <Banknote size={16} /> },
-                            { value: 'card', label: 'Card', icon: <CreditCard size={16} /> },
-                            { value: 'bank_transfer', label: 'Bank', icon: <Building2 size={16} /> },
-                          ].map(m => (
-                            <button key={m.value}
-                              onClick={() => setBalanceMethod(m.value as BalancePaymentMethod)}
-                              className={`flex items-center justify-center gap-2 p-2.5 rounded-lg text-xs font-medium border
-                                ${balanceMethod === m.value
-                                  ? 'border-brand-500 bg-brand-500/10 text-brand-300'
-                                  : 'border-slate-700 bg-surface-800 text-slate-400 hover:border-slate-600'}`}
-                            >{m.icon}{m.label}</button>
-                          ))}
-                        </div>
-                      </div>
-                      <div>
-                        <label className="label">Balance Amount Received</label>
-                        <input
-                          type="number"
-                          value={balanceReceived}
-                          onChange={e => setBalanceReceived(e.target.value)}
-                          className="input text-xl font-bold text-center h-12"
-                          min={voucherBalance} step="0.01"
-                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleConfirm() } }}
-                        />
-                      </div>
-                      {balanceMethod !== 'cash' && (
-                        <div>
-                          <label className="label">Balance Reference</label>
-                          <input type="text" value={balanceReference} onChange={e => setBalanceReference(e.target.value)}
-                            className="input" placeholder="e.g. CARD-AUTH-1234"
-                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleConfirm() } }}
-                          />
-                        </div>
-                      )}
-                      {balanceMethod === 'cash' && (
-                        <div className="grid grid-cols-4 gap-2">
-                          {[1000, 2000, 5000, 10000].map(v => (
-                            <button key={v} onClick={() => setBalanceReceived(String(Math.ceil(voucherBalance / v) * v))}
-                              className="btn-secondary btn-sm">Rs.{v.toLocaleString()}</button>
-                          ))}
-                        </div>
-                      )}
-                    </>
-                  )}
-                </div>
-              )}
-
               {/* Change display */}
-              {(method === 'cash' || (method === 'gift_voucher' && balanceMethod === 'cash')) && change > 0 && (
+              {method === 'cash' && change > 0 && (
                 <div className="flex justify-between items-center bg-green-500/10 border border-green-500/30 rounded-xl px-4 py-3">
                   <span className="text-green-400 font-medium">Change</span>
                   <span className="text-2xl font-bold text-green-400">

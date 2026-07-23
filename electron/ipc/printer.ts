@@ -144,6 +144,59 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
     return { success: true }
   })
 
+  // Branch-transfer delivery note. Previously built in the renderer and sent
+  // to a popup via window.open() — Electron's main-window setWindowOpenHandler
+  // denies every window.open() call, so that popup was always null and the
+  // print button always failed with "Popup blocked". Building + printing it
+  // here (same hidden-BrowserWindow pattern as every other print job) fixes
+  // that, and lets "Download PDF" actually save a file instead of just
+  // re-opening the print dialog.
+  safeHandle(ipcMain, 'printer:printDeliveryNote', async (_e, payload: Record<string, unknown>) => {
+    await printHtml(buildDeliveryNoteHtml(payload), 'a4', 'A4')
+    return { success: true }
+  })
+
+  safeHandle(ipcMain, 'printer:exportDeliveryNotePdf', async (_e, payload: Record<string, unknown>) => {
+    let tmpPath: string | undefined
+    let pdfWin: BrowserWindow | undefined
+    try {
+      const win = BrowserWindow.getFocusedWindow()
+      if (!win) return { success: false, error: 'No window' }
+
+      const transferNumber = String(payload.transfer_number || payload.id || 'delivery-note')
+      const saveResult = await dialog.showSaveDialog(win, {
+        title: 'Save Delivery Note PDF',
+        defaultPath: `DeliveryNote-${transferNumber}.pdf`,
+        filters: [{ name: 'PDF Document', extensions: ['pdf'] }],
+      })
+      if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true }
+
+      const html = buildDeliveryNoteHtml(payload)
+      tmpPath = path.join(app.getPath('temp'), `delivery-note-${Date.now()}.html`)
+      fs.writeFileSync(tmpPath, html, 'utf-8')
+
+      pdfWin = new BrowserWindow({
+        width: 900, height: 1200, show: false,
+        webPreferences: { contextIsolation: true, nodeIntegration: false },
+      })
+      const loadedPdfWin = pdfWin
+      await loadedPdfWin.loadFile(tmpPath)
+      const pdfBuffer = await loadedPdfWin.webContents.printToPDF({
+        printBackground: true,
+        pageSize: 'A4',
+        margins: { top: 0.3, bottom: 0.3, left: 0.3, right: 0.3 },
+      })
+
+      fs.writeFileSync(saveResult.filePath, pdfBuffer)
+      return { success: true, filePath: saveResult.filePath }
+    } catch (err) {
+      return { success: false, error: (err as Error).message }
+    } finally {
+      if (pdfWin) pdfWin.close()
+      if (tmpPath) { try { fs.unlinkSync(tmpPath) } catch { /* best effort */ } }
+    }
+  })
+
   safeHandle(ipcMain, 'printer:printInstallmentCard', async (_e, payload: Record<string, unknown>) => {
     const settings = store.get('app_settings') as Record<string, unknown> || {}
     const html = await buildInstallmentCardHtml(payload, settings)
@@ -176,6 +229,58 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'printer:listDevices', async () => {
     return { success: true, data: [] }
   })
+}
+
+// Branch-transfer delivery note / issue note — same layout as the renderer's
+// preview iframe in StockTransfersPage.tsx, rebuilt here so it can actually
+// be printed/exported (see printer:printDeliveryNote above for why).
+function buildDeliveryNoteHtml(t: Record<string, unknown>): string {
+  const v = (k: string) => esc(String(t[k] ?? ''))
+  const fmtDate = (s: unknown) => s ? new Date(String(s)).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
+  const transferNumber = esc(String(t.transfer_number || ''))
+  const qty = Number(t.quantity || 0)
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Delivery Note ${transferNumber}</title>
+  <style>
+    @page { size: A4; margin: 12mm; }
+    html, body { background:#ffffff; }
+    body { font-family: Arial, sans-serif; color:#111827; font-size:12px; }
+    .top { display:flex; justify-content:space-between; gap:16px; border-bottom:2px solid #111827; padding-bottom:10px; }
+    h1 { margin:0; font-size:20px; letter-spacing:.04em; }
+    h2 { margin:2px 0 0; font-size:13px; font-weight:600; color:#475569; }
+    .meta { display:grid; grid-template-columns:1fr 1fr; gap:6px 24px; margin:14px 0; }
+    .box { border:1px solid #111827; padding:8px; min-height:34px; }
+    .label { font-size:10px; text-transform:uppercase; color:#64748b; display:block; margin-bottom:2px; }
+    table { width:100%; border-collapse:collapse; margin-top:10px; }
+    th,td { border:1px solid #111827; padding:6px; vertical-align:top; }
+    th { background:#f1f5f9; font-size:11px; text-transform:uppercase; }
+    .num { text-align:right; }
+    .remarks { min-height:52px; }
+    .sign { display:grid; grid-template-columns:1fr 1fr 1fr; gap:18px; margin-top:34px; }
+    .line { border-top:1px dotted #111827; padding-top:6px; min-height:44px; }
+    .footer { margin-top:18px; font-size:10px; color:#64748b; display:flex; justify-content:space-between; }
+  </style></head><body>
+    <div class="top"><div><h1>DELIVERY NOTE / ISSUE NOTE</h1><h2>Branch Stock Transfer</h2></div><div style="text-align:right"><strong>${transferNumber}</strong><br/>${esc(new Date().toLocaleString())}</div></div>
+    <div class="meta">
+      <div class="box"><span class="label">Issuing Store Name</span>${v('from_branch_name')}</div>
+      <div class="box"><span class="label">Receiving Store Name</span>${v('to_branch_name')}</div>
+      <div class="box"><span class="label">Driver Name / Phone</span>${v('driver_name')}${t.driver_phone ? ` / ${v('driver_phone')}` : ''}</div>
+      <div class="box"><span class="label">Vehicle No</span>${v('vehicle_number')}</div>
+      <div class="box"><span class="label">Issuing Officer</span>${v('issuing_officer_name') || v('initiated_by_name')}</div>
+      <div class="box"><span class="label">Dispatch Date</span>${esc(fmtDate(t.dispatch_at) !== '—' ? fmtDate(t.dispatch_at) : fmtDate(t.initiated_at))}</div>
+    </div>
+    <table>
+      <thead><tr><th>No</th><th>Product / SKU</th><th>Description</th><th>Qty</th><th>Unit</th><th>No. of Packages</th><th>Serial / Batch</th></tr></thead>
+      <tbody><tr><td>1</td><td>${v('product_name')}<br/><small>${v('sku')}${t.barcode ? ` / ${v('barcode')}` : ''}</small></td><td>${v('item_description')}</td><td class="num">${qty}</td><td>${v('unit') || 'Nos'}</td><td class="num">${Number(t.package_count || 0) || ''}</td><td>${v('serial_batch_no')}</td></tr></tbody>
+      <tfoot><tr><th colspan="3" class="num">Total Quantity</th><th class="num">${qty}</th><th colspan="3"></th></tr></tfoot>
+    </table>
+    <div class="box remarks" style="margin-top:12px"><span class="label">Remarks</span>${v('notes')}</div>
+    <div class="sign">
+      <div class="line"><strong>Name & Signature of Issuing Officer</strong><br/>Designation:<br/>Date:</div>
+      <div class="line"><strong>Name & Signature of Driver / Officer Taking Over</strong><br/>Designation:<br/>Date:</div>
+      <div class="line"><strong>Name & Signature of Receiving Officer</strong><br/>Designation:<br/>Date:</div>
+    </div>
+    <div class="footer"><span>Printed copy must be signed manually and retained by both branches.</span><span>Print count: ${Number(t.print_count || 0) + 1}</span></div>
+  </body></html>`
 }
 
 // A4 stock-transfer note / gate pass — the printable hard copy carrying the
@@ -519,6 +624,18 @@ function printOptionsForDesign(design: 'dot' | 'thermal' | 'a4', paperType = '80
       scaleFactor: 100,
     }
   }
+  if (paperType === 'B5') {
+    return {
+      silent: false,
+      printBackground: true,
+      landscape: false,
+      margins: { marginType: 'none' },
+      // Electron's named pageSize enum has no 'B5' entry — use the ISO B5
+      // dimensions (176mm x 250mm) in microns instead.
+      pageSize: { width: 176000, height: 250000 },
+      scaleFactor: 100,
+    }
+  }
   return {
     silent: false,
     printBackground: true,
@@ -568,7 +685,7 @@ function selectedPaperType(settings: Record<string, unknown>, design: 'dot' | 't
   const scoped = String(settings[`invoice_${design}_paper_type`] || '')
   if (design === 'dot') return 'dot_matrix'
   if (design === 'thermal') return scoped === '58mm' ? '58mm' : '80mm'
-  return scoped === 'A5' ? 'A5' : 'A4'
+  return scoped === 'A5' ? 'A5' : scoped === 'B5' ? 'B5' : 'A4'
 }
 
 async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string, unknown>): Promise<string> {
@@ -634,12 +751,12 @@ async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string
 
   const contactLine = [companyPhone, companyEmail, companyWebsite].filter(Boolean).map(esc).join(' &nbsp;|&nbsp; ')
   const dotMatrix = paperType === 'dot_matrix'
-  const pageWidth = dotMatrix ? '920px' : paperType === '80mm' ? '302px' : paperType === '58mm' ? '220px' : paperType === 'A5' ? '559px' : '794px'
-  const pageMinHeight = paperType === '80mm' || paperType === '58mm' || dotMatrix ? 'auto' : paperType === 'A5' ? '780px' : '1100px'
+  const pageWidth = dotMatrix ? '920px' : paperType === '80mm' ? '302px' : paperType === '58mm' ? '220px' : paperType === 'A5' ? '559px' : paperType === 'B5' ? '665px' : '794px'
+  const pageMinHeight = paperType === '80mm' || paperType === '58mm' || dotMatrix ? 'auto' : paperType === 'A5' ? '780px' : paperType === 'B5' ? '945px' : '1100px'
   const pagePadding = dotMatrix ? '24px 36px' : paperType === '80mm' || paperType === '58mm' ? '6px 10px' : '48px'
   const compact = paperType === '80mm' || paperType === '58mm'
   const thermal = activeDesign === 'thermal'
-  const printPageSize = dotMatrix ? '241mm 279mm' : paperType === '58mm' ? '58mm 297mm' : paperType === '80mm' ? '80mm 297mm' : paperType === 'A5' ? 'A5' : 'A4'
+  const printPageSize = dotMatrix ? '241mm 279mm' : paperType === '58mm' ? '58mm 297mm' : paperType === '80mm' ? '80mm 297mm' : paperType === 'A5' ? 'A5' : paperType === 'B5' ? 'B5' : 'A4'
 
   // Real barcode (Code39 of the invoice no) + real QR encoding the full bill (scannable)
   const barcodeSvg = showBarcode ? buildBarcodeSvg(String(payload.invoice_number || '')) : ''

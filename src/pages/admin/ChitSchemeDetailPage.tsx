@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Modal from '@/components/shared/Modal'
 import StatCard from '@/components/shared/StatCard'
-import { ArrowLeft, Plus, Upload, FileDown, Users, Coins, Gift, Shuffle } from 'lucide-react'
+import { ArrowLeft, Plus, Upload, FileDown, Users, Coins, Gift, Shuffle, Pencil } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Row = Record<string, unknown>
@@ -23,6 +23,7 @@ export default function ChitSchemeDetailPage() {
   const [showDraw, setShowDraw] = useState(false)
   const [payingMember, setPayingMember] = useState<Row | null>(null)
   const [redeemingMember, setRedeemingMember] = useState<Row | null>(null)
+  const [showEdit, setShowEdit] = useState(false)
 
   const load = async () => {
     if (!id) return
@@ -99,8 +100,15 @@ export default function ChitSchemeDetailPage() {
           <h1 className="text-lg font-bold truncate" style={{ color: 'var(--text-1)' }}>{scheme.name as string}</h1>
           <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>{scheme.scheme_number as string} · {(scheme.product_name as string) || 'No product'} · {(scheme.agent_name as string) || 'No agent'}</p>
         </div>
+        <button onClick={() => setShowEdit(true)} className="btn-ghost btn-sm p-1.5" title="Edit scheme name / agent / notes">
+          <Pencil size={14} />
+        </button>
         <span className={scheme.status === 'active' ? 'badge-green' : 'badge-gray'}>{scheme.status as string}</span>
       </div>
+
+      {showEdit && (
+        <EditSchemeModal scheme={scheme} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load() }} />
+      )}
 
       <div className="grid grid-cols-4 gap-3 px-6 py-4 flex-shrink-0">
         <StatCard label="Members" value={`${membersEnrolled} / ${scheme.member_count}`} icon={Users} color="brand" />
@@ -461,6 +469,57 @@ function EarlyRedeemModal({ member, minAmount, onClose, onSave }: { member: Row;
             <option value="bank_transfer">Bank Transfer</option>
           </select>
         </div>
+      </div>
+    </Modal>
+  )
+}
+
+// Scoped to non-structural fields only — member_count/cycle_count/contribution
+// amounts etc. already have live members and draw history riding on them, so
+// they're not exposed here to avoid corrupting an in-progress scheme.
+function EditSchemeModal({ scheme, onClose, onSaved }: { scheme: Row; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(String(scheme.name || ''))
+  const [agentId, setAgentId] = useState(String(scheme.agent_id || ''))
+  const [notes, setNotes] = useState(String(scheme.notes || ''))
+  const [agents, setAgents] = useState<Row[]>([])
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    window.api.agents.list({}).then((res: { success: boolean; data?: Row[] }) => {
+      if (res.success) setAgents(res.data || [])
+    }).catch(() => {})
+  }, [])
+
+  const save = async () => {
+    if (!name.trim()) { toast.error('Scheme name is required'); return }
+    setSaving(true)
+    try {
+      const res = await window.api.chits.update(String(scheme.id), {
+        name: name.trim(), agent_id: agentId || null, notes: notes.trim() || null,
+      })
+      if (res.success) { toast.success('Scheme updated'); onSaved() }
+      else toast.error(String(res.error || 'Failed to update scheme'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to update scheme')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="Edit Chit Scheme" onClose={onClose}
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Save'}</button></>}>
+      <div className="space-y-3">
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Scheme Name *</label><input value={name} onChange={e => setName(e.target.value)} className="input" /></div>
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Agent</label>
+          <select value={agentId} onChange={e => setAgentId(e.target.value)} className="input">
+            <option value="">— None —</option>
+            {agents.map(a => <option key={a.id as string} value={a.id as string}>{(a.code as string)} — {(a.name as string)}</option>)}
+          </select>
+        </div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} className="input h-20 resize-none" /></div>
+        <p className="text-xs" style={{ color: 'var(--text-3)' }}>Member count, cycles, contribution amount, and other financial terms can't be changed here once a scheme is running.</p>
       </div>
     </Modal>
   )

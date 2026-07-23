@@ -550,6 +550,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (filters.customer_id){ sql += ' AND i.customer_id = ?';params.push(filters.customer_id) }
       if (filters.date_from)  { sql += ' AND date(i.created_at) >= ?'; params.push(filters.date_from) }
       if (filters.date_to)    { sql += ' AND date(i.created_at) <= ?'; params.push(filters.date_to) }
+      if (filters.search) {
+        sql += ' AND (i.invoice_number LIKE ? OR c.name LIKE ?)'
+        const term = `%${filters.search}%`
+        params.push(term, term)
+      }
       sql += ' ORDER BY i.created_at DESC LIMIT 500'
       return { success: true, data: db.prepare(sql).all(...params) }
   })

@@ -15,6 +15,7 @@ export default function InvoiceDetailModal({ invoiceId, onClose }: { invoiceId: 
 
   useEffect(() => {
     setLoading(true)
+    setDetail(null)
     window.api.reports.transactionDetail(invoiceId).then((res: { success: boolean; data?: InvoiceDetail; error?: string }) => {
       if (res.success) setDetail(res.data || null)
       else toast.error(res.error || 'Failed to load details')
@@ -110,6 +111,23 @@ export default function InvoiceDetailModal({ invoiceId, onClose }: { invoiceId: 
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>{detail.status}</p>
             </div>
           </div>
+
+          {(detail.bill_type === 'QUOTATION' && detail.valid_until) || detail.notes ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+              {detail.bill_type === 'QUOTATION' && detail.valid_until && (
+                <div className="card">
+                  <p className="text-xs text-slate-400 mb-1">Valid Until</p>
+                  <p className="font-medium" style={{ color: 'var(--text-1)' }}>{new Date(detail.valid_until).toLocaleDateString()}</p>
+                </div>
+              )}
+              {detail.notes && (
+                <div className="card">
+                  <p className="text-xs text-slate-400 mb-1">Notes</p>
+                  <p className="font-medium" style={{ color: 'var(--text-1)' }}>{detail.notes}</p>
+                </div>
+              )}
+            </div>
+          ) : null}
 
           <div>
             <p className="text-xs font-medium text-slate-400 mb-2">Items ({detail.items.length})</p>
