@@ -178,6 +178,11 @@ export default function SettingsPage() {
     ...defaultInvoiceDesign('dot', 'Default Dot Matrix Bill', 'dot_matrix'),
     ...defaultInvoiceDesign('thermal', 'Default Thermal Bill', '80mm'),
     ...defaultInvoiceDesign('a4', 'Default A4 Invoice', 'A4'),
+    invoice_dot_preprinted_mode: false,
+    invoice_dot_preprinted_offset_x: 0,
+    invoice_dot_preprinted_offset_y: 0,
+    thermal_printer_ip: '',
+    thermal_printer_port: 9100,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -320,7 +325,7 @@ export default function SettingsPage() {
         {tab === 'invoice' && <InvoiceDesigner form={form} f={f} check={check} />}
         {tab === 'communications' && <CommunicationsSettings form={form} f={f} check={check} />}
         {tab === 'loyalty'        && <LoyaltySettings />}
-        {tab === 'printer'        && <PrinterSettings printers={printers} loading={opsLoading} onRefresh={refreshOpsState} />}
+        {tab === 'printer'        && <PrinterSettings printers={printers} loading={opsLoading} onRefresh={refreshOpsState} form={form} f={f} />}
         {tab === 'notifications'   && <NotificationsSettings notifications={notifications} unreadCount={unreadCount} loading={opsLoading} onRefresh={refreshOpsState} />}
         {tab === 'license'         && <LicenseSettings licenseInfo={licenseInfo} loading={opsLoading} onRefresh={refreshOpsState} />}
         {tab === 's3'             && <S3Settings form={form} f={f} check={check} />}
@@ -832,6 +837,7 @@ function BarcodeDesigner({ form, setForm, f, check }: {
 }
 
 function InvoiceDesigner({ form, f, check }: { form: Record<string, any>; f: (k: string) => (e: any) => void; check: (k: string) => (e: any) => void }) {
+  const navigate = useNavigate()
   const [design, setDesign] = useState<InvoiceDesignId>((form.invoice_active_design as InvoiceDesignId) || 'thermal')
   const prefix = `invoice_${design}_`
   const k = (field: string) => `${prefix}${field}`
@@ -865,6 +871,13 @@ function InvoiceDesigner({ form, f, check }: { form: Record<string, any>; f: (k:
             />
             <span className="text-sm" style={{ color: 'var(--text-2)' }}>Use {activeMeta.label} as default print design</span>
           </label>
+          <div className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5 mt-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
+            <div>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-1)' }}>Need full control over positions?</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Open the Advanced Layout Designer to place every field precisely, per format, with a live preview.</p>
+            </div>
+            <button onClick={() => navigate('/admin/invoice-designer')} className="btn-secondary btn-sm flex-shrink-0">Open Designer</button>
+          </div>
         </Section>
 
         <Section title={`${activeMeta.label} Designer`}>
@@ -903,12 +916,68 @@ function InvoiceDesigner({ form, f, check }: { form: Record<string, any>; f: (k:
             <Check label="Tax Column" checked={Boolean(form[k('show_tax_column')])} onChange={check(k('show_tax_column'))} />
           </div>
         </Section>
+
+        {design === 'dot' && (
+          <PreprintedStationerySection form={form} f={f} check={check} />
+        )}
       </div>
 
       <PreviewPanel title="Invoice Live Preview" onPrint={() => window.print()}>
         <InvoicePreview form={form} design={design} />
       </PreviewPanel>
     </div>
+  )
+}
+
+function PreprintedStationerySection({ form, f, check }: {
+  form: Record<string, any>
+  f: (k: string) => (e: any) => void
+  check: (k: string) => (e: any) => void
+}) {
+  const [printing, setPrinting] = useState(false)
+
+  const printCalibrationSheet = async () => {
+    setPrinting(true)
+    try {
+      const res = await window.api.printer.printCalibrationSheet() as { success: boolean; error?: string }
+      if (res.success) toast.success('Calibration sheet sent to printer')
+      else toast.error(res.error || 'Failed to print calibration sheet')
+    } catch (err) {
+      toast.error('Failed to print calibration sheet: ' + String(err))
+    } finally {
+      setPrinting(false)
+    }
+  }
+
+  return (
+    <Section title="Pre-Printed Stationery Mode">
+      <p className="text-xs mb-3" style={{ color: 'var(--text-3)' }}>
+        For companies that have the logo, company name, labels, table header/gridlines and
+        footer already colour pre-printed on continuous dot-matrix stationery. When on, only
+        the item and payment data is printed — positioned to land in the blanks on that sheet.
+      </p>
+      <Check label="Pre-Printed Stationery Mode" checked={Boolean(form.invoice_dot_preprinted_mode)} onChange={check('invoice_dot_preprinted_mode')} />
+      {form.invoice_dot_preprinted_mode && (
+        <>
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <Field label="Calibration Offset X (mm)">
+              <input type="number" step="0.5" value={form.invoice_dot_preprinted_offset_x} onChange={f('invoice_dot_preprinted_offset_x')} className="input" />
+            </Field>
+            <Field label="Calibration Offset Y (mm)">
+              <input type="number" step="0.5" value={form.invoice_dot_preprinted_offset_y} onChange={f('invoice_dot_preprinted_offset_y')} className="input" />
+            </Field>
+          </div>
+          <button onClick={printCalibrationSheet} disabled={printing} className="btn-secondary btn-sm gap-1.5 mt-3">
+            <Printer size={14} /> {printing ? 'Printing…' : 'Print Calibration Sheet'}
+          </button>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>
+            Prints a sample bill plus a small crosshair mark. Measure how far the crosshair
+            is from where it should be on your pre-printed sheet, enter that distance (mm) as
+            the X/Y offset above, save, and print the calibration sheet again to confirm.
+          </p>
+        </>
+      )}
+    </Section>
   )
 }
 
@@ -1477,12 +1546,17 @@ function PrinterSettings({
   printers,
   loading,
   onRefresh,
+  form,
+  f,
 }: {
   printers: any[]
   loading: boolean
   onRefresh: () => Promise<void>
+  form: Record<string, any>
+  f: (k: string) => (e: any) => void
 }) {
   const [testing, setTesting] = useState(false)
+  const [testingEscPos, setTestingEscPos] = useState(false)
 
   const runTest = async () => {
     setTesting(true)
@@ -1497,8 +1571,40 @@ function PrinterSettings({
     }
   }
 
+  const runEscPosTest = async () => {
+    setTestingEscPos(true)
+    try {
+      const res = await window.api.printer.sendEscPosTest() as { success: boolean; error?: string }
+      if (res.success) toast.success('ESC/POS test receipt sent')
+      else toast.error(res.error || 'ESC/POS test failed')
+    } catch (err) {
+      toast.error('ESC/POS test failed: ' + String(err))
+    } finally {
+      setTestingEscPos(false)
+    }
+  }
+
   return (
     <div className="space-y-6 max-w-3xl">
+      <Section title="Network Thermal Printer (ESC/POS)">
+        <p className="text-xs -mt-1 mb-3" style={{ color: 'var(--text-3)' }}>
+          Sends raw ESC/POS commands directly to a network thermal printer over TCP, bypassing
+          the normal Windows print dialog. Requires a network/Ethernet-capable printer — USB-only
+          printers should keep using the regular Thermal print design instead.
+        </p>
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <Field label="Printer IP Address">
+            <input value={form.thermal_printer_ip || ''} onChange={f('thermal_printer_ip')} className="input" placeholder="e.g. 192.168.1.50" />
+          </Field>
+          <Field label="Port">
+            <input type="number" value={form.thermal_printer_port || 9100} onChange={f('thermal_printer_port')} className="input" placeholder="9100" />
+          </Field>
+        </div>
+        <button onClick={runEscPosTest} disabled={testingEscPos} className="btn-secondary btn-sm gap-1.5">
+          <Printer size={14} /> {testingEscPos ? 'Sending…' : 'Send Test Print (ESC/POS)'}
+        </button>
+      </Section>
+
       <Section title="Printers">
         <p className="text-xs -mt-1 mb-3" style={{ color: 'var(--text-3)' }}>
           Installed printer devices detected by the desktop app.

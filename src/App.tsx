@@ -25,6 +25,7 @@ import AuditLogsPage from '@/pages/admin/AuditLogsPage'
 import EditRequestsPage from '@/pages/admin/EditRequestsPage'
 import OperationsHubPage from '@/pages/admin/OperationsHubPage'
 import SettingsPage from '@/pages/admin/SettingsPage'
+import InvoiceDesignerPage from '@/pages/admin/InvoiceDesignerPage'
 import SyncMonitorPage from '@/pages/admin/SyncMonitorPage'
 import CategoriesPage from '@/pages/admin/CategoriesPage'
 import StockCountPage from '@/pages/admin/StockCountPage'
@@ -161,6 +162,7 @@ export default function App() {
         <Route path="/admin/operations" element={<OperationsHubPage />} />
         <Route path="/admin/sync" element={<SyncMonitorPage />} />
         <Route path="/admin/settings" element={<RequireSuperAdmin><SettingsPage /></RequireSuperAdmin>} />
+        <Route path="/admin/invoice-designer" element={<RequireSuperAdmin><InvoiceDesignerPage /></RequireSuperAdmin>} />
         <Route path="/admin/roles" element={<RolesPage />} />
         <Route path="/admin/returns" element={<ReturnsPage />} />
         <Route path="/admin/cash-register" element={<CashRegisterPage />} />

@@ -3,6 +3,7 @@ import { BrowserWindow, shell, app, dialog } from 'electron'
 import Store from 'electron-store'
 import path from 'path'
 import fs from 'fs'
+import net from 'net'
 import QRCode from 'qrcode'
 import { safeHandle } from './ipcHandler'
 
@@ -83,9 +84,114 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'printer:printInvoice', async (_e, payload: InvoicePayload) => {
     const settings = store.get('app_settings') as Record<string, unknown> || {}
-    const html = await buildInvoiceHtml(payload, settings)
     const design = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
+    const html = await resolveInvoiceHtml(payload, settings, design)
     await printHtml(html, design, selectedPaperType(settings, design))
+    return { success: true }
+  })
+
+  // Renders the exact same HTML that printer:printInvoice would send to the
+  // printer, but returns it as a string instead of printing it — the designer
+  // page (src/pages/admin/InvoiceDesignerPage.tsx) shows this in an
+  // <iframe srcDoc>. Same function, same settings lookup, same output either
+  // way, so the live preview can never drift from what actually prints.
+  // `draftLayout` (optional) lets the Advanced Layout Designer preview
+  // unsaved edits live, as-you-type — it renders through the exact same
+  // buildCustomLayoutHtml() used for real printing, just fed draft data
+  // instead of the saved settings blob. Once saved, printing and preview
+  // read the identical persisted layout, so there's no drift either way.
+  safeHandle(ipcMain, 'printer:renderInvoiceHtml', async (_e, payload: InvoicePayload, draftLayout?: CustomLayout) => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    if (draftLayout) {
+      const html = await buildCustomLayoutHtml(payload, settings, draftLayout, { includeBackground: true })
+      return { success: true, html }
+    }
+    const design = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
+    const html = await resolveInvoiceHtml(payload, settings, design)
+    return { success: true, html }
+  })
+
+  // Raw ESC/POS bill — sent directly to a network thermal printer over TCP
+  // (port 9100, the standard "raw print" port), bypassing the OS print
+  // spooler entirely. Requires Thermal Printer IP/Port to be set in Settings.
+  safeHandle(ipcMain, 'printer:sendEscPos', async (_e, payload: InvoicePayload) => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const host = String(settings.thermal_printer_ip || '').trim()
+    const port = Number(settings.thermal_printer_port) || 9100
+    if (!host) return { success: false, error: 'Thermal printer IP address is not configured (Settings → Printers)' }
+    const buffer = buildEscPos(payload, settings)
+    return sendRawToPrinter(host, port, buffer)
+  })
+
+  // Same as above but with built-in sample data, for testing the network
+  // connection and receipt formatting without needing a real sale.
+  safeHandle(ipcMain, 'printer:sendEscPosTest', async () => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const host = String(settings.thermal_printer_ip || '').trim()
+    const port = Number(settings.thermal_printer_port) || 9100
+    if (!host) return { success: false, error: 'Thermal printer IP address is not configured (Settings → Printers)' }
+    const samplePayload: InvoicePayload = {
+      invoice_number: 'SAMPLE-0001',
+      invoice_date: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      cashier_name: 'Test Cashier',
+      customer_name: 'Sample Customer',
+      items: [
+        { product_name: 'Sample Product A', sku: 'SKU-0001', quantity: 2, unit_price: 1500, line_total: 3000 },
+        { product_name: 'Sample Product B', sku: 'SKU-0002', quantity: 1, unit_price: 750, line_total: 750 },
+      ],
+      subtotal: 3750, discount_amount: 0, tax_amount: 0, total_amount: 3750,
+      paid_amount: 3750, change_amount: 0, payment_method: 'cash',
+    }
+    const buffer = buildEscPos(samplePayload, settings)
+    return sendRawToPrinter(host, port, buffer)
+  })
+
+  // Prints a sample invoice through the pre-printed-mode renderer regardless
+  // of the toggle, plus a small crosshair at the calibration origin, so the
+  // company can measure the offset against their pre-printed stationery and
+  // correct invoice_dot_preprinted_offset_x/_y in Settings.
+  safeHandle(ipcMain, 'printer:printCalibrationSheet', async () => {
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const offsetX = Number(settings.invoice_dot_preprinted_offset_x) || 0
+    const offsetY = Number(settings.invoice_dot_preprinted_offset_y) || 0
+    const samplePayload: InvoicePayload = {
+      invoice_number: 'SAMPLE-0001',
+      invoice_date: new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+      cashier_name: 'Test Cashier',
+      customer_name: 'Sample Customer',
+      customer_address: 'Sample Address Line 1, Sample Town',
+      items: [
+        { product_name: 'Sample Product A', sku: 'SKU-0001', quantity: 2, unit_price: 1500, line_total: 3000 },
+        { product_name: 'Sample Product B', sku: 'SKU-0002', quantity: 1, unit_price: 750, line_total: 750 },
+      ],
+      subtotal: 3750, discount_amount: 0, tax_amount: 0, total_amount: 3750,
+      paid_amount: 3750, change_amount: 0, payment_method: 'cash',
+    }
+    // Prefer a saved Advanced Layout Designer layout for the dot-matrix
+    // profile if one exists and is enabled; otherwise fall back to the
+    // built-in pre-printed-mode LAYOUT constant, exactly as before.
+    const customLayoutRaw = settings['invoice_dot_custom_layout_json'] as string | undefined
+    let html: string
+    if (customLayoutRaw) {
+      try {
+        const layout = JSON.parse(customLayoutRaw) as CustomLayout
+        if (layout.enabled) {
+          const crossX = layout.calibration.offsetX
+          const crossY = layout.calibration.offsetY
+          const crosshair = `<div style="position:absolute;left:${crossX}mm;top:${crossY - 3}mm;width:0;height:6mm;border-left:0.3mm solid #999"></div>
+            <div style="position:absolute;left:${crossX - 3}mm;top:${crossY}mm;width:6mm;height:0;border-top:0.3mm solid #999"></div>`
+          html = await buildCustomLayoutHtml(samplePayload, settings, layout, { includeBackground: true, extraHtml: crosshair })
+          await printHtml(html, 'dot', 'dot_matrix')
+          return { success: true }
+        }
+      } catch { /* fall through to the built-in layout below on malformed JSON */ }
+    }
+    const crossX = LAYOUT.globalOffset.x + offsetX
+    const crossY = LAYOUT.globalOffset.y + offsetY
+    const crosshair = `<div style="position:absolute;left:${crossX}mm;top:${crossY - 3}mm;width:0;height:6mm;border-left:0.3mm solid #999"></div>
+      <div style="position:absolute;left:${crossX - 3}mm;top:${crossY}mm;width:6mm;height:0;border-top:0.3mm solid #999"></div>`
+    html = buildPreprintedInvoiceHtml(samplePayload, settings, offsetX, offsetY, crosshair)
+    await printHtml(html, 'dot', 'dot_matrix')
     return { success: true }
   })
 
@@ -109,7 +215,8 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
       if (saveResult.canceled || !saveResult.filePath) return { success: false, cancelled: true }
 
       const settings = store.get('app_settings') as Record<string, unknown> || {}
-      const html = await buildInvoiceHtml(payload, settings)
+      const design = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
+      const html = await resolveInvoiceHtml(payload, settings, design)
       tmpPath = path.join(app.getPath('temp'), `${docWord.toLowerCase()}-${Date.now()}.html`)
       fs.writeFileSync(tmpPath, html, 'utf-8')
 
@@ -121,10 +228,21 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
       })
       const loadedPdfWin = pdfWin
       await loadedPdfWin.loadFile(tmpPath)
+      // Exact page size for the resolved design (matches printer:printInvoice's
+      // sizing exactly) instead of always forcing A4 — a dot-matrix/B5/A5
+      // custom layout now exports at its own true dimensions, no scaling.
+      const paperType = selectedPaperType(settings, design)
+      const pdfPageSize = paperType === 'dot_matrix' ? { width: 241000, height: 279000 }
+        : paperType === 'B5' ? { width: 176000, height: 250000 }
+        : paperType === 'A5' ? 'A5' as const
+        : 'A4' as const
+      const pdfMargins = paperType === 'dot_matrix' || paperType === 'B5'
+        ? { top: 0, bottom: 0, left: 0, right: 0 }
+        : { top: 0.3, bottom: 0.3, left: 0.3, right: 0.3 }
       const pdfBuffer = await loadedPdfWin.webContents.printToPDF({
         printBackground: true,
-        pageSize: 'A4',
-        margins: { top: 0.3, bottom: 0.3, left: 0.3, right: 0.3 },
+        pageSize: pdfPageSize,
+        margins: pdfMargins,
       })
 
       fs.writeFileSync(saveResult.filePath, pdfBuffer)
@@ -901,13 +1019,29 @@ table{margin-bottom:8px}th,td{padding:4px 3px;font-size:9px}.pname{font-size:10p
 .barcode{margin:6px auto 2px;max-width:130px}.barcode svg{height:28px}.bc-num{font-size:9px;margin-bottom:4px}.qr{width:72px;height:72px;margin:6px auto}
 ` : ''}
 ${dotMatrix ? `
+/* Dot-matrix: dense, fully-ruled letterhead form — logo shown, solid rules
+   throughout (not dashed), matching a professional pre-printed continuous
+   stationery layout rather than the softer branded designs above. */
 body{font-family:'Courier New',monospace}.page{font-family:'Courier New',monospace}
-.hdr{border-bottom:1px dashed #111;padding-bottom:10px;margin-bottom:14px}.logo,.gbar{display:none}
-.co-name{font-size:20px;color:#111;letter-spacing:0}.co-sub,.inv-num{color:#111}.inv-word{font-size:24px;color:#111;letter-spacing:2px}
-.two{gap:24px;margin-bottom:18px}.meta-box,.pay-box{border:1px dashed #111;background:#fff;border-radius:0}.info-box h4{border-bottom:1px dashed #111;color:#111}
-thead tr{background:#fff;border-top:1px dashed #111;border-bottom:1px dashed #111}th{color:#111;padding:6px 8px}td{padding:6px 8px}
-tbody tr,tbody tr:nth-child(even){background:#fff;border-bottom:1px dashed #d1d5db}.trow.grand{background:#fff;border:1px dashed #111;border-radius:0}.trow.grand .tl,.trow.grand .tv{color:#111}
-.note{background:#fff;border:1px dashed #111;border-radius:0}.foot{border-top:1px dashed #111}
+.hdr{border-bottom:2px solid #111;padding-bottom:10px;margin-bottom:10px}
+.gbar{display:none}
+.logo{border-radius:0;background:#111}
+.co-name{font-size:22px;color:#111;letter-spacing:0;font-weight:800}.co-sub,.inv-num{color:#111}.inv-word{font-size:24px;color:#111;letter-spacing:2px}
+.reg-no{font-size:10px;color:#111;margin-top:2px}
+.two{gap:24px;margin-bottom:14px}
+.meta-box,.pay-box,.info-box{border:1px solid #111;background:#fff;border-radius:0;padding:10px}
+.info-box h4{border-bottom:1px solid #111;color:#111;padding-bottom:4px;margin-bottom:6px}
+.mrow:not(:last-child){border-bottom:1px solid #d1d5db}
+table{border:1px solid #111}
+thead tr{background:#e5e7eb;border-top:1px solid #111;border-bottom:1px solid #111}
+th,td{border:1px solid #111;color:#111}
+th:first-child,th:last-child{border-radius:0}
+tbody tr,tbody tr:nth-child(even){background:#fff}
+.trow.grand{background:#fff;border:2px solid #111;border-radius:0;margin:10px 0 0}.trow.grand .tl,.trow.grand .tv{color:#111}
+.note{background:#fff;border:1px solid #111;border-radius:0}
+.foot{border-top:2px solid #111}
+.sign{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:18px 0 8px}
+.sign .line{border-top:1px solid #111;padding-top:5px;font-size:10px;color:#111;text-align:left}
 ` : ''}
 ${thermal ? `
 /* Thermal: clean black & white, no logo, no colour */
@@ -956,6 +1090,7 @@ tbody tr:nth-child(even){background:#fff!important}
         ${showCompany ? `<div class="co-name">${esc(companyName)}</div>` : ''}
         <div class="co-sub">${esc(docSubtitle)}</div>
         ${headerMessage ? `<div class="co-sub">${esc(headerMessage)}</div>` : ''}
+        ${dotMatrix && showTaxNo && companyTin ? `<div class="reg-no">Reg No: ${esc(companyTin)}</div>` : ''}
       </div>
     </div>
     <div class="inv-right">
@@ -1025,6 +1160,12 @@ tbody tr:nth-child(even){background:#fff!important}
 
   ${invoiceTerms ? `<div class="note"><p>${esc(invoiceTerms)}</p></div>` : ''}
 
+  ${dotMatrix ? `
+  <div class="sign">
+    <div class="line">Prepared By</div>
+    <div class="line">Received By</div>
+  </div>` : ''}
+
   <div class="foot">
     ${showBarcode && barcodeSvg ? `<div class="barcode">${barcodeSvg}</div><div class="bc-num">${esc(payload.invoice_number)}</div>` : ''}
     ${showQr && qrSvg ? `<div class="qr">${qrSvg}</div>` : ''}
@@ -1036,6 +1177,387 @@ tbody tr:nth-child(even){background:#fff!important}
 </div>
 </body>
 </html>`
+}
+
+// ─── Pre-printed dot-matrix stationery mode ───────────────────────────────
+// The company has had the static parts of the invoice (logo, company name,
+// field labels, table header/gridlines, footer text, signature boxes) COLOUR
+// PRE-PRINTED onto continuous 241mm x 279mm (9.5"x11") dot-matrix stationery.
+// This renderer prints ONLY the variable data at absolute mm coordinates so
+// each value lands in the correct blank on that pre-printed sheet — no logo,
+// borders, labels or gridlines of our own. Position every field from ONE
+// LAYOUT object below so it can be fine-tuned after a real test print
+// without touching the render logic; `globalOffset` nudges everything at
+// once for quick calibration, per-field x/y for finer correction later.
+type Align = 'left' | 'center' | 'right'
+interface FieldPos { x: number; y: number; align?: Align }
+
+const PREPRINTED_PAGE_MM = { width: 241, height: 279 }
+
+const LAYOUT = {
+  // mm — small nudge (a few mm) to correct printer-feed/margin drift only.
+  // NOT the page size — leave at 0,0 unless a calibration print is
+  // consistently off by the same amount in every field.
+  globalOffset: { x: 0, y: 0 },
+
+  // ---- INFO BOX (top) ---- re-measured directly from the reference template image
+  date:         { x: 34,  y: 40 } as FieldPos,
+  code:         { x: 34,  y: 45 } as FieldPos,
+  name:         { x: 34,  y: 50 } as FieldPos,
+  address:      { x: 34,  y: 55 } as FieldPos, // wraps, line step ~4mm
+  invoiceNo:    { x: 114, y: 40 } as FieldPos,
+  terms:        { x: 114, y: 45 } as FieldPos,
+  currency:     { x: 114, y: 50 } as FieldPos,
+  deliveryTo:   { x: 114, y: 55 } as FieldPos,
+  custPoNo:     { x: 185, y: 40 } as FieldPos,
+  copyNo:       { x: 185, y: 45 } as FieldPos,
+  deliveryAddr: { x: 185, y: 50 } as FieldPos, // multi-line, line step ~4mm
+
+  // ---- ITEMS TABLE ----
+  itemsStartY: 80,   // mm — Y baseline of the FIRST product row (just below the blue table header)
+  rowHeight:   7,    // mm between product rows
+  col: {
+    line: { x: 13,  align: 'center' as Align },
+    desc: { x: 23,  align: 'left'   as Align },
+    uom:  { x: 128, align: 'center' as Align },
+    qty:  { x: 145, align: 'center' as Align },
+    loc:  { x: 163, align: 'center' as Align },
+    rate: { x: 202, align: 'right'  as Align },
+    value:{ x: 234, align: 'right'  as Align },
+  },
+
+  // ---- TOTALS ----
+  subTotal: { x: 234, y: 163, align: 'right' as Align },
+  total:    { x: 234, y: 168, align: 'right' as Align },
+
+  // ---- OPTIONAL ----
+  enteredBy: { x: 8,   y: 213 } as FieldPos,
+  dateIssue: { x: 193, y: 249 } as FieldPos,
+}
+// Re-measured from the actual reference template photo (percentage-of-page
+// position × 241mm/279mm). Still expect a few mm of drift from printer feed
+// tolerance — use "Print Calibration Sheet" (Settings → Invoice Designer →
+// Dot Matrix) and globalOffset for that final, small correction only.
+
+function posDiv(x: number, y: number, offsetX: number, offsetY: number, align: Align, content: string, extraCss = ''): string {
+  const left = x + offsetX
+  const top = y + offsetY
+  const base = align === 'right'
+    ? `right:calc(${PREPRINTED_PAGE_MM.width}mm - ${left}mm);text-align:right`
+    : align === 'center'
+      ? `left:${left}mm;text-align:center;transform:translateX(-50%)`
+      : `left:${left}mm;text-align:left`
+  return `<div style="position:absolute;top:${top}mm;${base};white-space:nowrap;${extraCss}">${content}</div>`
+}
+
+function buildPreprintedInvoiceHtml(payload: InvoicePayload, settings: Record<string, unknown>, offsetX: number, offsetY: number, extraHtml = ''): string {
+  const L = LAYOUT
+  const ox = offsetX + L.globalOffset.x
+  const oy = offsetY + L.globalOffset.y
+  const currency = String(settings.currency || 'LKR')
+  const fmt = (n: number) => Number(n || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const field = (pos: FieldPos, value: string, extraCss = '') =>
+    value ? posDiv(pos.x, pos.y, ox, oy, pos.align || 'left', esc(value), extraCss) : ''
+
+  const itemRows = payload.items.map((item, i) => {
+    const y = L.itemsStartY + L.rowHeight * i
+    const descHtml = `${esc(item.product_name)}${item.sku ? `<div style="font-size:8pt;margin-top:1mm">${esc(item.sku)}</div>` : ''}`
+    return [
+      posDiv(L.col.line.x, y, ox, oy, L.col.line.align, String(i + 1)),
+      posDiv(L.col.desc.x, y, ox, oy, L.col.desc.align, descHtml, 'white-space:normal;max-width:100mm'),
+      posDiv(L.col.uom.x, y, ox, oy, L.col.uom.align, 'Nos'),
+      posDiv(L.col.qty.x, y, ox, oy, L.col.qty.align, String(item.quantity)),
+      posDiv(L.col.rate.x, y, ox, oy, L.col.rate.align, fmt(item.unit_price)),
+      posDiv(L.col.value.x, y, ox, oy, L.col.value.align, fmt(item.line_total)),
+    ].join('')
+  }).join('')
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${esc(payload.invoice_number)}</title>
+  <style>
+    @page { size: ${PREPRINTED_PAGE_MM.width}mm ${PREPRINTED_PAGE_MM.height}mm; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: transparent; }
+    body { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+    .page { position: relative; width: ${PREPRINTED_PAGE_MM.width}mm; height: ${PREPRINTED_PAGE_MM.height}mm; }
+  </style></head><body>
+    <div class="page">
+      ${field(L.date, payload.invoice_date || '')}
+      ${field(L.code, '')}
+      ${field(L.name, payload.customer_name && payload.customer_name !== 'Walk-in' ? payload.customer_name : '')}
+      ${field(L.address, payload.customer_address || '', 'white-space:normal;max-width:70mm;line-height:4mm')}
+      ${field(L.invoiceNo, payload.invoice_number)}
+      ${field(L.terms, String(payload.payment_method || '').replace(/_/g, ' ').toUpperCase())}
+      ${field(L.currency, currency)}
+      ${field(L.deliveryTo, payload.customer_name && payload.customer_name !== 'Walk-in' ? payload.customer_name : '')}
+      ${field(L.custPoNo, '')}
+      ${field(L.copyNo, '')}
+      ${field(L.deliveryAddr, payload.customer_address || '', 'white-space:normal;max-width:70mm;line-height:4mm')}
+
+      ${itemRows}
+
+      ${field(L.subTotal, fmt(payload.subtotal))}
+      ${field(L.total, fmt(payload.total_amount))}
+
+      ${field(L.enteredBy, payload.cashier_name || '')}
+      ${field(L.dateIssue, payload.invoice_date || '')}
+      ${extraHtml}
+    </div>
+  </body></html>`
+}
+
+// ─── Advanced Layout Designer — fully custom, per-profile JSON layouts ────
+// Every element the designer can place (bound text/label, line, image,
+// barcode, QR), the item table's columns, and totals, are positioned in mm
+// from ONE layout object saved per print profile. This is the SAME
+// posDiv()-based absolute-positioning technique as buildPreprintedInvoiceHtml
+// above, generalized so it isn't hardcoded to the dot-matrix pre-printed case.
+export interface LayoutElement {
+  id: string
+  type: 'text' | 'line' | 'image' | 'barcode' | 'qr'
+  bind?: string | null    // a token from resolveToken(), or null for static text
+  staticText?: string     // static label text, or (for type:'image') a data: URL
+  x: number
+  y: number
+  width?: number          // used by 'line' (length, mm) and 'image' (max width, mm)
+  font?: string
+  size?: number            // pt
+  weight?: number
+  color?: string
+  align?: Align
+  visible?: boolean
+}
+export interface LayoutColumn { field: string; header?: string; x: number; align?: Align }
+export interface CustomLayout {
+  enabled: boolean
+  page: { w: number; h: number }
+  prePrinted: boolean
+  calibration: { offsetX: number; offsetY: number }
+  backgroundDataUrl?: string
+  elements: LayoutElement[]
+  itemTable: { x: number; y: number; rowHeight: number; maxRows?: number; showHeader?: boolean; columns: LayoutColumn[] }
+  totals: Record<'subtotal' | 'discount' | 'tax' | 'total', FieldPos | undefined>
+}
+
+function resolveToken(token: string, payload: InvoicePayload, settings: Record<string, unknown>): string {
+  const currency = String(settings.currency || 'LKR')
+  const fmt = (n: number) => Number(n || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const custName = payload.customer_name && payload.customer_name !== 'Walk-in' ? payload.customer_name : ''
+  switch (token) {
+    case 'company.name': return String(settings.company_name || '')
+    case 'company.address': return String(settings.company_address || '')
+    case 'company.phone': return String(settings.company_phone || '')
+    case 'company.email': return String(settings.company_email || '')
+    case 'company.regNo': return String(settings.company_tin || '')
+    case 'invoice.no': return payload.invoice_number || ''
+    case 'invoice.date': return payload.invoice_date || ''
+    case 'invoice.time': return payload.invoice_date || ''
+    case 'invoice.terms': return String(payload.payment_method || '').replace(/_/g, ' ').toUpperCase()
+    case 'invoice.currency': return currency
+    case 'invoice.copyNo': return ''
+    case 'invoice.poNo': return ''
+    case 'branch.name': return String(settings.branch_name || '')
+    case 'cashier.name': return payload.cashier_name || ''
+    case 'customer.name': return custName
+    case 'customer.address': return payload.customer_address || ''
+    case 'customer.deliveryTo': return custName
+    case 'subtotal': return fmt(payload.subtotal)
+    case 'discount': return fmt(payload.discount_amount)
+    case 'tax': return fmt(payload.tax_amount)
+    case 'total': return fmt(payload.total_amount)
+    case 'payment.method': return String(payload.payment_method || '')
+    case 'payment.received': return fmt(payload.paid_amount)
+    case 'payment.balance': return fmt(Math.max(0, (payload.total_amount || 0) - (payload.paid_amount || 0)))
+    default: return ''
+  }
+}
+
+function resolveItemToken(token: string, item: InvoicePayload['items'][number], index: number): string {
+  const fmt = (n: number) => Number(n || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  switch (token) {
+    case 'item.line': return String(index + 1)
+    case 'item.code': return item.sku || ''
+    case 'item.desc': return item.product_name || ''
+    case 'item.uom': return 'Nos'
+    case 'item.qty': return String(item.quantity)
+    case 'item.loc': return ''
+    case 'item.price': return fmt(item.unit_price)
+    case 'item.disc': return item.discount_amount ? fmt(item.discount_amount) : ''
+    case 'item.amount': return fmt(item.line_total)
+    default: return ''
+  }
+}
+
+async function buildCustomLayoutHtml(
+  payload: InvoicePayload, settings: Record<string, unknown>, layout: CustomLayout,
+  opts: { includeBackground?: boolean; extraHtml?: string } = {}
+): Promise<string> {
+  const ox = layout.calibration.offsetX
+  const oy = layout.calibration.offsetY
+  const pw = layout.page.w
+  const ph = layout.page.h
+
+  const elementParts = await Promise.all(layout.elements.filter(e => e.visible !== false).map(async e => {
+    const style = `font-family:'${e.font || 'Courier New'}',monospace;font-size:${e.size || 9}pt;font-weight:${e.weight || 400};color:${e.color || '#000'}`
+    if (e.type === 'line') {
+      return `<div style="position:absolute;left:${e.x + ox}mm;top:${e.y + oy}mm;width:${e.width || 20}mm;border-top:0.3mm solid ${e.color || '#000'}"></div>`
+    }
+    if (e.type === 'image') {
+      if (!e.staticText) return ''
+      return `<img src="${esc(e.staticText)}" style="position:absolute;left:${e.x + ox}mm;top:${e.y + oy}mm;max-width:${e.width || 40}mm;max-height:20mm" />`
+    }
+    if (e.type === 'barcode') {
+      const svg = buildBarcodeSvg(payload.invoice_number)
+      return `<div style="position:absolute;left:${e.x + ox}mm;top:${e.y + oy}mm;width:${e.width || 40}mm;line-height:0">${svg}</div>`
+    }
+    if (e.type === 'qr') {
+      let qrSvg = ''
+      try { qrSvg = await QRCode.toString(payload.invoice_number, { type: 'svg', margin: 0, errorCorrectionLevel: 'M' }) } catch { /* ignore */ }
+      return `<div style="position:absolute;left:${e.x + ox}mm;top:${e.y + oy}mm;width:${e.width || 20}mm;line-height:0">${qrSvg}</div>`
+    }
+    const text = esc(e.bind ? resolveToken(e.bind, payload, settings) : (e.staticText || ''))
+    if (!text) return ''
+    return posDiv(e.x, e.y, ox, oy, e.align || 'left', text, style)
+  }))
+
+  const t = layout.itemTable
+  const maxRows = t.maxRows || payload.items.length
+  const itemRows = payload.items.slice(0, maxRows).map((item, i) => {
+    const y = t.y + t.rowHeight * i
+    return t.columns.map(col =>
+      posDiv(col.x, y, ox, oy, col.align || 'left', esc(resolveItemToken(col.field, item, i)))
+    ).join('')
+  }).join('')
+  const tableHeader = t.showHeader
+    ? t.columns.map(col => posDiv(col.x, t.y - t.rowHeight, ox, oy, col.align || 'left', esc(col.header || ''), 'font-weight:700')).join('')
+    : ''
+
+  const totalsHtml = (['subtotal', 'discount', 'tax', 'total'] as const).map(key => {
+    const pos = layout.totals[key]
+    if (!pos) return ''
+    const value = key === 'subtotal' ? payload.subtotal : key === 'discount' ? payload.discount_amount : key === 'tax' ? payload.tax_amount : payload.total_amount
+    const fmt = Number(value || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    return posDiv(pos.x, pos.y, ox, oy, pos.align || 'right', fmt)
+  }).join('')
+
+  const backgroundHtml = opts.includeBackground && layout.backgroundDataUrl
+    ? `<img src="${esc(layout.backgroundDataUrl)}" style="position:absolute;left:0;top:0;width:${pw}mm;height:${ph}mm;opacity:0.5;z-index:0" />`
+    : ''
+
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Invoice ${esc(payload.invoice_number)}</title>
+  <style>
+    @page { size: ${pw}mm ${ph}mm; margin: 0; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; background: ${layout.prePrinted ? 'transparent' : '#fff'}; }
+    body { font-family: 'Courier New', monospace; color: #000; }
+    .page { position: relative; width: ${pw}mm; height: ${ph}mm; z-index: 1; }
+  </style></head><body>
+    ${backgroundHtml}
+    <div class="page">
+      ${elementParts.join('')}
+      ${tableHeader}
+      ${itemRows}
+      ${totalsHtml}
+      ${opts.extraHtml || ''}
+    </div>
+  </body></html>`
+}
+
+// Chooses which renderer to use for a print job: a saved custom layout for
+// this profile (Part B/C — Advanced Layout Designer) if one exists and is
+// enabled, else the existing pre-printed dot-matrix mode, else the built-in
+// branded template. Used by both printer:printInvoice (actual print/PDF) and
+// printer:renderInvoiceHtml (designer live preview) so they can never drift.
+async function resolveInvoiceHtml(
+  payload: InvoicePayload, settings: Record<string, unknown>, design: 'dot' | 'thermal' | 'a4',
+  opts: { includeBackground?: boolean } = {}
+): Promise<string> {
+  const customLayoutRaw = settings[`invoice_${design}_custom_layout_json`] as string | undefined
+  if (customLayoutRaw) {
+    try {
+      const layout = JSON.parse(customLayoutRaw) as CustomLayout
+      if (layout.enabled) return buildCustomLayoutHtml(payload, settings, layout, opts)
+    } catch { /* fall through to built-in templates on malformed JSON */ }
+  }
+  if (design === 'dot' && Boolean(settings.invoice_dot_preprinted_mode)) {
+    return buildPreprintedInvoiceHtml(payload, settings,
+      Number(settings.invoice_dot_preprinted_offset_x) || 0, Number(settings.invoice_dot_preprinted_offset_y) || 0)
+  }
+  return buildInvoiceHtml(payload, settings)
+}
+
+// ─── ESC/POS raw thermal printing ──────────────────────────────────────────
+// Thermal printers speak a line-based command protocol, not the X/Y-mm model
+// the HTML/PDF renderers above use — there's no meaningful way to project a
+// mm-positioned layout onto a 42-character-wide receipt, so this walks the
+// same logical sections (header → meta → items → totals → footer) as the
+// thermal HTML template and emits raw ESC/POS bytes instead. Delivered via a
+// raw TCP socket to the printer's configured IP:port (standard "raw print"
+// port 9100 on nearly all network thermal printers) — no native/serial
+// dependency needed.
+const ESC = 0x1B
+const GS = 0x1D
+function escInit() { return Buffer.from([ESC, 0x40]) }
+function escAlign(n: 0 | 1 | 2) { return Buffer.from([ESC, 0x61, n]) }
+function escBold(on: boolean) { return Buffer.from([ESC, 0x45, on ? 1 : 0]) }
+function escFontSize(w: number, h: number) {
+  const n = ((Math.max(0, Math.min(7, w))) << 4) | Math.max(0, Math.min(7, h))
+  return Buffer.from([GS, 0x21, n])
+}
+function escFeed(lines = 1) { return Buffer.from(new Array(lines).fill(0x0A)) }
+function escCut() { return Buffer.from([GS, 0x56, 0x00]) }
+// ESC/POS printers generally only render the default codepage's ASCII/Latin
+// range reliably without a codepage-switch command — strip anything outside
+// it so unsupported characters don't come out as garbage instead of failing loudly.
+function escSafe(s: string): string { return s.replace(/[^\x20-\x7E]/g, '') }
+function escText(s: string): Buffer { return Buffer.from(escSafe(s), 'ascii') }
+function padLine(left: string, right: string, width = 42): string {
+  const l = left.length > width ? left.slice(0, width) : left
+  const space = Math.max(1, width - l.length - right.length)
+  return l + ' '.repeat(space) + right
+}
+
+function buildEscPos(payload: InvoicePayload, settings: Record<string, unknown>): Buffer {
+  const W = 42
+  const currency = String(settings.currency_symbol || 'Rs.')
+  const fmt = (n: number) => `${currency}${Number(n || 0).toFixed(2)}`
+  const companyName = escSafe(String(settings.company_name || 'Nature Plantation'))
+  const parts: Buffer[] = [escInit(), escAlign(1), escBold(true), escFontSize(1, 1), escText(companyName + '\n'), escFontSize(0, 0), escBold(false)]
+  if (settings.company_address) parts.push(escText(String(settings.company_address) + '\n'))
+  if (settings.company_phone) parts.push(escText(String(settings.company_phone) + '\n'))
+  parts.push(escText('-'.repeat(W) + '\n'), escAlign(0))
+  parts.push(escText(`Invoice: ${payload.invoice_number}\n`))
+  parts.push(escText(`Date: ${payload.invoice_date || ''}\n`))
+  if (payload.cashier_name) parts.push(escText(`Cashier: ${payload.cashier_name}\n`))
+  if (payload.customer_name && payload.customer_name !== 'Walk-in') parts.push(escText(`Customer: ${payload.customer_name}\n`))
+  parts.push(escText('-'.repeat(W) + '\n'))
+  for (const item of payload.items) {
+    parts.push(escText(item.product_name.slice(0, W) + '\n'))
+    parts.push(escText(padLine(`  ${item.quantity} x ${fmt(item.unit_price)}`, fmt(item.line_total), W) + '\n'))
+  }
+  parts.push(escText('-'.repeat(W) + '\n'))
+  parts.push(escText(padLine('Subtotal', fmt(payload.subtotal), W) + '\n'))
+  if (payload.discount_amount > 0) parts.push(escText(padLine('Discount', '-' + fmt(payload.discount_amount), W) + '\n'))
+  if (payload.tax_amount > 0) parts.push(escText(padLine('Tax', fmt(payload.tax_amount), W) + '\n'))
+  parts.push(escBold(true), escText(padLine('TOTAL', fmt(payload.total_amount), W) + '\n'), escBold(false))
+  parts.push(escText('-'.repeat(W) + '\n'), escAlign(1))
+  parts.push(escText(String(settings.invoice_thermal_footer_message || 'Thank you for shopping with us!') + '\n'))
+  parts.push(escFeed(3), escCut())
+  return Buffer.concat(parts)
+}
+
+function sendRawToPrinter(host: string, port: number, buffer: Buffer): Promise<{ success: boolean; error?: string }> {
+  return new Promise(resolve => {
+    const socket = new net.Socket()
+    const timer = setTimeout(() => { socket.destroy(); resolve({ success: false, error: 'Connection to printer timed out' }) }, 5000)
+    socket.once('error', (err) => { clearTimeout(timer); resolve({ success: false, error: err.message }) })
+    socket.connect(port, host, () => {
+      socket.write(buffer, () => {
+        clearTimeout(timer)
+        socket.end()
+        resolve({ success: true })
+      })
+    })
+  })
 }
 
 function buildEmailBody(payload: InvoicePayload, settings: Record<string, unknown>): string {
