@@ -15,7 +15,14 @@ export function useSyncStatus() {
   const refresh = async () => {
     try {
       const res = await window.api.sync.status()
-      if (res.success) setStatus(s => ({ ...s, ...(res.data as object) }))
+      if (!res.success) return
+      // Polled every 10s — only replace the object (and re-render every
+      // consumer, e.g. AppLayout) when a field actually changed.
+      setStatus(s => {
+        const next = { ...s, ...(res.data as object) }
+        const keys = Object.keys(next) as (keyof SyncStatus)[]
+        return keys.every(k => next[k] === s[k]) ? s : next
+      })
     } catch {}
   }
 

@@ -119,7 +119,18 @@ export default function App() {
         navigate('/setup', { replace: true })
       }
     })
-  }, [init, navigate])
+    // Run once on app boot only. `navigate` from useNavigate() is NOT
+    // referentially stable across route changes (react-router memoizes it
+    // with the current location pathname in its dependency array), so
+    // including it here was re-firing this whole activation/init check on
+    // every single navigation — which calls init() again, flips
+    // authStore.isLoading true->false, and makes RequireAuth swap
+    // <LoadingScreen/> in for <AppLayout/>, unmounting and remounting the
+    // entire layout (sidebar, logo, scroll position) on every click.
+    // `init` is a stable Zustand action reference and does not need to be
+    // listed either.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   if (activated === null) return <LoadingScreen />
   if (!activated) return <ActivationPage onActivated={() => { finishActivation().catch(() => navigate('/login', { replace: true })) }} />

@@ -21,9 +21,19 @@ export const useAuthStore = create<AuthState>()(
       // Called from AppLayout's periodic /api/brand poll so a superadmin
       // toggling a module takes effect for any page reading this store,
       // not just the sidebar nav that originally fetched it.
+      // The poll runs every 30s forever with the same module list on almost
+      // every tick — replacing `user` with a new object reference each time
+      // was forcing every useAuthStore() consumer (App, RequireAuth,
+      // AppLayout, RequireModule) to re-render app-wide on a timer. Only
+      // replace `user` when the module list actually changed.
       setEnabledModules: (modules) => {
         const user = get().user
         if (!user) return
+        const prev = user.enabledModules
+        const unchanged = Array.isArray(prev)
+          && prev.length === modules.length
+          && prev.every((m, i) => m === modules[i])
+        if (unchanged) return
         set({ user: { ...user, enabledModules: modules } })
       },
 

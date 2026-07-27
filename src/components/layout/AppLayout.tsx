@@ -8,7 +8,7 @@ import {
   ChevronRight, ShoppingBag, Menu, Building2, Shield, HardDrive,
   Activity, Download, RefreshCw, Ticket, Coins, Percent, type LucideIcon
 } from 'lucide-react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, memo } from 'react'
 import toast from 'react-hot-toast'
 import NotificationPanel from './NotificationPanel'
 import { setSystemTheme } from '@/lib/systemTheme'
@@ -199,7 +199,7 @@ function saveSidebarScroll(top: number) {
   try { sessionStorage.setItem(SIDEBAR_SCROLL_KEY, String(Math.max(0, top))) } catch {}
 }
 
-function SidebarGroup({
+const SidebarGroup = memo(function SidebarGroup({
   group, permissions, isAdmin, collapsed, enabledModules, kind
 }: {
   group: NavGroup
@@ -322,7 +322,7 @@ function SidebarGroup({
       </div>
     </div>
   )
-}
+})
 
 function SidebarLink({ to, icon: Icon, label, collapsed, end = false }: {
   to: string
@@ -350,7 +350,6 @@ function SidebarLink({ to, icon: Icon, label, collapsed, end = false }: {
 }
 
 export default function AppLayout() {
-
   const { user, logout, setEnabledModules: setAuthEnabledModules } = useAuthStore()
   const { status, triggerSync } = useSyncStatus()
   const navigate = useNavigate()
@@ -365,7 +364,6 @@ export default function AppLayout() {
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null)
   const sidebarNavRef = useRef<HTMLElement | null>(null)
   const brand401CountRef = useRef(0)
-  const location = useLocation()
 
   const permissions = (user?.role?.permissions ||
     (user as unknown as Record<string, unknown>)?.permissions) as Record<string, unknown> || {}
@@ -425,16 +423,24 @@ export default function AppLayout() {
               applyColor(brand.brand_color)
               setBranding(prev => ({ ...prev, brand_color: brand.brand_color, company_logo_url: brand.brand_logo_url ?? prev.company_logo_url }))
             }
-            if (brand?.sub_status) setSubStatus(brand.sub_status)
-            if (brand?.sub_ends_at) setSubEndsAt(brand.sub_ends_at)
+            // This branch runs every 30s on every poll tick — only commit a
+            // setState when the value actually differs, otherwise this loop
+            // re-renders AppLayout (and everything under it) forever even
+            // when nothing about the subscription/lock/module state changed.
+            if (brand?.sub_status) setSubStatus(prev => prev === brand.sub_status ? prev : brand.sub_status)
+            if (brand?.sub_ends_at) setSubEndsAt(prev => prev === brand.sub_ends_at ? prev : brand.sub_ends_at)
             if (brand?.is_locked) {
-              setIsLocked(Boolean(brand.is_locked))
-              if (brand.lock_reason) setLockReason(brand.lock_reason as 'suspended' | 'cancelled')
-              setLockDetail(typeof brand.suspension_reason === 'string' ? brand.suspension_reason : null)
+              setIsLocked(prev => prev === true ? prev : true)
+              if (brand.lock_reason) setLockReason(prev => prev === brand.lock_reason ? prev : brand.lock_reason as 'suspended' | 'cancelled')
+              const detail = typeof brand.suspension_reason === 'string' ? brand.suspension_reason : null
+              setLockDetail(prev => prev === detail ? prev : detail)
             }
             if (Array.isArray(brand?.modules)) {
-              setEnabledModules(brand.modules as string[])
-              setAuthEnabledModules(brand.modules as string[])
+              const modules = brand.modules as string[]
+              setEnabledModules(prev =>
+                prev && prev.length === modules.length && prev.every((m, i) => m === modules[i]) ? prev : modules
+              )
+              setAuthEnabledModules(modules)
             }
           } catch { /* offline — cached color stays */ }
         }
@@ -460,6 +466,11 @@ export default function AppLayout() {
   }, [])
 
   useEffect(() => {
+    // Restore once on mount only — the <nav> DOM node persists across route
+    // navigation (single layout Route + Outlet), so re-running this on every
+    // location.pathname change was force-writing scrollTop on every sidebar
+    // click, which could race with the live onScroll save below and appear
+    // to reset the scroll position.
     const node = sidebarNavRef.current
     if (!node) return
     const top = getSavedSidebarScroll()
@@ -470,7 +481,7 @@ export default function AppLayout() {
       saveSidebarScroll(node.scrollTop)
       window.removeEventListener('beforeunload', onBeforeUnload)
     }
-  }, [location.pathname, sidebarOpen])
+  }, [])
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
