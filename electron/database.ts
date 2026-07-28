@@ -1165,6 +1165,32 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_discounts_product ON discounts(product_id);
     CREATE INDEX IF NOT EXISTS idx_discounts_branch  ON discounts(branch_id);
   `)
+
+  // ── Printers: which physical/OS printer handles which print purpose ───────
+  // Local-only (no synced_at) — a Windows printer_name is only meaningful on
+  // the machine it's installed on. device_id = '' means "branch-level default".
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS printers (
+      id               TEXT PRIMARY KEY,
+      branch_id        TEXT NOT NULL REFERENCES branches(id),
+      device_id        TEXT NOT NULL DEFAULT '',
+      printer_name     TEXT NOT NULL,
+      printer_type     TEXT NOT NULL DEFAULT 'thermal' CHECK (printer_type IN ('thermal','dot_matrix','laser','label')),
+      connection_type  TEXT NOT NULL DEFAULT 'windows_driver' CHECK (connection_type IN ('windows_driver','network_escpos')),
+      ip_address       TEXT,
+      port             INTEGER,
+      paper_size       TEXT,
+      assigned_module  TEXT NOT NULL CHECK (assigned_module IN ('receipt','invoice','label','kitchen')),
+      copies           INTEGER NOT NULL DEFAULT 1,
+      is_active        INTEGER NOT NULL DEFAULT 1,
+      created_by       TEXT REFERENCES users(id),
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_printers_branch ON printers(branch_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_printers_scope_module
+      ON printers(branch_id, device_id, assigned_module);
+  `)
 }
 
 function seedDefaultData() {

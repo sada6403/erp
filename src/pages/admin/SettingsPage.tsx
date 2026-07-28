@@ -1542,6 +1542,128 @@ function CommunicationsSettings({ form, f, check }: {
   )
 }
 
+const PRINT_ASSIGNMENT_TYPES = [
+  { key: 'receipt', label: 'Receipt (Thermal)' },
+  { key: 'invoice', label: 'Invoice' },
+  { key: 'label',   label: 'Barcode Label' },
+  { key: 'kitchen', label: 'Kitchen Ticket' },
+] as const
+
+function PrinterAssignmentRow({ module, label, printers, config, onSaved }: {
+  module: string
+  label: string
+  printers: any[]
+  config: any | undefined
+  onSaved: () => Promise<void>
+}) {
+  const [connectionType, setConnectionType] = useState<'windows_driver' | 'network_escpos'>(config?.connection_type || 'windows_driver')
+  const [printerName, setPrinterName] = useState(config?.connection_type === 'windows_driver' ? (config?.printer_name || '') : '')
+  const [ipAddress, setIpAddress] = useState(config?.ip_address || '')
+  const [port, setPort] = useState(config?.port || 9100)
+  const [copies, setCopies] = useState(config?.copies || 1)
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    if (connectionType === 'windows_driver' && !printerName) {
+      toast.error('Select a printer'); return
+    }
+    if (connectionType === 'network_escpos' && !ipAddress) {
+      toast.error('Enter the printer IP address'); return
+    }
+    setSaving(true)
+    try {
+      const res = await window.api.printer.savePrinterConfig({
+        id: config?.id,
+        assignedModule: module,
+        connectionType,
+        printerName: connectionType === 'windows_driver' ? printerName : ipAddress,
+        printerType: 'thermal',
+        ipAddress: connectionType === 'network_escpos' ? ipAddress : null,
+        port: connectionType === 'network_escpos' ? Number(port) || 9100 : null,
+        copies: Math.max(1, Number(copies) || 1),
+      }) as { success: boolean; error?: string }
+      if (res.success) { toast.success(`${label} printer saved`); await onSaved() }
+      else toast.error(res.error || 'Failed to save')
+    } catch (err) {
+      toast.error('Failed to save: ' + String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const remove = async () => {
+    if (!config?.id) return
+    if (!confirm(`Remove the ${label} printer assignment?`)) return
+    try {
+      const res = await window.api.printer.deletePrinterConfig(config.id) as { success: boolean; error?: string }
+      if (res.success) { toast.success('Assignment removed'); await onSaved() }
+      else toast.error(res.error || 'Failed to remove')
+    } catch (err) {
+      toast.error('Failed to remove: ' + String(err))
+    }
+  }
+
+  const [testingRow, setTestingRow] = useState(false)
+  const testPrint = async () => {
+    if (!config?.id) return
+    setTestingRow(true)
+    try {
+      const res = await window.api.printer.testPrinterConfig(config.id) as { success: boolean; error?: string }
+      if (res.success) toast.success('Test print sent')
+      else toast.error(res.error || 'Test print failed')
+    } catch (err) {
+      toast.error('Test print failed: ' + String(err))
+    } finally {
+      setTestingRow(false)
+    }
+  }
+
+  return (
+    <div className="rounded-lg border p-3" style={{ borderColor: 'var(--border)' }}>
+      <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-1)' }}>{label}</p>
+      <div className="grid grid-cols-2 gap-3 mb-2">
+        <Field label="Connection">
+          <select value={connectionType} onChange={e => setConnectionType(e.target.value as 'windows_driver' | 'network_escpos')} className="input">
+            <option value="windows_driver">Windows Printer</option>
+            <option value="network_escpos">Network (ESC/POS)</option>
+          </select>
+        </Field>
+        <Field label="Copies">
+          <input type="number" min={1} value={copies} onChange={e => setCopies(e.target.value)} className="input" />
+        </Field>
+      </div>
+      {connectionType === 'windows_driver' ? (
+        <Field label="Printer">
+          <select value={printerName} onChange={e => setPrinterName(e.target.value)} className="input">
+            <option value="">Select a printer…</option>
+            {printers.map((printer, index) => {
+              const name = printer?.name || printer?.deviceName || ''
+              const display = printer?.displayName || name || `Printer ${index + 1}`
+              return <option key={`${name}-${index}`} value={name}>{display}</option>
+            })}
+          </select>
+        </Field>
+      ) : (
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="IP Address">
+            <input value={ipAddress} onChange={e => setIpAddress(e.target.value)} className="input" placeholder="e.g. 192.168.1.50" />
+          </Field>
+          <Field label="Port">
+            <input type="number" value={port} onChange={e => setPort(e.target.value)} className="input" placeholder="9100" />
+          </Field>
+        </div>
+      )}
+      <div className="flex gap-2 mt-3">
+        <button onClick={save} disabled={saving} className="btn-primary btn-sm">{saving ? 'Saving…' : 'Save'}</button>
+        {config?.id && (
+          <button onClick={testPrint} disabled={testingRow} className="btn-secondary btn-sm">{testingRow ? 'Testing…' : 'Test Print'}</button>
+        )}
+        {config?.id && <button onClick={remove} className="btn-ghost btn-sm text-red-400">Remove</button>}
+      </div>
+    </div>
+  )
+}
+
 function PrinterSettings({
   printers,
   loading,
@@ -1557,6 +1679,20 @@ function PrinterSettings({
 }) {
   const [testing, setTesting] = useState(false)
   const [testingEscPos, setTestingEscPos] = useState(false)
+  const [configs, setConfigs] = useState<any[]>([])
+  const [configsLoading, setConfigsLoading] = useState(true)
+
+  const loadConfigs = async () => {
+    setConfigsLoading(true)
+    try {
+      const res = await window.api.printer.listPrinterConfigs() as { success: boolean; data?: any[] }
+      if (res.success) setConfigs(res.data || [])
+    } finally {
+      setConfigsLoading(false)
+    }
+  }
+
+  useEffect(() => { loadConfigs() }, [])
 
   const runTest = async () => {
     setTesting(true)
@@ -1641,6 +1777,29 @@ function PrinterSettings({
             )
           })}
         </div>
+      </Section>
+
+      <Section title="Print Assignments">
+        <p className="text-xs -mt-1 mb-3" style={{ color: 'var(--text-3)' }}>
+          Assign a specific printer to each document type. Leave a type unassigned to keep
+          using the Windows default printer with a print dialog, same as before.
+        </p>
+        {configsLoading ? (
+          <div className="text-sm" style={{ color: 'var(--text-3)' }}>Loading…</div>
+        ) : (
+          <div className="space-y-3">
+            {PRINT_ASSIGNMENT_TYPES.map(({ key, label }) => (
+              <PrinterAssignmentRow
+                key={key}
+                module={key}
+                label={label}
+                printers={printers}
+                config={configs.find(c => c.assigned_module === key)}
+                onSaved={loadConfigs}
+              />
+            ))}
+          </div>
+        )}
       </Section>
     </div>
   )

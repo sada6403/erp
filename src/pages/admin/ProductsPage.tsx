@@ -4,7 +4,7 @@ import Modal from '@/components/shared/Modal'
 import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
-  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw, Clock
+  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw, Clock, Printer
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
@@ -174,6 +174,18 @@ export default function ProductsPage() {
     }
   }
 
+  const printLabel = async (p: Product) => {
+    try {
+      const res = await window.api.printer.printLabel({
+        product_name: p.name, sku: p.sku, barcode: p.barcode, price: p.selling_price,
+      }) as { success: boolean; error?: string }
+      if (res.success) toast.success('Label sent to printer')
+      else toast.error(res.error || 'Failed to print label')
+    } catch (err) {
+      toast.error('Failed to print label: ' + String(err))
+    }
+  }
+
   const handlePermanentDelete = async () => {
     if (!deleteTarget || !deleteReason.trim()) {
       toast.error('Please provide a reason for deletion')
@@ -322,6 +334,9 @@ export default function ProductsPage() {
                       />
                       <button onClick={() => toggleActive(p)} className="btn-ghost btn-sm p-1.5" title={p.is_active ? 'Deactivate' : 'Activate'}>
                         {p.is_active ? <ToggleRight size={14} className="text-green-400" /> : <ToggleLeft size={14} />}
+                      </button>
+                      <button onClick={() => printLabel(p)} className="btn-ghost btn-sm p-1.5" title="Print Label">
+                        <Printer size={13} />
                       </button>
                       {isCompanyAdmin && (
                         <button onClick={() => { setDeleteTarget(p); setDeleteReason('') }}
