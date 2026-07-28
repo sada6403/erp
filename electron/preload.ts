@@ -243,6 +243,13 @@ const api = {
     emailInvoice: (payload: unknown) => ipcRenderer.invoke('printer:emailInvoice', payload),
     test:         ()                 => ipcRenderer.invoke('printer:test'),
     listDevices:  ()                 => ipcRenderer.invoke('printer:listDevices'),
+    listSystemPrinters: ()            => ipcRenderer.invoke('printer:listSystemPrinters'),
+    listPrinterConfigs:  (branchId?: string) => ipcRenderer.invoke('printer:listPrinterConfigs', branchId),
+    savePrinterConfig:   (payload: unknown)  => ipcRenderer.invoke('printer:savePrinterConfig', payload),
+    deletePrinterConfig: (id: string)        => ipcRenderer.invoke('printer:deletePrinterConfig', id),
+    testPrinterConfig:   (id: string)        => ipcRenderer.invoke('printer:testPrinterConfig', id),
+    printKitchenTicket:  (payload: unknown)  => ipcRenderer.invoke('printer:printKitchenTicket', payload),
+    printLabel:          (payload: unknown)  => ipcRenderer.invoke('printer:printLabel', payload),
   },
 
   // Purchase Orders

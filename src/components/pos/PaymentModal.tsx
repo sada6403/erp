@@ -6,7 +6,7 @@ import { useKeyboard } from '@/hooks/useKeyboard'
 import type { BillType } from '@/store/cartStore'
 import {
   X, CreditCard, Banknote, Building2, Calendar, Printer, CheckCircle2,
-  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Keyboard, Handshake, UserPlus, Ticket
+  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Keyboard, Handshake, UserPlus, Ticket, ChefHat
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { PaymentMethod } from '@/types'
@@ -59,6 +59,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [done, setDone]                 = useState(false)
   const [printing, setPrinting]         = useState(false)
   const [emailing, setEmailing]         = useState(false)
+  const [printingKitchen, setPrintingKitchen] = useState(false)
   const [receiptPayload, setReceiptPayload] = useState<Record<string, unknown> | null>(null)
   const [printDesign, setPrintDesign]   = useState<'dot' | 'thermal' | 'a4'>('thermal')
   // Loyalty
@@ -410,6 +411,17 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     finally { setPrinting(false) }
   }, [receiptPayload, printDesign])
 
+  const handleKitchenTicket = useCallback(async () => {
+    if (!receiptPayload) return
+    setPrintingKitchen(true)
+    try {
+      const res = await window.api.printer.printKitchenTicket(receiptPayload)
+      if (!(res as { success: boolean }).success) toast.error('Kitchen ticket failed')
+      else toast.success('Kitchen ticket sent')
+    } catch { toast.error('Kitchen ticket failed') }
+    finally { setPrintingKitchen(false) }
+  }, [receiptPayload])
+
   const handleEmail = useCallback(async () => {
     if (!receiptPayload) return
     const customerEmail = receiptPayload.customer_email as string
@@ -528,6 +540,14 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               <Mail size={15} className={emailing ? 'animate-pulse' : ''} />
               {emailing ? 'Opening...' : 'Email Invoice'}
               <kbd className="kbd text-[9px] ml-auto">E</kbd>
+            </button>
+            <button
+              onClick={handleKitchenTicket} disabled={printingKitchen}
+              title="Print kitchen order ticket"
+              className="btn-secondary w-full gap-1.5 disabled:opacity-40"
+            >
+              <ChefHat size={15} className={printingKitchen ? 'animate-pulse' : ''} />
+              {printingKitchen ? 'Sending...' : 'Kitchen Ticket'}
             </button>
           </div>
 

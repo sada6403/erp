@@ -62,7 +62,7 @@ function activationSessionShape(extra: Record<string, unknown> = {}) {
   }
 }
 
-function getOrCreateDeviceId(): string {
+export function getOrCreateDeviceId(): string {
   let id = store.get('device_uuid') as string | undefined
   if (!id) {
     id = randomUUID()
