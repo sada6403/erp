@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
+import { syncStockRow } from '../services/stockSync'
 import { safeHandleModule } from './ipcHandler'
 
 const store = new Store()
@@ -148,6 +149,9 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       })()
 
       await enqueuSync('purchase_orders', id, 'INSERT', po)
+      for (const item of items as Record<string, unknown>[]) {
+        await enqueuSync('purchase_items', String(item.id), 'INSERT', item)
+      }
       return { success: true, data: { id, po_number } }
   })
 
@@ -174,6 +178,8 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       const patch: Record<string, unknown> = { status }
 
       // When marking RECEIVED or PARTIAL, update received quantities on items and adjust stock
+      const receivedItemIds: string[] = []
+      const receivedProductIds: string[] = []
       if ((status === 'RECEIVED' || status === 'PARTIAL') && payload.items) {
         db.transaction(() => {
           let allFullyReceived = true
@@ -191,6 +197,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
 
             db.prepare(`UPDATE purchase_items SET received_qty=?, updated_at=datetime('now') WHERE id=?`)
               .run(totalReceived, poItem.id)
+            receivedItemIds.push(String(poItem.id))
 
             // Update stock at receiving branch
             if (newReceived > 0) {
@@ -205,6 +212,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
                 db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty)
                   VALUES (?,?,?,?,0)`).run(crypto.randomUUID(), productId, branchId, newReceived)
               }
+              receivedProductIds.push(productId)
             }
 
             if (totalReceived < Number(poItem.quantity)) allFullyReceived = false
@@ -223,6 +231,13 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             newValues: { from: po.status, to: patch.status },
           })
         })()
+        for (const itemId of receivedItemIds) {
+          const row = db.prepare('SELECT * FROM purchase_items WHERE id=?').get(itemId)
+          await enqueuSync('purchase_items', itemId, 'UPDATE', row as Record<string, unknown>)
+        }
+        for (const productId of receivedProductIds) {
+          await syncStockRow(db, productId, String(po.branch_id))
+        }
       } else {
         if (status === 'SENT')      patch.sent_at      = now
         if (status === 'RECEIVED')  patch.received_at  = now
@@ -251,6 +266,8 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       if (!po) throw new Error('Purchase order not found')
       if (po.status !== 'DRAFT') throw new Error('Only DRAFT purchase orders can be edited')
 
+      const newItems: Record<string, unknown>[] = []
+
       db.transaction(() => {
         if (payload.notes !== undefined)         db.prepare('UPDATE purchase_orders SET notes=? WHERE id=?').run(payload.notes, id)
         if (payload.expected_date !== undefined) db.prepare('UPDATE purchase_orders SET expected_date=? WHERE id=?').run(payload.expected_date, id)
@@ -265,9 +282,14 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             const unitCost = Number(item.unit_cost) || 0
             const lineTotal = qty * unitCost
             totalAmount += lineTotal
+            const itemId = crypto.randomUUID()
             db.prepare(`INSERT INTO purchase_items (id,po_id,product_id,quantity,unit_cost,line_total,received_qty,notes)
               VALUES (?,?,?,?,?,?,0,?)`)
-              .run(crypto.randomUUID(), id, item.product_id, qty, unitCost, lineTotal, item.notes || null)
+              .run(itemId, id, item.product_id, qty, unitCost, lineTotal, item.notes || null)
+            newItems.push({
+              id: itemId, po_id: id, product_id: item.product_id, quantity: qty,
+              unit_cost: unitCost, line_total: lineTotal, received_qty: 0, notes: item.notes || null,
+            })
           }
           db.prepare(`UPDATE purchase_orders SET total_amount=?, updated_at=datetime('now') WHERE id=?`)
             .run(totalAmount, id)
@@ -280,6 +302,9 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       })()
 
       await enqueuSync('purchase_orders', id, 'UPDATE', { id, ...payload })
+      for (const item of newItems) {
+        await enqueuSync('purchase_items', String(item.id), 'INSERT', item)
+      }
       return { success: true }
   })
 }

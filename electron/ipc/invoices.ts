@@ -5,6 +5,7 @@ import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
+import { syncStockRow, syncCustomerRow } from '../services/stockSync'
 import { redeemCouponInTransaction, reverseCouponForInvoice, type CouponRedemptionResult } from './coupons'
 import { resolveApplicableDiscount } from './discounts'
 import { safeHandle } from './ipcHandler'
@@ -351,6 +352,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       })
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+        await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
       }
       for (const itemRow of itemRecords) {
         await enqueuSync('invoice_items', String(itemRow.id), 'INSERT', itemRow)
@@ -360,6 +362,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       }
       if (creditLedgerRecord) {
         await enqueuSync('credit_ledger', String((creditLedgerRecord as Record<string, unknown>).id), 'INSERT', creditLedgerRecord)
+      }
+      if (payload.customer_id && (billType === 'CREDIT' || (payload.due_amount || 0) > 0)) {
+        await syncCustomerRow(db, String(payload.customer_id))
       }
       // (cast: TS cannot see the assignment inside the transaction closure)
       const redeemed = couponResult as CouponRedemptionResult | null
@@ -429,6 +434,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       await enqueuSync('invoices', id, 'UPDATE', { id, bill_type: 'RETAIL', status: 'completed', invoice_number: newNumber })
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+        await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
       }
       return { success: true, data: { invoice_number: newNumber } }
   })
@@ -519,6 +525,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         const ledgerRow = db.prepare(`SELECT * FROM credit_ledger WHERE id = ?`).get(ledgerId) as Record<string, unknown>
         await enqueuSync('credit_ledger', ledgerId, 'UPDATE', ledgerRow)
       }
+      if (invoice.customer_id) await syncCustomerRow(db, String(invoice.customer_id))
 
       return { success: true }
   })
@@ -655,6 +662,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       await enqueuSync('invoices', id, 'UPDATE', { id, status: 'cancelled' })
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+        await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
+      }
+      if (invoice.bill_type === 'CREDIT' && invoice.customer_id) {
+        await syncCustomerRow(db, String(invoice.customer_id))
       }
       for (const reversal of couponReversals) {
         await enqueuSync('coupons', reversal.couponId, 'UPDATE', reversal.couponRow)
@@ -778,6 +789,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       await enqueuSync('invoices', id, 'UPDATE', updatedInvoice as Record<string, unknown>)
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+        await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
+      }
+      if (invoice.bill_type === 'CREDIT' && deltaLineTotal !== 0 && invoice.customer_id) {
+        await syncCustomerRow(db, String(invoice.customer_id))
       }
       if (!isAdmin && payload.edit_request_id) {
         await enqueuSync('edit_requests', payload.edit_request_id, 'UPDATE', { id: payload.edit_request_id, status: 'consumed' })

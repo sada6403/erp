@@ -79,15 +79,14 @@ const NAV_GROUPS: NavGroup[] = [
     ]
   },
   {
-    // Umbrella home for every Chit Fund feature — schemes, member/customer
-    // management, and agent management all live here so future chit-fund
-    // development has one place to grow into instead of being scattered
-    // across other groups.
+    // Umbrella home for every Chit Fund feature — schemes and member/customer
+    // management live here so future chit-fund development has one place to
+    // grow into instead of being scattered across other groups. Agent
+    // Management lives under Employee Management only (staff records).
     label: 'Chit Fund Management', icon: Coins, perm: 'customers', module: 'customers',
     items: [
       { to: '/admin/chits', label: 'Chit Schemes', perm: 'customers' },
       { to: '/admin/chit-customers', label: 'Customers', perm: 'customers' },
-      { to: '/admin/agents', label: 'Agent Management', perm: 'employees' },
     ]
   },
   {
@@ -200,7 +199,7 @@ function saveSidebarScroll(top: number) {
 }
 
 const SidebarGroup = memo(function SidebarGroup({
-  group, permissions, isAdmin, collapsed, enabledModules, kind
+  group, permissions, isAdmin, collapsed, enabledModules, kind, pendingRoutes
 }: {
   group: NavGroup
   permissions: Record<string, unknown>
@@ -208,6 +207,7 @@ const SidebarGroup = memo(function SidebarGroup({
   collapsed: boolean
   enabledModules: string[] | null
   kind: SessionRoleKind
+  pendingRoutes?: string[]
 }) {
   const location = useLocation()
   const Icon = group.icon
@@ -305,7 +305,7 @@ const SidebarGroup = memo(function SidebarGroup({
                 key={item.to}
                 to={item.to}
                 className={({ isActive }) =>
-                  `block px-2.5 py-1.5 rounded-md text-xs transition-colors duration-100 truncate font-semibold ${
+                  `relative flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-xs transition-colors duration-100 truncate font-semibold ${
                     isActive ? 'shadow-sm' : 'hover:bg-[var(--bg-soft)]'
                   }`
                 }
@@ -314,7 +314,10 @@ const SidebarGroup = memo(function SidebarGroup({
                   : { color: 'var(--text-3)' }
                 }
               >
-                {item.label}
+                <span className="truncate">{item.label}</span>
+                {pendingRoutes?.includes(item.to) && (
+                  <span className="h-1.5 w-1.5 rounded-full flex-shrink-0" style={{ background: '#f59e0b' }} />
+                )}
               </NavLink>
             ))}
           </div>
@@ -362,6 +365,7 @@ export default function AppLayout() {
   const [lockReason, setLockReason] = useState<'suspended' | 'cancelled' | null>(null)
   const [lockDetail, setLockDetail] = useState<string | null>(null)
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null)
+  const [hasPendingStockRequests, setHasPendingStockRequests] = useState(false)
   const sidebarNavRef = useRef<HTMLElement | null>(null)
   const brand401CountRef = useRef(0)
 
@@ -372,6 +376,22 @@ export default function AppLayout() {
   const homeRoute = getLandingRoute(user)
   const homeLabel = getHomeLabel(profile.kind)
   const roleName = user?.role?.name || 'System User'
+  const userBranchId = (user?.branch?.id || (user as unknown as Record<string, unknown>)?.branch_id as string) ?? ''
+
+  useEffect(() => {
+    if (!userBranchId) return
+    let cancelled = false
+    const checkPending = async () => {
+      try {
+        const res = await window.api.stocks.listTransfers({ status: 'pending_approval' }) as { success: boolean; data?: Record<string, unknown>[] }
+        if (cancelled || !res.success || !res.data) return
+        setHasPendingStockRequests(res.data.some(t => String(t.to_branch_id) === userBranchId))
+      } catch { /* offline — leave last known state */ }
+    }
+    checkPending()
+    const interval = setInterval(checkPending, 60_000)
+    return () => { cancelled = true; clearInterval(interval) }
+  }, [userBranchId])
 
   useEffect(() => {
     const applyColor = (color: string) => {
@@ -653,6 +673,7 @@ export default function AppLayout() {
                 collapsed={!sidebarOpen}
                 enabledModules={enabledModules}
                 kind={profile.kind}
+                pendingRoutes={hasPendingStockRequests ? ['/admin/stock-requests'] : undefined}
               />
             ))}
             {profile.kind === 'owner' && (

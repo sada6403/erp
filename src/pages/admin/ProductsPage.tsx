@@ -943,10 +943,10 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
                 <input type="number" value={form.tax_rate} onChange={f('tax_rate')} className="input" min="0" max="100" step="0.5" />
               </div>
               <div>
-                <label className="label">Discount (%)</label>
+                <label className="label">Max Discount (%)</label>
                 <input type="number" value={discountPct || ''} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
                   className="input" min="0" max="100" step="0.5" placeholder="0"
-                  title="Auto-applies at POS. Also manageable per-branch in Admin > Discounts." />
+                  title="Applies automatically at POS checkout — the cashier doesn't need to enter it. Also manageable per-branch in Admin > Discounts." />
               </div>
               <div>
                 <label className="label">Image</label>

@@ -5,6 +5,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { enqueuSync } from '../services/syncQueue'
+import { syncStockRow } from '../services/stockSync'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { CloudApi } from '../services/cloudApi'
@@ -603,6 +604,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
               db.prepare('INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,?,?)')
                 .run(crypto.randomUUID(), productId, stockBranchId, null, stockQty)
             }
+            await syncStockRow(db, productId, stockBranchId)
 
             imported++
           } catch (rowErr) {
@@ -700,6 +702,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             } else {
               db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)`).run(crypto.randomUUID(), productId, branchId, stockQty)
             }
+            await syncStockRow(db, productId, branchId)
           }
 
           imported++

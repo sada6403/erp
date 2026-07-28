@@ -7,6 +7,8 @@ import fs from 'fs'
 import path from 'path'
 import { enqueuSync, enqueueUserRow } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
+import { insertStockMovement } from '../services/stockMovement'
+import { syncStockRow } from '../services/stockSync'
 import Store from 'electron-store'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import * as XLSX from 'xlsx'
@@ -890,6 +892,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const itemRecords: Record<string, unknown>[] = []
     const scheduleRecords: Record<string, unknown>[] = []
     const reminderRecords: Record<string, unknown>[] = []
+    const movementRecords: Record<string, unknown>[] = []
     let downPaymentRow: Record<string, unknown> | null = null
 
     db.transaction(() => {
@@ -934,6 +937,16 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
           WHERE product_id=? AND branch_id=? AND quantity >= ?
         `).run(qty, productId, branchId, qty)
         if (!changed.changes) throw new Error(`Insufficient branch stock for product ${productId}`)
+        movementRecords.push(insertStockMovement(db, {
+          product_id: productId,
+          from_branch_id: branchId,
+          to_branch_id: null,
+          quantity: qty,
+          movement_type: 'SALE',
+          reference_order_id: invoiceId,
+          notes: `Installment sale ${contractNumber}`,
+          created_by: (user.id as string) || null,
+        }))
       }
 
       db.prepare(`
@@ -1012,6 +1025,10 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     await enqueuSync('installments', accountId, 'INSERT', { id: accountId, contract_number: contractNumber, invoice_id: invoiceId, customer_id: customerId, branch_id: branchId, ...calc })
     for (const itemRow of itemRecords) {
       await enqueuSync('invoice_items', String(itemRow.id), 'INSERT', itemRow)
+    }
+    for (const movement of movementRecords) {
+      await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
     }
     for (const scheduleRow of scheduleRecords) {
       await enqueuSync('installment_schedule', String(scheduleRow.id), 'INSERT', scheduleRow)

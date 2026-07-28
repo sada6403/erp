@@ -22,6 +22,9 @@ export const ALLOWED_TABLES = new Set([
   'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions',
   // Edit requests
   'edit_requests',
+  // Stock counts + discounts — pushed from the app but were missing here,
+  // so every sync for these permanently failed server-side.
+  'stock_count_sessions', 'stock_count_items', 'discounts',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {

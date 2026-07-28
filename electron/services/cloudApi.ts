@@ -40,12 +40,31 @@ export class CloudApi {
     })
   }
 
+  // The server caps each response at PAGE_SIZE rows (see backend/app/api/sync/changes/route.ts)
+  // with no cursor of its own. A single one-shot call would silently truncate any table with
+  // more changed rows than that since the last pull — most likely on a fresh install's first
+  // sync, or a device that's been offline a long time. Page through by re-querying with the
+  // last row's own `updated_at` as the next `since`, until a page comes back under the cap.
+  private static readonly CHANGES_PAGE_SIZE = 5000
+  private static readonly CHANGES_MAX_PAGES = 200
+
   async changes(table: string, since: string): Promise<Record<string, unknown>[]> {
-    const query = new URLSearchParams({ table, since })
-    const result = await this.request<{ data: Record<string, unknown>[] }>(
-      `/api/sync/changes?${query.toString()}`
-    )
-    return result.data
+    const all: Record<string, unknown>[] = []
+    let cursor = since
+    for (let page = 0; page < CloudApi.CHANGES_MAX_PAGES; page++) {
+      const query = new URLSearchParams({ table, since: cursor })
+      const result = await this.request<{ data: Record<string, unknown>[] }>(
+        `/api/sync/changes?${query.toString()}`
+      )
+      const data = result.data
+      all.push(...data)
+      if (data.length < CloudApi.CHANGES_PAGE_SIZE) break
+      const lastUpdatedAt = data[data.length - 1]?.updated_at
+      if (!lastUpdatedAt || typeof lastUpdatedAt !== 'string') break
+      cursor = lastUpdatedAt
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+    return all
   }
 
   async related(table: string, foreignKey: string, ids: string[]): Promise<Record<string, unknown>[]> {
