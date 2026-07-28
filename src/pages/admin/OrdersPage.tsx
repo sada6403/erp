@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Plus } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
+import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
 import toast from 'react-hot-toast'
 
 const FLOW = ['pending','confirmed','processing','preparing','ready_for_delivery','dispatched','in_transit','delivered']
@@ -85,7 +86,7 @@ function OrderForm({ onClose, onDone }: { onClose: () => void; onDone: () => voi
       <div><label className="text-xs text-slate-400">Delivery date</label><input type="date" className="input mt-1" value={form.delivery_date} onChange={e => setForm({...form,delivery_date:e.target.value})} /></div>
       <div className="col-span-2 space-y-2"><label className="text-xs text-slate-400">Products *</label>
         {form.items.map((item, index) => <div className="grid grid-cols-[1fr_90px_130px] gap-2" key={index}>
-          <select className="input" value={item.product_id} onChange={e => setItem(index,'product_id',e.target.value)}><option value="">Select product</option>{products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+          <ProductSearchSelect products={products} value={item.product_id} onChange={id => setItem(index,'product_id',id)} />
           <input className="input" type="number" min={1} value={item.quantity} onChange={e => setItem(index,'quantity',Number(e.target.value))} />
           <input className="input" type="number" value={item.unit_price} onChange={e => setItem(index,'unit_price',Number(e.target.value))} />
         </div>)}
