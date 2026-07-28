@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Bell, X, Check, CheckCheck, Trash2, Package, CreditCard, RefreshCw, ShieldAlert, Info, ArrowLeftRight } from 'lucide-react'
 
 interface Notification {
@@ -9,6 +10,23 @@ interface Notification {
   is_read: number
   data: string | null
   created_at: string
+}
+
+// Best-effort destination for a notification click. Not every type has an
+// obvious single page (sync_failed, license/subscription alerts) — those
+// just mark read and close instead of navigating.
+function routeFor(n: Notification): string | null {
+  let data: Record<string, unknown> = {}
+  try { data = n.data ? JSON.parse(n.data) : {} } catch { /* ignore malformed data */ }
+
+  if (n.type === 'low_stock') {
+    if (n.title === 'Batches Expiring Soon' || n.title === 'Expired Stock Alert') return '/admin/batches'
+    return '/admin/stock-intelligence'
+  }
+  if (n.type === 'installment_due' || n.type === 'installment_overdue') return '/admin/installments'
+  if (n.type === 'transfer_request') return '/admin/stock-requests'
+  if (n.type === 'info' && typeof data.event === 'string' && data.event.startsWith('edit_request_')) return '/admin/edit-requests'
+  return null
 }
 
 const TYPE_ICON: Record<string, React.ReactNode> = {
@@ -34,6 +52,7 @@ function timeAgo(dt: string) {
 }
 
 export default function NotificationPanel() {
+  const navigate = useNavigate()
   const [open, setOpen]             = useState(false)
   const [items, setItems]           = useState<Notification[]>([])
   const [unread, setUnread]         = useState(0)
@@ -95,6 +114,12 @@ export default function NotificationPanel() {
     setItems(prev => prev.filter(n => !n.is_read))
   }
 
+  const openNotification = async (n: Notification) => {
+    if (!n.is_read) await markRead(n.id)
+    const to = routeFor(n)
+    if (to) { navigate(to); setOpen(false) }
+  }
+
   return (
     <div className="relative" ref={panelRef}>
       <button
@@ -153,9 +178,12 @@ export default function NotificationPanel() {
                 <p className="text-sm" style={{ color: 'var(--text-3)' }}>No notifications</p>
               </div>
             )}
-            {items.map(n => (
+            {items.map(n => {
+              const clickable = Boolean(routeFor(n))
+              return (
               <div key={n.id}
-                className={`flex gap-3 px-4 py-3 border-b transition-colors ${!n.is_read ? '' : 'opacity-60'}`}
+                onClick={clickable ? () => openNotification(n) : undefined}
+                className={`flex gap-3 px-4 py-3 border-b transition-colors ${!n.is_read ? '' : 'opacity-60'} ${clickable ? 'cursor-pointer hover:bg-[var(--bg-soft)]' : ''}`}
                 style={{ borderColor: 'var(--border)', background: !n.is_read ? 'color-mix(in srgb, var(--brand-primary) 5%, transparent)' : undefined }}
               >
                 <div className="mt-0.5 flex-shrink-0">{TYPE_ICON[n.type] ?? <Info size={14} style={{ color: 'var(--text-3)' }} />}</div>
@@ -166,16 +194,17 @@ export default function NotificationPanel() {
                 </div>
                 <div className="flex flex-col gap-1 flex-shrink-0">
                   {!n.is_read && (
-                    <button onClick={() => markRead(n.id)} className="p-1 rounded hover:bg-[var(--bg-soft)]" title="Mark read" style={{ color: 'var(--text-3)' }}>
+                    <button onClick={e => { e.stopPropagation(); markRead(n.id) }} className="p-1 rounded hover:bg-[var(--bg-soft)]" title="Mark read" style={{ color: 'var(--text-3)' }}>
                       <Check size={11} />
                     </button>
                   )}
-                  <button onClick={() => deleteNotif(n.id)} className="p-1 rounded hover:bg-[var(--bg-soft)] text-red-400" title="Delete">
+                  <button onClick={e => { e.stopPropagation(); deleteNotif(n.id) }} className="p-1 rounded hover:bg-[var(--bg-soft)] text-red-400" title="Delete">
                     <X size={11} />
                   </button>
                 </div>
               </div>
-            ))}
+              )
+            })}
           </div>
         </div>
       )}

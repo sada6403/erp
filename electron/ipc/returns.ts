@@ -2,6 +2,8 @@ import { ipcMain } from 'electron'
 import crypto from 'crypto'
 import { getDb } from '../database'
 import { enqueuSync } from '../services/syncQueue'
+import { insertStockMovement } from '../services/stockMovement'
+import { syncStockRow } from '../services/stockSync'
 import { safeHandle } from './ipcHandler'
 
 export function registerReturnHandlers() {
@@ -87,12 +89,17 @@ export function registerReturnHandlers() {
     const id = crypto.randomUUID()
     const total_refund = data.items.reduce((s, i) => s + i.quantity * i.unit_price, 0)
 
+    const invoice = db.prepare('SELECT branch_id FROM invoices WHERE id = ?').get(data.invoice_id) as { branch_id?: string } | undefined
+    const branchId = invoice?.branch_id
+    if (!branchId) throw new Error('Cannot determine branch for this return — invoice not found')
+
     db.prepare(`
       INSERT INTO returns (id, invoice_id, customer_id, reason, total_refund, refund_method, notes, created_by, status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed')
     `).run(id, data.invoice_id, data.customer_id ?? null, data.reason, total_refund, data.refund_method, data.notes ?? null, data.created_by)
 
     const itemRecords: Record<string, unknown>[] = []
+    const movementRecords: Record<string, unknown>[] = []
     for (const item of data.items) {
       const itemId = crypto.randomUUID()
       db.prepare(`
@@ -104,13 +111,28 @@ export function registerReturnHandlers() {
         invoice_item_id: item.invoice_item_id ?? null, quantity: item.quantity, unit_price: item.unit_price,
       })
 
-      // Restore stock in the default branch warehouse
-      db.prepare(`UPDATE stocks SET quantity = quantity + ? WHERE product_id = ?`).run(item.quantity, item.product_id)
+      // Restore stock in the branch the sale actually happened in
+      db.prepare(`UPDATE stocks SET quantity = quantity + ? WHERE product_id = ? AND branch_id = ?`)
+        .run(item.quantity, item.product_id, branchId)
+      movementRecords.push(insertStockMovement(db, {
+        product_id: item.product_id,
+        from_branch_id: null,
+        to_branch_id: branchId,
+        quantity: item.quantity,
+        movement_type: 'ADJUSTMENT',
+        reference_order_id: data.invoice_id,
+        notes: `Return: ${data.reason}`,
+        created_by: data.created_by,
+      }))
     }
 
     await enqueuSync('returns', id, 'INSERT', { id, ...data, total_refund })
     for (const itemRow of itemRecords) {
       await enqueuSync('return_items', String(itemRow.id), 'INSERT', itemRow)
+    }
+    for (const movement of movementRecords) {
+      await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      await syncStockRow(db, String(movement.product_id), branchId)
     }
     return { success: true, data: { id, total_refund } }
   })

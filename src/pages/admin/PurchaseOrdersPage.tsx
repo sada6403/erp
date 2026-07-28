@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, RefreshCw, Eye, ChevronDown, Send, PackageCheck, XCircle, Search } from 'lucide-react'
+import { Plus, RefreshCw, Eye, ChevronDown, Send, PackageCheck, XCircle, Search, Package } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
+import { resolveImageSrc } from '@/lib/imageUrl'
 import toast from 'react-hot-toast'
 
 type PO = Record<string, unknown>
@@ -301,6 +302,20 @@ function ReceivePOModal({ po, onClose, onDone }:
   )
 }
 
+function ProductThumb({ imageUrl, size = 28 }: { imageUrl?: unknown; size?: number }) {
+  const src = resolveImageSrc(typeof imageUrl === 'string' ? imageUrl : '')
+  return (
+    <div
+      className="rounded flex items-center justify-center flex-shrink-0 overflow-hidden"
+      style={{ width: size, height: size, background: 'var(--bg-page)', border: '1px solid var(--border)' }}
+    >
+      {src
+        ? <img src={src} alt="" className="w-full h-full object-cover" />
+        : <Package size={size * 0.5} style={{ color: 'var(--text-3)' }} />}
+    </div>
+  )
+}
+
 function ProductSearchSelect({
   products, value, onChange
 }: {
@@ -366,6 +381,7 @@ function ProductSearchSelect({
         onClick={openDropdown}
         onKeyDown={onKeyDown}
       >
+        {selected && <ProductThumb imageUrl={selected.image_url} size={24} />}
         <span className="min-w-0 flex-1 truncate" style={{ color: selected ? 'var(--text-1)' : 'var(--text-3)' }}>
           {selected ? `${String(selected.name)} (${String(selected.sku || '')})` : 'Select product...'}
         </span>
@@ -396,14 +412,17 @@ function ProductSearchSelect({
                 key={String(p.id)}
                 onClick={() => select(String(p.id))}
                 onMouseEnter={() => setHighlighted(i)}
-                className="px-3 py-2 text-sm cursor-pointer flex items-center justify-between gap-2 transition-colors"
+                className="px-3 py-2 text-sm cursor-pointer flex items-center gap-2 transition-colors"
                 style={{
                   background: i === highlighted ? 'var(--bg-soft)' : 'transparent',
                   color: String(p.id) === value ? 'var(--brand-500, #6366f1)' : 'var(--text-1)',
                 }}
               >
-                <span className="truncate">{String(p.name)}</span>
-                <span className="text-xs shrink-0" style={{ color: 'var(--text-3)' }}>{String(p.sku || '')}</span>
+                <ProductThumb imageUrl={p.image_url} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-medium leading-tight">{String(p.name)}</p>
+                  <p className="text-xs truncate leading-tight" style={{ color: 'var(--text-3)' }}>{String(p.sku || '')}</p>
+                </div>
               </div>
             ))}
           </div>

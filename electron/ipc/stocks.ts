@@ -7,6 +7,7 @@ import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import fs from 'fs'
 import { insertStockMovement } from '../services/stockMovement'
+import { syncStockRow } from '../services/stockSync'
 import { createNotification } from './notifications'
 import { safeHandle } from './ipcHandler'
 
@@ -148,7 +149,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         WHERE p.is_active = 1
           AND (p.branch_id = ? OR p.branch_id IS NULL)
         GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.min_stock_level
-        HAVING COALESCE(SUM(COALESCE(s.quantity, 0)), 0) BETWEEN 1 AND 5
+        HAVING COALESCE(SUM(COALESCE(s.quantity, 0)), 0) <= COALESCE(p.min_stock_level, 5)
         ORDER BY COALESCE(SUM(COALESCE(s.quantity, 0)), 0) ASC, p.name
       `).all(bid, bid, bid)
       return { success: true, data: rows }
@@ -170,18 +171,20 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       const existing = db.prepare(`
         SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
-      `).get(product_id, branch_id)
+      `).get(product_id, branch_id) as Record<string, unknown> | undefined
 
+      let stockId: string
       if (existing) {
+        stockId = String(existing.id)
         db.prepare(`UPDATE stocks SET quantity = ?, updated_at = datetime('now')
           WHERE product_id = ? AND branch_id = ?`).run(quantity, product_id, branch_id)
       } else {
-        const id = crypto.randomUUID()
+        stockId = crypto.randomUUID()
         db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity)
-          VALUES (?, ?, ?, ?, ?)`).run(id, product_id, branch_id, warehouse_id || null, quantity)
+          VALUES (?, ?, ?, ?, ?)`).run(stockId, product_id, branch_id, warehouse_id || null, quantity)
       }
 
-      const previousQty = existing ? Number((existing as Record<string, unknown>).quantity || 0) : 0
+      const previousQty = existing ? Number(existing.quantity || 0) : 0
       const delta = Number(quantity) - previousQty
       let movement: Record<string, unknown> | null = null
       if (delta !== 0) {
@@ -201,7 +204,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         tableName: 'stocks', recordId: product_id, newValues: { quantity, reason },
       })
 
-      await enqueuSync('stocks', `${product_id}-${branch_id}`, 'UPDATE', payload)
+      await enqueuSync('stocks', stockId, 'UPDATE', { ...payload, id: stockId })
       if (movement) await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       return { success: true }
   })
@@ -226,6 +229,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       let movement: Record<string, unknown> | null = null
       let previousQty = 0
+      let stockId = ''
 
       db.transaction(() => {
         if (!isAdmin) {
@@ -244,12 +248,13 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           .get(product_id, branch_id) as Record<string, unknown> | undefined
 
         if (existing) {
+          stockId = String(existing.id)
           db.prepare(`UPDATE stocks SET quantity = ?, updated_at = datetime('now')
             WHERE product_id = ? AND branch_id = ?`).run(quantity, product_id, branch_id)
         } else {
-          const id = crypto.randomUUID()
+          stockId = crypto.randomUUID()
           db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity)
-            VALUES (?, ?, ?, ?, ?)`).run(id, product_id, branch_id, warehouse_id || null, quantity)
+            VALUES (?, ?, ?, ?, ?)`).run(stockId, product_id, branch_id, warehouse_id || null, quantity)
         }
 
         previousQty = existing ? Number(existing.quantity || 0) : 0
@@ -272,7 +277,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         })
       })()
 
-      await enqueuSync('stocks', `${product_id}-${branch_id}`, 'UPDATE', payload)
+      await enqueuSync('stocks', stockId, 'UPDATE', { ...payload, id: stockId })
       if (movement) await enqueuSync('stock_movements', String((movement as Record<string, unknown>).id), 'INSERT', movement)
       if (!isAdmin && payload.edit_request_id) {
         await enqueuSync('edit_requests', payload.edit_request_id, 'UPDATE', { id: payload.edit_request_id, status: 'consumed' })
@@ -1143,6 +1148,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       await enqueuSync('stock_count_sessions', id, 'UPDATE', { id, status: 'completed' })
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+        await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
       }
       return { success: true }
   })

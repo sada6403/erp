@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
+import { enqueuSync } from './services/syncQueue'
 
 let db: Database.Database
 
@@ -1165,6 +1166,67 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_discounts_product ON discounts(product_id);
     CREATE INDEX IF NOT EXISTS idx_discounts_branch  ON discounts(branch_id);
   `)
+
+  // ── One-time repair: merge duplicate stock rows created by a past sync bug ──
+  // NULL warehouse_id defeats UNIQUE(product_id,branch_id,warehouse_id), so a
+  // cloud-pull could insert a second row per product+branch instead of updating
+  // the existing one, inflating every SUM(quantity) display (dashboard low-stock
+  // count, product list, etc). Keep the most recently updated row, drop the rest.
+  try {
+    const dupGroups = db.prepare(`
+      SELECT product_id, branch_id, COALESCE(warehouse_id, '') as wid
+      FROM stocks
+      GROUP BY product_id, branch_id, COALESCE(warehouse_id, '')
+      HAVING COUNT(*) > 1
+    `).all() as { product_id: string; branch_id: string; wid: string }[]
+
+    if (dupGroups.length > 0) {
+      const dedupe = db.transaction(() => {
+        for (const g of dupGroups) {
+          const rows = db.prepare(`
+            SELECT id FROM stocks
+            WHERE product_id = ? AND branch_id = ? AND COALESCE(warehouse_id, '') = ?
+            ORDER BY datetime(updated_at) DESC, quantity DESC
+          `).all(g.product_id, g.branch_id, g.wid) as { id: string }[]
+          for (const loser of rows.slice(1)) {
+            db.prepare(`DELETE FROM stocks WHERE id = ?`).run(loser.id)
+          }
+        }
+      })
+      dedupe()
+      console.log(`[DB] Migration: merged duplicate stock rows for ${dupGroups.length} product/branch pair(s)`)
+    }
+  } catch (err) {
+    console.error('[DB] Stocks dedup migration failed:', err)
+  }
+
+  // ── One-time backfill: push current stock/customer-balance truth to the cloud ──
+  // Several flows (sales, transfers, PO receiving, stock counts, returns, imports)
+  // used to mutate `stocks.quantity` / `customers.outstanding_due` locally without
+  // ever enqueuing that change for sync — only the stock_movements audit trail
+  // reached the cloud, not the resulting number. Local values have been correct
+  // the whole time; they just never made it to the cloud/other devices. Push each
+  // device's current local truth once so the cloud (and every other device) catches
+  // up, without touching any data.
+  db.exec(`CREATE TABLE IF NOT EXISTS app_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT (datetime('now')))`)
+  const backfillName = 'sync_backfill_stocks_customers_v1'
+  const backfillDone = db.prepare(`SELECT 1 FROM app_migrations WHERE name = ?`).get(backfillName)
+  if (!backfillDone) {
+    try {
+      const stockRows = db.prepare(`SELECT * FROM stocks`).all() as Record<string, unknown>[]
+      for (const row of stockRows) {
+        void enqueuSync('stocks', String(row.id), 'UPDATE', row)
+      }
+      const customerRows = db.prepare(`SELECT * FROM customers WHERE outstanding_due > 0`).all() as Record<string, unknown>[]
+      for (const row of customerRows) {
+        void enqueuSync('customers', String(row.id), 'UPDATE', row)
+      }
+      db.prepare(`INSERT INTO app_migrations (name) VALUES (?)`).run(backfillName)
+      console.log(`[DB] Migration: queued ${stockRows.length} stock row(s) and ${customerRows.length} customer row(s) for cloud sync backfill`)
+    } catch (err) {
+      console.error('[DB] Sync backfill migration failed:', err)
+    }
+  }
 }
 
 function seedDefaultData() {

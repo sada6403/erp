@@ -756,6 +756,37 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_chit_contributions_status (status)
      )`,
 
+    // ── Stock counts — were pushed from the app but had no cloud table at
+    // all, so every sync for them failed silently ───────────────────────
+    `CREATE TABLE IF NOT EXISTS stock_count_sessions (
+       id            CHAR(36)     NOT NULL PRIMARY KEY,
+       branch_id     CHAR(36)     NOT NULL,
+       warehouse_id  CHAR(36)     NULL,
+       status        VARCHAR(20)  NOT NULL DEFAULT 'in_progress',
+       notes         TEXT         NULL,
+       created_by    CHAR(36)     NULL,
+       completed_by  CHAR(36)     NULL,
+       created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       completed_at  DATETIME     NULL,
+       updated_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at     DATETIME     NULL,
+       INDEX idx_stock_count_sessions_branch (branch_id),
+       INDEX idx_stock_count_sessions_updated (updated_at)
+     )`,
+    `CREATE TABLE IF NOT EXISTS stock_count_items (
+       id            CHAR(36)      NOT NULL PRIMARY KEY,
+       session_id    CHAR(36)      NOT NULL,
+       product_id    CHAR(36)      NOT NULL,
+       system_qty    DECIMAL(12,2) NOT NULL DEFAULT 0,
+       counted_qty   DECIMAL(12,2) NULL,
+       notes         TEXT          NULL,
+       updated_at    DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at     DATETIME      NULL,
+       UNIQUE KEY uq_stock_count_items_session_product (session_id, product_id),
+       INDEX idx_stock_count_items_session (session_id),
+       INDEX idx_stock_count_items_updated (updated_at)
+     )`,
+
     // ── Edit requests — manager-requested, admin-approved corrections to
     // already-completed invoices/stock ──────────────────────────────────
     `CREATE TABLE IF NOT EXISTS edit_requests (

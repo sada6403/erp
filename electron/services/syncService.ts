@@ -289,6 +289,10 @@ export class SyncService {
       'chit_schemes',
       // Edit requests
       'edit_requests',
+      // credit_ledger is pushed from invoices.ts but was missing here, so it
+      // never pulled down to other devices. Stock counts/discounts were also
+      // missing (in addition to being missing from the backend allowlist).
+      'credit_ledger', 'stock_count_sessions', 'stock_count_items', 'discounts',
     ]
 
     let pulledInstallmentIds: string[] = []
@@ -549,6 +553,30 @@ export class SyncService {
       const parentId = String(localRow.parent_id)
       const exists = db.prepare(`SELECT id FROM categories WHERE id = ? LIMIT 1`).get(parentId)
       if (!exists) localRow.parent_id = null
+    }
+
+    // Stocks: NULL warehouse_id defeats the UNIQUE(product_id,branch_id,warehouse_id)
+    // constraint (SQL NULL never equals NULL), so a blind INSERT OR REPLACE by `id`
+    // can leave the existing local row untouched and insert a second row for the
+    // same product+branch — doubling the quantity everywhere it's summed. Match by
+    // the real business key first and update in place instead.
+    if (table === 'stocks' && localRow.product_id && localRow.branch_id) {
+      const existingByKey = db.prepare(`
+        SELECT id FROM stocks WHERE product_id = ? AND branch_id = ? AND warehouse_id IS ?
+      `).get(
+        String(localRow.product_id),
+        String(localRow.branch_id),
+        localRow.warehouse_id != null ? String(localRow.warehouse_id) : null
+      ) as { id?: string } | undefined
+      if (existingByKey?.id) {
+        const updateKeys = keys.filter(k => k !== 'id')
+        if (updateKeys.length > 0) {
+          db.prepare(
+            `UPDATE stocks SET ${updateKeys.map(k => `${k}=?`).join(',')} WHERE id=?`
+          ).run(...updateKeys.map(k => localRow[k]), existingByKey.id)
+        }
+        return
+      }
     }
 
     if (table === 'stock_movements') {

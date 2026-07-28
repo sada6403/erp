@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
-import { Ticket, Download, FileSpreadsheet, FileText, Search } from 'lucide-react'
+import InvoiceDetailModal from '@/components/shared/InvoiceDetailModal'
+import { buildInvoicePrintPayload, type InvoiceDetail } from '@/lib/invoicePrint'
+import { Ticket, Download, Eye, FileSpreadsheet, FileText, Printer, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Row = Record<string, unknown>
@@ -52,6 +54,23 @@ export default function CouponReportsPage() {
   const [dateTo, setDateTo]     = useState('')
   const [search, setSearch]     = useState('')
   const [loading, setLoading]   = useState(false)
+  const [viewingId, setViewingId] = useState<string | null>(null)
+  const [printingId, setPrintingId] = useState<string | null>(null)
+
+  const quickPrint = async (id: string) => {
+    setPrintingId(id)
+    try {
+      const res = await window.api.reports.transactionDetail(id)
+      if (!res.success) { toast.error(res.error || 'Failed to load bill'); return }
+      const printRes = await window.api.printer.printInvoice(buildInvoicePrintPayload(res.data as InvoiceDetail))
+      if (printRes.success) toast.success('Sent to printer')
+      else toast.error(printRes.error || 'Failed to print')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to print')
+    } finally {
+      setPrintingId(null)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -193,6 +212,7 @@ export default function CouponReportsPage() {
               {columns.map(([key, header]) => (
                 <th key={key} className="table-header px-3 py-2.5 text-left">{header}</th>
               ))}
+              {tab === 'redeemed' && <th className="table-header px-3 py-2.5 text-left">Actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -207,10 +227,26 @@ export default function CouponReportsPage() {
                         : String(r[key] ?? '—')}
                   </td>
                 ))}
+                {tab === 'redeemed' && (
+                  <td className="table-cell text-xs">
+                    {r.invoice_id ? (
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setViewingId(String(r.invoice_id))}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-xs" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+                          <Eye size={12} /> View
+                        </button>
+                        <button onClick={() => quickPrint(String(r.invoice_id))} disabled={printingId === r.invoice_id}
+                          className="flex items-center gap-1 px-2 py-1 rounded text-xs disabled:opacity-50" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+                          <Printer size={12} /> {printingId === r.invoice_id ? '…' : 'Print'}
+                        </button>
+                      </div>
+                    ) : '—'}
+                  </td>
+                )}
               </tr>
             ))}
             {rows.length === 0 && !loading && (
-              <tr><td colSpan={columns.length} className="text-center py-16 text-slate-500">
+              <tr><td colSpan={columns.length + (tab === 'redeemed' ? 1 : 0)} className="text-center py-16 text-slate-500">
                 <Ticket size={28} className="mx-auto mb-2 opacity-40" />
                 No data for this report
               </td></tr>
@@ -218,6 +254,10 @@ export default function CouponReportsPage() {
           </tbody>
         </table>
       </div>
+
+      {viewingId && (
+        <InvoiceDetailModal invoiceId={viewingId} onClose={() => setViewingId(null)} />
+      )}
     </div>
   )
 }

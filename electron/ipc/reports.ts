@@ -506,7 +506,7 @@ export function registerReportHandlers() {
       `, params)
 
       const refundCancelled = safeAll(db, `
-        SELECT i.invoice_number, i.status, i.created_at, b.name as branch_name,
+        SELECT i.id, i.invoice_number, i.status, i.created_at, b.name as branch_name,
           u.name as cashier_name, c.name as customer_name, i.total_amount, i.paid_amount, i.due_amount
         FROM invoices i
         LEFT JOIN branches b ON b.id = i.branch_id

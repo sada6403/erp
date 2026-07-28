@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Download, FileText, RefreshCw, Search, Table2 } from 'lucide-react'
+import { Download, Eye, FileText, Printer, RefreshCw, Search, Table2 } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
+import InvoiceDetailModal from '@/components/shared/InvoiceDetailModal'
+import { buildInvoicePrintPayload, type InvoiceDetail } from '@/lib/invoicePrint'
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
 
@@ -54,8 +56,12 @@ function cleanRows(rows: Row[]) {
   return rows.map(row => Object.fromEntries(Object.entries(row).map(([k, v]) => [displayKey(k), v ?? ''])))
 }
 
-function DataTable({ rows }: { rows: Row[] }) {
-  const columns = rows[0] ? Object.keys(rows[0]) : []
+function DataTable({ rows, hiddenColumns, renderActions }: {
+  rows: Row[]
+  hiddenColumns?: string[]
+  renderActions?: (row: Row) => React.ReactNode
+}) {
+  const columns = (rows[0] ? Object.keys(rows[0]) : []).filter(c => !hiddenColumns?.includes(c))
   if (!rows.length) {
     return (
       <div className="h-40 flex flex-col items-center justify-center gap-2" style={{ color: 'var(--text-3)' }}>
@@ -74,6 +80,7 @@ function DataTable({ rows }: { rows: Row[] }) {
                 {displayKey(col)}
               </th>
             ))}
+            {renderActions && <th className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap">Actions</th>}
           </tr>
         </thead>
         <tbody>
@@ -88,6 +95,7 @@ function DataTable({ rows }: { rows: Row[] }) {
                   </td>
                 )
               })}
+              {renderActions && <td className="px-3 py-2 whitespace-nowrap">{renderActions(row)}</td>}
             </tr>
           ))}
         </tbody>
@@ -105,7 +113,24 @@ export default function AdvancedReportsPage() {
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [companyName, setCompanyName] = useState('')
+  const [viewingId, setViewingId] = useState<string | null>(null)
+  const [printingId, setPrintingId] = useState<string | null>(null)
   const authUser = useAuthStore(state => state.user)
+
+  const quickPrint = async (id: string) => {
+    setPrintingId(id)
+    try {
+      const res = await window.api.reports.transactionDetail(id)
+      if (!res.success) { toast.error(res.error || 'Failed to load bill'); return }
+      const printRes = await window.api.printer.printInvoice(buildInvoicePrintPayload(res.data as InvoiceDetail))
+      if (printRes.success) toast.success('Sent to printer')
+      else toast.error(printRes.error || 'Failed to print')
+    } catch (err) {
+      toast.error((err as Error).message || 'Failed to print')
+    } finally {
+      setPrintingId(null)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -294,7 +319,22 @@ export default function AdvancedReportsPage() {
               ))}
             </div>
             <div className="p-3">
-              <DataTable rows={filteredRows} />
+              <DataTable
+                rows={filteredRows}
+                hiddenColumns={active === 'refundCancelled' ? ['id'] : undefined}
+                renderActions={active === 'refundCancelled' ? (row => (
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setViewingId(String(row.id))}
+                      className="flex items-center gap-1 px-2 py-1 rounded text-xs" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+                      <Eye size={12} /> View
+                    </button>
+                    <button onClick={() => quickPrint(String(row.id))} disabled={printingId === row.id}
+                      className="flex items-center gap-1 px-2 py-1 rounded text-xs disabled:opacity-50" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+                      <Printer size={12} /> {printingId === row.id ? '…' : 'Print'}
+                    </button>
+                  </div>
+                )) : undefined}
+              />
             </div>
           </div>
 
@@ -326,6 +366,10 @@ export default function AdvancedReportsPage() {
           </div>
         </div>
       </div>
+
+      {viewingId && (
+        <InvoiceDetailModal invoiceId={viewingId} onClose={() => setViewingId(null)} />
+      )}
     </div>
   )
 }

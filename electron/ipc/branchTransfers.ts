@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
+import { syncStockRow } from '../services/stockSync'
 import { safeHandleModule } from './ipcHandler'
 
 const store = new Store()
@@ -55,6 +56,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         created_by: currentUserId(),
         ...rest
       }
+
+      let dispatchedOnCreate = false
+      let logRecord: Record<string, unknown> | null = null
 
       db.transaction(() => {
         db.prepare(`
@@ -108,9 +112,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
               UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
               WHERE product_id=? AND branch_id=? AND quantity>=?
             `).run(qty, item.product_id, from_branch_id, qty)
-            
+
             if (!changed.changes) throw new Error(`Insufficient stock for product ${item.product_id}`)
-            
+
             insertStockMovement(db, {
               product_id: item.product_id,
               from_branch_id,
@@ -121,20 +125,23 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
               notes: `Branch Transfer Out: ${transferNumber}`,
               created_by: currentUserId()
             })
+            dispatchedOnCreate = true
           }
         }
 
-        logTransferAction(db, transferId, 'CREATED', null, { status: transfer.status, items: items.length })
+        logRecord = logTransferAction(db, transferId, 'CREATED', null, { status: transfer.status, items: items.length })
       })()
 
       // Enqueue syncs after transaction
       const savedTransfer = db.prepare('SELECT * FROM branch_transfers WHERE id = ?').get(transferId)
       const savedItems = db.prepare('SELECT * FROM branch_transfer_items WHERE transfer_id = ?').all(transferId)
-      
+
       await enqueuSync('branch_transfers', transferId, 'INSERT', savedTransfer as Record<string, any>)
       for (const item of savedItems) {
         await enqueuSync('branch_transfer_items', String((item as any).id), 'INSERT', item as Record<string, any>)
+        if (dispatchedOnCreate) await syncStockRow(db, String((item as any).product_id), from_branch_id)
       }
+      if (logRecord) await enqueuSync('branch_transfer_logs', String((logRecord as Record<string, unknown>).id), 'INSERT', logRecord)
 
       return { success: true, data: { id: transferId, transfer_number: transferNumber } }
     }
@@ -252,6 +259,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         if (payload.issuing_officer_name) patch.issuing_officer_name = payload.issuing_officer_name
       }
 
+      const dispatchedProductIds: string[] = []
+      let logRecord: Record<string, unknown> | null = null
+
       db.transaction(() => {
         // If dispatching, deduct stock
         if (status === 'dispatched' && transfer.status !== 'dispatched') {
@@ -262,9 +272,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
               UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
               WHERE product_id=? AND branch_id=? AND quantity>=?
             `).run(qty, item.product_id, transfer.from_branch_id, qty)
-            
+
             if (!changed.changes) throw new Error(`Insufficient stock for product ${item.product_id}`)
-            
+
             insertStockMovement(db, {
               product_id: item.product_id,
               from_branch_id: String(transfer.from_branch_id),
@@ -275,17 +285,22 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
               notes: `Branch Transfer Out: ${transfer.transfer_number}`,
               created_by: currentUserId()
             })
+            dispatchedProductIds.push(item.product_id)
           }
         }
 
         const fields = Object.keys(patch).map(k => `${k}=@${k}`).join(',')
         db.prepare(`UPDATE branch_transfers SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
           .run({ id, ...patch })
-          
-        logTransferAction(db, id, `STATUS_${status.toUpperCase()}`, { status: transfer.status }, patch)
+
+        logRecord = logTransferAction(db, id, `STATUS_${status.toUpperCase()}`, { status: transfer.status }, patch)
       })()
 
       await enqueuSync('branch_transfers', id, 'UPDATE', { id, ...patch })
+      for (const productId of dispatchedProductIds) {
+        await syncStockRow(db, productId, String(transfer.from_branch_id))
+      }
+      if (logRecord) await enqueuSync('branch_transfer_logs', String((logRecord as Record<string, unknown>).id), 'INSERT', logRecord)
       return { success: true }
     }
   })
@@ -305,6 +320,8 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       let totalReceived = 0
       let hasMismatch = false
       const newMismatches: any[] = []
+      const receivedProductIds: string[] = []
+      let logRecord: Record<string, unknown> | null = null
 
       db.transaction(() => {
         for (const input of items) {
@@ -375,18 +392,19 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
               notes: `Branch Transfer Received: ${transfer.transfer_number}`,
               created_by: currentUserId()
             })
+            receivedProductIds.push(item.product_id)
           }
         }
 
         const newStatus = hasMismatch ? 'discrepancy' : (totalReceived < totalSent ? 'partially_received' : 'received')
-        
+
         db.prepare(`
-          UPDATE branch_transfers 
+          UPDATE branch_transfers
           SET status=?, actual_delivery_at=?, received_by=?, received_by_name=?, received_designation=?, notes=COALESCE(notes || '\n', '') || ?, updated_at=datetime('now')
           WHERE id=?
         `).run(newStatus, now, currentUserId(), received_by_name || null, received_designation || null, notes || '', id)
 
-        logTransferAction(db, id, 'RECEIVED', { status: transfer.status }, { status: newStatus, received_by_name })
+        logRecord = logTransferAction(db, id, 'RECEIVED', { status: transfer.status }, { status: newStatus, received_by_name })
       })()
 
       // sync updates
@@ -399,6 +417,10 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       for (const m of newMismatches) {
         await enqueuSync('branch_transfer_mismatches', m.id, 'INSERT', m)
       }
+      for (const productId of receivedProductIds) {
+        await syncStockRow(db, productId, String(transfer.to_branch_id))
+      }
+      if (logRecord) await enqueuSync('branch_transfer_logs', String((logRecord as Record<string, unknown>).id), 'INSERT', logRecord)
 
       return { success: true }
     }
@@ -429,6 +451,8 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         status: 'under_admin_review'
       }
 
+      let logRecord: Record<string, unknown> | null = null
+
       db.transaction(() => {
         db.prepare(`
           INSERT INTO branch_transfer_mismatches (
@@ -439,12 +463,13 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         `).run(mismatch)
 
         db.prepare(`UPDATE branch_transfers SET status='under_admin_review', updated_at=datetime('now') WHERE id=?`).run(id)
-        
-        logTransferAction(db, id, 'MISMATCH_REPORTED', null, mismatch)
+
+        logRecord = logTransferAction(db, id, 'MISMATCH_REPORTED', null, mismatch)
       })()
 
       await enqueuSync('branch_transfer_mismatches', mismatchId, 'INSERT', mismatch)
       await enqueuSync('branch_transfers', id, 'UPDATE', { id, status: 'under_admin_review' })
+      if (logRecord) await enqueuSync('branch_transfer_logs', String((logRecord as Record<string, unknown>).id), 'INSERT', logRecord)
 
       return { success: true }
     }
@@ -476,30 +501,33 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       
       const { admin_reason } = payload
       
+      let logRecord: Record<string, unknown> | null = null
+
       db.transaction(() => {
         db.prepare(`
-          UPDATE branch_transfer_mismatches 
+          UPDATE branch_transfer_mismatches
           SET status='resolved', admin_reason=?, resolved_by=?, updated_at=datetime('now')
           WHERE transfer_id=?
         `).run(admin_reason || 'Resolved by Administrator', currentUserId(), id)
-        
+
         db.prepare(`
           UPDATE branch_transfers
           SET status='corrected', updated_at=datetime('now')
           WHERE id=?
         `).run(id)
-        
-        logTransferAction(db, id, 'MISMATCH_RESOLVED', { status: transfer.status }, { status: 'corrected', admin_reason })
+
+        logRecord = logTransferAction(db, id, 'MISMATCH_RESOLVED', { status: transfer.status }, { status: 'corrected', admin_reason })
       })()
 
       const updatedTransfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id)
       await enqueuSync('branch_transfers', id, 'UPDATE', updatedTransfer as Record<string, any>)
-      
+
       const updatedMismatches = db.prepare('SELECT * FROM branch_transfer_mismatches WHERE transfer_id=?').all(id) as any[]
       for (const m of updatedMismatches) {
         await enqueuSync('branch_transfer_mismatches', m.id, 'UPDATE', m)
       }
-      
+      if (logRecord) await enqueuSync('branch_transfer_logs', String((logRecord as Record<string, unknown>).id), 'INSERT', logRecord)
+
       return { success: true }
     }
   })
