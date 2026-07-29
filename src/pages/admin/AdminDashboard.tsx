@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
+import { Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import { ShoppingBag, TrendingUp, AlertCircle, Package, CreditCard, Truck, RefreshCw, Building2, ShieldCheck, Warehouse, Wifi, ArrowRightLeft, Check, X } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import StatCard from '@/components/shared/StatCard'
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
-import { getSessionProfile } from '@/lib/sessionRouting'
+import { getSessionProfile, getLandingRoute } from '@/lib/sessionRouting'
 
 interface RevenueData { today: { revenue: number; invoices: number }; month: { revenue: number; invoices: number }; outstanding: { total: number } }
 interface ProfitData { net_profit: number }
@@ -38,6 +39,7 @@ export default function AdminDashboard() {
   const scopeLevel = String((u?.scope as Record<string, unknown> | undefined)?.level || '')
   const branchScoped = scopeLevel === 'branch' || scopeLevel === 'subBranch'
   const profile = getSessionProfile(user)
+  if (profile.kind === 'smartBuyManager') return <Navigate to={getLandingRoute(user)} replace />
   const isCashier = profile.kind === 'cashier'
   const isAccountant = profile.kind === 'accountant'
   const isStockRole = profile.kind === 'storeKeeper'

@@ -69,7 +69,7 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'agents:create', async (_e, payload: Record<string, unknown>) => {
     {
       const perms = currentPerms()
-      if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+      if (!perms.all && !perms.employees && !perms.chits) return { success: false, error: 'Employee management access required' }
 
       const db = getDb()
       const code = String(payload.code || '').trim().toUpperCase()
@@ -87,7 +87,9 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
         phone: payload.phone || null,
         email: payload.email || null,
         nic: payload.nic || null,
-        branch_id: payload.branch_id || caller.branch_id || null,
+        // A caller with only 'chits' (Smart Buy Manager) is branch-scoped —
+        // never let them plant an agent in a different branch via payload.
+        branch_id: (perms.all || perms.employees) ? (payload.branch_id || caller.branch_id || null) : (caller.branch_id || null),
         default_commission_pct: Number(payload.default_commission_pct) || 0,
         monthly_target: Number(payload.monthly_target) || 0,
         status: payload.status || 'active',
@@ -106,13 +108,20 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'agents:update', async (_e, id: string, payload: Record<string, unknown>) => {
     {
       const perms = currentPerms()
-      if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+      if (!perms.all && !perms.employees && !perms.chits) return { success: false, error: 'Employee management access required' }
 
       const db = getDb()
-      const existing = db.prepare('SELECT id FROM agents WHERE id = ?').get(id)
+      const caller = authUser()
+      const existing = db.prepare('SELECT id, branch_id FROM agents WHERE id = ?').get(id) as { id: string; branch_id: unknown } | undefined
       if (!existing) return { success: false, error: 'Agent not found' }
+      const isGlobalManage = Boolean(perms.all || perms.employees)
+      if (!isGlobalManage && String(existing.branch_id || '') !== String(caller.branch_id || '')) {
+        return { success: false, error: 'You do not have access to this agent' }
+      }
 
       const update: Record<string, unknown> = { ...payload }
+      // A branch-scoped caller (Smart Buy Manager) can't move an agent to a different branch.
+      if (!isGlobalManage) delete update.branch_id
       if (update.code !== undefined) {
         const code = String(update.code || '').trim().toUpperCase()
         if (!code) return { success: false, error: 'Agent code is required' }
@@ -133,7 +142,7 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'agents:downloadTemplate', async () => {
     {
       const perms = currentPerms()
-      if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+      if (!perms.all && !perms.employees && !perms.chits) return { success: false, error: 'Employee management access required' }
 
       const saveResult = await dialog.showSaveDialog({
         title: 'Save Agent Import Template',
@@ -175,7 +184,7 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'agents:importExcel', async () => {
     {
       const perms = currentPerms()
-      if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+      if (!perms.all && !perms.employees && !perms.chits) return { success: false, error: 'Employee management access required' }
 
       const { filePaths } = await dialog.showOpenDialog({
         title: 'Select Agent Import File',

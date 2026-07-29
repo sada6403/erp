@@ -125,7 +125,7 @@ export default function CustomersPage() {
                   <div className="flex gap-1">
                     <button onClick={() => setViewing(c)} className="btn-ghost btn-sm p-1.5"><Eye size={13} /></button>
                     <button onClick={() => { setEditing(c); setShowForm(true) }} className="btn-ghost btn-sm p-1.5"><Edit2 size={13} /></button>
-                    <button onClick={() => setEnrolling(c)} className="btn-ghost btn-sm p-1.5" title="Add to Chit Scheme"><Coins size={13} /></button>
+                    <button onClick={() => setEnrolling(c)} className="btn-ghost btn-sm p-1.5" title="Add to Smart Buy Scheme"><Coins size={13} /></button>
                   </div>
                 </td>
               </tr>
@@ -188,7 +188,7 @@ function EnrollInChitModal({ customer, onClose, onSave }: { customer: Customer; 
   }
 
   return (
-    <Modal title={`Add "${customer.name}" to a Chit Scheme`} onClose={onClose}
+    <Modal title={`Add "${customer.name}" to a Smart Buy Scheme`} onClose={onClose}
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving || loading} className="btn-primary">{saving ? 'Adding...' : 'Add to Scheme'}</button></>}>
       <div className="space-y-3">
         {loading ? (
@@ -198,7 +198,7 @@ function EnrollInChitModal({ customer, onClose, onSave }: { customer: Customer; 
         ) : (
           <>
             <div>
-              <label className="block text-xs font-medium text-slate-400 mb-1">Chit Scheme *</label>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Smart Buy Scheme *</label>
               <select value={schemeId} onChange={e => setSchemeId(e.target.value)} className="input">
                 <option value="">— Select a scheme —</option>
                 {schemes.map(s => (
@@ -325,7 +325,7 @@ function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: (
 
         {chitMemberships.length > 0 && (
           <div>
-            <h3 className="text-sm font-semibold mb-2">Chit Memberships</h3>
+            <h3 className="text-sm font-semibold mb-2">Smart Buy Memberships</h3>
             <div className="space-y-2">
               {chitMemberships.map(cm => (
                 <div key={cm.id as string} className="px-3 py-2 rounded-lg" style={{ background: 'var(--bg-page)', border: '1px solid var(--border)' }}>

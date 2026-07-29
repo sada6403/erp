@@ -60,10 +60,10 @@ export default function ChitSchemesPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <PageHeader title="Chit Fund" subtitle={`${filtered.length} scheme(s)`}
+      <PageHeader title="Smart Buy" subtitle={`${filtered.length} scheme(s)`}
         actions={
           <button onClick={() => setShowForm(true)} className="btn-primary btn-sm gap-1.5">
-            <Plus size={14} /> New Chit Scheme
+            <Plus size={14} /> New Smart Buy Scheme
           </button>
         }
       />
@@ -147,7 +147,7 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
     try {
       const res = await window.api.chits.create(form)
       if (res.success) {
-        toast.success('Chit scheme created')
+        toast.success('Smart Buy scheme created')
         onSave(res.data.id)
       } else {
         toast.error(String(res.error || 'Save failed'))
@@ -160,7 +160,7 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
   }
 
   return (
-    <Modal title="New Chit Scheme" size="lg" onClose={onClose}
+    <Modal title="New Smart Buy Scheme" size="lg" onClose={onClose}
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Create Scheme'}</button></>}>
       <div className="space-y-4">
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Scheme Name *</label><input value={form.name} onChange={f('name')} className="input" placeholder="e.g. Rice Cooker Chit — Batch 4" /></div>

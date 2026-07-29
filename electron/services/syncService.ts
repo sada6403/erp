@@ -293,6 +293,10 @@ export class SyncService {
       // never pulled down to other devices. Stock counts/discounts were also
       // missing (in addition to being missing from the backend allowlist).
       'credit_ledger', 'stock_count_sessions', 'stock_count_items', 'discounts',
+      // Smart Buy agent cash remittance/settlement — standalone (keyed by
+      // agent_id, not scheme_id), so it's pulled directly, not via the
+      // chit_schemes-related-ids dance below.
+      'agent_remittances',
     ]
 
     let pulledInstallmentIds: string[] = []

@@ -21,6 +21,8 @@ import InstallmentsPage from '@/pages/admin/InstallmentsPage'
 import ChitSchemesPage from '@/pages/admin/ChitSchemesPage'
 import ChitCustomersPage from '@/pages/admin/ChitCustomersPage'
 import ChitSchemeDetailPage from '@/pages/admin/ChitSchemeDetailPage'
+import SmartBuyAgentsPage from '@/pages/admin/SmartBuyAgentsPage'
+import SmartBuyDashboardPage from '@/pages/admin/SmartBuyDashboardPage'
 import AuditLogsPage from '@/pages/admin/AuditLogsPage'
 import EditRequestsPage from '@/pages/admin/EditRequestsPage'
 import OperationsHubPage from '@/pages/admin/OperationsHubPage'
@@ -168,6 +170,8 @@ export default function App() {
         <Route path="/admin/chits" element={<ChitSchemesPage />} />
         <Route path="/admin/chits/:id" element={<ChitSchemeDetailPage />} />
         <Route path="/admin/chit-customers" element={<ChitCustomersPage />} />
+        <Route path="/admin/smart-buy-agents" element={<SmartBuyAgentsPage />} />
+        <Route path="/admin/smart-buy" element={<SmartBuyDashboardPage />} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
         <Route path="/admin/edit-requests" element={<EditRequestsPage />} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />

@@ -95,12 +95,15 @@ const api = {
     reports: (filters?: unknown) => ipcRenderer.invoke('chits:reports', filters),
     customersList: (filters?: unknown) => ipcRenderer.invoke('chits:customers:list', filters),
     members: {
-      add:              (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:add', schemeId, payload),
-      remove:           (memberId: string)                   => ipcRenderer.invoke('chits:members:remove', memberId),
-      list:             (schemeId: string)                   => ipcRenderer.invoke('chits:members:list', schemeId),
-      downloadTemplate: ()                                   => ipcRenderer.invoke('chits:members:downloadTemplate'),
-      importExcel:      (schemeId: string)                   => ipcRenderer.invoke('chits:members:importExcel', schemeId),
-      earlyRedeem:      (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:members:earlyRedeem', memberId, payload),
+      add:                (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:add', schemeId, payload),
+      remove:             (memberId: string)                   => ipcRenderer.invoke('chits:members:remove', memberId),
+      list:               (schemeId: string)                   => ipcRenderer.invoke('chits:members:list', schemeId),
+      downloadTemplate:   ()                                   => ipcRenderer.invoke('chits:members:downloadTemplate'),
+      importExcel:        (schemeId: string)                   => ipcRenderer.invoke('chits:members:importExcel', schemeId),
+      earlyRedeem:        (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:members:earlyRedeem', memberId, payload),
+      contributionHistory: (memberId: string)                  => ipcRenderer.invoke('chits:members:contributionHistory', memberId),
+      registerHistorical: (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:registerHistorical', schemeId, payload),
+      recordRedemption:   (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:members:recordRedemption', memberId, payload),
     },
     draws: {
       eligible: (schemeId: string, cycleNo: number) => ipcRenderer.invoke('chits:draws:eligible', schemeId, cycleNo),
@@ -112,6 +115,15 @@ const api = {
       verify:            (id: string, action: 'approve' | 'reject', notes?: string) => ipcRenderer.invoke('chits:contributions:verify', id, action, notes),
       pendingTransfers: (filters?: unknown) => ipcRenderer.invoke('chits:contributions:pendingTransfers', filters),
     },
+    agents: {
+      report: (filters?: unknown) => ipcRenderer.invoke('chits:agents:report', filters),
+      detail: (agentId: string)   => ipcRenderer.invoke('chits:agents:detail', agentId),
+    },
+    remittances: {
+      record: (payload: unknown)   => ipcRenderer.invoke('chits:remittances:record', payload),
+      list:   (filters?: unknown)  => ipcRenderer.invoke('chits:remittances:list', filters),
+    },
+    dashboard: () => ipcRenderer.invoke('chits:dashboard'),
   },
 
   // Edit requests — manager-requested, admin-approved corrections to

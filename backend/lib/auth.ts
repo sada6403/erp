@@ -710,6 +710,12 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     // CREATE TABLE IF NOT EXISTS is a no-op for them, so add it explicitly.
     `ALTER TABLE chit_members ADD COLUMN agent_id CHAR(36) NULL`,
     `ALTER TABLE chit_members ADD INDEX idx_chit_members_agent (agent_id)`,
+    // Paper-record traceability + redemption product capture (Smart Buy).
+    `ALTER TABLE chit_members ADD COLUMN paper_reference_code VARCHAR(64) NULL`,
+    `ALTER TABLE chit_members ADD COLUMN redeemed_product_id CHAR(36) NULL`,
+    `ALTER TABLE chit_members ADD COLUMN redeemed_product_name VARCHAR(255) NULL`,
+    `ALTER TABLE chit_members ADD COLUMN redeemed_qty INT NOT NULL DEFAULT 1`,
+    `ALTER TABLE chit_members ADD COLUMN redeemed_value DECIMAL(14,2) NULL`,
     `CREATE TABLE IF NOT EXISTS chit_draws (
        id               CHAR(36)     NOT NULL PRIMARY KEY,
        scheme_id        CHAR(36)     NOT NULL,
@@ -755,6 +761,8 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_chit_contributions_member (member_id),
        INDEX idx_chit_contributions_status (status)
      )`,
+    // Who physically collected the cash — distinct from received_by (office user).
+    `ALTER TABLE chit_contributions ADD COLUMN collected_by_agent_id CHAR(36) NULL`,
 
     // ── Stock counts — were pushed from the app but had no cloud table at
     // all, so every sync for them failed silently ───────────────────────
@@ -785,6 +793,25 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        UNIQUE KEY uq_stock_count_items_session_product (session_id, product_id),
        INDEX idx_stock_count_items_session (session_id),
        INDEX idx_stock_count_items_updated (updated_at)
+     )`,
+
+    // ── Smart Buy (Chit Fund) agent cash remittance/settlement ───────────
+    `CREATE TABLE IF NOT EXISTS agent_remittances (
+       id             CHAR(36)      NOT NULL PRIMARY KEY,
+       agent_id       CHAR(36)      NOT NULL,
+       branch_id      CHAR(36)      NOT NULL,
+       amount         DECIMAL(14,2) NOT NULL DEFAULT 0,
+       method         VARCHAR(20)   NOT NULL DEFAULT 'cash',
+       bank_reference VARCHAR(128)  NULL,
+       submitted_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       received_by    CHAR(36)      NULL,
+       notes          TEXT          NULL,
+       created_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at      DATETIME      NULL,
+       INDEX idx_agent_remittances_agent (agent_id),
+       INDEX idx_agent_remittances_branch (branch_id),
+       INDEX idx_agent_remittances_updated (updated_at)
      )`,
 
     // ── Edit requests — manager-requested, admin-approved corrections to

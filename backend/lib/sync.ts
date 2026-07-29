@@ -25,6 +25,8 @@ export const ALLOWED_TABLES = new Set([
   // Stock counts + discounts — pushed from the app but were missing here,
   // so every sync for these permanently failed server-side.
   'stock_count_sessions', 'stock_count_items', 'discounts',
+  // Smart Buy (Chit Fund) agent cash remittance/settlement tracking.
+  'agent_remittances',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {

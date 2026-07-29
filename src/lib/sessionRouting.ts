@@ -7,6 +7,7 @@ export type SessionRoleKind =
   | 'cashier'
   | 'storeKeeper'
   | 'accountant'
+  | 'smartBuyManager'
 
 type SessionProfile = {
   kind: SessionRoleKind
@@ -26,6 +27,9 @@ export function getSessionProfile(user?: AuthUser | null): SessionProfile {
 
   if (permissions.all || scopeLevel === 'owner' || portal === 'superadmin') {
     return { kind: 'owner', portal, scopeLevel, permissions }
+  }
+  if (scopeLevel === 'smartbuy') {
+    return { kind: 'smartBuyManager', portal, scopeLevel, permissions }
   }
   if (portal === 'pos') {
     return { kind: 'cashier', portal, scopeLevel, permissions }
@@ -54,6 +58,8 @@ export function getLandingRoute(user?: AuthUser | null): string {
       return '/admin/reports'
     case 'storeKeeper':
       return '/admin/stock-intelligence'
+    case 'smartBuyManager':
+      return '/admin/smart-buy'
     default:
       return '/admin'
   }
@@ -67,6 +73,8 @@ export function getHomeLabel(kind: SessionRoleKind): string {
       return 'Reports'
     case 'storeKeeper':
       return 'Stock'
+    case 'smartBuyManager':
+      return 'Smart Buy'
     default:
       return 'Dashboard'
   }

@@ -28,7 +28,7 @@ function getJwtSecret(): string {
 const JWT_SECRET = getJwtSecret()
 
 type AuthScope = {
-  level: 'owner' | 'branch' | 'subBranch'
+  level: 'owner' | 'branch' | 'subBranch' | 'smartBuy'
   branchId: string | null
   subBranchId: string | null
 }
@@ -51,6 +51,7 @@ function resolveSessionScope(user: Record<string, unknown>): { portal: 'admin' |
     || Boolean((readPermissions(user)).all)
   const isBranchManager = roleName === 'branch manager'
   const isCashier = roleName === 'cashier'
+  const isSmartBuyManager = roleName === 'smart buy manager'
 
   if (isOwner) {
     return { portal: 'admin', scope: { level: 'owner', branchId: null, subBranchId: null } }
@@ -59,6 +60,11 @@ function resolveSessionScope(user: Record<string, unknown>): { portal: 'admin' |
   if (isBranchManager) {
     if (!branchId) throw new Error('Branch Manager account must be assigned to a branch before login')
     return { portal: 'admin', scope: { level: 'branch', branchId, subBranchId: null } }
+  }
+
+  if (isSmartBuyManager) {
+    if (!branchId) throw new Error('Smart Buy Manager account must be assigned to a branch before login')
+    return { portal: 'admin', scope: { level: 'smartBuy', branchId, subBranchId: null } }
   }
 
   if (isCashier) {

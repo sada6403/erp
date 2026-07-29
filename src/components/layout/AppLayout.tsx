@@ -54,8 +54,14 @@ function Clock() {
   )
 }
 
-type NavItem = { to: string; label: string; perm?: string; adminOnly?: boolean }
-type NavGroup = { label: string; icon: LucideIcon; items: NavItem[]; perm?: string; adminOnly?: boolean; module?: string }
+type NavItem = { to: string; label: string; perm?: string | string[]; adminOnly?: boolean }
+type NavGroup = { label: string; icon: LucideIcon; items: NavItem[]; perm?: string | string[]; adminOnly?: boolean; module?: string }
+
+function hasAnyPerm(perm: string | string[] | undefined, permissions: Record<string, unknown>): boolean {
+  if (!perm) return true
+  const keys = Array.isArray(perm) ? perm : [perm]
+  return keys.some(k => Boolean(permissions[k]))
+}
 
 const NAV_GROUPS: NavGroup[] = [
   {
@@ -79,14 +85,18 @@ const NAV_GROUPS: NavGroup[] = [
     ]
   },
   {
-    // Umbrella home for every Chit Fund feature — schemes and member/customer
-    // management live here so future chit-fund development has one place to
-    // grow into instead of being scattered across other groups. Agent
-    // Management lives under Employee Management only (staff records).
-    label: 'Chit Fund Management', icon: Coins, perm: 'customers', module: 'customers',
+    // Umbrella home for every Smart Buy (chit fund) feature — schemes,
+    // member/customer management, and a dedicated agent view all live here.
+    // Gated by 'customers' (existing roles) OR 'chits' (the restricted,
+    // branch-scoped Smart Buy Manager role — see sessionRouting.ts's
+    // 'smartBuyManager' kind) so granting a new role 'chits' alone never
+    // implies the broader 'customers' permission.
+    label: 'Smart Buy', icon: Coins, perm: ['customers', 'chits'], module: 'customers',
     items: [
-      { to: '/admin/chits', label: 'Chit Schemes', perm: 'customers' },
-      { to: '/admin/chit-customers', label: 'Customers', perm: 'customers' },
+      { to: '/admin/smart-buy', label: 'Dashboard', perm: ['customers', 'chits'] },
+      { to: '/admin/chits', label: 'Schemes', perm: ['customers', 'chits'] },
+      { to: '/admin/chit-customers', label: 'Customers', perm: ['customers', 'chits'] },
+      { to: '/admin/smart-buy-agents', label: 'Agents', perm: ['customers', 'chits'] },
     ]
   },
   {
@@ -163,17 +173,18 @@ const NAV_GROUPS: NavGroup[] = [
 function canSeeItem(item: NavItem, permissions: Record<string, unknown>, isAdmin: boolean) {
   if (isAdmin) return true
   if (item.adminOnly) return false
-  return !item.perm || Boolean(permissions[item.perm])
+  return hasAnyPerm(item.perm, permissions)
 }
 
 function canSeeGroup(group: NavGroup, kind: SessionRoleKind) {
   const label = group.label
   if (kind === 'owner') return true
-  if (kind === 'cashier') return ['Sell', 'Customers', 'Customer Management', 'Chit Fund Management', 'Coupons', 'Deliveries'].includes(label)
-  if (kind === 'accountant') return ['Customer Management', 'Chit Fund Management', 'Expenses', 'Reports', 'Branches'].includes(label)
+  if (kind === 'smartBuyManager') return label === 'Smart Buy'
+  if (kind === 'cashier') return ['Sell', 'Customers', 'Customer Management', 'Smart Buy', 'Coupons', 'Deliveries'].includes(label)
+  if (kind === 'accountant') return ['Customer Management', 'Smart Buy', 'Expenses', 'Reports', 'Branches'].includes(label)
   if (kind === 'storeKeeper') return ['Products', 'Purchase Orders', 'Supplier Management', 'Stock Transfers', 'Branches'].includes(label)
   if (kind === 'branchManager' || kind === 'subBranchManager') {
-    return ['Products', 'Purchase Orders', 'Supplier Management', 'Customer Management', 'Chit Fund Management', 'Stock Transfers', 'Sell', 'Coupons', 'Deliveries', 'Expenses', 'Reports', 'Employee Management', 'Branches'].includes(label)
+    return ['Products', 'Purchase Orders', 'Supplier Management', 'Customer Management', 'Smart Buy', 'Stock Transfers', 'Sell', 'Coupons', 'Deliveries', 'Expenses', 'Reports', 'Employee Management', 'Branches'].includes(label)
   }
   return true
 }
@@ -230,7 +241,7 @@ const SidebarGroup = memo(function SidebarGroup({
 
   if (!isAdmin && group.adminOnly) return null
   if (!canSeeGroup(group, kind)) return null
-  if (!isAdmin && group.perm && !permissions[group.perm] && !visibleItems.length) return null
+  if (!isAdmin && group.perm && !hasAnyPerm(group.perm, permissions) && !visibleItems.length) return null
   if (!visibleItems.length) return null
   // Module gating: enabledModules null = offline/unknown = show all
   if (group.module && enabledModules && !enabledModules.includes(group.module)) return null
@@ -655,7 +666,7 @@ export default function AppLayout() {
             onScroll={e => saveSidebarScroll((e.currentTarget as HTMLElement).scrollTop)}
             className={`flex-1 overflow-y-auto space-y-0.5 px-2 ${sidebarOpen ? 'py-1' : 'py-3'}`}
           >
-            {profile.kind !== 'cashier' && (
+            {profile.kind !== 'cashier' && profile.kind !== 'smartBuyManager' && (
               <SidebarLink
                 to={homeRoute}
                 end={profile.kind === 'owner' || profile.kind === 'branchManager' || profile.kind === 'subBranchManager'}

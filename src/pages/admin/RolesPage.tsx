@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, Trash2, Shield, ShieldCheck, Lock, ShoppingBag, Package, Users, Truck, Receipt, BarChart3, UserCog, GitBranch, ArrowLeftRight, Settings, Check, X, Ticket } from 'lucide-react'
+import { Plus, Edit2, Trash2, Shield, ShieldCheck, Lock, ShoppingBag, Package, Users, Truck, Receipt, BarChart3, UserCog, GitBranch, ArrowLeftRight, Settings, Check, X, Ticket, Coins } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -38,6 +38,14 @@ const MODULES = [
       { key: 'customers_edit',   label: 'Edit' },
       { key: 'customers_delete', label: 'Delete' },
     ]
+  },
+  {
+    // Distinct from 'customers' on purpose: chits.ts's branch-scoping treats
+    // 'customers' as global (all-branch) access, so a role that should only
+    // manage Smart Buy for its own branch (e.g. "Smart Buy Manager") must be
+    // granted 'chits' alone, never 'customers'.
+    key: 'chits', label: 'Smart Buy', icon: Coins, group: 'Operations',
+    actions: []
   },
   {
     key: 'deliveries', label: 'Deliveries', icon: Truck, group: 'Operations',

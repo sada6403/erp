@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
+import MemberPaymentHistoryModal from '@/components/shared/MemberPaymentHistoryModal'
 import { Plus, Search, Eye, Coins } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -18,9 +19,9 @@ export default function ChitCustomersPage() {
     try {
       const res = await window.api.chits.customersList({})
       if (res.success) setCustomers(res.data as Row[])
-      else toast.error(res.error || 'Failed to load chit fund customers')
+      else toast.error(res.error || 'Failed to load Smart Buy customers')
     } catch (err) {
-      toast.error((err as Error).message || 'Failed to load chit fund customers')
+      toast.error((err as Error).message || 'Failed to load Smart Buy customers')
     } finally {
       setLoading(false)
     }
@@ -36,10 +37,10 @@ export default function ChitCustomersPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <PageHeader title="Chit Fund Customers" subtitle={`${filtered.length} customer(s) enrolled in a chit scheme`}
+      <PageHeader title="Smart Buy Customers" subtitle={`${filtered.length} customer(s) enrolled in a Smart Buy scheme`}
         actions={
           <button onClick={() => setShowForm(true)} className="btn-primary btn-sm gap-1.5">
-            <Plus size={14} /> Add Chit Customer
+            <Plus size={14} /> Add Smart Buy Customer
           </button>
         }
       />
@@ -64,7 +65,7 @@ export default function ChitCustomersPage() {
             {loading ? (
               <tr><td colSpan={9} className="text-center py-16 text-slate-500">Loading...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={9} className="text-center py-16 text-slate-500">No chit fund customers yet</td></tr>
+              <tr><td colSpan={9} className="text-center py-16 text-slate-500">No Smart Buy customers yet</td></tr>
             ) : filtered.map(c => (
               <tr key={c.id as string} className="table-row">
                 <td className="table-cell">
@@ -124,10 +125,10 @@ function AddChitCustomerModal({ onClose, onSave }: { onClose: () => void; onSave
         const open = (schemesRes.data || []).filter(s => Number(s.members_enrolled ?? 0) < Number(s.member_count ?? 0))
         setSchemes(open)
       } else {
-        toast.error(schemesRes.error || 'Failed to load chit schemes')
+        toast.error(schemesRes.error || 'Failed to load Smart Buy schemes')
       }
       if (agentsRes.success) setAgents(agentsRes.data || [])
-    }).catch(() => toast.error('Failed to load chit schemes')).finally(() => setLoading(false))
+    }).catch(() => toast.error('Failed to load Smart Buy schemes')).finally(() => setLoading(false))
   }, [])
 
   useEffect(() => {
@@ -140,7 +141,7 @@ function AddChitCustomerModal({ onClose, onSave }: { onClose: () => void; onSave
   const save = async () => {
     if (!form.name.trim()) { toast.error('Customer name is required'); return }
     if (!form.phone.trim()) { toast.error('Phone is required'); return }
-    if (!schemeId) { toast.error('Select a chit scheme'); return }
+    if (!schemeId) { toast.error('Select a Smart Buy scheme'); return }
     setSaving(true)
     try {
       const res = await window.api.chits.members.add(schemeId, {
@@ -148,7 +149,7 @@ function AddChitCustomerModal({ onClose, onSave }: { onClose: () => void; onSave
         customer_email: form.email.trim() || undefined, customer_nic: form.nic.trim() || undefined,
         customer_address: form.address.trim() || undefined, agent_id: agentId || undefined,
       })
-      if (res.success) { toast.success('Chit fund customer added'); onSave() }
+      if (res.success) { toast.success('Smart Buy customer added'); onSave() }
       else toast.error(res.error || 'Failed to add customer')
     } catch (err) {
       toast.error((err as Error).message || 'Failed to add customer')
@@ -158,7 +159,7 @@ function AddChitCustomerModal({ onClose, onSave }: { onClose: () => void; onSave
   }
 
   return (
-    <Modal title="Add Chit Fund Customer" onClose={onClose}
+    <Modal title="Add Smart Buy Customer" onClose={onClose}
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving || loading} className="btn-primary">{saving ? 'Saving...' : 'Add Customer'}</button></>}>
       <div className="space-y-4">
         <div>
@@ -176,15 +177,15 @@ function AddChitCustomerModal({ onClose, onSave }: { onClose: () => void; onSave
         </div>
 
         <div>
-          <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-3)' }}>Chit Fund Enrollment</h3>
+          <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-3)' }}>Smart Buy Enrollment</h3>
           {loading ? (
             <p className="text-sm text-slate-500">Loading schemes...</p>
           ) : schemes.length === 0 ? (
-            <p className="text-sm text-slate-500">No open chit schemes with available slots right now.</p>
+            <p className="text-sm text-slate-500">No open Smart Buy schemes with available slots right now.</p>
           ) : (
             <div className="space-y-3">
               <div>
-                <label className="block text-xs font-medium text-slate-400 mb-1">Chit Scheme *</label>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Smart Buy Scheme *</label>
                 <select value={schemeId} onChange={e => setSchemeId(e.target.value)} className="input">
                   <option value="">— Select a scheme —</option>
                   {schemes.map(s => (
@@ -212,16 +213,17 @@ function AddChitCustomerModal({ onClose, onSave }: { onClose: () => void; onSave
 function ChitCustomerDetail({ customer, onClose }: { customer: Row; onClose: () => void }) {
   const [memberships, setMemberships] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
+  const [historyMemberId, setHistoryMemberId] = useState<string | null>(null)
 
   useEffect(() => {
     window.api.customers.chitMemberships(customer.id as string).then((res: { success: boolean; data?: Row[]; error?: string }) => {
       if (res.success) setMemberships(res.data || [])
-      else toast.error(res.error || 'Failed to load chit memberships')
-    }).catch(() => toast.error('Failed to load chit memberships')).finally(() => setLoading(false))
+      else toast.error(res.error || 'Failed to load Smart Buy memberships')
+    }).catch(() => toast.error('Failed to load Smart Buy memberships')).finally(() => setLoading(false))
   }, [customer.id])
 
   return (
-    <Modal title={`${customer.name as string} — Chit Fund Details`} onClose={onClose} size="lg">
+    <Modal title={`${customer.name as string} — Smart Buy Details`} onClose={onClose} size="lg">
       <div className="space-y-4">
         <div className="grid grid-cols-3 gap-3 text-center">
           <div className="card"><p className="text-xs text-slate-400">Schemes</p><p className="text-lg font-bold">{memberships.length}</p></div>
@@ -230,7 +232,7 @@ function ChitCustomerDetail({ customer, onClose }: { customer: Row; onClose: () 
         </div>
 
         <div>
-          <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5"><Coins size={14} /> Chit Memberships</h3>
+          <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5"><Coins size={14} /> Smart Buy Memberships</h3>
           {loading ? (
             <p className="text-sm text-slate-500">Loading...</p>
           ) : memberships.length === 0 ? (
@@ -246,15 +248,24 @@ function ChitCustomerDetail({ customer, onClose }: { customer: Row; onClose: () 
                   <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                     {(cm.product_name as string) || 'No product set'} · {(cm.branch_name as string) || 'No branch'} · Agent: {(cm.agent_name as string) || '—'}
                   </p>
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
-                    Join order #{cm.join_order as number} · Paid Rs.{Number(cm.contributions_paid).toLocaleString()} of Rs.{Number(cm.chit_value).toLocaleString()}
-                  </p>
+                  <div className="flex items-center justify-between mt-1">
+                    <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                      Join order #{cm.join_order as number} · Paid Rs.{Number(cm.contributions_paid).toLocaleString()} of Rs.{Number(cm.chit_value).toLocaleString()}
+                    </p>
+                    <button onClick={() => setHistoryMemberId(cm.id as string)} className="text-xs text-brand-400 hover:underline flex items-center gap-1">
+                      <Eye size={11} /> Payment History
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </div>
       </div>
+
+      {historyMemberId && (
+        <MemberPaymentHistoryModal memberId={historyMemberId} onClose={() => setHistoryMemberId(null)} />
+      )}
     </Modal>
   )
 }

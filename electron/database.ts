@@ -626,6 +626,11 @@ function runMigrations(): void {
       installment_id        TEXT REFERENCES installments(id),
       status                TEXT NOT NULL DEFAULT 'active',
       eligibility_note      TEXT,
+      paper_reference_code  TEXT,
+      redeemed_product_id   TEXT REFERENCES products(id),
+      redeemed_product_name TEXT,
+      redeemed_qty          INTEGER NOT NULL DEFAULT 1,
+      redeemed_value        REAL,
       created_at            TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
       synced_at             TEXT,
@@ -638,6 +643,23 @@ function runMigrations(): void {
   `)
   if (!hasColumn('chit_members', 'agent_id')) {
     db.exec(`ALTER TABLE chit_members ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
+  }
+  // Paper-record traceability (Register Historical Member) + redemption
+  // product capture (winner picks a product, possibly not the scheme default).
+  if (!hasColumn('chit_members', 'paper_reference_code')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN paper_reference_code TEXT`)
+  }
+  if (!hasColumn('chit_members', 'redeemed_product_id')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN redeemed_product_id TEXT REFERENCES products(id)`)
+  }
+  if (!hasColumn('chit_members', 'redeemed_product_name')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN redeemed_product_name TEXT`)
+  }
+  if (!hasColumn('chit_members', 'redeemed_qty')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN redeemed_qty INTEGER NOT NULL DEFAULT 1`)
+  }
+  if (!hasColumn('chit_members', 'redeemed_value')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN redeemed_value REAL`)
   }
   db.exec(`
 
@@ -660,30 +682,58 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_chit_draws_scheme ON chit_draws(scheme_id);
 
     CREATE TABLE IF NOT EXISTS chit_contributions (
-      id                TEXT PRIMARY KEY,
-      scheme_id         TEXT NOT NULL REFERENCES chit_schemes(id),
-      member_id         TEXT NOT NULL REFERENCES chit_members(id),
-      cycle_no          INTEGER,
-      contribution_type TEXT NOT NULL DEFAULT 'cycle',
-      amount            REAL NOT NULL,
-      method            TEXT NOT NULL DEFAULT 'cash',
-      receipt_number    TEXT,
-      reference         TEXT,
-      status            TEXT NOT NULL DEFAULT 'approved',
-      received_by       TEXT REFERENCES users(id),
-      verified_by       TEXT REFERENCES users(id),
-      verified_at       TEXT,
-      rejected_reason   TEXT,
-      branch_id         TEXT REFERENCES branches(id),
-      commission_amount REAL NOT NULL DEFAULT 0,
-      notes             TEXT,
-      paid_at           TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
-      synced_at         TEXT
+      id                    TEXT PRIMARY KEY,
+      scheme_id             TEXT NOT NULL REFERENCES chit_schemes(id),
+      member_id             TEXT NOT NULL REFERENCES chit_members(id),
+      cycle_no              INTEGER,
+      contribution_type     TEXT NOT NULL DEFAULT 'cycle',
+      amount                REAL NOT NULL,
+      method                TEXT NOT NULL DEFAULT 'cash',
+      receipt_number        TEXT,
+      reference             TEXT,
+      status                TEXT NOT NULL DEFAULT 'approved',
+      received_by           TEXT REFERENCES users(id),
+      collected_by_agent_id TEXT REFERENCES agents(id),
+      verified_by           TEXT REFERENCES users(id),
+      verified_at           TEXT,
+      rejected_reason       TEXT,
+      branch_id             TEXT REFERENCES branches(id),
+      commission_amount     REAL NOT NULL DEFAULT 0,
+      notes                 TEXT,
+      paid_at               TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at             TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_scheme ON chit_contributions(scheme_id);
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_member ON chit_contributions(member_id);
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_status ON chit_contributions(status);
+  `)
+  if (!hasColumn('chit_contributions', 'collected_by_agent_id')) {
+    db.exec(`ALTER TABLE chit_contributions ADD COLUMN collected_by_agent_id TEXT REFERENCES agents(id)`)
+  }
+
+  // Agent cash remittance/settlement — a field agent collects cash from
+  // customers (chit_contributions.collected_by_agent_id) and later hands it
+  // over to the office as a separate event. "Balance owed" is computed as
+  // collected-minus-remitted, not stored — this table only records the
+  // remittance side.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_remittances (
+      id             TEXT PRIMARY KEY,
+      agent_id       TEXT NOT NULL REFERENCES agents(id),
+      branch_id      TEXT NOT NULL REFERENCES branches(id),
+      amount         REAL NOT NULL,
+      method         TEXT NOT NULL DEFAULT 'cash',
+      bank_reference TEXT,
+      submitted_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      received_by    TEXT REFERENCES users(id),
+      notes          TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_agent_remittances_agent  ON agent_remittances(agent_id);
+    CREATE INDEX IF NOT EXISTS idx_agent_remittances_branch ON agent_remittances(branch_id);
   `)
 
   // Edit requests — a branch manager/cashier wanting to correct an
