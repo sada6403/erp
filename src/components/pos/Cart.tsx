@@ -20,15 +20,26 @@ function getMaxDiscount(user: { role?: { name?: string; permissions?: Record<str
   return typeof perms.max_discount_pct === 'number' ? perms.max_discount_pct : legacyMaxDiscount(roleName)
 }
 
+interface DiscountPlan {
+  id: string
+  name: string
+  type: 'percentage' | 'flat'
+  value: number
+}
+
 interface Props {
   focusedIdx?: number
   onFocusIdx?: (idx: number) => void
+  discountPlans?: Record<string, unknown>[]
 }
 
-export default function Cart({ focusedIdx = -1, onFocusIdx }: Props) {
+export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }: Props) {
   const cart = useCartStore()
   const { user } = useAuthStore()
   const [showDiscount, setShowDiscount] = useState(false)
+  const [selectedPlanId, setSelectedPlanId] = useState('')
+
+  const plans = discountPlans as unknown as DiscountPlan[]
 
   const roleName = (user?.role as { name?: string } | null)?.name || 'Cashier'
   const maxDiscount = getMaxDiscount(user as { role?: { name?: string; permissions?: Record<string, unknown> } } | null)
@@ -60,6 +71,17 @@ export default function Cart({ focusedIdx = -1, onFocusIdx }: Props) {
       return
     }
     cart.setGlobalDiscount(pct)
+  }
+
+  const handlePlanSelect = (planId: string) => {
+    setSelectedPlanId(planId)
+    if (!planId) return
+    const plan = plans.find(p => p.id === planId)
+    if (!plan) return
+    const pct = plan.type === 'percentage'
+      ? plan.value
+      : cart.subtotal > 0 ? (plan.value / cart.subtotal) * 100 : 0
+    handleGlobalDiscount(pct)
   }
 
   if (cart.items.length === 0) {
@@ -212,16 +234,32 @@ export default function Cart({ focusedIdx = -1, onFocusIdx }: Props) {
           <ChevronDown size={12} className={`ml-auto transition-transform ${showDiscount ? 'rotate-180' : ''}`} />
         </button>
         {showDiscount && (
-          <div className="flex items-center gap-2">
-            <input
-              type="number"
-              value={cart.globalDiscount}
-              onChange={e => handleGlobalDiscount(parseFloat(e.target.value) || 0)}
-              className="input py-1.5 text-sm w-24"
-              placeholder="%"
-              min="0" max={maxDiscount}
-            />
-            <span className="text-xs" style={{ color: 'var(--text-3)' }}>% (max {maxDiscount}% for {roleName})</span>
+          <div className="space-y-1.5">
+            {plans.length > 0 && (
+              <select
+                value={selectedPlanId}
+                onChange={e => handlePlanSelect(e.target.value)}
+                className="input py-1.5 text-sm w-full"
+              >
+                <option value="">Custom %...</option>
+                {plans.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name} — {p.type === 'percentage' ? `${p.value}%` : `Rs.${p.value}`}
+                  </option>
+                ))}
+              </select>
+            )}
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                value={cart.globalDiscount}
+                onChange={e => { setSelectedPlanId(''); handleGlobalDiscount(parseFloat(e.target.value) || 0) }}
+                className="input py-1.5 text-sm w-24"
+                placeholder="%"
+                min="0" max={maxDiscount}
+              />
+              <span className="text-xs" style={{ color: 'var(--text-3)' }}>% (max {maxDiscount}% for {roleName})</span>
+            </div>
           </div>
         )}
 

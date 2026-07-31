@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { ArrowLeft, Save, Truck, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
 
 interface Branch {
   id: string
@@ -219,16 +220,11 @@ export default function BranchTransferForm() {
                     <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-xs font-medium text-slate-400 mb-1">Product</label>
-                        <select 
+                        <ProductSearchSelect
+                          products={products as unknown as Record<string, unknown>[]}
                           value={item.product_id}
-                          onChange={e => updateItem(item.id, 'product_id', e.target.value)}
-                          className="w-full bg-surface-800 border border-surface-600 text-white px-3 py-1.5 rounded-lg focus:outline-none focus:border-brand-500 text-sm"
-                        >
-                          <option value="">Select Product</option>
-                          {products.map(p => (
-                            <option key={p.id} value={p.id}>{p.name} ({p.sku})</option>
-                          ))}
-                        </select>
+                          onChange={id => updateItem(item.id, 'product_id', id)}
+                        />
                       </div>
                       
                       <div className="flex gap-4">

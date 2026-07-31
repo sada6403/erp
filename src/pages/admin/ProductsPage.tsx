@@ -946,7 +946,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
                 <label className="label">Max Discount (%)</label>
                 <input type="number" value={discountPct || ''} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
                   className="input" min="0" max="100" step="0.5" placeholder="0"
-                  title="Applies automatically at POS checkout — the cashier doesn't need to enter it. Also manageable per-branch in Admin > Discounts." />
+                  title="Maximum discount % a cashier can manually apply to this product at checkout. Also manageable per-branch in Admin > Discounts." />
               </div>
               <div>
                 <label className="label">Image</label>

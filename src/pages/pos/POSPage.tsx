@@ -509,7 +509,8 @@ export default function POSPage() {
               </button>
             )}
           </div>
-          <Cart focusedIdx={cartFocusedIdx} onFocusIdx={setCartFocusedIdx} />
+          <Cart focusedIdx={cartFocusedIdx} onFocusIdx={setCartFocusedIdx}
+            discountPlans={discountRules.filter(r => r.scope === 'all' && r.is_active)} />
         </div>
       </div>
 

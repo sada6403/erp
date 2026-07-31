@@ -92,7 +92,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       const newItem = calcLine({
         product, quantity,
         unit_price:      product.selling_price,
-        discount_pct:    floor,
+        discount_pct:    0,
         discount_amount: 0,
         tax_amount:      0,
         line_total:      0,
