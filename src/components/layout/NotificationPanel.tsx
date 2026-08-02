@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Bell, X, Check, CheckCheck, Trash2, Package, CreditCard, RefreshCw, ShieldAlert, Info, ArrowLeftRight } from 'lucide-react'
+import { Bell, X, Check, CheckCheck, Trash2, Package, CreditCard, RefreshCw, ShieldAlert, Info, ArrowLeftRight, GitBranch, Coins } from 'lucide-react'
 
 interface Notification {
   id: string
@@ -26,6 +26,12 @@ function routeFor(n: Notification): string | null {
   if (n.type === 'installment_due' || n.type === 'installment_overdue') return '/admin/installments'
   if (n.type === 'transfer_request') return '/admin/stock-requests'
   if (n.type === 'info' && typeof data.event === 'string' && data.event.startsWith('edit_request_')) return '/admin/edit-requests'
+  if (n.type === 'chit_collaboration_invite') return '/admin/smart-buy'
+  if (n.type === 'chit_payment_due') return '/admin/smart-buy-reports'
+  if (n.type === 'chit_scheme_closing') {
+    const schemeId = typeof data.schemeId === 'string' ? data.schemeId : ''
+    return schemeId ? `/admin/chits/${schemeId}` : '/admin/chits'
+  }
   return null
 }
 
@@ -39,6 +45,9 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   subscription_expired: <ShieldAlert size={14} className="text-red-400" />,
   transfer_request:     <ArrowLeftRight size={14} className="text-purple-400" />,
   info:                 <Info size={14} className="text-blue-400" />,
+  chit_collaboration_invite: <GitBranch size={14} className="text-purple-400" />,
+  chit_payment_due:          <Coins size={14} className="text-yellow-400" />,
+  chit_scheme_closing:       <Coins size={14} className="text-blue-400" />,
 }
 
 function timeAgo(dt: string) {

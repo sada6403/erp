@@ -575,6 +575,38 @@ function runMigrations(): void {
     db.exec(`ALTER TABLE invoices ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
   }
 
+  // Stable session-scope identifier for restricted-portal roles (Smart Buy
+  // Manager, Agent) — replaces matching on the role's display name, which
+  // silently breaks the portal restriction if the role is ever renamed.
+  // NULL for ordinary (non-restricted) roles.
+  if (!hasColumn('roles', 'session_scope')) {
+    db.exec(`ALTER TABLE roles ADD COLUMN session_scope TEXT`)
+    // One-time backfill so upgrading installs don't lose the existing
+    // "Smart Buy Manager" restricted-portal behavior the moment the
+    // string-match becomes only a fallback.
+    db.exec(`UPDATE roles SET session_scope='smartBuy' WHERE LOWER(TRIM(name))='smart buy manager'`)
+  }
+
+  // Links an agent record to a real login (users row) so an agent can sign
+  // in and see only their own schemes/members/commission, instead of being
+  // a passive record admins manage on their behalf. Partial unique index —
+  // many agents can share user_id=NULL (not yet linked to a login).
+  if (!hasColumn('agents', 'user_id')) {
+    db.exec(`ALTER TABLE agents ADD COLUMN user_id TEXT REFERENCES users(id)`)
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id) WHERE user_id IS NOT NULL`)
+  }
+
+  // Formal "this user is THE SmartBuy Manager of this branch" pointer — a
+  // soft assignment (no uniqueness enforced; a user could in principle be
+  // pointed at from more than one branch, or a branch left unassigned).
+  // Distinct from `users.branch_id`, which is what actually drives a Smart
+  // Buy Manager's session scoping on login — this column is display/report
+  // metadata only (e.g. "Manager Name" on the branch performance report),
+  // so admin.ts validates the two agree when this is set.
+  if (!hasColumn('branches', 'smartbuy_manager_id')) {
+    db.exec(`ALTER TABLE branches ADD COLUMN smartbuy_manager_id TEXT REFERENCES users(id)`)
+  }
+
   // Chit Fund — a group of customers (recruited by an agent) contributes
   // toward a product over a fixed number of cycles. One member wins the
   // product each cycle by lottery draw; on the final cycle every remaining
@@ -641,6 +673,32 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_chit_members_customer ON chit_members(customer_id);
     CREATE INDEX IF NOT EXISTS idx_chit_members_status   ON chit_members(status);
   `)
+  // Activation floor: a scheme starts life as 'pending' and only flips to
+  // 'active' once enrolled members reach min_members (member_count remains
+  // the separate capacity/maximum). Defaults to 1 at the column level so
+  // existing schemes aren't retroactively knocked back to pending on
+  // upgrade — the spec's default of 50 is applied by chits:create instead.
+  if (!hasColumn('chit_schemes', 'min_members')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN min_members INTEGER NOT NULL DEFAULT 1`)
+  }
+  // Registration Lock — when set, enrollment (chits:members:add/
+  // registerHistorical/importExcel) is rejected outside this window.
+  // NULL means no lock (enrollment always open), matching existing schemes.
+  if (!hasColumn('chit_schemes', 'registration_start_date')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN registration_start_date TEXT`)
+  }
+  if (!hasColumn('chit_schemes', 'registration_end_date')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN registration_end_date TEXT`)
+  }
+  // Late Fee — grace period (days into the month) before a cycle
+  // contribution is considered late; late_fee_amount is added on top of the
+  // recorded amount when a contribution is collected past that day.
+  if (!hasColumn('chit_schemes', 'late_payment_days')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN late_payment_days INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('chit_schemes', 'late_fee_amount')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN late_fee_amount REAL NOT NULL DEFAULT 0`)
+  }
   if (!hasColumn('chit_members', 'agent_id')) {
     db.exec(`ALTER TABLE chit_members ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
   }
@@ -660,6 +718,12 @@ function runMigrations(): void {
   }
   if (!hasColumn('chit_members', 'redeemed_value')) {
     db.exec(`ALTER TABLE chit_members ADD COLUMN redeemed_value REAL`)
+  }
+  // Links to the real POS invoice generated when the redemption is recorded
+  // (stock decrement + invoice_items + payment) — makes the product handout
+  // show up in stock-on-hand and sales/tax reporting like any other sale.
+  if (!hasColumn('chit_members', 'redemption_invoice_id')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN redemption_invoice_id TEXT REFERENCES invoices(id)`)
   }
   db.exec(`
 
@@ -734,6 +798,231 @@ function runMigrations(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_remittances_agent  ON agent_remittances(agent_id);
     CREATE INDEX IF NOT EXISTS idx_agent_remittances_branch ON agent_remittances(branch_id);
+  `)
+
+  // Branch Collaboration — when a scheme's home branch (chit_schemes.branch_id)
+  // can't reach min_members alone, it can invite another branch to enroll
+  // members into the SAME scheme. There is still only ONE scheme, ONE home
+  // branch, and ONE responsible agent (chit_schemes.agent_id) — collaboration
+  // only extends who may enroll/collect for it, never splits ownership.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chit_scheme_branches (
+      id             TEXT PRIMARY KEY,
+      scheme_id      TEXT NOT NULL REFERENCES chit_schemes(id),
+      branch_id      TEXT NOT NULL REFERENCES branches(id),
+      status         TEXT NOT NULL DEFAULT 'pending',
+      requested_by   TEXT REFERENCES users(id),
+      responded_by   TEXT REFERENCES users(id),
+      responded_at   TEXT,
+      notes          TEXT,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at      TEXT,
+      UNIQUE(scheme_id, branch_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_chit_scheme_branches_scheme ON chit_scheme_branches(scheme_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_scheme_branches_branch ON chit_scheme_branches(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_scheme_branches_status ON chit_scheme_branches(status);
+  `)
+  // Which branch actually recruited this member — defaults to the scheme's
+  // home branch for members enrolled there; set to the collaborating
+  // branch's id when enrolled through an active collaboration. Drives
+  // per-branch member access (a collaborating branch only manages members
+  // it recruited; the home branch always sees everyone).
+  if (!hasColumn('chit_members', 'enrolled_branch_id')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN enrolled_branch_id TEXT REFERENCES branches(id)`)
+  }
+  // Every collaborator-scoped member query (assertMemberAccess call sites)
+  // filters on this column — without an index it's a full table scan once a
+  // scheme has any meaningful member count.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_chit_members_enrolled_branch ON chit_members(enrolled_branch_id)`)
+
+  // Optional brand tag on products, needed for brand-wise commission rules
+  // (category-wise/product-wise already have FKs to reuse).
+  if (!hasColumn('products', 'brand')) {
+    db.exec(`ALTER TABLE products ADD COLUMN brand TEXT`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand)`)
+  }
+
+  // Enterprise Commission Engine — configurable rules (no hardcoded % or
+  // ownership logic). A rule matches at exactly one specificity level
+  // (product > category > brand > scheme > global); multiple 'bonus' rules
+  // may stack on top of the one base (non-bonus) rule that matches.
+  // ownership_model decides how a matched rule's commission splits between
+  // the member's registering agent (chit_members.agent_id) and whoever
+  // physically collected this particular payment
+  // (chit_contributions.collected_by_agent_id) — the two-agent scenario
+  // ("Agent A registered, Agent B collected") the spec calls out explicitly.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commission_rules (
+      id                      TEXT PRIMARY KEY,
+      name                    TEXT NOT NULL,
+      scope                   TEXT NOT NULL DEFAULT 'global',
+      scheme_id               TEXT REFERENCES chit_schemes(id),
+      product_id              TEXT REFERENCES products(id),
+      category_id             TEXT REFERENCES categories(id),
+      brand                   TEXT,
+      calculation_type        TEXT NOT NULL DEFAULT 'percentage',
+      rate                    REAL NOT NULL DEFAULT 0,
+      ownership_model         TEXT NOT NULL DEFAULT 'registration',
+      registration_share_pct  REAL NOT NULL DEFAULT 100,
+      sales_share_pct         REAL NOT NULL DEFAULT 0,
+      is_bonus                INTEGER NOT NULL DEFAULT 0,
+      priority                INTEGER NOT NULL DEFAULT 0,
+      active_from             TEXT,
+      active_to               TEXT,
+      status                  TEXT NOT NULL DEFAULT 'active',
+      notes                   TEXT,
+      created_by              TEXT REFERENCES users(id),
+      created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at               TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_commission_rules_scheme   ON commission_rules(scheme_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_rules_product  ON commission_rules(product_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_rules_category ON commission_rules(category_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_rules_status   ON commission_rules(status);
+
+    CREATE TABLE IF NOT EXISTS commission_ledger (
+      id                      TEXT PRIMARY KEY,
+      source_table            TEXT NOT NULL,
+      source_id               TEXT NOT NULL,
+      scheme_id               TEXT REFERENCES chit_schemes(id),
+      member_id               TEXT REFERENCES chit_members(id),
+      rule_id                 TEXT REFERENCES commission_rules(id),
+      is_bonus                INTEGER NOT NULL DEFAULT 0,
+      registration_agent_id   TEXT REFERENCES agents(id),
+      sales_agent_id          TEXT REFERENCES agents(id),
+      base_amount             REAL NOT NULL DEFAULT 0,
+      registration_commission REAL NOT NULL DEFAULT 0,
+      sales_commission        REAL NOT NULL DEFAULT 0,
+      total_commission        REAL NOT NULL DEFAULT 0,
+      status                  TEXT NOT NULL DEFAULT 'pending',
+      approved_by             TEXT REFERENCES users(id),
+      approved_at             TEXT,
+      paid_at                 TEXT,
+      branch_id               TEXT REFERENCES branches(id),
+      notes                   TEXT,
+      created_at              TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at              TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at               TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_source  ON commission_ledger(source_table, source_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_scheme  ON commission_ledger(scheme_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_reg     ON commission_ledger(registration_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_sales   ON commission_ledger(sales_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_status  ON commission_ledger(status);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_branch  ON commission_ledger(branch_id);
+  `)
+
+  // Records an actual payment event to an agent, covering one or more
+  // approved commission_ledger rows in one batch — commission_ledger.status
+  // alone only says "paid", with no trail of when/how/by-whom/how-much was
+  // actually handed over. A payout always targets exactly one agent (the
+  // ledger rows it covers may themselves be split registration/sales
+  // commission, but that split is intra-row, not something this table needs
+  // to unpick — see commissions.ts:payouts:create).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commission_payouts (
+      id           TEXT PRIMARY KEY,
+      agent_id     TEXT NOT NULL REFERENCES agents(id),
+      branch_id    TEXT REFERENCES branches(id),
+      amount       REAL NOT NULL DEFAULT 0,
+      method       TEXT NOT NULL DEFAULT 'cash',
+      reference    TEXT,
+      paid_by      TEXT REFERENCES users(id),
+      paid_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      notes        TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at    TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_commission_payouts_agent  ON commission_payouts(agent_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_payouts_branch ON commission_payouts(branch_id);
+  `)
+  if (!hasColumn('commission_ledger', 'payout_id')) {
+    db.exec(`ALTER TABLE commission_ledger ADD COLUMN payout_id TEXT REFERENCES commission_payouts(id)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_commission_ledger_payout ON commission_ledger(payout_id)`)
+  }
+
+  // Multi-level commission approval — the manager-level decision keeps
+  // reusing the existing approved_by/approved_at (it always fires first);
+  // these two are only for the second, Super-Admin-level decision. Their
+  // absence also doubles as the one-time guard for the status-vocabulary
+  // migration right below (both ship together, so "column doesn't exist yet"
+  // reliably means "this install hasn't run either upgrade yet").
+  if (!hasColumn('commission_ledger', 'admin_approved_by')) {
+    db.exec(`ALTER TABLE commission_ledger ADD COLUMN admin_approved_by TEXT REFERENCES users(id)`)
+    db.exec(`ALTER TABLE commission_ledger ADD COLUMN admin_approved_at TEXT`)
+    // 'pending' was always manager-level (nobody had reviewed it yet);
+    // 'approved' was always the old single manager-level approval (markPaid
+    // separately required isCommissionAdmin, i.e. Super Admin already had to
+    // act before 'paid' — so an 'approved' row is exactly a row that's now
+    // awaiting that Super Admin step). 'paid' is unchanged.
+    db.exec(`UPDATE commission_ledger SET status='pending_manager_approval' WHERE status='pending'`)
+    db.exec(`UPDATE commission_ledger SET status='pending_admin_approval' WHERE status='approved'`)
+  }
+
+  // Structured commission approval/rejection/cancellation trail — one row
+  // per status transition, distinct from the generic audit_logs (which
+  // stores an unstructured JSON blob) because the approval-history UI needs
+  // previous_status/new_status/remarks as first-class queryable fields.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commission_approval_logs (
+      id               TEXT PRIMARY KEY,
+      commission_id    TEXT NOT NULL REFERENCES commission_ledger(id),
+      agent_id         TEXT REFERENCES agents(id),
+      branch_id        TEXT REFERENCES branches(id),
+      action           TEXT NOT NULL,
+      previous_status  TEXT,
+      new_status       TEXT NOT NULL,
+      changed_by       TEXT REFERENCES users(id),
+      remarks          TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_commission_approval_logs_commission ON commission_approval_logs(commission_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_approval_logs_agent      ON commission_approval_logs(agent_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_approval_logs_branch     ON commission_approval_logs(branch_id);
+  `)
+
+  // One row per "Download Commission Statement" click — audit trail of who
+  // pulled a statement, for which agent, and for what period.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commission_statement_history (
+      id            TEXT PRIMARY KEY,
+      agent_id      TEXT NOT NULL REFERENCES agents(id),
+      generated_by  TEXT REFERENCES users(id),
+      period_from   TEXT,
+      period_to     TEXT,
+      status_filter TEXT,
+      generated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_commission_statement_history_agent ON commission_statement_history(agent_id);
+  `)
+
+  // Commission rule version history — a snapshot of a commission_rules row's
+  // prior values, written just before a rate/scope-changing update is
+  // applied. commission_ledger rows already store baked-in dollar amounts
+  // (never a live rule reference), so past commissions were never at risk
+  // from a later rate change — this only adds the ability to audit "what was
+  // the rate on date X," which wasn't previously recorded anywhere.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS commission_rule_history (
+      id                  TEXT PRIMARY KEY,
+      rule_id             TEXT NOT NULL REFERENCES commission_rules(id),
+      product_id          TEXT REFERENCES products(id),
+      scope               TEXT NOT NULL,
+      calculation_type    TEXT NOT NULL,
+      rate                REAL NOT NULL DEFAULT 0,
+      effective_start_date TEXT,
+      effective_end_date   TEXT,
+      created_by          TEXT REFERENCES users(id),
+      created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at           TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_commission_rule_history_rule ON commission_rule_history(rule_id);
   `)
 
   // Edit requests — a branch manager/cashier wanting to correct an
@@ -1018,6 +1307,17 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_notifications_read    ON notifications(is_read);
     CREATE INDEX IF NOT EXISTS idx_notifications_created ON notifications(created_at DESC);
   `)
+  // Targeting — all nullable, so NULL/NULL/NULL preserves today's broadcast
+  // behavior (visible to everyone) for every pre-existing notification type.
+  // Only new SmartBuy call sites (agent/scheme/commission events) set these;
+  // low-stock alerts, chit payment/closing reminders, etc. are untouched.
+  if (!hasColumn('notifications', 'user_id')) {
+    db.exec(`ALTER TABLE notifications ADD COLUMN user_id TEXT REFERENCES users(id)`)
+    db.exec(`ALTER TABLE notifications ADD COLUMN role_scope TEXT`)
+    db.exec(`ALTER TABLE notifications ADD COLUMN target_branch_id TEXT REFERENCES branches(id)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)`)
+    db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_role_branch ON notifications(role_scope, target_branch_id)`)
+  }
 
   // ── Loyalty Points ─────────────────────────────────────────────────────────
   db.exec(`

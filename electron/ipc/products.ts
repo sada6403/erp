@@ -341,6 +341,23 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         return { success: false, error: `Cannot permanently delete — this product appears in ${hasInvoiceItems.cnt} invoice(s). Use deactivate instead to preserve financial history.` }
       }
 
+      // Smart Buy — a product referenced here is live scheme/commission
+      // config or a member's redemption record, not disposable. FK
+      // enforcement (foreign_keys=ON) would otherwise surface this as a raw
+      // constraint-failure error only after `stocks` was already deleted.
+      const { cnt: schemeCnt } = db.prepare(`SELECT COUNT(*) as cnt FROM chit_schemes WHERE product_id = ?`).get(id) as { cnt: number }
+      if (schemeCnt > 0) {
+        return { success: false, error: `Cannot permanently delete — this product is used by ${schemeCnt} Smart Buy scheme(s). Use deactivate instead.` }
+      }
+      const { cnt: redeemedCnt } = db.prepare(`SELECT COUNT(*) as cnt FROM chit_members WHERE redeemed_product_id = ?`).get(id) as { cnt: number }
+      if (redeemedCnt > 0) {
+        return { success: false, error: `Cannot permanently delete — ${redeemedCnt} Smart Buy member(s) redeemed this product. Use deactivate instead.` }
+      }
+      const { cnt: ruleCnt } = db.prepare(`SELECT COUNT(*) as cnt FROM commission_rules WHERE product_id = ?`).get(id) as { cnt: number }
+      if (ruleCnt > 0) {
+        return { success: false, error: `Cannot permanently delete — ${ruleCnt} commission rule(s) reference this product. Remove or repoint them first.` }
+      }
+
       // Audit log before deletion
       logAudit(db, {
         userId: (caller?.id as string) || null,
@@ -351,9 +368,13 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         oldValues: { name: product.name, sku: product.sku, barcode: product.barcode, reason },
       })
 
-      // Remove related stock records then product
-      db.prepare(`DELETE FROM stocks WHERE product_id = ?`).run(id)
-      db.prepare(`DELETE FROM products WHERE id = ?`).run(id)
+      // Remove related stock records then product, atomically — otherwise a
+      // later failure (e.g. an FK constraint from a table not pre-checked
+      // above) leaves stocks deleted with the product still present.
+      db.transaction(() => {
+        db.prepare(`DELETE FROM stocks WHERE product_id = ?`).run(id)
+        db.prepare(`DELETE FROM products WHERE id = ?`).run(id)
+      })()
 
       return { success: true }
   })

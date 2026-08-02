@@ -275,7 +275,7 @@ export default function AdminDashboard() {
               </h3>
               <div className="space-y-2">
                 {lowStock.slice(0, 8).map((s) => (
-                  <div key={s.id as string} className="flex items-center justify-between">
+                  <div key={s.product_id as string} className="flex items-center justify-between">
                     <div className="min-w-0 flex-1">
                       <p className="text-sm truncate" style={{ color: 'var(--text-1)' }}>{s.product_name as string}</p>
                       <p className="text-xs text-slate-500 font-mono">{s.sku as string}</p>

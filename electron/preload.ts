@@ -66,6 +66,7 @@ const api = {
     search: (query: string)     => ipcRenderer.invoke('customers:search', query),
     create: (payload: unknown)  => ipcRenderer.invoke('customers:create', payload),
     update: (id: string, payload: unknown) => ipcRenderer.invoke('customers:update', id, payload),
+    delete: (id: string)        => ipcRenderer.invoke('customers:delete', id),
     installments: (id: string)  => ipcRenderer.invoke('customers:installments', id),
     history:      (id: string)  => ipcRenderer.invoke('customers:history', id),
     chitMemberships:    (id: string)  => ipcRenderer.invoke('customers:chitMemberships', id),
@@ -80,6 +81,9 @@ const api = {
     get:              (id: string)        => ipcRenderer.invoke('agents:get', id),
     create:           (payload: unknown)  => ipcRenderer.invoke('agents:create', payload),
     update:           (id: string, payload: unknown) => ipcRenderer.invoke('agents:update', id, payload),
+    delete:           (id: string)        => ipcRenderer.invoke('agents:delete', id),
+    linkUser:         (agentId: string, userId: string | null) => ipcRenderer.invoke('agents:linkUser', agentId, userId),
+    approve:          (id: string)        => ipcRenderer.invoke('agents:approve', id),
     report:           (filters: unknown)  => ipcRenderer.invoke('agents:report', filters),
     reportAllSummary: (filters?: unknown) => ipcRenderer.invoke('agents:reportAllSummary', filters),
     importExcel:      ()                  => ipcRenderer.invoke('agents:importExcel'),
@@ -92,7 +96,14 @@ const api = {
     get:     (id: string)        => ipcRenderer.invoke('chits:get', id),
     create:  (payload: unknown)  => ipcRenderer.invoke('chits:create', payload),
     update:  (id: string, payload: unknown) => ipcRenderer.invoke('chits:update', id, payload),
+    delete:  (id: string)                   => ipcRenderer.invoke('chits:delete', id),
+    purgeCancelled: (id: string)             => ipcRenderer.invoke('chits:purgeCancelled', id),
+    toggleActive: (id: string)              => ipcRenderer.invoke('chits:toggleActive', id),
     reports: (filters?: unknown) => ipcRenderer.invoke('chits:reports', filters),
+    reportsMembers:           (filters?: unknown) => ipcRenderer.invoke('chits:reports:members', filters),
+    reportsContributions:     (filters?: unknown) => ipcRenderer.invoke('chits:reports:contributions', filters),
+    reportsWinners:           (filters?: unknown) => ipcRenderer.invoke('chits:reports:winners', filters),
+    reportsBranchPerformance: () => ipcRenderer.invoke('chits:reports:branchPerformance'),
     customersList: (filters?: unknown) => ipcRenderer.invoke('chits:customers:list', filters),
     members: {
       add:                (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:add', schemeId, payload),
@@ -123,7 +134,41 @@ const api = {
       record: (payload: unknown)   => ipcRenderer.invoke('chits:remittances:record', payload),
       list:   (filters?: unknown)  => ipcRenderer.invoke('chits:remittances:list', filters),
     },
+    branches: {
+      invite:        (schemeId: string, targetBranchId: string, notes?: string) => ipcRenderer.invoke('chits:branches:invite', schemeId, targetBranchId, notes),
+      respond:       (collaborationId: string, action: 'approve' | 'reject', notes?: string) => ipcRenderer.invoke('chits:branches:respond', collaborationId, action, notes),
+      remove:        (collaborationId: string) => ipcRenderer.invoke('chits:branches:remove', collaborationId),
+      pendingInvites: () => ipcRenderer.invoke('chits:branches:pendingInvites'),
+    },
     dashboard: () => ipcRenderer.invoke('chits:dashboard'),
+  },
+
+  // Enterprise Commission Engine
+  commissions: {
+    rules: {
+      list:    (filters?: unknown) => ipcRenderer.invoke('commissions:rules:list', filters),
+      create:  (payload: unknown)  => ipcRenderer.invoke('commissions:rules:create', payload),
+      update:  (id: string, payload: unknown) => ipcRenderer.invoke('commissions:rules:update', id, payload),
+      delete:  (id: string)        => ipcRenderer.invoke('commissions:rules:delete', id),
+      history: (ruleId: string)    => ipcRenderer.invoke('commissions:rules:history', ruleId),
+    },
+    ledger: {
+      list:     (filters?: unknown) => ipcRenderer.invoke('commissions:ledger:list', filters),
+      approve:  (id: string, remarks?: string) => ipcRenderer.invoke('commissions:ledger:approve', id, remarks),
+      reject:   (id: string, remarks: string)  => ipcRenderer.invoke('commissions:ledger:reject', id, remarks),
+      cancel:   (id: string, remarks?: string) => ipcRenderer.invoke('commissions:ledger:cancel', id, remarks),
+      markPaid: (ids: string[])     => ipcRenderer.invoke('commissions:ledger:markPaid', ids),
+    },
+    approvalLogs: {
+      list: (commissionId: string) => ipcRenderer.invoke('commissions:approvalLogs:list', commissionId),
+    },
+    statement: {
+      generate: (agentId: string, filters?: unknown) => ipcRenderer.invoke('commissions:statement:generate', agentId, filters),
+    },
+    payouts: {
+      create: (payload: unknown)   => ipcRenderer.invoke('commissions:payouts:create', payload),
+      list:   (filters?: unknown)  => ipcRenderer.invoke('commissions:payouts:list', filters),
+    },
   },
 
   // Edit requests — manager-requested, admin-approved corrections to

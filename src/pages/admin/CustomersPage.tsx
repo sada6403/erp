@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import type { Customer } from '@/types'
-import { Plus, Search, Edit2, Eye, Upload, FileDown, Coins } from 'lucide-react'
+import { Plus, Search, Edit2, Eye, Upload, FileDown, Coins, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { validateCustomer } from '@/lib/validateCustomer'
 
@@ -58,6 +58,17 @@ export default function CustomersPage() {
   }
 
   useEffect(() => { load() }, [])
+
+  const deleteCustomer = async (c: Customer) => {
+    if (!confirm(`Delete customer "${c.name}"? This only works if they have no invoices, Smart Buy membership, or other billing history.`)) return
+    try {
+      const res = await window.api.customers.delete(c.id)
+      if (res.success) { toast.success('Customer deleted'); load() }
+      else toast.error(String(res.error || 'Failed to delete customer'))
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to delete customer')
+    }
+  }
 
   const filtered = customers.filter(c =>
     !search ||
@@ -126,6 +137,7 @@ export default function CustomersPage() {
                     <button onClick={() => setViewing(c)} className="btn-ghost btn-sm p-1.5"><Eye size={13} /></button>
                     <button onClick={() => { setEditing(c); setShowForm(true) }} className="btn-ghost btn-sm p-1.5"><Edit2 size={13} /></button>
                     <button onClick={() => setEnrolling(c)} className="btn-ghost btn-sm p-1.5" title="Add to Smart Buy Scheme"><Coins size={13} /></button>
+                    <button onClick={() => deleteCustomer(c)} className="btn-ghost btn-sm p-1.5 hover:text-red-500" title="Delete"><Trash2 size={13} /></button>
                   </div>
                 </td>
               </tr>

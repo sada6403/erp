@@ -27,6 +27,13 @@ export const ALLOWED_TABLES = new Set([
   'stock_count_sessions', 'stock_count_items', 'discounts',
   // Smart Buy (Chit Fund) agent cash remittance/settlement tracking.
   'agent_remittances',
+  // Smart Buy Branch Collaboration.
+  'chit_scheme_branches',
+  // Smart Buy Enterprise Commission Engine.
+  'commission_rules', 'commission_ledger', 'commission_payouts',
+  // Multi-level commission approval workflow — audit trail, statement
+  // downloads, and commission-rate version history.
+  'commission_approval_logs', 'commission_statement_history', 'commission_rule_history',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
@@ -40,6 +47,7 @@ const RELATED_KEYS: Record<string, Set<string>> = {
   chit_members:           new Set(['scheme_id']),
   chit_draws:             new Set(['scheme_id']),
   chit_contributions:     new Set(['scheme_id']),
+  chit_scheme_branches:   new Set(['scheme_id']),
 }
 
 export function assertTable(table: unknown): asserts table is string {

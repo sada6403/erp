@@ -107,7 +107,7 @@ const MODULES = [
 
 type ModKey = typeof MODULES[number]['key']
 type PermMap = Record<string, boolean>
-type Role = { id: string; name: string; permissions: string }
+type Role = { id: string; name: string; permissions: string; session_scope?: string | null }
 
 function parsePerms(raw: string): PermMap {
   try { return JSON.parse(raw) } catch { return {} }
@@ -126,7 +126,7 @@ export default function RolesPage() {
   const [roles, setRoles]       = useState<Role[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editing, setEditing]   = useState<Role | null>(null)
-  const [form, setForm]         = useState<{ name: string; permissions: PermMap }>({ name: '', permissions: {} })
+  const [form, setForm]         = useState<{ name: string; permissions: PermMap; session_scope: string }>({ name: '', permissions: {}, session_scope: '' })
   const [saving, setSaving]     = useState(false)
 
   const myPerms = ((user?.role as unknown as Record<string,unknown>)?.permissions as PermMap) || {}
@@ -146,13 +146,13 @@ export default function RolesPage() {
 
   const openCreate = () => {
     setEditing(null)
-    setForm({ name: '', permissions: {} })
+    setForm({ name: '', permissions: {}, session_scope: '' })
     setShowForm(true)
   }
 
   const openEdit = (r: Role) => {
     setEditing(r)
-    setForm({ name: r.name, permissions: parsePerms(r.permissions) })
+    setForm({ name: r.name, permissions: parsePerms(r.permissions), session_scope: r.session_scope || '' })
     setShowForm(true)
   }
 
@@ -198,7 +198,7 @@ export default function RolesPage() {
     if (!form.name.trim()) { toast.error('Role name is required'); return }
     setSaving(true)
     try {
-      const payload = { name: form.name.trim(), permissions: form.permissions }
+      const payload = { name: form.name.trim(), permissions: form.permissions, session_scope: form.session_scope || null }
       const res = editing
         ? await window.api.admin.roles.update(editing.id, payload)
         : await window.api.admin.roles.create(payload)
@@ -326,6 +326,23 @@ export default function RolesPage() {
                 placeholder="e.g. Branch Manager, Cashier, Warehouse Staff"
                 disabled={formIsLocked}
               />
+            </div>
+
+            <div>
+              <label className="label">Restricted Portal Scope</label>
+              <select
+                className="input"
+                value={form.session_scope}
+                onChange={e => setForm(f => ({ ...f, session_scope: e.target.value }))}
+                disabled={formIsLocked}
+              >
+                <option value="">None — ordinary role, sees whatever permissions below allow</option>
+                <option value="smartBuy">Smart Buy Manager — branch-scoped, restricted to the Smart Buy portal only</option>
+                <option value="agent">Agent — restricted to their own Smart Buy schemes/members/commission only</option>
+              </select>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                Users with an "Agent" scope role must also be linked to an Agent record (via Smart Buy Agents → Link Login Account) to sign in.
+              </p>
             </div>
 
             {/* Full access toggle */}

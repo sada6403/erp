@@ -26,7 +26,14 @@ export default defineWorkspace([
         'src/**/*.integration.test.ts',
         'electron/**/*.integration.test.ts',
       ],
-      exclude: ['src/**/*.test.ts', 'electron/**/*.test.ts', 'e2e/**'],
+      // NOTE: previously also excluded 'src/**/*.test.ts' / 'electron/**/*.test.ts'
+      // — those globs match `*.test.ts` as a suffix (glob `*` matches dots), so
+      // they also matched this project's own `*.integration.test.ts` include
+      // pattern and silently excluded every integration test that could ever
+      // exist. The include list above is already narrow enough that a plain
+      // `foo.test.ts` unit test can never match it, so those exclude entries
+      // were redundant as well as self-defeating.
+      exclude: ['e2e/**'],
       pool: 'forks',
       poolOptions: { forks: { singleFork: true } },
     },

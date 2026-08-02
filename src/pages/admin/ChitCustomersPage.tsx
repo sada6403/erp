@@ -2,24 +2,33 @@ import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import MemberPaymentHistoryModal from '@/components/shared/MemberPaymentHistoryModal'
-import { Plus, Search, Eye, Coins } from 'lucide-react'
+import { Plus, Search, Eye, Coins, Download, FileSpreadsheet, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Row = Record<string, unknown>
 
+const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
 export default function ChitCustomersPage() {
   const [customers, setCustomers] = useState<Row[]>([])
+  const [branches, setBranches] = useState<Row[]>([])
   const [search, setSearch] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
   const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [viewing, setViewing] = useState<Row | null>(null)
 
   const load = async () => {
     setLoading(true)
     try {
-      const res = await window.api.chits.customersList({})
+      const [res, b] = await Promise.all([
+        window.api.chits.customersList({ branchId: branchFilter || undefined }),
+        window.api.admin.branches.list(),
+      ])
       if (res.success) setCustomers(res.data as Row[])
       else toast.error(res.error || 'Failed to load Smart Buy customers')
+      if (b.success) setBranches(b.data as Row[])
     } catch (err) {
       toast.error((err as Error).message || 'Failed to load Smart Buy customers')
     } finally {
@@ -27,7 +36,7 @@ export default function ChitCustomersPage() {
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [branchFilter]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = customers.filter(c => {
     const q = search.toLowerCase().trim()
@@ -35,21 +44,59 @@ export default function ChitCustomersPage() {
     return [c.name, c.phone, c.nic].some(v => String(v || '').toLowerCase().includes(q))
   })
 
+  const exportRows = () => filtered.map(c => ({
+    Customer: c.name, Phone: c.phone, NIC: c.nic, Schemes: c.scheme_names, Products: c.product_names,
+    'Branch(es)': c.branch_names, 'Agent(s)': c.agent_names,
+    'Contributions Paid': `Rs.${money(c.total_contributions_paid)}`, 'Outstanding Due': `Rs.${money(c.outstanding_due)}`,
+  }))
+  const exportMeta = { Report: 'Smart Buy Customers', Generated: new Date().toLocaleString() }
+  const filename = `smartbuy-customers-${new Date().toISOString().slice(0, 10)}`
+  const exportCsv = async () => {
+    setExporting(true)
+    try {
+      const res = await window.api.reports.exportCsvRows({ filename, rows: exportRows(), metadata: exportMeta })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'Export failed')
+    } finally { setExporting(false) }
+  }
+  const exportExcel = async () => {
+    setExporting(true)
+    try {
+      const res = await window.api.reports.exportExcel({ filename, sheets: [{ name: 'Customers', rows: exportRows() }] })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'Export failed')
+    } finally { setExporting(false) }
+  }
+  const exportPdf = async () => {
+    setExporting(true)
+    try {
+      const res = await window.api.reports.exportPdf({ filename, title: 'Smart Buy Customers', metadata: exportMeta, sections: [{ title: 'Customers', rows: exportRows() }] })
+      if (res && !res.success && !res.cancelled) toast.error(res.error || 'Export failed')
+    } finally { setExporting(false) }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader title="Smart Buy Customers" subtitle={`${filtered.length} customer(s) enrolled in a Smart Buy scheme`}
         actions={
-          <button onClick={() => setShowForm(true)} className="btn-primary btn-sm gap-1.5">
-            <Plus size={14} /> Add Smart Buy Customer
-          </button>
+          <div className="flex gap-2">
+            <button onClick={exportCsv} disabled={exporting || filtered.length === 0} className="btn-secondary btn-sm gap-1.5"><Download size={13} /> CSV</button>
+            <button onClick={exportExcel} disabled={exporting || filtered.length === 0} className="btn-secondary btn-sm gap-1.5"><FileSpreadsheet size={13} /> Excel</button>
+            <button onClick={exportPdf} disabled={exporting || filtered.length === 0} className="btn-secondary btn-sm gap-1.5"><FileText size={13} /> PDF</button>
+            <button onClick={() => setShowForm(true)} className="btn-primary btn-sm gap-1.5">
+              <Plus size={14} /> Add Smart Buy Customer
+            </button>
+          </div>
         }
       />
 
-      <div className="flex gap-3 px-6 py-3 border-b border-slate-800 flex-shrink-0">
+      <div className="flex flex-wrap gap-3 px-6 py-3 border-b border-slate-800 flex-shrink-0">
         <div className="relative flex-1 max-w-sm">
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, phone, NIC..." className="input pl-8 text-sm" />
         </div>
+        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input text-sm w-auto">
+          <option value="">All Branches</option>
+          {branches.map(b => <option key={b.id as string} value={b.id as string}>{b.name as string}</option>)}
+        </select>
       </div>
 
       <div className="flex-1 overflow-auto">

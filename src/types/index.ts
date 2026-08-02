@@ -324,9 +324,10 @@ export interface AuthUser {
   licenseId?: string | null
   deviceId?: string | null
   scope?: {
-    level: 'owner' | 'branch' | 'subBranch' | 'smartBuy'
+    level: 'owner' | 'branch' | 'subBranch' | 'smartBuy' | 'agent'
     branchId?: string | null
     subBranchId?: string | null
+    agentId?: string | null
   }
 }
 

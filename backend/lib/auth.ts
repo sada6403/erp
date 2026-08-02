@@ -495,6 +495,18 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        UNIQUE KEY uq_agents_code (code),
        INDEX idx_agents_branch (branch_id)
      )`,
+    // Already-provisioned tenants pre-date user_id — links an agent to a
+    // real login so an agent can sign in and see only their own data.
+    `ALTER TABLE agents ADD COLUMN user_id CHAR(36) NULL`,
+    `ALTER TABLE agents ADD UNIQUE INDEX idx_agents_user (user_id)`,
+    // Already-provisioned tenants pre-date session_scope — stable
+    // restricted-portal identifier for roles (Smart Buy Manager, Agent).
+    `ALTER TABLE roles ADD COLUMN session_scope VARCHAR(20) NULL`,
+    `UPDATE roles SET session_scope='smartBuy' WHERE LOWER(TRIM(name))='smart buy manager' AND session_scope IS NULL`,
+    // Already-provisioned tenants pre-date smartbuy_manager_id — soft
+    // "this user is THE SmartBuy Manager of this branch" pointer, display/
+    // report metadata only (does not drive session scoping).
+    `ALTER TABLE branches ADD COLUMN smartbuy_manager_id CHAR(36) NULL`,
     `CREATE TABLE IF NOT EXISTS expense_categories (
        id          CHAR(36)     NOT NULL PRIMARY KEY,
        name        VARCHAR(255) NOT NULL UNIQUE,
@@ -682,6 +694,12 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_chit_schemes_agent (agent_id),
        INDEX idx_chit_schemes_status (status)
      )`,
+    // Already-provisioned tenants pre-date min_members — add it explicitly.
+    `ALTER TABLE chit_schemes ADD COLUMN min_members INT NOT NULL DEFAULT 1`,
+    `ALTER TABLE chit_schemes ADD COLUMN registration_start_date DATETIME NULL`,
+    `ALTER TABLE chit_schemes ADD COLUMN registration_end_date DATETIME NULL`,
+    `ALTER TABLE chit_schemes ADD COLUMN late_payment_days INT NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_schemes ADD COLUMN late_fee_amount DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS chit_members (
        id                    CHAR(36)      NOT NULL PRIMARY KEY,
        scheme_id             CHAR(36)      NOT NULL,
@@ -716,6 +734,7 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     `ALTER TABLE chit_members ADD COLUMN redeemed_product_name VARCHAR(255) NULL`,
     `ALTER TABLE chit_members ADD COLUMN redeemed_qty INT NOT NULL DEFAULT 1`,
     `ALTER TABLE chit_members ADD COLUMN redeemed_value DECIMAL(14,2) NULL`,
+    `ALTER TABLE chit_members ADD COLUMN redemption_invoice_id CHAR(36) NULL`,
     `CREATE TABLE IF NOT EXISTS chit_draws (
        id               CHAR(36)     NOT NULL PRIMARY KEY,
        scheme_id        CHAR(36)     NOT NULL,
@@ -812,6 +831,156 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_agent_remittances_agent (agent_id),
        INDEX idx_agent_remittances_branch (branch_id),
        INDEX idx_agent_remittances_updated (updated_at)
+     )`,
+    // Already-provisioned tenants pre-date enrolled_branch_id.
+    `ALTER TABLE chit_members ADD COLUMN enrolled_branch_id CHAR(36) NULL`,
+    `CREATE TABLE IF NOT EXISTS chit_scheme_branches (
+       id           CHAR(36)     NOT NULL PRIMARY KEY,
+       scheme_id    CHAR(36)     NOT NULL,
+       branch_id    CHAR(36)     NOT NULL,
+       status       VARCHAR(20)  NOT NULL DEFAULT 'pending',
+       requested_by CHAR(36)     NULL,
+       responded_by CHAR(36)     NULL,
+       responded_at DATETIME     NULL,
+       notes        TEXT         NULL,
+       created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at    DATETIME     NULL,
+       UNIQUE KEY uq_chit_scheme_branches (scheme_id, branch_id),
+       INDEX idx_chit_scheme_branches_branch (branch_id),
+       INDEX idx_chit_scheme_branches_status (status)
+     )`,
+    // Already-provisioned tenants pre-date products.brand.
+    `ALTER TABLE products ADD COLUMN brand VARCHAR(128) NULL`,
+    `ALTER TABLE products ADD INDEX idx_products_brand (brand)`,
+
+    // ── Enterprise Commission Engine ──────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS commission_rules (
+       id                     CHAR(36)      NOT NULL PRIMARY KEY,
+       name                   VARCHAR(255)  NOT NULL,
+       scope                  VARCHAR(20)   NOT NULL DEFAULT 'global',
+       scheme_id              CHAR(36)      NULL,
+       product_id             CHAR(36)      NULL,
+       category_id            CHAR(36)      NULL,
+       brand                  VARCHAR(128)  NULL,
+       calculation_type       VARCHAR(20)   NOT NULL DEFAULT 'percentage',
+       rate                   DECIMAL(14,4) NOT NULL DEFAULT 0,
+       ownership_model        VARCHAR(20)   NOT NULL DEFAULT 'registration',
+       registration_share_pct DECIMAL(6,2)  NOT NULL DEFAULT 100,
+       sales_share_pct        DECIMAL(6,2)  NOT NULL DEFAULT 0,
+       is_bonus               BOOLEAN       NOT NULL DEFAULT 0,
+       priority               INT           NOT NULL DEFAULT 0,
+       active_from            DATETIME      NULL,
+       active_to              DATETIME      NULL,
+       status                 VARCHAR(20)   NOT NULL DEFAULT 'active',
+       notes                  TEXT          NULL,
+       created_by             CHAR(36)      NULL,
+       created_at             DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at             DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at              DATETIME      NULL,
+       INDEX idx_commission_rules_scheme (scheme_id),
+       INDEX idx_commission_rules_product (product_id),
+       INDEX idx_commission_rules_category (category_id),
+       INDEX idx_commission_rules_status (status)
+     )`,
+    `CREATE TABLE IF NOT EXISTS commission_ledger (
+       id                      CHAR(36)      NOT NULL PRIMARY KEY,
+       source_table            VARCHAR(32)   NOT NULL,
+       source_id               CHAR(36)      NOT NULL,
+       scheme_id               CHAR(36)      NULL,
+       member_id               CHAR(36)      NULL,
+       rule_id                 CHAR(36)      NULL,
+       is_bonus                BOOLEAN       NOT NULL DEFAULT 0,
+       registration_agent_id   CHAR(36)      NULL,
+       sales_agent_id          CHAR(36)      NULL,
+       base_amount             DECIMAL(14,2) NOT NULL DEFAULT 0,
+       registration_commission DECIMAL(14,2) NOT NULL DEFAULT 0,
+       sales_commission        DECIMAL(14,2) NOT NULL DEFAULT 0,
+       total_commission        DECIMAL(14,2) NOT NULL DEFAULT 0,
+       status                  VARCHAR(20)   NOT NULL DEFAULT 'pending',
+       approved_by             CHAR(36)      NULL,
+       approved_at             DATETIME      NULL,
+       paid_at                 DATETIME      NULL,
+       branch_id               CHAR(36)      NULL,
+       notes                   TEXT          NULL,
+       created_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at              DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at               DATETIME      NULL,
+       INDEX idx_commission_ledger_source (source_table, source_id),
+       INDEX idx_commission_ledger_scheme (scheme_id),
+       INDEX idx_commission_ledger_reg (registration_agent_id),
+       INDEX idx_commission_ledger_sales (sales_agent_id),
+       INDEX idx_commission_ledger_status (status)
+     )`,
+    `CREATE TABLE IF NOT EXISTS commission_payouts (
+       id           CHAR(36)      NOT NULL PRIMARY KEY,
+       agent_id     CHAR(36)      NOT NULL,
+       branch_id    CHAR(36)      NULL,
+       amount       DECIMAL(14,2) NOT NULL DEFAULT 0,
+       method       VARCHAR(20)   NOT NULL DEFAULT 'cash',
+       reference    VARCHAR(255)  NULL,
+       paid_by      CHAR(36)      NULL,
+       paid_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       notes        TEXT          NULL,
+       created_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at    DATETIME      NULL,
+       INDEX idx_commission_payouts_agent (agent_id),
+       INDEX idx_commission_payouts_branch (branch_id)
+     )`,
+    // Already-provisioned tenants pre-date payout_id — links a ledger line
+    // to the batch payment event that actually paid it out.
+    `ALTER TABLE commission_ledger ADD COLUMN payout_id CHAR(36) NULL`,
+    `ALTER TABLE commission_ledger ADD INDEX idx_commission_ledger_payout (payout_id)`,
+
+    // ── Multi-level commission approval workflow ──────────────────────────
+    // Status values grew past VARCHAR(20) (e.g. 'pending_manager_approval'
+    // is 25 chars) — widen unconditionally, MODIFY is a safe no-op on repeat.
+    `ALTER TABLE commission_ledger MODIFY COLUMN status VARCHAR(40) NOT NULL DEFAULT 'pending_manager_approval'`,
+    `ALTER TABLE commission_ledger ADD COLUMN admin_approved_by CHAR(36) NULL`,
+    `ALTER TABLE commission_ledger ADD COLUMN admin_approved_at DATETIME NULL`,
+    `UPDATE commission_ledger SET status='pending_manager_approval' WHERE status='pending'`,
+    `UPDATE commission_ledger SET status='pending_admin_approval' WHERE status='approved'`,
+    `CREATE TABLE IF NOT EXISTS commission_approval_logs (
+       id               CHAR(36)     NOT NULL PRIMARY KEY,
+       commission_id    CHAR(36)     NOT NULL,
+       agent_id         CHAR(36)     NULL,
+       branch_id        CHAR(36)     NULL,
+       action           VARCHAR(32)  NOT NULL,
+       previous_status  VARCHAR(40)  NULL,
+       new_status       VARCHAR(40)  NOT NULL,
+       changed_by       CHAR(36)     NULL,
+       remarks          TEXT         NULL,
+       created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at        DATETIME     NULL,
+       INDEX idx_commission_approval_logs_commission (commission_id),
+       INDEX idx_commission_approval_logs_agent (agent_id),
+       INDEX idx_commission_approval_logs_branch (branch_id)
+     )`,
+    `CREATE TABLE IF NOT EXISTS commission_statement_history (
+       id            CHAR(36)     NOT NULL PRIMARY KEY,
+       agent_id      CHAR(36)     NOT NULL,
+       generated_by  CHAR(36)     NULL,
+       period_from   DATE         NULL,
+       period_to     DATE         NULL,
+       status_filter VARCHAR(40)  NULL,
+       generated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at     DATETIME     NULL,
+       INDEX idx_commission_statement_history_agent (agent_id)
+     )`,
+    `CREATE TABLE IF NOT EXISTS commission_rule_history (
+       id                   CHAR(36)      NOT NULL PRIMARY KEY,
+       rule_id              CHAR(36)      NOT NULL,
+       product_id           CHAR(36)      NULL,
+       scope                VARCHAR(20)   NOT NULL,
+       calculation_type     VARCHAR(20)   NOT NULL,
+       rate                 DECIMAL(14,4) NOT NULL DEFAULT 0,
+       effective_start_date DATETIME      NULL,
+       effective_end_date   DATETIME      NULL,
+       created_by           CHAR(36)      NULL,
+       created_at           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at            DATETIME      NULL,
+       INDEX idx_commission_rule_history_rule (rule_id)
      )`,
 
     // ── Edit requests — manager-requested, admin-approved corrections to

@@ -10,6 +10,11 @@ export type NotifType =
   | 'low_stock' | 'installment_due' | 'installment_overdue'
   | 'sync_failed' | 'license_expiry' | 'subscription_grace'
   | 'subscription_expired' | 'transfer_request' | 'info'
+  | 'chit_collaboration_invite' | 'chit_payment_due' | 'chit_scheme_closing'
+  | 'agent_registered' | 'agent_approved' | 'scheme_created' | 'scheme_status_update'
+  | 'commission_pending_manager' | 'commission_pending_admin'
+  | 'commission_approved' | 'commission_paid' | 'commission_rejected'
+  | 'commission_large_payout' | 'branch_performance_alert'
 
 export interface Notification {
   id: string
@@ -21,14 +26,56 @@ export interface Notification {
   created_at: string
 }
 
-export function createNotification(type: NotifType, title: string, message: string, data?: Record<string, unknown>) {
+// Targeting is entirely optional and additive — omit all three for today's
+// broadcast behavior (visible to everyone), same as every pre-existing call
+// site. Only the new SmartBuy events pass a target.
+export interface NotificationTarget {
+  userId?: string | null
+  roleScope?: string | null
+  branchId?: string | null
+}
+
+export function createNotification(
+  type: NotifType, title: string, message: string,
+  data?: Record<string, unknown>, target?: NotificationTarget
+) {
   try {
     const db = getDb()
     db.prepare(`
-      INSERT OR IGNORE INTO notifications (id, type, title, message, data, created_at)
-      VALUES (?, ?, ?, ?, ?, datetime('now'))
-    `).run(randomUUID(), type, title, message, data ? JSON.stringify(data) : null)
+      INSERT OR IGNORE INTO notifications (id, type, title, message, data, user_id, role_scope, target_branch_id, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+    `).run(
+      randomUUID(), type, title, message, data ? JSON.stringify(data) : null,
+      target?.userId || null, target?.roleScope || null, target?.branchId || null
+    )
   } catch { /* db not ready */ }
+}
+
+function authUser(): Record<string, unknown> {
+  return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+}
+
+// Broadcast rows (no targeting at all) are visible to everyone, same as
+// before targeting existed. A targeted row is visible to its exact user, or
+// to every session matching its role_scope (optionally narrowed to one
+// branch). Super Admin ('owner') always sees everything, targeted or not —
+// matches "Super Admin can view all branch commissions" etc. elsewhere.
+function notificationVisibilityWhere(): { where: string; params: unknown[] } {
+  const caller = authUser()
+  const scope = caller.scope as { level?: string; branchId?: string | null } | undefined
+  if (scope?.level === 'owner') return { where: '', params: [] }
+  const userId = caller.id as string | undefined
+  const roleLevel = scope?.level
+  const branchId = scope?.branchId || (caller.branch_id as string | undefined) || null
+
+  const conditions = ['(user_id IS NULL AND role_scope IS NULL)']
+  const params: unknown[] = []
+  if (userId) { conditions.push('user_id = ?'); params.push(userId) }
+  if (roleLevel) {
+    conditions.push('(role_scope = ? AND (target_branch_id IS NULL OR target_branch_id = ?))')
+    params.push(roleLevel, branchId)
+  }
+  return { where: `WHERE ${conditions.join(' OR ')}`, params }
 }
 
 function createUniqueTransferNotification(
@@ -55,16 +102,19 @@ export function registerNotificationHandlers() {
   ipcMain.handle('notifications:getAll', () => {
     try {
       const db = getDb()
+      const { where, params } = notificationVisibilityWhere()
       return db.prepare(`
-        SELECT * FROM notifications ORDER BY created_at DESC LIMIT 100
-      `).all()
+        SELECT * FROM notifications ${where} ORDER BY created_at DESC LIMIT 100
+      `).all(...params)
     } catch { return [] }
   })
 
   ipcMain.handle('notifications:getUnreadCount', () => {
     try {
       const db = getDb()
-      const row = db.prepare(`SELECT COUNT(*) as cnt FROM notifications WHERE is_read = 0`).get() as { cnt: number }
+      const { where, params } = notificationVisibilityWhere()
+      const cond = where ? `${where} AND is_read = 0` : 'WHERE is_read = 0'
+      const row = db.prepare(`SELECT COUNT(*) as cnt FROM notifications ${cond}`).get(...params) as { cnt: number }
       return row.cnt
     } catch { return 0 }
   })
@@ -72,7 +122,10 @@ export function registerNotificationHandlers() {
   safeHandle(ipcMain, 'notifications:markRead', (_e, id: string) => {
     const db = getDb()
     if (id === 'all') {
-      db.prepare(`UPDATE notifications SET is_read = 1`).run()
+      // Scoped to what this caller can actually see — otherwise "mark all
+      // read" would silently mark other users' targeted notifications read.
+      const { where, params } = notificationVisibilityWhere()
+      db.prepare(`UPDATE notifications SET is_read = 1 ${where}`).run(...params)
     } else {
       db.prepare(`UPDATE notifications SET is_read = 1 WHERE id = ?`).run(id)
     }

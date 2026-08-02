@@ -142,6 +142,9 @@ export default function BranchesPage() {
               <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                 Manager: {String(b.manager_name || 'Unassigned')}
               </p>
+              <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                SmartBuy Manager: {String(b.smartbuy_manager_name || 'Unassigned')}
+              </p>
               <p className="text-xs" style={{ color: 'var(--text-3)' }}>{b.address as string || 'No address'}</p>
               <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                 {`${String(b.phone ?? '')}${b.email ? ` · ${String(b.email)}` : ''}`}
@@ -217,6 +220,7 @@ function BranchForm({
     phone:      String(branch?.phone      || ''),
     email:      String(branch?.email      || ''),
     manager_id: String(branch?.manager_id || ''),
+    smartbuy_manager_id: String(branch?.smartbuy_manager_id || ''),
     is_active:  branch ? Boolean(branch.is_active ?? true) : true,
   })
   const [saving, setSaving] = useState(false)
@@ -236,6 +240,7 @@ function BranchForm({
           code:       form.code.toUpperCase().trim() || null,
           branch_pin: form.branch_pin.trim() || null,
           manager_id: form.manager_id || null,
+          smartbuy_manager_id: form.smartbuy_manager_id || null,
           is_active:  form.is_active ? 1 : 0,
         }
       // Blank PIN on an existing branch = keep the current (hashed) PIN
@@ -303,6 +308,23 @@ function BranchForm({
             This user will be treated as the branch contact/owner for branch-level workflows.
           </p>
         </div>
+
+        {branch && (
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Assigned SmartBuy Manager</label>
+            <select value={form.smartbuy_manager_id} onChange={f('smartbuy_manager_id')} className="input">
+              <option value="">Unassigned</option>
+              {users
+                .filter(u => u.session_scope === 'smartBuy' && String(u.branch_id || '') === String(branch.id || ''))
+                .map(u => (
+                  <option key={String(u.id)} value={String(u.id)}>{String(u.name || 'User')}</option>
+                ))}
+            </select>
+            <p className="text-[11px] mt-1" style={{ color: 'var(--text-3)' }}>
+              Only users with the SmartBuy Manager role who already belong to this branch can be assigned. Used for SmartBuy reports (e.g. "Manager Name" on the branch performance report) — does not affect login access.
+            </p>
+          </div>
+        )}
 
         <div className="rounded-lg p-3 border border-slate-700 bg-slate-800/40">
           <div className="grid grid-cols-2 gap-3 items-end">

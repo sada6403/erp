@@ -128,7 +128,15 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Branches
   safeHandle(ipcMain, 'admin:branches:list', () => {
-    return { success: true, data: getDb().prepare('SELECT * FROM branches ORDER BY name').all() }
+    return {
+      success: true,
+      data: getDb().prepare(`
+        SELECT b.*, sm.name as smartbuy_manager_name
+        FROM branches b
+        LEFT JOIN users sm ON sm.id = b.smartbuy_manager_id
+        ORDER BY b.name
+      `).all(),
+    }
   })
   safeHandle(ipcMain, 'admin:branches:findByCode', async (_e, code: string) => {
     const db = getDb()
@@ -189,6 +197,23 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       if (dup) return { success: false, error: 'Another branch already uses this PIN. Choose a different PIN.' }
       payload.branch_pin = await bcrypt.hash(rawPin, 10)
     }
+    // Assigning a SmartBuy Manager is a soft pointer (display/report
+    // metadata — session scoping is driven by users.branch_id, not this
+    // column), but it must still point at someone who could actually be a
+    // SmartBuy Manager *of this branch* — otherwise the branch performance
+    // report would show a "Manager Name" for someone who can't log into
+    // that branch's data at all.
+    if (payload.smartbuy_manager_id !== undefined && payload.smartbuy_manager_id !== null) {
+      const manager = db.prepare(`
+        SELECT u.id, u.branch_id, r.session_scope FROM users u
+        LEFT JOIN roles r ON r.id = u.role_id
+        WHERE u.id = ?
+      `).get(payload.smartbuy_manager_id) as { id: string; branch_id: string | null; session_scope: string | null } | undefined
+      if (!manager) return { success: false, error: 'Selected user not found' }
+      if (manager.session_scope !== 'smartBuy') return { success: false, error: 'Selected user does not have the SmartBuy Manager role' }
+      if (String(manager.branch_id || '') !== String(id)) return { success: false, error: 'Selected user must already be assigned to this branch' }
+    }
+
     const existingCols = new Set(
       (db.prepare('PRAGMA table_info(branches)').all() as { name: string }[]).map(c => c.name)
     )
@@ -257,6 +282,23 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const { cnt: poCnt } = db.prepare('SELECT COUNT(*) as cnt FROM purchase_orders WHERE branch_id=?').get(id) as { cnt: number }
     if (poCnt > 0) return { success: false, error: `Cannot delete: ${poCnt} purchase order(s) exist for this branch.` }
 
+    // Smart Buy — schemes/remittances/commission are real financial/business
+    // records, same treatment as invoices/installments above (block, don't
+    // silently orphan). chit_contributions is also blocked defensively even
+    // though its branch_id is always derived from its scheme's branch_id
+    // today (so the chit_schemes check already covers it in practice).
+    const { cnt: schemeCnt } = db.prepare('SELECT COUNT(*) as cnt FROM chit_schemes WHERE branch_id=?').get(id) as { cnt: number }
+    if (schemeCnt > 0) return { success: false, error: `Cannot delete: ${schemeCnt} Smart Buy scheme(s) are based at this branch. Cancel or reassign them first.` }
+
+    const { cnt: remitCnt } = db.prepare('SELECT COUNT(*) as cnt FROM agent_remittances WHERE branch_id=?').get(id) as { cnt: number }
+    if (remitCnt > 0) return { success: false, error: `Cannot delete: ${remitCnt} agent remittance record(s) exist for this branch.` }
+
+    const { cnt: commCnt } = db.prepare('SELECT COUNT(*) as cnt FROM commission_ledger WHERE branch_id=?').get(id) as { cnt: number }
+    if (commCnt > 0) return { success: false, error: `Cannot delete: ${commCnt} commission ledger entr(y/ies) exist for this branch.` }
+
+    const { cnt: chitContribCnt } = db.prepare('SELECT COUNT(*) as cnt FROM chit_contributions WHERE branch_id=?').get(id) as { cnt: number }
+    if (chitContribCnt > 0) return { success: false, error: `Cannot delete: ${chitContribCnt} Smart Buy contribution(s) exist for this branch.` }
+
     // Disable FK checks for the duration of the cleanup (re-enabled in finally)
     db.pragma('foreign_keys = OFF')
     try {
@@ -271,6 +313,13 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         db.prepare('UPDATE stock_movements      SET to_branch_id=NULL   WHERE to_branch_id=?').run(id)
         db.prepare('UPDATE stock_transfers      SET from_branch_id=NULL WHERE from_branch_id=?').run(id)
         db.prepare('UPDATE stock_transfers      SET to_branch_id=NULL   WHERE to_branch_id=?').run(id)
+        // Smart Buy — a collaborating branch (not scheme-owner, already
+        // blocked above) or an agent based here just gets unlinked; the
+        // collaboration link itself has no standalone value once the branch
+        // it points at is gone.
+        db.prepare('UPDATE agents               SET branch_id=NULL WHERE branch_id=?').run(id)
+        db.prepare('UPDATE chit_members         SET enrolled_branch_id=NULL WHERE enrolled_branch_id=?').run(id)
+        db.prepare('DELETE FROM chit_scheme_branches WHERE branch_id=?').run(id)
 
         // Delete operational records (no standalone business value)
         db.prepare('DELETE FROM credit_ledger        WHERE branch_id=?').run(id)
@@ -306,7 +355,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
           SELECT u.id, u.name, u.email, u.is_active, u.last_login_at,
                  u.role_id, u.branch_id,
                  CASE WHEN u.pin_hash IS NOT NULL OR u.pin IS NOT NULL THEN 1 ELSE 0 END as has_pin,
-                 r.name as role_name, b.name as branch_name
+                 r.name as role_name, r.session_scope, b.name as branch_name
           FROM users u
           LEFT JOIN roles r ON r.id = u.role_id
           LEFT JOIN branches b ON b.id = u.branch_id
@@ -316,7 +365,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
           SELECT u.id, u.name, u.email, u.is_active, u.last_login_at,
                  u.role_id, u.branch_id,
                  CASE WHEN u.pin_hash IS NOT NULL OR u.pin IS NOT NULL THEN 1 ELSE 0 END as has_pin,
-                 r.name as role_name, b.name as branch_name
+                 r.name as role_name, r.session_scope, b.name as branch_name
           FROM users u
           LEFT JOIN roles r ON r.id = u.role_id
           LEFT JOIN branches b ON b.id = u.branch_id
@@ -457,6 +506,16 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         db.prepare('UPDATE stock_count_sessions SET created_by=NULL WHERE created_by=?').run(id)
         try { db.prepare('UPDATE stock_count_sessions SET completed_by=NULL WHERE completed_by=?').run(id) } catch { /* column may not exist on older DB */ }
         db.prepare('UPDATE expenses         SET created_by=NULL WHERE created_by=?').run(id)
+        // Smart Buy — same unlink treatment; none of these are NOT NULL so
+        // nulling preserves scheme/commission/audit history intact.
+        db.prepare('UPDATE agents               SET user_id=NULL     WHERE user_id=?').run(id)
+        db.prepare('UPDATE chit_schemes         SET created_by=NULL  WHERE created_by=?').run(id)
+        db.prepare('UPDATE chit_draws           SET conducted_by=NULL WHERE conducted_by=?').run(id)
+        db.prepare('UPDATE chit_contributions   SET received_by=NULL, verified_by=NULL WHERE received_by=? OR verified_by=?').run(id, id)
+        db.prepare('UPDATE agent_remittances    SET received_by=NULL WHERE received_by=?').run(id)
+        db.prepare('UPDATE chit_scheme_branches SET requested_by=NULL, responded_by=NULL WHERE requested_by=? OR responded_by=?').run(id, id)
+        db.prepare('UPDATE commission_rules     SET created_by=NULL  WHERE created_by=?').run(id)
+        db.prepare('UPDATE commission_ledger    SET approved_by=NULL WHERE approved_by=?').run(id)
         db.prepare('DELETE FROM users WHERE id=?').run(id)
       })()
     } finally {
@@ -658,21 +717,25 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'admin:roles:list', () => {
     return { success: true, data: getDb().prepare('SELECT * FROM roles ORDER BY name').all() }
   })
+  // Restricted-portal identifier: null (ordinary role) | 'smartBuy' | 'agent'.
+  const ROLE_SESSION_SCOPES = [null, 'smartBuy', 'agent']
   safeHandle(ipcMain, 'admin:roles:create', async (_e, p: Record<string, unknown>) => {
     if (!currentPerms().all) return { success: false, error: 'Company Admin access required to create roles' }
     const id = crypto.randomUUID()
     const permissions = typeof p.permissions === 'string' ? p.permissions : JSON.stringify(p.permissions || {})
-    getDb().prepare(`INSERT INTO roles (id,name,permissions) VALUES (?,?,?)`)
-      .run(id, p.name, permissions)
-    await enqueuSync('roles', id, 'INSERT', { id, name: p.name, permissions })
+    const sessionScope = ROLE_SESSION_SCOPES.includes((p.session_scope as string) || null) ? ((p.session_scope as string) || null) : null
+    getDb().prepare(`INSERT INTO roles (id,name,permissions,session_scope) VALUES (?,?,?,?)`)
+      .run(id, p.name, permissions, sessionScope)
+    await enqueuSync('roles', id, 'INSERT', { id, name: p.name, permissions, session_scope: sessionScope })
     return { success: true, data: { id } }
   })
   safeHandle(ipcMain, 'admin:roles:update', async (_e, id: string, p: Record<string, unknown>) => {
     if (!currentPerms().all) return { success: false, error: 'Company Admin access required to edit roles' }
     const permissions = typeof p.permissions === 'string' ? p.permissions : JSON.stringify(p.permissions || {})
-    getDb().prepare(`UPDATE roles SET name=?, permissions=?, updated_at=datetime('now') WHERE id=?`)
-      .run(p.name, permissions, id)
-    await enqueuSync('roles', id, 'UPDATE', { id, name: p.name, permissions })
+    const sessionScope = ROLE_SESSION_SCOPES.includes((p.session_scope as string) || null) ? ((p.session_scope as string) || null) : null
+    getDb().prepare(`UPDATE roles SET name=?, permissions=?, session_scope=?, updated_at=datetime('now') WHERE id=?`)
+      .run(p.name, permissions, sessionScope, id)
+    await enqueuSync('roles', id, 'UPDATE', { id, name: p.name, permissions, session_scope: sessionScope })
     return { success: true }
   })
   safeHandle(ipcMain, 'admin:roles:delete', async (_e, id: string) => {

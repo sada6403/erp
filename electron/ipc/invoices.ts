@@ -9,10 +9,11 @@ import { syncStockRow, syncCustomerRow } from '../services/stockSync'
 import { redeemCouponInTransaction, reverseCouponForInvoice, type CouponRedemptionResult } from './coupons'
 import { resolveApplicableDiscount } from './discounts'
 import { safeHandle } from './ipcHandler'
+import { computeAndRecordCommission } from '../services/commissionEngine'
 
 const store = new Store()
 
-type BillType = 'RETAIL' | 'QUOTATION' | 'CREDIT'
+export type BillType = 'RETAIL' | 'QUOTATION' | 'CREDIT'
 
 const BILL_PREFIX: Record<BillType, string> = {
   RETAIL:    'INV',
@@ -21,7 +22,7 @@ const BILL_PREFIX: Record<BillType, string> = {
 }
 
 // Atomic sequence counter: {BRANCH_CODE}-{PREFIX}-{YEAR}-{SEQ:0004}
-function getNextBillNumber(branchId: string, billType: BillType): string {
+export function getNextBillNumber(branchId: string, billType: BillType): string {
   const db = getDb()
   const year = new Date().getFullYear()
   const prefix = BILL_PREFIX[billType]
@@ -99,15 +100,16 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const movementRecords: Record<string, unknown>[] = []
       const itemRecords: Record<string, unknown>[] = []
       const paymentRecords: Record<string, unknown>[] = []
+      const commissionEnqueue: Array<{ table: string; id: string; row: Record<string, unknown>; op: 'INSERT' }> = []
       let creditLedgerRecord: Record<string, unknown> | null = null
       let couponResult: CouponRedemptionResult | null = null
       const agentCode = String(payload.agent_code || '').trim() || null
       const agentName = String(payload.agent_name || '').trim() || null
       const agentId = String(payload.agent_id || '').trim() || null
-      const agentCommissionPct = Math.max(0, Math.min(100, Number(payload.agent_commission_pct || 0)))
-      const agentCommissionAmount = agentCode || agentName
-        ? Number(((Number(payload.total_amount || 0) * agentCommissionPct) / 100).toFixed(2))
-        : 0
+      // Commission is computed per line item below, against each product's
+      // own Commission Rule — not a flat % of the whole bill the cashier
+      // used to type in. A line with no matching rule earns nothing.
+      let agentCommissionAmount = 0
 
       // --- Discount cap validation (server-side; the client-side cap in
       // Cart.tsx can be bypassed by a modified renderer) ---
@@ -211,8 +213,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           agent_code:      agentCode,
           agent_name:      agentName,
           agent_id:        agentId,
-          agent_commission_pct: agentCommissionPct,
-          agent_commission_amount: agentCommissionAmount,
+          // Filled in below once each line's commission is computed —
+          // depends on the invoice_items rows this same statement is about
+          // to precede.
+          agent_commission_pct: 0,
+          agent_commission_amount: 0,
           notes:           payload.notes || null,
         })
 
@@ -257,7 +262,29 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
               notes: `${billType} bill ${invoiceNumber}`,
               created_by: (user?.id as string) || null,
             }))
+
+            // Commission for this line — matched against this product's own
+            // Commission Rule only. agentId is only a real agents.id when the
+            // cashier selected a suggestion (free-typed agent text can't be
+            // credited, there's no agent row to point the ledger at).
+            if (agentId) {
+              const lineAmount = Number((Number(itemRow.unit_price) * Number(itemRow.quantity) - Number(itemRow.discount_amount)).toFixed(2))
+              const commissionResult = computeAndRecordCommission(db, {
+                sourceTable: 'invoice_items', sourceId: String(itemRow.id), productId: String(itemRow.product_id),
+                schemeId: null, memberId: null, registrationAgentId: agentId, salesAgentId: null,
+                amount: lineAmount, branchId,
+              })
+              agentCommissionAmount += commissionResult.totalCommission
+              commissionEnqueue.push(...commissionResult.enqueue)
+            }
           }
+        }
+
+        if (agentCommissionAmount > 0) {
+          const subtotalNum = Number(payload.subtotal) || 0
+          const derivedPct = subtotalNum > 0 ? Number(((agentCommissionAmount / subtotalNum) * 100).toFixed(2)) : 0
+          db.prepare(`UPDATE invoices SET agent_commission_pct=?, agent_commission_amount=? WHERE id=?`)
+            .run(derivedPct, agentCommissionAmount, id)
         }
 
         // Record payment lines. POS can send split payments, e.g. gift voucher + cash/card balance.
@@ -337,6 +364,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
       insertInvoice()
 
+      const commissionPctForSync = agentCommissionAmount > 0 && Number(payload.subtotal) > 0
+        ? Number(((agentCommissionAmount / Number(payload.subtotal)) * 100).toFixed(2))
+        : 0
       await enqueuSync('invoices', id, 'INSERT', {
         id, invoice_number: invoiceNumber, branch_id: branchId,
         customer_id: payload.customer_id || null,
@@ -346,7 +376,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         tax_amount: payload.tax_amount || 0, total_amount: payload.total_amount,
         paid_amount: payload.paid_amount || 0, due_amount: payload.due_amount || 0,
         agent_code: agentCode, agent_name: agentName, agent_id: agentId,
-        agent_commission_pct: agentCommissionPct,
+        agent_commission_pct: commissionPctForSync,
         agent_commission_amount: agentCommissionAmount,
         notes: payload.notes || null,
       })
@@ -356,6 +386,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       }
       for (const itemRow of itemRecords) {
         await enqueuSync('invoice_items', String(itemRow.id), 'INSERT', itemRow)
+      }
+      for (const item of commissionEnqueue) {
+        await enqueuSync(item.table, item.id, item.op, item.row)
       }
       for (const paymentRow of paymentRecords) {
         await enqueuSync('payments', String(paymentRow.id), 'INSERT', paymentRow)

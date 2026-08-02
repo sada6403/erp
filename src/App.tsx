@@ -23,6 +23,9 @@ import ChitCustomersPage from '@/pages/admin/ChitCustomersPage'
 import ChitSchemeDetailPage from '@/pages/admin/ChitSchemeDetailPage'
 import SmartBuyAgentsPage from '@/pages/admin/SmartBuyAgentsPage'
 import SmartBuyDashboardPage from '@/pages/admin/SmartBuyDashboardPage'
+import CommissionRulesPage from '@/pages/admin/CommissionRulesPage'
+import SmartBuyReportsPage from '@/pages/admin/SmartBuyReportsPage'
+import SmartBuySettingsPage from '@/pages/admin/SmartBuySettingsPage'
 import AuditLogsPage from '@/pages/admin/AuditLogsPage'
 import EditRequestsPage from '@/pages/admin/EditRequestsPage'
 import OperationsHubPage from '@/pages/admin/OperationsHubPage'
@@ -75,6 +78,18 @@ function RequireSuperAdmin({ children }: { children: React.ReactNode }) {
   const permissions = (user.role?.permissions ||
     (user as unknown as Record<string, unknown>).permissions) as Record<string, unknown> || {}
   if (!permissions.all) return <Navigate to="/admin" replace />
+  return <>{children}</>
+}
+
+function RequireSmartBuyAccess({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuthStore()
+  if (isLoading) return <LoadingScreen />
+  if (!user) return <Navigate to="/login" replace />
+  const permissions = (user.role?.permissions ||
+    (user as unknown as Record<string, unknown>).permissions) as Record<string, unknown> || {}
+  if (!permissions.all && !permissions.customers && !permissions.chits) {
+    return <Navigate to={getLandingRoute(user)} replace />
+  }
   return <>{children}</>
 }
 
@@ -167,11 +182,14 @@ export default function App() {
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
         <Route path="/admin/deliveries" element={<RequireModule module="deliveries"><DeliveriesPage /></RequireModule>} />
         <Route path="/admin/installments" element={<RequireModule module="installments"><InstallmentsPage /></RequireModule>} />
-        <Route path="/admin/chits" element={<ChitSchemesPage />} />
-        <Route path="/admin/chits/:id" element={<ChitSchemeDetailPage />} />
-        <Route path="/admin/chit-customers" element={<ChitCustomersPage />} />
-        <Route path="/admin/smart-buy-agents" element={<SmartBuyAgentsPage />} />
-        <Route path="/admin/smart-buy" element={<SmartBuyDashboardPage />} />
+        <Route path="/admin/chits" element={<RequireSmartBuyAccess><ChitSchemesPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/chits/:id" element={<RequireSmartBuyAccess><ChitSchemeDetailPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/chit-customers" element={<RequireSmartBuyAccess><ChitCustomersPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/smart-buy-agents" element={<RequireSmartBuyAccess><SmartBuyAgentsPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/smart-buy" element={<RequireSmartBuyAccess><SmartBuyDashboardPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/commission-rules" element={<RequireSmartBuyAccess><CommissionRulesPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/smart-buy-reports" element={<RequireSmartBuyAccess><SmartBuyReportsPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/smart-buy-settings" element={<RequireSuperAdmin><SmartBuySettingsPage /></RequireSuperAdmin>} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
         <Route path="/admin/edit-requests" element={<EditRequestsPage />} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />

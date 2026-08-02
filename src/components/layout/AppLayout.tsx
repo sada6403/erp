@@ -97,6 +97,9 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/admin/chits', label: 'Schemes', perm: ['customers', 'chits'] },
       { to: '/admin/chit-customers', label: 'Customers', perm: ['customers', 'chits'] },
       { to: '/admin/smart-buy-agents', label: 'Agents', perm: ['customers', 'chits'] },
+      { to: '/admin/smart-buy-reports', label: 'Reports', perm: ['customers', 'chits'] },
+      { to: '/admin/commission-rules', label: 'Commission Rules', adminOnly: true },
+      { to: '/admin/smart-buy-settings', label: 'Admin Configuration', adminOnly: true },
     ]
   },
   {
@@ -179,7 +182,7 @@ function canSeeItem(item: NavItem, permissions: Record<string, unknown>, isAdmin
 function canSeeGroup(group: NavGroup, kind: SessionRoleKind) {
   const label = group.label
   if (kind === 'owner') return true
-  if (kind === 'smartBuyManager') return label === 'Smart Buy'
+  if (kind === 'smartBuyManager' || kind === 'agent') return label === 'Smart Buy'
   if (kind === 'cashier') return ['Sell', 'Customers', 'Customer Management', 'Smart Buy', 'Coupons', 'Deliveries'].includes(label)
   if (kind === 'accountant') return ['Customer Management', 'Smart Buy', 'Expenses', 'Reports', 'Branches'].includes(label)
   if (kind === 'storeKeeper') return ['Products', 'Purchase Orders', 'Supplier Management', 'Stock Transfers', 'Branches'].includes(label)
@@ -666,7 +669,7 @@ export default function AppLayout() {
             onScroll={e => saveSidebarScroll((e.currentTarget as HTMLElement).scrollTop)}
             className={`flex-1 overflow-y-auto space-y-0.5 px-2 ${sidebarOpen ? 'py-1' : 'py-3'}`}
           >
-            {profile.kind !== 'cashier' && profile.kind !== 'smartBuyManager' && (
+            {profile.kind !== 'cashier' && profile.kind !== 'smartBuyManager' && profile.kind !== 'agent' && (
               <SidebarLink
                 to={homeRoute}
                 end={profile.kind === 'owner' || profile.kind === 'branchManager' || profile.kind === 'subBranchManager'}

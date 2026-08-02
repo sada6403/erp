@@ -127,6 +127,23 @@ const DEFAULTS = {
   s3_secret_key: '',
   s3_endpoint: '',    // leave blank for AWS, set for MinIO/Wasabi/B2
   s3_cdn_url: '',     // optional CDN prefix
+
+  // Smart Buy (Scheme Management) — company-wide defaults, pre-fill new
+  // schemes but every field stays per-scheme overridable at creation.
+  smartbuy_default_min_members: 50,
+  smartbuy_default_late_payment_days: 5,
+  smartbuy_default_late_fee_amount: 0,
+  smartbuy_default_repayment_months: 12,
+  smartbuy_enforce_registration_lock: true,
+  smartbuy_allow_agent_scheme_requests: false,
+  // Above this amount, a commission payout notifies Super Admin ("large
+  // payout") in addition to the agent — a lightweight fraud/error check on
+  // unusually large batches, not a hard limit.
+  smartbuy_large_payout_threshold: 50000,
+  // From this day of the month onward, a branch with zero SmartBuy
+  // collections so far this month triggers a "branch performance alert" to
+  // Super Admin — gives collection time to start before flagging it.
+  smartbuy_branch_alert_day: 15,
 }
 
 function encryptSecret(value: string): string {

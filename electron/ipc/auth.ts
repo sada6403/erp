@@ -28,9 +28,10 @@ function getJwtSecret(): string {
 const JWT_SECRET = getJwtSecret()
 
 type AuthScope = {
-  level: 'owner' | 'branch' | 'subBranch' | 'smartBuy'
+  level: 'owner' | 'branch' | 'subBranch' | 'smartBuy' | 'agent'
   branchId: string | null
   subBranchId: string | null
+  agentId?: string | null
 }
 
 function readPermissions(user: Record<string, unknown>): Record<string, boolean> {
@@ -46,12 +47,18 @@ function readPermissions(user: Record<string, unknown>): Record<string, boolean>
 function resolveSessionScope(user: Record<string, unknown>): { portal: 'admin' | 'pos'; scope: AuthScope } {
   const roleObj = user.role as Record<string, unknown> | undefined
   const roleName = String(user.role_name || roleObj?.name || '').trim().toLowerCase()
+  // roles.session_scope is the stable identifier for restricted-portal roles
+  // (replaces matching on the role's display name, which breaks silently if
+  // the role gets renamed). Falls back to the legacy name match only for
+  // roles created before this column existed.
+  const sessionScope = String(user.role_session_scope || roleObj?.session_scope || '').trim()
   const branchId = user.branch_id ? String(user.branch_id) : null
   const isOwner = roleName === 'company admin' || roleName === 'owner' || roleName === 'super admin'
     || Boolean((readPermissions(user)).all)
   const isBranchManager = roleName === 'branch manager'
   const isCashier = roleName === 'cashier'
-  const isSmartBuyManager = roleName === 'smart buy manager'
+  const isSmartBuyManager = sessionScope === 'smartBuy' || (!sessionScope && roleName === 'smart buy manager')
+  const isAgent = sessionScope === 'agent'
 
   if (isOwner) {
     return { portal: 'admin', scope: { level: 'owner', branchId: null, subBranchId: null } }
@@ -60,6 +67,16 @@ function resolveSessionScope(user: Record<string, unknown>): { portal: 'admin' |
   if (isBranchManager) {
     if (!branchId) throw new Error('Branch Manager account must be assigned to a branch before login')
     return { portal: 'admin', scope: { level: 'branch', branchId, subBranchId: null } }
+  }
+
+  if (isAgent) {
+    const db = getDb()
+    const agent = db.prepare('SELECT id, branch_id, status FROM agents WHERE user_id = ?').get(user.id) as
+      { id: string; branch_id: string | null; status: string } | undefined
+    if (!agent) throw new Error('This account has no linked Agent profile. Contact your administrator.')
+    if (agent.status !== 'active') throw new Error('Agent profile is inactive.')
+    if (!agent.branch_id) throw new Error('Agent profile must be assigned to a branch before login')
+    return { portal: 'admin', scope: { level: 'agent', branchId: agent.branch_id, subBranchId: null, agentId: agent.id } }
   }
 
   if (isSmartBuyManager) {
@@ -136,7 +153,7 @@ function buildAuthUserPayload(user: Record<string, unknown>, company?: { id: str
 function loadCurrentAuthUser(userId: string): Record<string, unknown> | undefined {
   const db = getDb()
   return db.prepare(`
-      SELECT u.*, r.name as role_name, r.permissions as role_permissions,
+      SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
              b.name as branch_name
       FROM users u
       LEFT JOIN roles r ON r.id = u.role_id
@@ -188,7 +205,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const normalizedEmail = String(email || '').trim().toLowerCase()
       const user = db.prepare(`
-        SELECT u.*, r.name as role_name, r.permissions as role_permissions,
+        SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
                b.name as branch_name
         FROM users u
         LEFT JOIN roles r ON r.id = u.role_id
@@ -278,7 +295,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       if (branch_id) {
         // Strict branch isolation — only active users assigned to this branch can login
         users = db.prepare(`
-          SELECT u.*, r.name as role_name, r.permissions as role_permissions,
+          SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
                  b.name as branch_name
           FROM users u
           LEFT JOIN roles r ON r.id = u.role_id
@@ -287,7 +304,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
         `).all(branch_id) as Record<string, unknown>[]
       } else {
         users = db.prepare(`
-          SELECT u.*, r.name as role_name, r.permissions as role_permissions,
+          SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
                  b.name as branch_name
           FROM users u
           LEFT JOIN roles r ON r.id = u.role_id
@@ -374,7 +391,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       const db = getDb()
       const user = db.prepare(`
-        SELECT u.*, r.name as role_name, r.permissions as role_permissions, b.name as branch_name
+        SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope, b.name as branch_name
         FROM users u
         LEFT JOIN roles r ON r.id = u.role_id
         LEFT JOIN branches b ON b.id = u.branch_id
@@ -570,7 +587,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       const db = getDb()
       const user = db.prepare(`
-        SELECT u.*, r.name as role_name, r.permissions as role_permissions, b.name as branch_name
+        SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope, b.name as branch_name
         FROM users u LEFT JOIN roles r ON r.id=u.role_id LEFT JOIN branches b ON b.id=u.branch_id
         WHERE u.id = ? AND u.is_active = 1
       `).get(decoded.userId) as Record<string, unknown> | undefined

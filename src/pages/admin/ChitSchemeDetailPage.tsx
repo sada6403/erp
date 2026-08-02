@@ -4,8 +4,9 @@ import Modal from '@/components/shared/Modal'
 import StatCard from '@/components/shared/StatCard'
 import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
 import MemberPaymentHistoryModal from '@/components/shared/MemberPaymentHistoryModal'
-import { ArrowLeft, Plus, Upload, FileDown, Users, Coins, Gift, Shuffle, Pencil, Package, Eye } from 'lucide-react'
+import { ArrowLeft, Plus, Upload, FileDown, Users, Coins, Gift, Shuffle, Pencil, Package, Eye, GitBranch, Check, X } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/store/authStore'
 
 type Row = Record<string, unknown>
 
@@ -14,16 +15,21 @@ const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFr
 export default function ChitSchemeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const { user } = useAuthStore()
   const [scheme, setScheme] = useState<Row | null>(null)
   const [members, setMembers] = useState<Row[]>([])
   const [draws, setDraws] = useState<Row[]>([])
+  const [collaborations, setCollaborations] = useState<Row[]>([])
+  const [branches, setBranches] = useState<Row[]>([])
   const [summary, setSummary] = useState<Row>({})
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'members' | 'draws'>('members')
+  const [tab, setTab] = useState<'members' | 'draws' | 'branches'>('members')
   const [importing, setImporting] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [showRegisterHistorical, setShowRegisterHistorical] = useState(false)
   const [showDraw, setShowDraw] = useState(false)
+  const [showInvite, setShowInvite] = useState(false)
+  const [finalClaimsOnly, setFinalClaimsOnly] = useState(false)
   const [payingMember, setPayingMember] = useState<Row | null>(null)
   const [redeemingMember, setRedeemingMember] = useState<Row | null>(null)
   const [redemptionMember, setRedemptionMember] = useState<Row | null>(null)
@@ -34,15 +40,17 @@ export default function ChitSchemeDetailPage() {
     if (!id) return
     setLoading(true)
     try {
-      const res = await window.api.chits.get(id)
+      const [res, b] = await Promise.all([window.api.chits.get(id), window.api.admin.branches.list()])
       if (res.success) {
         setScheme(res.data.scheme)
         setMembers(res.data.members)
         setDraws(res.data.draws)
+        setCollaborations((res.data.collaborations || []) as Row[])
         setSummary(res.data.contributionSummary)
       } else {
         toast.error(res.error || 'Failed to load Smart Buy scheme')
       }
+      if (b.success) setBranches(b.data as Row[])
     } catch (err: any) {
       toast.error(err.message || 'Failed to load Smart Buy scheme')
     } finally {
@@ -89,6 +97,27 @@ export default function ChitSchemeDetailPage() {
     }
   }
 
+  const respondCollaboration = async (collaborationId: string, action: 'approve' | 'reject') => {
+    try {
+      const res = await window.api.chits.branches.respond(collaborationId, action)
+      if (res.success) { toast.success(action === 'approve' ? 'Collaboration approved' : 'Collaboration rejected'); load() }
+      else toast.error(res.error || 'Failed to respond')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to respond')
+    }
+  }
+
+  const removeCollaboration = async (collaborationId: string) => {
+    if (!confirm('Remove this branch from the collaboration? Already-enrolled members stay in the scheme.')) return
+    try {
+      const res = await window.api.chits.branches.remove(collaborationId)
+      if (res.success) { toast.success('Collaboration removed'); load() }
+      else toast.error(res.error || 'Failed to remove')
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to remove')
+    }
+  }
+
   if (loading || !scheme) {
     return <div className="flex items-center justify-center h-full text-slate-500">Loading...</div>
   }
@@ -96,6 +125,18 @@ export default function ChitSchemeDetailPage() {
   const nextCycle = draws.length + 1
   const isFinalCycle = nextCycle >= Number(scheme.cycle_count)
   const membersEnrolled = members.filter(m => m.status !== 'withdrawn').length
+  const myPermissions = ((user?.role as unknown as Row)?.permissions as Row) || {}
+  const isGlobal = Boolean(myPermissions.all)
+  const myBranchId = String(user?.branch_id || '')
+  const isHomeBranchOrGlobal = isGlobal || myBranchId === String(scheme.branch_id || '')
+  const pendingCollabCount = collaborations.filter(c => c.status === 'pending').length
+  // Final Month Product Claim — every member settled together on the final
+  // cycle (redemption_type='final_batch'); tracked separately from regular
+  // draw winners so staff can see at a glance how many still need their
+  // product claim processed (chits:members:recordRedemption for each).
+  const finalBatchMembers = members.filter(m => m.redemption_type === 'final_batch')
+  const finalBatchClaimed = finalBatchMembers.filter(m => m.redemption_invoice_id).length
+  const visibleMembers = finalClaimsOnly ? finalBatchMembers.filter(m => !m.redemption_invoice_id) : members
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -108,11 +149,17 @@ export default function ChitSchemeDetailPage() {
         <button onClick={() => setShowEdit(true)} className="btn-ghost btn-sm p-1.5" title="Edit scheme name / agent / notes">
           <Pencil size={14} />
         </button>
-        <span className={scheme.status === 'active' ? 'badge-green' : 'badge-gray'}>{scheme.status as string}</span>
+        <span className={scheme.status === 'active' ? 'badge-green' : scheme.status === 'pending' ? 'badge-yellow' : 'badge-gray'}>{scheme.status as string}</span>
       </div>
 
       {showEdit && (
         <EditSchemeModal scheme={scheme} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load() }} />
+      )}
+
+      {scheme.status === 'pending' && (
+        <div className="mx-6 mt-4 rounded-lg border px-4 py-3 text-sm flex-shrink-0" style={{ background: 'color-mix(in srgb, #f59e0b 10%, transparent)', borderColor: '#f59e0b', color: '#a16207' }}>
+          <strong>Waiting for Minimum Members</strong> — Need {Math.max(0, Number(scheme.min_members || 0) - membersEnrolled)} More Members.
+        </div>
       )}
 
       <div className="grid grid-cols-4 gap-3 px-6 py-4 flex-shrink-0">
@@ -126,6 +173,9 @@ export default function ChitSchemeDetailPage() {
         <div className="flex gap-1">
           <button onClick={() => setTab('members')} className={tab === 'members' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Members</button>
           <button onClick={() => setTab('draws')} className={tab === 'draws' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Draw History</button>
+          <button onClick={() => setTab('branches')} className={tab === 'branches' ? 'btn-primary btn-sm gap-1.5' : 'btn-secondary btn-sm gap-1.5'}>
+            <GitBranch size={13} /> Branches {pendingCollabCount > 0 && <span className="badge-yellow ml-1">{pendingCollabCount}</span>}
+          </button>
         </div>
         <div className="flex gap-2">
           {tab === 'members' && (
@@ -136,6 +186,9 @@ export default function ChitSchemeDetailPage() {
               <button onClick={() => setShowAddMember(true)} className="btn-secondary btn-sm gap-1.5"><Plus size={14} /> Add Member</button>
             </>
           )}
+          {tab === 'branches' && isHomeBranchOrGlobal && (
+            <button onClick={() => setShowInvite(true)} className="btn-primary btn-sm gap-1.5"><GitBranch size={14} /> Invite Branch</button>
+          )}
           {scheme.status === 'active' && (
             <button onClick={() => setShowDraw(true)} className="btn-primary btn-sm gap-1.5"><Shuffle size={14} /> Conduct Draw (Cycle {nextCycle})</button>
           )}
@@ -143,7 +196,68 @@ export default function ChitSchemeDetailPage() {
       </div>
 
       <div className="flex-1 overflow-auto px-6 pb-6">
-        {tab === 'members' ? (
+        {tab === 'branches' ? (
+          <div className="space-y-3">
+            <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+              Home branch: <strong>{(scheme.branch_name as string) || '—'}</strong> · Responsible agent: <strong>{(scheme.agent_name as string) || 'None'}</strong> — collaboration only extends which branches may enroll/collect members; scheme control always stays with the home branch.
+            </p>
+            <table className="w-full">
+              <thead className="sticky top-0 bg-surface-900 z-10">
+                <tr>
+                  {['Branch', 'Status', 'Members Enrolled', 'Requested', 'Responded', ''].map(h => (
+                    <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {collaborations.length === 0 ? (
+                  <tr><td colSpan={6} className="text-center py-16 text-slate-500">No collaborating branches yet{isHomeBranchOrGlobal ? ' — invite one if this scheme is short on members' : ''}</td></tr>
+                ) : collaborations.map(c => {
+                  const canRespond = (isGlobal || myBranchId === String(c.branch_id || '')) && c.status === 'pending'
+                  const canRemove = isHomeBranchOrGlobal && c.status === 'active'
+                  return (
+                    <tr key={c.id as string} className="table-row">
+                      <td className="table-cell font-medium">{(c.branch_name as string) || '—'}</td>
+                      <td className="table-cell">
+                        <span className={c.status === 'active' ? 'badge-green' : c.status === 'pending' ? 'badge-yellow' : c.status === 'rejected' ? 'badge-red' : 'badge-gray'}>{c.status as string}</span>
+                      </td>
+                      <td className="table-cell">{Number(c.members_enrolled || 0)}</td>
+                      <td className="table-cell text-xs text-slate-400">{c.created_at ? new Date(String(c.created_at)).toLocaleDateString() : '—'}</td>
+                      <td className="table-cell text-xs text-slate-400">{c.responded_at ? new Date(String(c.responded_at)).toLocaleDateString() : '—'}</td>
+                      <td className="table-cell">
+                        <div className="flex gap-1">
+                          {canRespond && (
+                            <>
+                              <button onClick={() => respondCollaboration(c.id as string, 'approve')} className="btn-ghost btn-sm p-1.5 text-green-500" title="Approve"><Check size={13} /></button>
+                              <button onClick={() => respondCollaboration(c.id as string, 'reject')} className="btn-ghost btn-sm p-1.5 text-red-400" title="Reject"><X size={13} /></button>
+                            </>
+                          )}
+                          {canRemove && (
+                            <button onClick={() => removeCollaboration(c.id as string)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Remove collaboration">✕</button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : tab === 'members' ? (
+          <>
+          {finalBatchMembers.length > 0 && (
+            <div className="mb-3 rounded-lg border px-4 py-3 text-sm flex items-center justify-between gap-3" style={{ background: 'color-mix(in srgb, var(--brand-primary) 8%, transparent)', borderColor: 'var(--brand-primary)' }}>
+              <span style={{ color: 'var(--text-1)' }}>
+                <strong>Final Month Product Claim</strong> — {finalBatchClaimed} / {finalBatchMembers.length} settled members have claimed their product.
+              </span>
+              {finalBatchClaimed < finalBatchMembers.length && (
+                <label className="flex items-center gap-1.5 text-xs cursor-pointer flex-shrink-0" style={{ color: 'var(--text-2)' }}>
+                  <input type="checkbox" checked={finalClaimsOnly} onChange={e => setFinalClaimsOnly(e.target.checked)} className="w-3.5 h-3.5" />
+                  Show only pending claims
+                </label>
+              )}
+            </div>
+          )}
           <table className="w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
@@ -153,9 +267,9 @@ export default function ChitSchemeDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {members.length === 0 ? (
-                <tr><td colSpan={10} className="text-center py-16 text-slate-500">No members enrolled yet</td></tr>
-              ) : members.map(m => (
+              {visibleMembers.length === 0 ? (
+                <tr><td colSpan={10} className="text-center py-16 text-slate-500">{finalClaimsOnly ? 'All final settlement members have claimed their product' : 'No members enrolled yet'}</td></tr>
+              ) : visibleMembers.map(m => (
                 <tr key={m.id as string} className="table-row">
                   <td className="table-cell text-slate-400">{m.join_order as number}</td>
                   <td className="table-cell font-medium">{(m.customer_name as string) || '—'}</td>
@@ -168,7 +282,12 @@ export default function ChitSchemeDetailPage() {
                   </td>
                   <td className="table-cell text-slate-400">{(m.won_cycle_no as number) || '—'}</td>
                   <td className="table-cell text-xs text-slate-400">
-                    {m.redeemed_product_name ? `${m.redeemed_product_name as string} × ${m.redeemed_qty as number}` : '—'}
+                    {m.redeemed_product_name ? (
+                      <>
+                        {m.redeemed_product_name as string} × {m.redeemed_qty as number}
+                        {Boolean(m.redemption_invoice_number) && <span className="badge-blue ml-1">{m.redemption_invoice_number as string}</span>}
+                      </>
+                    ) : '—'}
                   </td>
                   <td className="table-cell">
                     <div className="flex gap-1">
@@ -191,26 +310,29 @@ export default function ChitSchemeDetailPage() {
               ))}
             </tbody>
           </table>
+          </>
         ) : (
           <table className="w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
-                {['Cycle', 'Date', 'Winner', 'Method', 'Settled Count', 'Eligible Count', 'Product Chosen'].map(h => (
+                {['Cycle', 'Date & Time', 'Winner', 'Method', 'Selected By', 'Reason', 'Settled', 'Eligible', 'Product Chosen'].map(h => (
                   <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {draws.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-16 text-slate-500">No draws conducted yet</td></tr>
+                <tr><td colSpan={9} className="text-center py-16 text-slate-500">No draws conducted yet</td></tr>
               ) : draws.map(d => {
                 const winnerMember = members.find(m => m.id === d.winner_member_id)
                 return (
                 <tr key={d.id as string} className="table-row">
                   <td className="table-cell font-semibold">{d.cycle_no as number}</td>
-                  <td className="table-cell text-slate-400">{d.draw_date ? new Date(String(d.draw_date)).toLocaleDateString() : '—'}</td>
+                  <td className="table-cell text-slate-400 text-xs">{d.draw_date ? new Date(String(d.draw_date)).toLocaleString() : '—'}</td>
                   <td className="table-cell">{d.method === 'final_batch' ? `${d.settled_count} members (final settlement)` : (d.winner_name as string) || '—'}</td>
-                  <td className="table-cell"><span className={d.method === 'final_batch' ? 'badge-blue' : 'badge-green'}>{d.method as string}</span></td>
+                  <td className="table-cell"><span className={d.method === 'final_batch' ? 'badge-blue' : d.method === 'manual_pick' ? 'badge-purple' : 'badge-green'}>{d.method as string}</span></td>
+                  <td className="table-cell text-xs text-slate-400">{(d.conducted_by_name as string) || '—'}</td>
+                  <td className="table-cell text-xs text-slate-400">{(d.notes as string) || '—'}</td>
                   <td className="table-cell">{d.settled_count as number}</td>
                   <td className="table-cell text-slate-400">{d.eligible_count as number}</td>
                   <td className="table-cell text-xs text-slate-400">
@@ -245,11 +367,16 @@ export default function ChitSchemeDetailPage() {
           onClose={() => setRedeemingMember(null)} onSave={() => { setRedeemingMember(null); load() }} />
       )}
       {redemptionMember && (
-        <RecordRedemptionModal member={redemptionMember}
+        <RecordRedemptionModal member={redemptionMember} schemeChitValue={Number(scheme.chit_value)}
           onClose={() => setRedemptionMember(null)} onSave={() => { setRedemptionMember(null); load() }} />
       )}
       {historyMember && (
         <MemberPaymentHistoryModal memberId={historyMember.id as string} onClose={() => setHistoryMember(null)} />
+      )}
+      {showInvite && (
+        <InviteBranchModal schemeId={id!} schemeBranchId={(scheme.branch_id as string) || ''}
+          branches={branches} excludeBranchIds={collaborations.filter(c => c.status !== 'rejected' && c.status !== 'removed').map(c => String(c.branch_id))}
+          onClose={() => setShowInvite(false)} onSave={() => { setShowInvite(false); load() }} />
       )}
     </div>
   )
@@ -505,6 +632,7 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
   const [eligible, setEligible] = useState<Row[]>([])
   const [method, setMethod] = useState<'random' | 'manual_pick'>('random')
   const [winnerId, setWinnerId] = useState('')
+  const [reason, setReason] = useState('')
   const [loading, setLoading] = useState(true)
   const [conducting, setConducting] = useState(false)
 
@@ -521,9 +649,10 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
 
   const conduct = async () => {
     if (!isFinalCycle && method === 'manual_pick' && !winnerId) { toast.error('Select a member'); return }
+    if (!isFinalCycle && method === 'manual_pick' && !reason.trim()) { toast.error('Enter a reason for the manual pick — kept in the Winner Selection Log'); return }
     setConducting(true)
     try {
-      const res = await window.api.chits.draws.conduct(schemeId, cycleNo, { method, winnerMemberId: winnerId })
+      const res = await window.api.chits.draws.conduct(schemeId, cycleNo, { method, winnerMemberId: winnerId, reason: reason.trim() || undefined })
       if (res.success) {
         toast.success(isFinalCycle ? `Final settlement: ${res.data.settledCount} member(s) received their product` : 'Draw completed')
         onSave()
@@ -557,10 +686,17 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
               <button onClick={() => setMethod('manual_pick')} className={method === 'manual_pick' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Manual Pick</button>
             </div>
             {method === 'manual_pick' && (
-              <select value={winnerId} onChange={e => setWinnerId(e.target.value)} className="input">
-                <option value="">— Select winner —</option>
-                {eligible.map(m => <option key={m.id as string} value={m.id as string}>#{m.join_order as number} — {(m.customer_name as string) || m.id as string}</option>)}
-              </select>
+              <>
+                <select value={winnerId} onChange={e => setWinnerId(e.target.value)} className="input">
+                  <option value="">— Select winner —</option>
+                  {eligible.map(m => <option key={m.id as string} value={m.id as string}>#{m.join_order as number} — {(m.customer_name as string) || m.id as string}</option>)}
+                </select>
+                <div>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Reason for Manual Pick *</label>
+                  <textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-16 resize-none" placeholder="e.g. Customer dispute resolution, loyalty priority, admin override" />
+                  <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>Recorded in the Winner Selection Log for transparency.</p>
+                </div>
+              </>
             )}
           </>
         )}
@@ -593,7 +729,13 @@ function RecordContributionModal({ member, schemeId, onClose, onSave }: { member
         amount, method, reference, receipt_number: receiptNumber || undefined,
         paid_at: paidAt, collected_by_agent_id: collectedByAgentId || null,
       })
-      if (res.success) { toast.success(res.data.status === 'approved' ? 'Contribution recorded' : 'Contribution submitted for verification'); onSave() }
+      if (res.success) {
+        toast.success(res.data.status === 'approved' ? 'Contribution recorded' : 'Contribution submitted for verification')
+        if (Number(res.data.lateFeeApplied || 0) > 0) {
+          toast(`Rs.${res.data.lateFeeApplied} late fee added — total collected Rs.${res.data.amount}`, { icon: '⚠️' })
+        }
+        onSave()
+      }
       else toast.error(String(res.error || 'Failed to record contribution'))
     } catch (err: any) {
       toast.error(err.message || 'Failed to record contribution')
@@ -708,13 +850,12 @@ function EarlyRedeemModal({ member, minAmount, onClose, onSave }: { member: Row;
   )
 }
 
-function RecordRedemptionModal({ member, onClose, onSave }: { member: Row; onClose: () => void; onSave: () => void }) {
+function RecordRedemptionModal({ member, schemeChitValue, onClose, onSave }: { member: Row; schemeChitValue: number; onClose: () => void; onSave: () => void }) {
   const [products, setProducts] = useState<Row[]>([])
   const [productId, setProductId] = useState('')
-  const [productName, setProductName] = useState(String(member.redeemed_product_name || ''))
-  const [qty, setQty] = useState(Number(member.redeemed_qty || 1))
-  const [value, setValue] = useState(Number(member.redeemed_value || 0))
+  const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
+  const alreadyRedeemed = Boolean(member.redemption_invoice_id)
 
   useEffect(() => {
     window.api.products.list({ is_active: true }).then((res: { success: boolean; data?: Row[] }) => {
@@ -722,20 +863,19 @@ function RecordRedemptionModal({ member, onClose, onSave }: { member: Row; onClo
     }).catch(() => {})
   }, [])
 
-  const onPickProduct = (id: string) => {
-    setProductId(id)
-    const p = products.find(x => x.id === id)
-    if (p) { setProductName(String(p.name || '')); if (!value) setValue(Number(p.selling_price || 0)) }
-  }
+  const selectedProduct = products.find(p => p.id === productId)
+  const unitPrice = Number(selectedProduct?.selling_price || 0)
+  const taxRate = Number(selectedProduct?.tax_rate || 0)
+  const estimatedTotal = Math.round(unitPrice * qty * (1 + taxRate / 100) * 100) / 100
+  const exceedsLimit = estimatedTotal > schemeChitValue + 0.01
 
   const save = async () => {
-    if (!productName.trim()) { toast.error('Product name is required'); return }
+    if (!productId) { toast.error('Select a product from the catalog'); return }
+    if (exceedsLimit) { toast.error(`Product value Rs.${estimatedTotal} exceeds this scheme's entitled value of Rs.${schemeChitValue}`); return }
     setSaving(true)
     try {
-      const res = await window.api.chits.members.recordRedemption(member.id, {
-        product_id: productId || undefined, product_name: productName, qty, value,
-      })
-      if (res.success) { toast.success('Redemption recorded'); onSave() }
+      const res = await window.api.chits.members.recordRedemption(member.id, { product_id: productId, qty })
+      if (res.success) { toast.success(`Redemption recorded — invoice ${res.data?.invoiceNumber || ''}`); onSave() }
       else toast.error(String(res.error || 'Failed to record redemption'))
     } catch (err: any) {
       toast.error(err.message || 'Failed to record redemption')
@@ -744,20 +884,32 @@ function RecordRedemptionModal({ member, onClose, onSave }: { member: Row; onClo
     }
   }
 
+  if (alreadyRedeemed) {
+    return (
+      <Modal title={`Record Redemption — ${(member.customer_name as string) || 'Member'}`} onClose={onClose} footer={<button onClick={onClose} className="btn-secondary">Close</button>}>
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+          This member already has a redemption invoice recorded: <strong>{(member.redeemed_product_name as string) || '—'}</strong> × {member.redeemed_qty as number} — Rs.{money(member.redeemed_value)}.
+        </p>
+      </Modal>
+    )
+  }
+
   return (
     <Modal title={`Record Redemption — ${(member.customer_name as string) || 'Member'}`} onClose={onClose}
-      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Save'}</button></>}>
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving || !productId || exceedsLimit} className="btn-primary">{saving ? 'Saving...' : 'Record & Generate Invoice'}</button></>}>
       <div className="space-y-3">
-        <p className="text-sm" style={{ color: 'var(--text-2)' }}>Paid so far: <strong>Rs.{money(member.contributions_paid)}</strong></p>
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>Entitled product value: <strong>Rs.{money(schemeChitValue)}</strong> — recording this generates a real invoice, decrements stock, and cannot be undone from here.</p>
         <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Product picked (search catalog, optional)</label>
-          <ProductSearchSelect products={products} value={productId} onChange={onPickProduct} />
+          <label className="block text-xs font-medium text-slate-400 mb-1">Product *</label>
+          <ProductSearchSelect products={products} value={productId} onChange={setProductId} />
         </div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Product Name *</label><input value={productName} onChange={e => setProductName(e.target.value)} className="input" placeholder="e.g. LED TV 43-inch" /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Quantity</label><input type="number" value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="input" min={1} /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Value (Rs.)</label><input type="number" value={value} onChange={e => setValue(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
-        </div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Quantity</label><input type="number" value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="input" min={1} /></div>
+        {productId && (
+          <p className="text-xs" style={{ color: exceedsLimit ? '#ef4444' : 'var(--text-3)' }}>
+            Unit price Rs.{money(unitPrice)} × {qty} {taxRate > 0 ? `+ ${taxRate}% tax` : ''} = <strong>Rs.{money(estimatedTotal)}</strong>
+            {exceedsLimit ? ' — exceeds entitled value' : ''}
+          </p>
+        )}
       </div>
     </Modal>
   )
@@ -809,6 +961,53 @@ function EditSchemeModal({ scheme, onClose, onSaved }: { scheme: Row; onClose: (
         </div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} className="input h-20 resize-none" /></div>
         <p className="text-xs" style={{ color: 'var(--text-3)' }}>Member count, cycles, contribution amount, and other financial terms can't be changed here once a scheme is running.</p>
+      </div>
+    </Modal>
+  )
+}
+
+// Invites another branch to enroll members into this scheme (Branch
+// Collaboration). Sends a 'pending' request the target branch's own
+// manager (or Super Admin) must approve — the inviting (home) branch
+// cannot approve its own invite.
+function InviteBranchModal({ schemeId, schemeBranchId, branches, excludeBranchIds, onClose, onSave }: {
+  schemeId: string; schemeBranchId: string; branches: Row[]; excludeBranchIds: string[]; onClose: () => void; onSave: () => void
+}) {
+  const eligible = branches.filter(b => String(b.id) !== schemeBranchId && !excludeBranchIds.includes(String(b.id)))
+  const [branchId, setBranchId] = useState('')
+  const [notes, setNotes] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const save = async () => {
+    if (!branchId) { toast.error('Select a branch to invite'); return }
+    setSaving(true)
+    try {
+      const res = await window.api.chits.branches.invite(schemeId, branchId, notes.trim() || undefined)
+      if (res.success) { toast.success('Invitation sent'); onSave() }
+      else toast.error(String(res.error || 'Failed to send invitation'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to send invitation')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title="Invite Branch to Collaborate" onClose={onClose}
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving || !branchId} className="btn-primary">{saving ? 'Sending...' : 'Send Invitation'}</button></>}>
+      <div className="space-y-3">
+        <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+          The invited branch's manager must approve before their staff can enroll members into this scheme. Enrolled members still count toward this scheme's minimum-members activation — the scheme keeps one home branch and one responsible agent.
+        </p>
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Branch *</label>
+          <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input">
+            <option value="">— Select a branch —</option>
+            {eligible.map(b => <option key={b.id as string} value={b.id as string}>{b.name as string}</option>)}
+          </select>
+          {eligible.length === 0 && <p className="text-xs text-amber-500 mt-1">No other branches available to invite.</p>}
+        </div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} className="input h-16 resize-none" placeholder="Optional message for the receiving branch" /></div>
       </div>
     </Modal>
   )

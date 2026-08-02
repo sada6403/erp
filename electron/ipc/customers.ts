@@ -3,11 +3,22 @@ import { dialog } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import * as XLSX from 'xlsx'
 import { safeHandle } from './ipcHandler'
 
 const store = new Store()
+
+function authUser(): Record<string, unknown> {
+  return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+}
+
+function currentPerms(caller: Record<string, unknown> = authUser()): Record<string, unknown> {
+  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller.permissions as Record<string, unknown>)
+    || {}
+}
 
 const PHONE_RE = /^\+?\d{9,12}$/
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -100,6 +111,42 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
         .run({ ...payload, id })
       await enqueuSync('customers', id, 'UPDATE', { id, ...payload })
       return { success: true }
+  })
+
+  // Hard-delete only when nothing references this customer anywhere in the
+  // system (matches products:permanentDelete / agents:delete's pattern) —
+  // otherwise block with a descriptive error naming what's still tied to
+  // them. Unlike agents/schemes, customers have no active/inactive concept
+  // today, so there's no soft-delete alternative to offer.
+  safeHandle(ipcMain, 'customers:delete', async (_e, id: string) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.customers) return { success: false, error: 'Customer management access required' }
+
+    const db = getDb()
+    const caller = authUser()
+    const existing = db.prepare('SELECT id, branch_id, name FROM customers WHERE id = ?').get(id) as { id: string; branch_id: unknown; name: string } | undefined
+    if (!existing) return { success: false, error: 'Customer not found' }
+
+    const refs: Array<{ label: string; cnt: number }> = [
+      { label: 'invoice(s)', cnt: (db.prepare('SELECT COUNT(*) as c FROM invoices WHERE customer_id=?').get(id) as { c: number }).c },
+      { label: 'Smart Buy membership(s)', cnt: (db.prepare('SELECT COUNT(*) as c FROM chit_members WHERE customer_id=?').get(id) as { c: number }).c },
+      { label: 'credit ledger entry/entries', cnt: (db.prepare('SELECT COUNT(*) as c FROM credit_ledger WHERE customer_id=?').get(id) as { c: number }).c },
+      { label: 'installment(s)', cnt: (db.prepare('SELECT COUNT(*) as c FROM installments WHERE customer_id=?').get(id) as { c: number }).c },
+      { label: 'coupon(s)', cnt: (db.prepare('SELECT COUNT(*) as c FROM coupons WHERE customer_id=?').get(id) as { c: number }).c },
+      { label: 'loyalty transaction(s)', cnt: (db.prepare('SELECT COUNT(*) as c FROM loyalty_transactions WHERE customer_id=?').get(id) as { c: number }).c },
+    ]
+    const blocking = refs.find(r => r.cnt > 0)
+    if (blocking) {
+      return { success: false, error: `Cannot delete — this customer has ${blocking.cnt} ${blocking.label}. Customers with billing/membership history can't be removed.` }
+    }
+
+    db.prepare('DELETE FROM customers WHERE id=?').run(id)
+    await enqueuSync('customers', id, 'DELETE', { id })
+    logAudit(db, {
+      userId: (caller.id as string) || null, branchId: (existing.branch_id as string) || null,
+      action: 'CUSTOMER_DELETED', tableName: 'customers', recordId: id, oldValues: { name: existing.name },
+    })
+    return { success: true }
   })
 
   safeHandle(ipcMain, 'customers:downloadTemplate', async () => {

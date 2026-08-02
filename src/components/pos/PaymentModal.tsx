@@ -49,7 +49,6 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [agentCode, setAgentCode]         = useState('')
   const [agentName, setAgentName]         = useState('')
   const [agentId, setAgentId]             = useState('')
-  const [agentPct, setAgentPct]           = useState('')
   const [agentQuery, setAgentQuery]       = useState('')
   const [agentSuggestOpen, setAgentSuggestOpen] = useState(false)
   const [agents, setAgents]               = useState<Record<string, unknown>[]>([])
@@ -98,7 +97,6 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     setAgentCode(String(a.code || ''))
     setAgentName(String(a.name || ''))
     setAgentId(String(a.id || ''))
-    setAgentPct(String(a.default_commission_pct ?? ''))
     setAgentQuery(`${a.code} — ${a.name}`)
     setAgentSuggestOpen(false)
   }
@@ -198,10 +196,6 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   }
 
   const clearCoupon = () => { setCouponInfo(null); setCouponCode(''); setCouponAmount('0') }
-  const agentCommissionPct  = Math.max(0, Math.min(100, parseFloat(agentPct) || 0))
-  const agentCommissionAmount = (agentCode.trim() || agentName.trim()) && agentCommissionPct > 0
-    ? (totalAfterLoyalty * agentCommissionPct) / 100
-    : 0
 
   useEffect(() => {
     if (method === 'cash') setReceived(String(totalAfterCoupon.toFixed(2)))
@@ -261,8 +255,6 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     agent_code:        agentCode.trim() || undefined,
     agent_name:        agentName.trim() || undefined,
     agent_id:          agentId || undefined,
-    agent_commission_pct: agentCommissionPct,
-    agent_commission_amount: agentCommissionAmount,
     valid_until:       isQuotation ? validUntil : undefined,
     due_date:          isCredit    ? dueDate    : undefined,
   })
@@ -336,7 +328,6 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
         agent_code:      agentCode.trim() || undefined,
         agent_name:      agentName.trim() || undefined,
         agent_id:        agentId || undefined,
-        agent_commission_pct: agentCommissionPct,
         notes:           cart.notes,
         items: cart.items.map(i => ({
           product_id:      i.product.id,
@@ -396,7 +387,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     }
   }, [loading, isRetail, isCredit, isQuotation, method, receivedAmount, reference,
       cart, billType, validUntil, dueDate,
-      effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentCommissionPct, agentCommissionAmount,
+      effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentId,
       planId, downPayment, plans, couponApplied, couponInfo, totalAfterCoupon])
 
   const handlePrint = useCallback(async (design: 'dot' | 'thermal' | 'a4' = printDesign) => {
@@ -615,78 +606,57 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               <Handshake size={16} className="text-emerald-400" />
               <div>
                 <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Agent Commission</p>
-                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Optional - enter who brought this customer and their commission percentage.</p>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Optional - enter who brought this customer. Commission is calculated automatically per product from Admin → Commission Rules.</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-[2fr_0.75fr] gap-3">
-              <div className="relative">
-                <label className="label">Agent</label>
-                <input
-                  type="text"
-                  value={agentQuery}
-                  onChange={e => {
-                    const v = e.target.value
-                    setAgentQuery(v)
-                    setAgentSuggestOpen(true)
-                    // Typing after a selection (or freehand, for an agent not
-                    // yet registered) clears the link — treated as free text.
-                    setAgentId('')
-                    setAgentCode(v.toUpperCase())
-                    setAgentName(v)
-                  }}
-                  onFocus={() => setAgentSuggestOpen(true)}
-                  onBlur={() => setTimeout(() => setAgentSuggestOpen(false), 150)}
-                  className="input"
-                  placeholder="Search agent by code or name..."
-                />
-                {agentQuery && (
-                  <button
-                    type="button"
-                    onClick={clearAgent}
-                    className="absolute right-2 top-[26px] text-xs"
-                    style={{ color: 'var(--text-3)' }}
-                  >
-                    Clear
-                  </button>
-                )}
-                {agentSuggestOpen && agentMatches.length > 0 && (
-                  <div
-                    className="absolute z-10 mt-1 w-full rounded-lg border shadow-lg max-h-48 overflow-y-auto"
-                    style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
-                  >
-                    {agentMatches.map(a => (
-                      <button
-                        key={String(a.id)}
-                        type="button"
-                        onMouseDown={() => selectAgent(a)}
-                        className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/40"
-                      >
-                        <span className="font-mono text-xs font-semibold mr-2">{String(a.code)}</span>
-                        <span style={{ color: 'var(--text-2)' }}>{String(a.name)}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="label">Commission %</label>
-                <input
-                  type="number"
-                  value={agentPct}
-                  onChange={e => setAgentPct(e.target.value)}
-                  className="input"
-                  min={0}
-                  max={100}
-                  step="0.01"
-                  placeholder="0"
-                />
-              </div>
-            </div>
-            <div className="mt-3 flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
-              <span className="text-xs text-emerald-300">Commission Amount</span>
-              <span className="font-bold text-emerald-300">
-                Rs.{agentCommissionAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </span>
+            <div className="relative">
+              <label className="label">Agent</label>
+              <input
+                type="text"
+                value={agentQuery}
+                onChange={e => {
+                  const v = e.target.value
+                  setAgentQuery(v)
+                  setAgentSuggestOpen(true)
+                  // Typing after a selection (or freehand, for an agent not
+                  // yet registered) clears the link — treated as free text.
+                  setAgentId('')
+                  setAgentCode(v.toUpperCase())
+                  setAgentName(v)
+                }}
+                onFocus={() => setAgentSuggestOpen(true)}
+                onBlur={() => setTimeout(() => setAgentSuggestOpen(false), 150)}
+                className="input"
+                placeholder="Search agent by code or name..."
+              />
+              {agentQuery && (
+                <button
+                  type="button"
+                  onClick={clearAgent}
+                  className="absolute right-2 top-[26px] text-xs"
+                  style={{ color: 'var(--text-3)' }}
+                >
+                  Clear
+                </button>
+              )}
+              {agentSuggestOpen && agentMatches.length > 0 && (
+                <div
+                  className="absolute z-10 mt-1 w-full rounded-lg border shadow-lg max-h-48 overflow-y-auto"
+                  style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
+                >
+                  {agentMatches.map(a => (
+                    <button
+                      key={String(a.id)}
+                      type="button"
+                      onMouseDown={() => selectAgent(a)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/40"
+                    >
+                      <span className="font-mono text-xs font-semibold mr-2">{String(a.code)}</span>
+                      <span style={{ color: 'var(--text-2)' }}>{String(a.name)}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 

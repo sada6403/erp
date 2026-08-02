@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import StatCard from '@/components/shared/StatCard'
-import { Plus, Edit2, Eye, Upload, FileDown, Download, FileSpreadsheet, FileText, Target, DollarSign, Receipt, Search } from 'lucide-react'
+import { Plus, Edit2, Eye, Upload, FileDown, Download, FileSpreadsheet, FileText, Target, DollarSign, Receipt, Search, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Agent = Record<string, unknown> & { id: string; code: string; name: string; status: string }
@@ -77,6 +77,28 @@ export default function AgentsPage() {
 
   const branchName = (id: unknown) => (branches.find(b => b.id === id)?.name as string) || '—'
 
+  const toggleStatus = async (a: Row) => {
+    const nextStatus = a.status === 'active' ? 'inactive' : 'active'
+    try {
+      const res = await window.api.agents.update(a.id as string, { status: nextStatus })
+      if (res.success) { toast.success(`Agent marked ${nextStatus}`); load(branchFilter) }
+      else toast.error(String(res.error || 'Failed to update status'))
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to update status')
+    }
+  }
+
+  const deleteAgent = async (a: Row) => {
+    if (!confirm(`Delete agent "${a.name}"? This only works if the agent has no invoices, schemes, or commission history.`)) return
+    try {
+      const res = await window.api.agents.delete(a.id as string)
+      if (res.success) { toast.success('Agent deleted'); load(branchFilter) }
+      else toast.error(String(res.error || 'Failed to delete agent'))
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to delete agent')
+    }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader title="Agent Management" subtitle={`${filteredAgents.length} agents`}
@@ -135,12 +157,19 @@ export default function AgentsPage() {
                     <span className={target > 0 && pct >= 100 ? 'badge-green' : 'badge-blue'}>{target > 0 ? `${pct}%` : '—'}</span>
                   </td>
                   <td className="table-cell">
-                    <span className={a.status === 'active' ? 'badge-green' : 'badge-gray'}>{a.status as string}</span>
+                    <button
+                      onClick={() => toggleStatus(a)}
+                      className={a.status === 'active' ? 'badge-green' : 'badge-gray'}
+                      title="Click to toggle active/inactive"
+                    >
+                      {a.status as string}
+                    </button>
                   </td>
                   <td className="table-cell">
                     <div className="flex gap-1">
                       <button onClick={() => setViewing(a as Agent)} className="btn-ghost btn-sm p-1.5" title="View Report"><Eye size={13} /></button>
                       <button onClick={() => { setEditing(a as Agent); setShowForm(true) }} className="btn-ghost btn-sm p-1.5" title="Edit"><Edit2 size={13} /></button>
+                      <button onClick={() => deleteAgent(a)} className="btn-ghost btn-sm p-1.5 hover:text-red-500" title="Delete"><Trash2 size={13} /></button>
                     </div>
                   </td>
                 </tr>

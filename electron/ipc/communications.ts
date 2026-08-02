@@ -4,6 +4,7 @@ import { sendSms, testSms, installmentDueMessage, installmentOverdueMessage, low
 import { sendWhatsApp, testWhatsApp } from '../services/whatsappService'
 import { getDb } from '../database'
 import { createNotification } from './notifications'
+import { runChitPaymentDueSweep, runChitSchemeClosingSweep } from '../services/chitNotifications'
 import Store from 'electron-store'
 import { safeHandle } from './ipcHandler'
 
@@ -172,6 +173,54 @@ export function startReminderScheduler() {
           `${dueToday.length} due today, ${due1Day.length} due tomorrow, ${dueSoon.length} due in 3 days.`,
           { today: dueToday.length, in1: due1Day.length, in3: dueSoon.length })
       }
+
+      // Smart Buy: pre-redemption contribution due reminders + final-cycle
+      // "scheme closing" heads-up — sends to customers via whichever of
+      // email/SMS/WhatsApp is configured, and always logs an admin-facing
+      // in-app summary (own channels checked internally, so this must run
+      // even when only WhatsApp — not email/SMS — is enabled).
+      try {
+        const { dueCount, schemeCount } = await runChitPaymentDueSweep(db)
+        if (dueCount && !notedToday('chit_payment_due')) {
+          createNotification('chit_payment_due', 'Smart Buy Payments Due',
+            `${dueCount} member(s) across ${schemeCount} scheme(s) haven't paid this month's Smart Buy installment yet.`,
+            { dueCount, schemeCount })
+        }
+        const closingSchemes = await runChitSchemeClosingSweep(db)
+        if (closingSchemes.length && !notedToday('chit_scheme_closing')) {
+          const names = closingSchemes.map(s => s.schemeName).join(', ')
+          createNotification('chit_scheme_closing', 'Smart Buy Scheme(s) Closing',
+            `${closingSchemes.length} scheme(s) entering their final cycle: ${names}.`,
+            { schemes: closingSchemes })
+        }
+      } catch { /* Smart Buy sweep must never break the rest of the scheduler */ }
+
+      // Branch performance alert — a branch with zero SmartBuy collections
+      // so far this month, once past the configured day-of-month (gives
+      // collection time to start before flagging it as a concern).
+      try {
+        const savedSettings = (store.get('app_settings') as Record<string, unknown> | undefined) || {}
+        const alertDay = Number(savedSettings.smartbuy_branch_alert_day ?? 15) || 15
+        const dayOfMonth = new Date().getDate()
+        if (dayOfMonth >= alertDay) {
+          const quietBranches = db.prepare(`
+            SELECT b.id, b.name FROM branches b
+            WHERE b.is_active = 1
+              AND EXISTS (SELECT 1 FROM chit_schemes cs WHERE cs.branch_id = b.id AND cs.status = 'active')
+              AND NOT EXISTS (
+                SELECT 1 FROM chit_contributions cc
+                WHERE cc.branch_id = b.id AND cc.status = 'approved'
+                  AND strftime('%Y-%m', cc.paid_at) = strftime('%Y-%m', 'now')
+              )
+          `).all() as { id: string; name: string }[]
+          if (quietBranches.length && !notedToday('branch_performance_alert')) {
+            const names = quietBranches.map(b => b.name).join(', ')
+            createNotification('branch_performance_alert', 'Branch Performance Alert',
+              `${quietBranches.length} branch(es) have zero SmartBuy collections this month: ${names}.`,
+              { branches: quietBranches }, { roleScope: 'owner' })
+          }
+        }
+      } catch { /* Branch alert sweep must never break the rest of the scheduler */ }
 
       // Customer email / SMS reminders — only if configured.
       if (!emailEnabled && !smsEnabled) return

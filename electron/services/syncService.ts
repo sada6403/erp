@@ -297,6 +297,18 @@ export class SyncService {
       // agent_id, not scheme_id), so it's pulled directly, not via the
       // chit_schemes-related-ids dance below.
       'agent_remittances',
+      // Smart Buy Enterprise Commission Engine — pulled directly (not via
+      // the chit_schemes-related-ids dance) since commission_rules can be
+      // global/company-wide (not scheme-specific) and agents/reports need
+      // full ledger visibility regardless of which schemes were recently
+      // pulled on this device.
+      'commission_rules', 'commission_ledger',
+      // Commission payout batches — agent-keyed like agent_remittances, not
+      // scheme-keyed, so pulled directly here too.
+      'commission_payouts',
+      // Multi-level commission approval — audit trail, statement downloads,
+      // rate history. Same direct-pull treatment (not scheme-keyed).
+      'commission_approval_logs', 'commission_statement_history', 'commission_rule_history',
     ]
 
     let pulledInstallmentIds: string[] = []
@@ -450,6 +462,8 @@ export class SyncService {
           await sleep(REQUEST_DELAY_MS)
           const contributions = await cloud.related('chit_contributions', 'scheme_id', ids)
           await sleep(REQUEST_DELAY_MS)
+          const schemeBranches = await cloud.related('chit_scheme_branches', 'scheme_id', ids)
+          await sleep(REQUEST_DELAY_MS)
           db.transaction(() => {
             for (const member of members) {
               try { this.insertFiltered(db, 'chit_members', member) }
@@ -462,6 +476,10 @@ export class SyncService {
             for (const contribution of contributions) {
               try { this.insertFiltered(db, 'chit_contributions', contribution) }
               catch (err) { console.error(`[SyncService] Skipping chit_contribution (${contribution.id}):`, err) }
+            }
+            for (const schemeBranch of schemeBranches) {
+              try { this.insertFiltered(db, 'chit_scheme_branches', schemeBranch) }
+              catch (err) { console.error(`[SyncService] Skipping chit_scheme_branch (${schemeBranch.id}):`, err) }
             }
           })()
         }

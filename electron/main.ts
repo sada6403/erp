@@ -31,6 +31,7 @@ import { registerBackupHandlers } from './ipc/backup'
 import { registerMonitorHandlers } from './ipc/monitor'
 import { registerLicenseHandlers } from './ipc/license'
 import { registerChitHandlers } from './ipc/chits'
+import { registerCommissionHandlers } from './ipc/commissions'
 import { registerEditRequestHandlers } from './ipc/editRequests'
 import { startAutoBackup, stopAutoBackup } from './services/backupService'
 import { startLicenseChecks, stopLicenseChecks } from './services/licenseService'
@@ -182,6 +183,7 @@ async function bootstrap() {
   registerMonitorHandlers()
   registerLicenseHandlers(ipcMain)
   registerChitHandlers(ipcMain)
+  registerCommissionHandlers(ipcMain)
   registerEditRequestHandlers(ipcMain)
   startAutoBackup()
   startLicenseChecks()
