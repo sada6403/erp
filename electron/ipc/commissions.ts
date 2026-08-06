@@ -41,8 +41,13 @@ function currentPerms(caller: Record<string, unknown> = authUser()): Record<stri
 function isCommissionAdmin(perms: Record<string, unknown>): boolean {
   return Boolean(perms.all)
 }
+// Requires an EXPLICIT Smart Buy grant — 'all' or 'chits' — never
+// 'customers'. Mirrors the identical fix in chits.ts's canManage() (see the
+// SmartBuy fix audit, HIGH-2): the seeded Branch Manager/Cashier roles carry
+// customers:true for the ordinary Customers module, and treating that as
+// commission-viewing access was an unintended over-grant.
 function canViewCommissions(perms: Record<string, unknown>): boolean {
-  return Boolean(perms.all || perms.customers || perms.chits)
+  return Boolean(perms.all || perms.chits)
 }
 function isGlobalCommissionAccess(perms: Record<string, unknown>): boolean {
   return Boolean(perms.all)
@@ -343,6 +348,14 @@ export function registerCommissionHandlers(ipcMain: IpcMain) {
     const perms = currentPerms()
     const db = getDb()
     const caller = authUser()
+    // An Agent-portal session must never approve/reject a commission entry
+    // — not even their own — regardless of what module permissions their
+    // linked login role carries. Mirrors the same self-dealing prevention
+    // already applied to scheme creation and agent-profile edits elsewhere
+    // in this module (SmartBuy commission-flow audit).
+    if (resolveScopedAgentId(caller)) {
+      return { success: false, error: 'Agents cannot approve or reject commission entries' }
+    }
     const line = db.prepare(`
       SELECT id, status, branch_id, registration_agent_id, sales_agent_id FROM commission_ledger WHERE id=?
     `).get(id) as { id: string; status: string; branch_id: unknown; registration_agent_id: string | null; sales_agent_id: string | null } | undefined
@@ -401,6 +414,9 @@ export function registerCommissionHandlers(ipcMain: IpcMain) {
     const perms = currentPerms()
     const db = getDb()
     const caller = authUser()
+    if (resolveScopedAgentId(caller)) {
+      return { success: false, error: 'Agents cannot approve or reject commission entries' }
+    }
     const line = db.prepare(`
       SELECT id, status, branch_id, registration_agent_id, sales_agent_id FROM commission_ledger WHERE id=?
     `).get(id) as { id: string; status: string; branch_id: unknown; registration_agent_id: string | null; sales_agent_id: string | null } | undefined

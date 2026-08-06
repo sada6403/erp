@@ -87,7 +87,13 @@ function RequireSmartBuyAccess({ children }: { children: React.ReactNode }) {
   if (!user) return <Navigate to="/login" replace />
   const permissions = (user.role?.permissions ||
     (user as unknown as Record<string, unknown>).permissions) as Record<string, unknown> || {}
-  if (!permissions.all && !permissions.customers && !permissions.chits) {
+  // Requires an EXPLICIT Smart Buy grant ('all' or 'chits'), never
+  // 'customers' — matches the backend's canManage()/canViewCommissions()
+  // fix (SmartBuy fix audit, HIGH-2). A role that only has 'customers' can
+  // no longer reach the Smart Buy screens, since every underlying IPC call
+  // would reject it anyway; showing the pages first and 403-ing on every
+  // action was the actual bug.
+  if (!permissions.all && !permissions.chits) {
     return <Navigate to={getLandingRoute(user)} replace />
   }
   return <>{children}</>

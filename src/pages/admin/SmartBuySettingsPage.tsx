@@ -17,7 +17,6 @@ export default function SmartBuySettingsPage() {
     smartbuy_default_late_fee_amount: 0,
     smartbuy_default_repayment_months: 12,
     smartbuy_enforce_registration_lock: true,
-    smartbuy_allow_agent_scheme_requests: false,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -31,7 +30,6 @@ export default function SmartBuySettingsPage() {
           smartbuy_default_late_fee_amount: Number(res.data!.smartbuy_default_late_fee_amount ?? f.smartbuy_default_late_fee_amount),
           smartbuy_default_repayment_months: Number(res.data!.smartbuy_default_repayment_months ?? f.smartbuy_default_repayment_months),
           smartbuy_enforce_registration_lock: res.data!.smartbuy_enforce_registration_lock !== false,
-          smartbuy_allow_agent_scheme_requests: Boolean(res.data!.smartbuy_allow_agent_scheme_requests),
         }))
       } else if (!res.success) {
         toast.error('Failed to load settings')
@@ -107,15 +105,6 @@ export default function SmartBuySettingsPage() {
             <span className="text-sm" style={{ color: 'var(--text-2)' }}>Enforce each scheme's Registration Opens / Closes dates</span>
           </label>
           <p className="text-xs" style={{ color: 'var(--text-3)' }}>When on, new-member enrollment is rejected outside a scheme's registration window (set per scheme). Turn off to allow enrollment any time regardless of those dates.</p>
-        </div>
-
-        <div className="card space-y-3">
-          <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Agent Permissions</h3>
-          <label className="flex items-center gap-2 cursor-not-allowed opacity-60">
-            <input type="checkbox" checked={form.smartbuy_allow_agent_scheme_requests} disabled className="w-4 h-4" />
-            <span className="text-sm" style={{ color: 'var(--text-2)' }}>Allow Agents to request new schemes for Super Admin approval</span>
-          </label>
-          <p className="text-xs" style={{ color: 'var(--text-3)' }}>Reserved for a future phase — Agents cannot create or request schemes yet; every scheme must be created by a Branch Manager or Super Admin.</p>
         </div>
       </div>
     </div>

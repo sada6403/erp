@@ -113,6 +113,7 @@ const api = {
       importExcel:        (schemeId: string)                   => ipcRenderer.invoke('chits:members:importExcel', schemeId),
       earlyRedeem:        (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:members:earlyRedeem', memberId, payload),
       contributionHistory: (memberId: string)                  => ipcRenderer.invoke('chits:members:contributionHistory', memberId),
+      contributionStatement: (memberId: string)                => ipcRenderer.invoke('chits:members:contributionStatement', memberId),
       registerHistorical: (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:registerHistorical', schemeId, payload),
       recordRedemption:   (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:members:recordRedemption', memberId, payload),
     },

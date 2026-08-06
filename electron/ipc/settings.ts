@@ -135,7 +135,6 @@ const DEFAULTS = {
   smartbuy_default_late_fee_amount: 0,
   smartbuy_default_repayment_months: 12,
   smartbuy_enforce_registration_lock: true,
-  smartbuy_allow_agent_scheme_requests: false,
   // Above this amount, a commission payout notifies Super Admin ("large
   // payout") in addition to the agent — a lightweight fraud/error check on
   // unusually large batches, not a hard limit.

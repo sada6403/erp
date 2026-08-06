@@ -442,12 +442,29 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const caller = authUser()
       const perms = currentPerms(caller)
+      // Same access gate as every other agent-management handler in this
+      // file (create/update/list) — this was missing entirely, which let
+      // ANY authenticated session (including an unrelated Agent-portal
+      // login) read any agent's commission/invoice report.
+      if (!perms.all && !perms.employees && !perms.chits) return { success: false, error: 'Employee management access required' }
       const isGlobal = Boolean(perms.all)
 
       const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(filters.agentId) as Record<string, unknown> | undefined
       if (!agent) return { success: false, error: 'Agent not found' }
+      if (!isGlobal && String(agent.branch_id || '') !== String(caller.branch_id || '')) {
+        return { success: false, error: 'You do not have access to this agent' }
+      }
+      // An Agent-portal session may only ever pull their own report —
+      // mirrors agents:get's identical guard.
+      const scopedAgentId = resolveScopedAgentId(caller)
+      if (scopedAgentId && scopedAgentId !== filters.agentId) {
+        return { success: false, error: 'You do not have access to this agent' }
+      }
 
-      const branchId = filters.branchId || (!isGlobal ? caller.branch_id as string | undefined : undefined)
+      // Non-global callers can't widen the branch filter past their own
+      // branch via a client-supplied override (mirrors chits.ts's
+      // resolveScopedBranchId pattern).
+      const branchId = isGlobal ? filters.branchId : (caller.branch_id as string | undefined)
       const conditions = [`UPPER(TRIM(i.agent_code)) = UPPER(TRIM(?))`, `i.status = 'completed'`]
       const params: unknown[] = [agent.code]
       if (branchId) { conditions.push('i.branch_id = ?'); params.push(branchId) }
@@ -517,8 +534,11 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const caller = authUser()
       const perms = currentPerms(caller)
+      // Same missing gate as agents:report — this lists EVERY agent's
+      // commission/sales totals, so it needed a permission check even more.
+      if (!perms.all && !perms.employees && !perms.chits) return { success: false, error: 'Employee management access required' }
       const isGlobal = Boolean(perms.all)
-      const branchId = filters.branchId || (!isGlobal ? caller.branch_id as string | undefined : undefined)
+      const branchId = isGlobal ? filters.branchId : (caller.branch_id as string | undefined)
 
       const invoiceConditions = [`UPPER(TRIM(i.agent_code)) = UPPER(TRIM(a.code))`, `i.status = 'completed'`]
       const params: unknown[] = []
@@ -528,6 +548,9 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       const agentConditions: string[] = []
       const agentParams: unknown[] = []
       if (branchId) { agentConditions.push('a.branch_id = ?'); agentParams.push(branchId) }
+      // An Agent-portal session only ever sees their own row in this list.
+      const scopedAgentId = resolveScopedAgentId(caller)
+      if (scopedAgentId) { agentConditions.push('a.id = ?'); agentParams.push(scopedAgentId) }
       const agentWhere = agentConditions.length ? `WHERE ${agentConditions.join(' AND ')}` : ''
 
       const rows = db.prepare(`

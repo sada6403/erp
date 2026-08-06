@@ -87,17 +87,20 @@ const NAV_GROUPS: NavGroup[] = [
   {
     // Umbrella home for every Smart Buy (chit fund) feature — schemes,
     // member/customer management, and a dedicated agent view all live here.
-    // Gated by 'customers' (existing roles) OR 'chits' (the restricted,
-    // branch-scoped Smart Buy Manager role — see sessionRouting.ts's
-    // 'smartBuyManager' kind) so granting a new role 'chits' alone never
-    // implies the broader 'customers' permission.
-    label: 'Smart Buy', icon: Coins, perm: ['customers', 'chits'], module: 'customers',
+    // Gated by 'chits' alone (or 'all') — NOT 'customers'. Before the
+    // SmartBuy fix audit (HIGH-2), this also accepted 'customers', which
+    // meant every seeded Branch Manager/Cashier role (customers:true, no
+    // 'chits') saw this menu and could act on it, even though they were
+    // never explicitly granted Smart Buy access. A company that wants those
+    // roles to keep Smart Buy access must now grant 'chits' explicitly via
+    // Roles & Permissions.
+    label: 'Smart Buy', icon: Coins, perm: ['chits'], module: 'customers',
     items: [
-      { to: '/admin/smart-buy', label: 'Dashboard', perm: ['customers', 'chits'] },
-      { to: '/admin/chits', label: 'Schemes', perm: ['customers', 'chits'] },
-      { to: '/admin/chit-customers', label: 'Customers', perm: ['customers', 'chits'] },
-      { to: '/admin/smart-buy-agents', label: 'Agents', perm: ['customers', 'chits'] },
-      { to: '/admin/smart-buy-reports', label: 'Reports', perm: ['customers', 'chits'] },
+      { to: '/admin/smart-buy', label: 'Dashboard', perm: ['chits'] },
+      { to: '/admin/chits', label: 'Schemes', perm: ['chits'] },
+      { to: '/admin/chit-customers', label: 'Customers', perm: ['chits'] },
+      { to: '/admin/smart-buy-agents', label: 'Agents', perm: ['chits'] },
+      { to: '/admin/smart-buy-reports', label: 'Reports', perm: ['chits'] },
       { to: '/admin/commission-rules', label: 'Commission Rules', adminOnly: true },
       { to: '/admin/smart-buy-settings', label: 'Admin Configuration', adminOnly: true },
     ]

@@ -772,9 +772,14 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_member ON chit_contributions(member_id);
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_status ON chit_contributions(status);
   `)
-  if (!hasColumn('chit_contributions', 'collected_by_agent_id')) {
-    db.exec(`ALTER TABLE chit_contributions ADD COLUMN collected_by_agent_id TEXT REFERENCES agents(id)`)
-  }
+  // Note: collected_by_agent_id is declared directly in the CREATE TABLE
+  // above. It used to also be added via a separate hasColumn-guarded ALTER
+  // here (a leftover from when the column was retrofitted onto an
+  // already-shipped table) — removed as dead migration code (SmartBuy fix
+  // audit, LOW priority). Safe: every install that needed the ALTER already
+  // ran it on a prior startup, so the column already exists everywhere;
+  // this only removes a permanently-skipped no-op check, it does not
+  // un-add the column from any existing database.
 
   // Agent cash remittance/settlement — a field agent collects cash from
   // customers (chit_contributions.collected_by_agent_id) and later hands it
@@ -963,6 +968,23 @@ function runMigrations(): void {
     db.exec(`UPDATE commission_ledger SET status='pending_admin_approval' WHERE status='approved'`)
   }
 
+  // Blocks the same (source, rule) pair from ever generating a second
+  // commission_ledger row — a base rule + stacked bonus rules on the same
+  // source_id is still fine (each has a different rule_id), only an exact
+  // re-run of the same rule against the same source is rejected. SQLite
+  // treats every NULL as distinct for uniqueness purposes, so any legacy
+  // rows with rule_id IS NULL (the old no-rule-match fallback, removed
+  // since) never collide with each other or with this constraint.
+  // Wrapped defensively: if an install somehow already has a genuine
+  // duplicate (e.g. from the race this migration's paired code fix closes),
+  // building the index throws and we log instead of blocking startup —
+  // manual cleanup, not a crash, is the right response to found duplicates.
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_commission_ledger_source_rule_unique ON commission_ledger(source_table, source_id, rule_id)`)
+  } catch (err) {
+    console.error('[DB migration] Could not create idx_commission_ledger_source_rule_unique — likely pre-existing duplicate commission_ledger rows need manual review:', err)
+  }
+
   // Structured commission approval/rejection/cancellation trail — one row
   // per status transition, distinct from the generic audit_logs (which
   // stores an unstructured JSON blob) because the approval-history UI needs
@@ -1024,6 +1046,87 @@ function runMigrations(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_commission_rule_history_rule ON commission_rule_history(rule_id);
   `)
+
+  // Missing-index sweep across the Smart Buy / commission tables (SmartBuy
+  // fix audit, LOW priority) — every FK/lookup column identified by the
+  // audit that wasn't already covered by a CREATE INDEX above. All purely
+  // additive and safe to re-run: CREATE INDEX IF NOT EXISTS never fails on
+  // an index that already matches, and building an index on an existing
+  // table never touches row data.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_chit_schemes_product              ON chit_schemes(product_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_members_agent                ON chit_members(agent_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_members_installment          ON chit_members(installment_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_members_redeemed_product     ON chit_members(redeemed_product_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_members_redemption_invoice   ON chit_members(redemption_invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_draws_winner                 ON chit_draws(winner_member_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_draws_conducted_by           ON chit_draws(conducted_by);
+    CREATE INDEX IF NOT EXISTS idx_chit_contributions_branch         ON chit_contributions(branch_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_contributions_collected_by   ON chit_contributions(collected_by_agent_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_contributions_received_by    ON chit_contributions(received_by);
+    CREATE INDEX IF NOT EXISTS idx_chit_contributions_verified_by    ON chit_contributions(verified_by);
+    CREATE INDEX IF NOT EXISTS idx_chit_contributions_cycle          ON chit_contributions(cycle_no);
+    CREATE INDEX IF NOT EXISTS idx_agent_remittances_received_by     ON agent_remittances(received_by);
+    CREATE INDEX IF NOT EXISTS idx_chit_scheme_branches_requested_by ON chit_scheme_branches(requested_by);
+    CREATE INDEX IF NOT EXISTS idx_chit_scheme_branches_responded_by ON chit_scheme_branches(responded_by);
+    CREATE INDEX IF NOT EXISTS idx_commission_rules_brand            ON commission_rules(brand);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_member          ON commission_ledger(member_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_rule            ON commission_ledger(rule_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_approved_by     ON commission_ledger(approved_by);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_admin_approved  ON commission_ledger(admin_approved_by);
+    CREATE INDEX IF NOT EXISTS idx_commission_payouts_paid_by        ON commission_payouts(paid_by);
+    CREATE INDEX IF NOT EXISTS idx_commission_approval_logs_changed_by     ON commission_approval_logs(changed_by);
+    CREATE INDEX IF NOT EXISTS idx_commission_statement_history_generated ON commission_statement_history(generated_by);
+    CREATE INDEX IF NOT EXISTS idx_commission_rule_history_product   ON commission_rule_history(product_id);
+    CREATE INDEX IF NOT EXISTS idx_commission_rule_history_created_by ON commission_rule_history(created_by);
+  `)
+
+  // Performance indexes for large-dataset Smart Buy reports/dashboard
+  // (production readiness audit — concurrency/performance pass). These
+  // three specifically back hot paths that scan without a supporting index
+  // at scale: chit_members.won_cycle_no is the join key the winner report
+  // and dashboard "recent draws" now use to find every winning member (see
+  // chits:reports:winners/chits:dashboard — one row per winner, not per
+  // draw); paid_at/created_at back the dashboard's 6-month collection and
+  // commission trend charts' date-range filters, which would otherwise
+  // full-scan chit_contributions/commission_ledger as they accumulate.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_chit_members_won_cycle      ON chit_members(scheme_id, won_cycle_no);
+    CREATE INDEX IF NOT EXISTS idx_chit_contributions_paid_at  ON chit_contributions(paid_at);
+    CREATE INDEX IF NOT EXISTS idx_commission_ledger_created_at ON commission_ledger(created_at);
+  `)
+
+  // ── Flexible (partial/excess/installment) contribution handling ─────────
+  // Supersedes the earlier "exactly one approved contribution per
+  // (member, scheme, cycle)" rule — a member may now pay a cycle off in
+  // multiple installments, overpay (the excess carries forward as credit
+  // toward a future cycle), or underpay and draw down previously-banked
+  // credit to close the gap. The old rule's unique index would reject a
+  // second legitimate installment outright, so it's dropped here — the new
+  // duplicate-prevention rule ("reject a new contribution once the cycle's
+  // balance is already fully settled") is a computed, aggregate condition
+  // that can't be expressed as a simple column-tuple UNIQUE constraint, so
+  // it's enforced in application code (chits:contributions:record) instead;
+  // see also credit_balance/credit_applied below.
+  db.exec(`DROP INDEX IF EXISTS idx_chit_contributions_one_approved_per_cycle`)
+
+  if (!hasColumn('chit_members', 'credit_balance')) {
+    // Running credit balance for this member's membership in THIS scheme
+    // (chit_members is already one row per scheme-membership, so credit
+    // from Scheme A can never leak into Scheme B for the same customer —
+    // no additional scoping needed). Increases when a payment overshoots a
+    // cycle's expected amount; decreases when a later cycle's shortfall
+    // draws on it.
+    db.exec(`ALTER TABLE chit_members ADD COLUMN credit_balance REAL NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('chit_contributions', 'credit_applied')) {
+    // How much of the member's credit_balance this specific payment
+    // transaction drew down to help close that cycle's gap — kept
+    // separate from `amount` (what was actually collected this
+    // transaction) so the contribution history/statement can show real
+    // cash/method collected and credit-covered amounts as distinct lines.
+    db.exec(`ALTER TABLE chit_contributions ADD COLUMN credit_applied REAL NOT NULL DEFAULT 0`)
+  }
 
   // Edit requests — a branch manager/cashier wanting to correct an
   // already-completed invoice line item or a direct stock quantity must
@@ -1601,6 +1704,147 @@ function runMigrations(): void {
       console.log(`[DB] Migration: queued ${stockRows.length} stock row(s) and ${customerRows.length} customer row(s) for cloud sync backfill`)
     } catch (err) {
       console.error('[DB] Sync backfill migration failed:', err)
+    }
+  }
+
+  // ── One-time fix: installments.invoice_id must allow NULL ──────────────
+  // A Smart Buy draw winner gets a post-delivery repayment schedule
+  // generated by generateChitRepaymentSchedule() (chits.ts) at DRAW time —
+  // before any invoice exists for them. The real redemption invoice is a
+  // separate, later step (chits:members:recordRedemption), and a winner
+  // can go a long time between winning and actually collecting their
+  // product. That function has always passed invoice_id: null for exactly
+  // this reason, but the column was declared NOT NULL — every such insert
+  // was silently failing with "NOT NULL constraint failed:
+  // installments.invoice_id" for any winner who still owed a balance
+  // (i.e. almost every real draw). Found via the SmartBuy fix audit's
+  // regression tests, the first time this path was actually executed
+  // end-to-end rather than only read. Not part of the original 16-item
+  // audit — a pre-existing bug the audit's own testing requirement surfaced.
+  // SQLite has no ALTER COLUMN, so relaxing a NOT NULL constraint requires
+  // the standard rename → recreate → copy → drop sequence. Ordinary
+  // (non-chit) installment sales always already have a real invoice_id, so
+  // this only ever *permits* NULL going forward — it does not change a
+  // single existing row's data.
+  const installmentsFixName = 'installments_invoice_id_nullable_v1'
+  const installmentsFixDone = db.prepare(`SELECT 1 FROM app_migrations WHERE name = ?`).get(installmentsFixName)
+  if (!installmentsFixDone) {
+    try {
+      const invoiceIdCol = (db.prepare(`PRAGMA table_info(installments)`).all() as { name: string; notnull: number }[])
+        .find(c => c.name === 'invoice_id')
+      if (invoiceIdCol && invoiceIdCol.notnull) {
+        db.pragma('foreign_keys = OFF')
+        // Since SQLite 3.25, ALTER TABLE RENAME automatically rewrites the
+        // REFERENCES clause text in every OTHER table's stored schema
+        // (installment_schedule.installment_id, installment_payments.
+        // installment_id, installment_reminders.installment_id,
+        // chit_members.installment_id all say "REFERENCES installments(id)")
+        // to point at the new temp name — which would leave them pointing
+        // at a table that no longer exists once it's dropped below.
+        // legacy_alter_table disables that rewrite, so those columns keep
+        // referencing the literal name "installments," which correctly
+        // resolves again once the real table is recreated under that name.
+        db.pragma('legacy_alter_table = ON')
+        db.transaction(() => {
+          db.exec(`ALTER TABLE installments RENAME TO installments_pre_nullable_fix`)
+          db.exec(`
+            CREATE TABLE installments (
+              id           TEXT PRIMARY KEY,
+              contract_number TEXT UNIQUE,
+              invoice_id   TEXT REFERENCES invoices(id),
+              customer_id  TEXT NOT NULL REFERENCES customers(id),
+              branch_id    TEXT REFERENCES branches(id),
+              customer_phone TEXT,
+              cash_price   REAL NOT NULL DEFAULT 0,
+              down_payment REAL NOT NULL DEFAULT 0,
+              financed_amount REAL NOT NULL DEFAULT 0,
+              interest_type TEXT NOT NULL DEFAULT 'flat',
+              interest_rate REAL NOT NULL DEFAULT 0,
+              interest_amount REAL NOT NULL DEFAULT 0,
+              total_amount REAL NOT NULL,
+              paid_amount  REAL NOT NULL DEFAULT 0,
+              due_amount   REAL NOT NULL,
+              penalty_amount REAL NOT NULL DEFAULT 0,
+              grace_period_days INTEGER NOT NULL DEFAULT 0,
+              late_fee     REAL NOT NULL DEFAULT 0,
+              monthly_amount REAL NOT NULL DEFAULT 0,
+              installment_count INTEGER NOT NULL,
+              remaining_installments INTEGER NOT NULL DEFAULT 0,
+              frequency    TEXT NOT NULL DEFAULT 'monthly',
+              start_date   TEXT NOT NULL,
+              next_due_date TEXT,
+              last_paid_date TEXT,
+              status       TEXT NOT NULL DEFAULT 'active',
+              notes        TEXT,
+              created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+              updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+              synced_at    TEXT
+            )
+          `)
+          db.exec(`INSERT INTO installments SELECT * FROM installments_pre_nullable_fix`)
+          db.exec(`DROP TABLE installments_pre_nullable_fix`)
+          db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_installments_contract ON installments(contract_number)`)
+          db.exec(`CREATE INDEX IF NOT EXISTS idx_installments_branch ON installments(branch_id)`)
+          db.exec(`CREATE INDEX IF NOT EXISTS idx_installments_next_due ON installments(next_due_date)`)
+        })()
+        db.pragma('legacy_alter_table = OFF')
+        db.pragma('foreign_keys = ON')
+        console.log('[DB] Migration: installments.invoice_id relaxed to nullable (Smart Buy repayment schedules)')
+      }
+      db.prepare(`INSERT OR IGNORE INTO app_migrations (name) VALUES (?)`).run(installmentsFixName)
+    } catch (err) {
+      db.pragma('legacy_alter_table = OFF')
+      db.pragma('foreign_keys = ON')
+      console.error('[DB] installments.invoice_id nullable migration failed:', err)
+    }
+  }
+
+  // ── One-time backfill: waive existing draw/final-cycle winners' balances ──
+  // Confirmed business rule: this SmartBuy scheme is a promotional lucky
+  // draw, not a loan-financed pool — a draw or final-cycle winner's
+  // remaining balance (chit_value minus what they'd contributed so far) is
+  // waived outright, not financed. chits:draws:conduct no longer creates a
+  // repayment installment for new winners; this backfill closes out any
+  // repayment installment that was already created for a PAST winner under
+  // the old (financed) behavior, so existing data matches the confirmed
+  // rule too — no stale "still owes X" installment, no reminder that
+  // shouldn't exist. Deliberately scoped to redemption_type IN
+  // ('draw','final_batch') only — early redemption is a separate,
+  // explicitly-paid mechanism and keeps financing its own balance.
+  const winnerWaiverName = 'chit_draw_winner_balance_waiver_v1'
+  const winnerWaiverDone = db.prepare(`SELECT 1 FROM app_migrations WHERE name = ?`).get(winnerWaiverName)
+  if (!winnerWaiverDone) {
+    try {
+      const waived = db.prepare(`
+        SELECT m.id as member_id, m.installment_id
+        FROM chit_members m
+        JOIN installments i ON i.id = m.installment_id
+        WHERE m.redemption_type IN ('draw', 'final_batch') AND m.installment_id IS NOT NULL
+          AND i.status != 'completed'
+      `).all() as { member_id: string; installment_id: string }[]
+
+      if (waived.length > 0) {
+        const closeInstallment = db.prepare(`
+          UPDATE installments
+          SET status='completed', due_amount=0, paid_amount=total_amount, remaining_installments=0,
+              notes=COALESCE(notes, '') || ' (waived — Smart Buy draw winner, no further balance owed)',
+              updated_at=datetime('now')
+          WHERE id=?
+        `)
+        const cancelReminders = db.prepare(`
+          UPDATE installment_reminders SET status='cancelled' WHERE installment_id=? AND status='pending'
+        `)
+        db.transaction(() => {
+          for (const row of waived) {
+            closeInstallment.run(row.installment_id)
+            cancelReminders.run(row.installment_id)
+          }
+        })()
+        console.log(`[DB] Migration: waived ${waived.length} existing Smart Buy draw winner installment(s) per the confirmed no-further-obligation rule`)
+      }
+      db.prepare(`INSERT OR IGNORE INTO app_migrations (name) VALUES (?)`).run(winnerWaiverName)
+    } catch (err) {
+      console.error('[DB] Chit draw winner balance waiver migration failed:', err)
     }
   }
 }

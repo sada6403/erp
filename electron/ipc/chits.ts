@@ -13,12 +13,15 @@ import { computeAndRecordCommission } from '../services/commissionEngine'
 import Store from 'electron-store'
 import * as XLSX from 'xlsx'
 import { safeHandle } from './ipcHandler'
+import { PHONE_RE, EMAIL_RE, NIC_RE, validateContactFields } from '../services/contactValidation'
 
 const store = new Store()
 
-const PHONE_RE = /^\+?\d{9,12}$/
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-const NIC_RE = /^(\d{9}[vVxX]|\d{12})$/
+// A manual winner override (chits:draws:conduct, method='manual_pick') must
+// carry a substantive, auditable justification — not just a placeholder
+// word — since it lets a Company Admin hand-pick who receives a real
+// product ahead of the normal random draw.
+const MANUAL_DRAW_MIN_REASON_LENGTH = 10
 
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
@@ -85,6 +88,33 @@ function maybeActivateScheme(db: ReturnType<typeof getDb>, schemeId: string): bo
   return false
 }
 
+// Flips an 'active' scheme to 'completed' once every enrolled (non-
+// withdrawn) member has received their product (status='redeemed') — i.e.
+// no member is left in 'active' status. 'completed' was already a
+// recognized status elsewhere (delete/purge guards, the dashboard's
+// completed_schemes count, chits:toggleActive's "final states" comment) but
+// no code path ever actually produced it — this closes that gap (SmartBuy
+// final-cycle audit). Checked after every draw, not only a final-cycle one:
+// an earlier random/manual draw can also happen to redeem the last
+// remaining active member (e.g. after withdrawals shrank the pool). A
+// member who hadn't paid the final cycle's contribution yet (see
+// eligibleMembersForDraw's current-cycle-payment requirement) correctly
+// stays 'active' and keeps the scheme open until a later draw call
+// catches them too — never silently drops them. Returns true if the
+// scheme was just completed (so callers can enqueue the sync row).
+function maybeCompleteScheme(db: ReturnType<typeof getDb>, schemeId: string): boolean {
+  const scheme = db.prepare('SELECT status FROM chit_schemes WHERE id=?')
+    .get(schemeId) as { status: string } | undefined
+  if (!scheme || scheme.status !== 'active') return false
+  const remaining = db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status='active'`)
+    .get(schemeId) as { c: number }
+  if (remaining.c === 0) {
+    db.prepare(`UPDATE chit_schemes SET status='completed', updated_at=datetime('now') WHERE id=?`).run(schemeId)
+    return true
+  }
+  return false
+}
+
 // Sync's pull for chit_members/chit_draws/chit_contributions/chit_scheme_branches
 // only fetches a scheme's child rows when that scheme itself shows up as
 // "changed since last pull" (see syncService.ts's related-ids dance keyed off
@@ -134,18 +164,23 @@ function importCell(row: Record<string, unknown>, ...names: string[]): string {
   return ''
 }
 
+// Smart Buy access requires an EXPLICIT grant — 'all' (Company Admin) or
+// 'chits' (Smart Buy Manager / any role an owner has opted in). 'customers'
+// deliberately does NOT imply Smart Buy access: the seeded Branch Manager
+// and Cashier roles both carry customers:true for the ordinary Customers
+// module, and until this fix that also gave them full, unintended Smart Buy
+// write access (create/edit schemes, enroll members, record payments,
+// invite branches...) for their own branch. A company that wants Branch
+// Manager/Cashier to keep Smart Buy access must now grant 'chits' to that
+// role explicitly via Roles & Permissions — see the SmartBuy fix audit,
+// HIGH-2 (permission leak).
 function canManage(perms: Record<string, unknown>): boolean {
-  return Boolean(perms.all || perms.customers || perms.chits)
+  return Boolean(perms.all || perms.chits)
 }
 
-// Only 'all' (Company Admin) is treated as global (all-branch) access.
-// 'customers' is intentionally excluded here even though canManage() accepts
-// it — seeded Branch Manager/Cashier roles carry customers:true for the
-// ordinary Customers module, and treating that as global would silently
-// grant them cross-branch Smart Buy visibility, contradicting their scoped
-// role. A caller with only 'chits' or 'customers' (no 'all') is always
-// confined to their own branch even if a request tries to pass a different
-// branch_id.
+// Only 'all' (Company Admin) is treated as global (all-branch) access. A
+// caller with only 'chits' (no 'all') is always confined to their own
+// branch even if a request tries to pass a different branch_id.
 function isGlobalChitAccess(perms: Record<string, unknown>): boolean {
   return Boolean(perms.all)
 }
@@ -294,6 +329,65 @@ function generateChitRepaymentSchedule(
   return { installmentId, enqueue }
 }
 
+// Computes one member's contribution status for one cycle from real,
+// already-recorded chit_contributions rows only — never a hypothetical
+// "if we applied their available credit right now" preview. paidAmount is
+// cash/method actually collected this cycle; creditUsed is how much of the
+// member's credit_balance was drawn down against this specific cycle at
+// the time each contributing row was recorded/approved; balanceDue is
+// what's still owed. A member only accrues creditUsed here through an
+// actual contribution event — sitting on unused credit_balance with zero
+// contribution rows for the current cycle leaves balanceDue at the full
+// expected amount until staff records at least one payment for it (see
+// chits:contributions:record, which is the only place credit actually
+// gets applied). Used identically by draw eligibility, the contribution-
+// recording settle-check, and the member contribution statement report,
+// so none of them can ever disagree about whether a cycle is settled.
+function computeMemberCycleBalance(
+  db: ReturnType<typeof getDb>, memberId: string, schemeId: string, cycleNo: number, expectedAmount: number
+): { expectedAmount: number; paidAmount: number; creditUsed: number; balanceDue: number } {
+  const row = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) as paid, COALESCE(SUM(credit_applied), 0) as creditUsed
+    FROM chit_contributions
+    WHERE member_id=? AND scheme_id=? AND cycle_no=? AND contribution_type='cycle' AND status='approved'
+  `).get(memberId, schemeId, cycleNo) as { paid: number; creditUsed: number }
+  const expected = money(expectedAmount)
+  const paidAmount = money(Number(row.paid) || 0)
+  const creditUsed = money(Number(row.creditUsed) || 0)
+  const balanceDue = money(Math.max(0, expected - paidAmount - creditUsed))
+  return { expectedAmount: expected, paidAmount, creditUsed, balanceDue }
+}
+
+// Single source of truth for "who can be selected to win this cycle's
+// draw" — used by BOTH the read-only preview (chits:draws:eligible) and the
+// actual draw (chits:draws:conduct), so the two can never disagree about
+// who is eligible again (see the SmartBuy fix audit, HIGH-1: draw
+// eligibility mismatch). A member is eligible if active, not yet redeemed,
+// has a fully settled balance for THIS cycle (balanceDue === 0 — full
+// payment via direct payment, credit adjustment, or a combination —
+// confirmed flexible-contribution business rule), and has no REJECTED
+// contribution for this cycle or any earlier one (standard chit practice —
+// a rejected payment blocks eligibility even after the fact, until it's
+// corrected and re-approved, regardless of what the balance math alone
+// would say).
+function eligibleMembersForDraw(db: ReturnType<typeof getDb>, schemeId: string, cycleNo: number): Record<string, unknown>[] {
+  const scheme = db.prepare('SELECT contribution_amount FROM chit_schemes WHERE id=?').get(schemeId) as { contribution_amount: number } | undefined
+  const expectedAmount = Number(scheme?.contribution_amount) || 0
+  const candidates = db.prepare(`
+    SELECT m.*, c.name as customer_name, c.phone as customer_phone
+    FROM chit_members m
+    LEFT JOIN customers c ON c.id = m.customer_id
+    WHERE m.scheme_id = ? AND m.status = 'active' AND m.redemption_type IS NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM chit_contributions cc
+        WHERE cc.member_id = m.id AND cc.contribution_type = 'cycle'
+          AND cc.cycle_no <= ? AND cc.status = 'rejected'
+      )
+    ORDER BY m.join_order
+  `).all(schemeId, cycleNo) as Record<string, unknown>[]
+  return candidates.filter(m => computeMemberCycleBalance(db, String(m.id), schemeId, cycleNo, expectedAmount).balanceDue <= 0.01)
+}
+
 export function registerChitHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'chits:list', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
@@ -390,10 +484,17 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     `).all(...memberParams)
 
     const draws = db.prepare(`
-      SELECT d.*, c.name as winner_name, u.name as conducted_by_name
+      SELECT d.*,
+        -- winner_member_id is only ever set for a single-winner draw
+        -- (random/manual_pick) — a final_batch draw settles multiple
+        -- members at once and leaves it NULL, so winner_name is built from
+        -- every member whose won_cycle_no matches this draw's cycle
+        -- instead, correctly listing all of them for both cases.
+        (SELECT GROUP_CONCAT(c2.name, ', ') FROM chit_members m2
+           JOIN customers c2 ON c2.id = m2.customer_id
+           WHERE m2.scheme_id = d.scheme_id AND m2.won_cycle_no = d.cycle_no) as winner_name,
+        u.name as conducted_by_name
       FROM chit_draws d
-      LEFT JOIN chit_members m ON m.id = d.winner_member_id
-      LEFT JOIN customers c ON c.id = m.customer_id
       LEFT JOIN users u ON u.id = d.conducted_by
       WHERE d.scheme_id = ?
       ORDER BY d.cycle_no
@@ -422,7 +523,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'chits:create', async (_e, payload: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -515,7 +616,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'chits:update', async (_e, id: string, payload: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -684,7 +785,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // change needed for the pause to actually take effect.
   safeHandle(ipcMain, 'chits:toggleActive', async (_e, id: string) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -715,7 +816,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // who controls the scheme (draws, edits stay home-branch/global only).
   safeHandle(ipcMain, 'chits:branches:invite', async (_e, schemeId: string, targetBranchId: string, notes?: string) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -766,7 +867,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // global caller, may respond (the home branch cannot approve itself in).
   safeHandle(ipcMain, 'chits:branches:respond', async (_e, collaborationId: string, action: 'approve' | 'reject', notes?: string) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -802,7 +903,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // enrolled through it — only the home branch or global may do this).
   safeHandle(ipcMain, 'chits:branches:remove', async (_e, collaborationId: string) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -831,7 +932,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const isGlobal = isGlobalChitAccess(perms)
     const branchId = caller.branch_id as string | undefined
     if (!isGlobal && !branchId) return { success: true, data: [] }
@@ -855,7 +956,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // ── Members: individual add ─────────────────────────────────────────────
   safeHandle(ipcMain, 'chits:members:add', async (_e, schemeId: string, payload: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -863,6 +964,13 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (!scheme) return { success: false, error: 'Chit scheme not found' }
     if (!assertSchemeAccess(db, perms, caller, scheme as { id: unknown; branch_id: unknown })) {
       return { success: false, error: 'You do not have access to this scheme' }
+    }
+    // A completed/cancelled scheme has no future cycles left to enroll
+    // into — without this, a scheme that finished with spare capacity
+    // (some earlier withdrawals) could silently accept a new member after
+    // maybeCompleteScheme() already closed it out.
+    if (scheme.status !== 'pending' && scheme.status !== 'active') {
+      return { success: false, error: `Cannot enroll a member into a ${scheme.status} scheme` }
     }
     const registrationBlocked = assertRegistrationWindow(scheme)
     if (registrationBlocked) return { success: false, error: registrationBlocked }
@@ -899,6 +1007,15 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (customerId) {
       const already = db.prepare(`SELECT id FROM chit_members WHERE scheme_id=? AND customer_id=?`).get(schemeId, customerId)
       if (already) return { success: false, error: 'This customer is already enrolled in this scheme' }
+    } else {
+      // Creating a brand-new customer record from this enrollment — apply
+      // the same phone/email/NIC format validation the bulk Excel import
+      // already enforces, via the shared validator (SmartBuy fix audit,
+      // MED-1), so the two entry points can no longer drift apart.
+      const contactError = validateContactFields({
+        phone: payload.customer_phone, email: payload.customer_email, nic: payload.customer_nic,
+      })
+      if (contactError) return { success: false, error: contactError }
     }
 
     const enqueue: Array<{ table: string; id: string; row: Record<string, unknown> }> = []
@@ -939,10 +1056,14 @@ export function registerChitHandlers(ipcMain: IpcMain) {
            @enrolled_branch_id)
       `).run(memberRow)
       enqueue.push({ table: 'chit_members', id: memberId, row: memberRow })
+      // Who signed up whom is the most sensitive event in the module — the
+      // audit entry records the acting user, the enrolling agent (if any),
+      // the branch, the scheme, and the customer (SmartBuy fix audit, HIGH-4).
       logAudit(db, {
         userId: (caller.id as string) || null, branchId: (enrolledBranchId as string) || (scheme.branch_id as string) || null,
         action: 'CHIT_MEMBER_ADDED', tableName: 'chit_members', recordId: memberId,
-        newValues: { schemeId, customerId, joinOrder: nextOrder },
+        newValues: { schemeId, customerId, agentId: memberRow.agent_id, joinOrder: nextOrder },
+        ipAddress: (caller.deviceId as string) || null,
       })
     })()
 
@@ -964,7 +1085,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // through can't leave a member with no matching payment record.
   safeHandle(ipcMain, 'chits:members:registerHistorical', async (_e, schemeId: string, payload: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -972,6 +1093,9 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (!scheme) return { success: false, error: 'Chit scheme not found' }
     if (!assertSchemeAccess(db, perms, caller, scheme as { id: unknown; branch_id: unknown })) {
       return { success: false, error: 'You do not have access to this scheme' }
+    }
+    if (scheme.status !== 'pending' && scheme.status !== 'active') {
+      return { success: false, error: `Cannot enroll a member into a ${scheme.status} scheme` }
     }
     const scopedAgentId = resolveScopedAgentId(caller)
     if (scopedAgentId) payload.agent_id = scopedAgentId
@@ -996,6 +1120,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (customerId) {
       const already = db.prepare(`SELECT id FROM chit_members WHERE scheme_id=? AND customer_id=?`).get(schemeId, customerId)
       if (already) return { success: false, error: 'This customer is already enrolled in this scheme' }
+    } else {
+      const contactError = validateContactFields({
+        phone: payload.customer_phone, email: payload.customer_email, nic: payload.customer_nic,
+      })
+      if (contactError) return { success: false, error: contactError }
     }
 
     const initialAmount = money(Number(payload.initial_amount) || 0)
@@ -1078,7 +1207,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       logAudit(db, {
         userId: (caller.id as string) || null, branchId: (scheme.branch_id as string) || null,
         action: 'CHIT_MEMBER_REGISTERED_HISTORICAL', tableName: 'chit_members', recordId: memberId,
-        newValues: { customerId, initialAmount, paperReferenceCode: payload.paper_reference_code },
+        newValues: { schemeId, customerId, agentId, initialAmount, paperReferenceCode: payload.paper_reference_code },
       })
     })()
 
@@ -1093,7 +1222,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'chits:members:remove', async (_e, memberId: string) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -1142,7 +1271,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // ── Members: bulk upload (Excel/CSV), same shape as agents:downloadTemplate/importExcel ──
   safeHandle(ipcMain, 'chits:members:downloadTemplate', async () => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const saveResult = await dialog.showSaveDialog({
       title: 'Save Chit Member Import Template',
@@ -1182,7 +1311,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'chits:members:importExcel', async (_e, schemeId: string) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -1190,6 +1319,9 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (!scheme) return { success: false, error: 'Chit scheme not found' }
     if (!assertSchemeAccess(db, perms, caller, scheme as { id: unknown; branch_id: unknown })) {
       return { success: false, error: 'You do not have access to this scheme' }
+    }
+    if (scheme.status !== 'pending' && scheme.status !== 'active') {
+      return { success: false, error: `Cannot enroll a member into a ${scheme.status} scheme` }
     }
     const registrationBlocked = assertRegistrationWindow(scheme)
     if (registrationBlocked) return { success: false, error: registrationBlocked }
@@ -1322,27 +1454,12 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (!assertSchemeAccess(db, perms, caller, scheme)) {
       return { success: false, error: 'You do not have access to this scheme' }
     }
-    // A member is eligible if active, not yet redeemed, and has no unpaid
-    // contribution for any prior cycle (standard chit practice — missed a
-    // payment, sit out the draw until caught up).
-    const rows = db.prepare(`
-      SELECT m.*, c.name as customer_name, c.phone as customer_phone
-      FROM chit_members m
-      LEFT JOIN customers c ON c.id = m.customer_id
-      WHERE m.scheme_id = ? AND m.status = 'active' AND m.redemption_type IS NULL
-        AND NOT EXISTS (
-          SELECT 1 FROM chit_contributions cc
-          WHERE cc.member_id = m.id AND cc.contribution_type = 'cycle'
-            AND cc.cycle_no < ? AND cc.status = 'rejected'
-        )
-      ORDER BY m.join_order
-    `).all(schemeId, cycleNo)
-    return { success: true, data: rows }
+    return { success: true, data: eligibleMembersForDraw(db, schemeId, cycleNo) }
   })
 
   safeHandle(ipcMain, 'chits:draws:conduct', async (_e, schemeId: string, cycleNo: number, options: { method?: 'random' | 'manual_pick'; winnerMemberId?: string; reason?: string } = {}) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -1368,18 +1485,45 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       return { success: false, error: `Cannot conduct a draw on a ${scheme.status} scheme` }
     }
 
-    const eligible = db.prepare(`
-      SELECT m.* FROM chit_members m
-      WHERE m.scheme_id = ? AND m.status = 'active' AND m.redemption_type IS NULL
-    `).all(schemeId) as Record<string, unknown>[]
+    const isFinalCycle = cycleNo >= Number(scheme.cycle_count)
+    const requestedMethod = options.method || 'random'
+    // Manual override of who wins a real product is the single highest-trust
+    // action in this module — restricted to Company/Super Admin (perms.all)
+    // regardless of ordinary Smart Buy management access, and always
+    // requires a substantive, recorded justification (SmartBuy fix audit,
+    // HIGH-5). Final-cycle batch settlement always overrides the requested
+    // method (every remaining member settles together), so it is exempt.
+    if (!isFinalCycle && requestedMethod === 'manual_pick') {
+      if (!perms.all) return { success: false, error: 'Only a Company Admin can manually select a Smart Buy winner' }
+      const reason = String(options.reason || '').trim()
+      if (reason.length < MANUAL_DRAW_MIN_REASON_LENGTH) {
+        return { success: false, error: `A manual winner selection requires a reason of at least ${MANUAL_DRAW_MIN_REASON_LENGTH} characters` }
+      }
+    }
+
+    // Single source of truth for who may be drawn — identical to the
+    // read-only preview (chits:draws:eligible), so a member excluded there
+    // (e.g. a rejected prior-cycle payment) can never be selected here
+    // either (SmartBuy fix audit, HIGH-1).
+    const eligible = eligibleMembersForDraw(db, schemeId, cycleNo)
     if (eligible.length === 0) return { success: false, error: 'No eligible members remain for this scheme' }
 
-    const isFinalCycle = cycleNo >= Number(scheme.cycle_count)
     const enqueue: Array<{ table: string; id: string; row: Record<string, unknown>; op: 'INSERT' | 'UPDATE' }> = []
     const drawId = crypto.randomUUID()
     let settledWinners: Record<string, unknown>[] = []
 
     db.transaction(() => {
+      // Re-verified inside the transaction, not just in the pre-transaction
+      // read above — the earlier existingDraw check is a plain SELECT with
+      // no lock, so this is the actual guard against two near-simultaneous
+      // draw attempts for the same cycle both passing it (mirrors the same
+      // pattern already used in chits:members:recordRedemption). The
+      // UNIQUE(scheme_id, cycle_no) constraint on chit_draws would catch a
+      // genuine double-insert regardless, but only as a raw SQL error —
+      // this turns that into the same friendly, expected error message.
+      const stillUndrawn = db.prepare('SELECT id FROM chit_draws WHERE scheme_id=? AND cycle_no=?').get(schemeId, cycleNo)
+      if (stillUndrawn) throw new Error(`Cycle ${cycleNo} has already been drawn`)
+
       let winners: Record<string, unknown>[]
       let method: string
 
@@ -1387,16 +1531,14 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         // Final cycle: every remaining member receives their product together.
         winners = eligible
         method = 'final_batch'
-      } else {
-        method = options.method || 'random'
-        let winner: Record<string, unknown> | undefined
-        if (method === 'manual_pick') {
-          winner = eligible.find(m => m.id === options.winnerMemberId)
-          if (!winner) throw new Error('Selected member is not eligible for this draw')
-        } else {
-          winner = eligible[crypto.randomInt(eligible.length)]
-        }
+      } else if (requestedMethod === 'manual_pick') {
+        const winner = eligible.find(m => m.id === options.winnerMemberId)
+        if (!winner) throw new Error('Selected member is not eligible for this draw')
         winners = [winner]
+        method = 'manual_pick'
+      } else {
+        winners = [eligible[crypto.randomInt(eligible.length)]]
+        method = 'random'
       }
 
       const drawRow = {
@@ -1417,25 +1559,27 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       enqueue.push({ table: 'chit_draws', id: drawId, row: drawRow, op: 'INSERT' })
 
       for (const winner of winners) {
-        const principalRemaining = money(Number(scheme.chit_value) - Number(winner.contributions_paid || 0))
-        const repayment = generateChitRepaymentSchedule(
-          db, scheme, winner, principalRemaining,
-          `${scheme.scheme_number}-M${winner.join_order}`
-        )
-        for (const item of repayment?.enqueue || []) enqueue.push({ ...item, op: 'INSERT' })
-
+        // Business rule (confirmed): a draw/final-cycle winner's remaining
+        // balance is waived outright, not financed — this SmartBuy scheme
+        // is a promotional lucky-draw, not a loan-financed pool, and the
+        // business intentionally absorbs the gap between chit_value and
+        // what the winner had contributed so far. No repayment schedule is
+        // generated and installment_id stays null. This is deliberately
+        // scoped to draw/final_batch winners only — early redemption
+        // (chits:members:earlyRedeem) is a separate, explicitly-paid
+        // mechanism and still finances its own remaining balance.
         db.prepare(`
           UPDATE chit_members
           SET redemption_type=?, won_cycle_no=?, product_received_at=date('now'),
-              installment_id=?, status='redeemed', updated_at=datetime('now')
+              installment_id=NULL, status='redeemed', updated_at=datetime('now')
           WHERE id=?
-        `).run(isFinalCycle ? 'final_batch' : 'draw', cycleNo, repayment?.installmentId || null, winner.id)
+        `).run(isFinalCycle ? 'final_batch' : 'draw', cycleNo, winner.id)
         enqueue.push({
           table: 'chit_members', id: String(winner.id), op: 'UPDATE',
           row: {
             id: winner.id, redemption_type: isFinalCycle ? 'final_batch' : 'draw',
             won_cycle_no: cycleNo, product_received_at: new Date().toISOString().slice(0, 10),
-            installment_id: repayment?.installmentId || null, status: 'redeemed',
+            installment_id: null, status: 'redeemed',
           },
         })
       }
@@ -1450,7 +1594,15 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     })()
 
     for (const item of enqueue) await enqueuSync(item.table, item.id, item.op, item.row)
-    await touchSchemeSync(db, schemeId)
+    // A draw can be the one that redeems the last remaining active member —
+    // not only on a final-cycle call (an earlier cycle can also happen to
+    // clear out everyone, e.g. after withdrawals shrank the pool). Checked
+    // after every draw, not just isFinalCycle ones.
+    if (maybeCompleteScheme(db, schemeId)) {
+      await enqueuSync('chit_schemes', schemeId, 'UPDATE', { id: schemeId, status: 'completed' })
+    } else {
+      await touchSchemeSync(db, schemeId)
+    }
     // Winner Selected / Product Ready notification — best-effort, never
     // blocks the draw result even if SMS/email/WhatsApp all fail.
     for (const winner of settledWinners) {
@@ -1469,10 +1621,14 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       return { success: false, error: 'You do not have access to this scheme' }
     }
     const rows = db.prepare(`
-      SELECT d.*, c.name as winner_name, u.name as conducted_by_name
+      SELECT d.*,
+        -- Same fix as chits:get's embedded draws — winner_member_id alone
+        -- misses final_batch's multiple winners.
+        (SELECT GROUP_CONCAT(c2.name, ', ') FROM chit_members m2
+           JOIN customers c2 ON c2.id = m2.customer_id
+           WHERE m2.scheme_id = d.scheme_id AND m2.won_cycle_no = d.cycle_no) as winner_name,
+        u.name as conducted_by_name
       FROM chit_draws d
-      LEFT JOIN chit_members m ON m.id = d.winner_member_id
-      LEFT JOIN customers c ON c.id = m.customer_id
       LEFT JOIN users u ON u.id = d.conducted_by
       WHERE d.scheme_id = ?
       ORDER BY d.cycle_no
@@ -1483,7 +1639,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // ── Early redemption ────────────────────────────────────────────────────
   safeHandle(ipcMain, 'chits:members:earlyRedeem', async (_e, memberId: string, payload: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -1569,14 +1725,20 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     })()
 
     for (const item of enqueue) await enqueuSync(item.table, item.id, item.op, item.row)
-    await touchSchemeSync(db, String(member.scheme_id))
+    // Early redemption also sets status='redeemed' — it can be the event
+    // that clears out the last remaining active member, same as a draw.
+    if (maybeCompleteScheme(db, String(member.scheme_id))) {
+      await enqueuSync('chit_schemes', String(member.scheme_id), 'UPDATE', { id: member.scheme_id, status: 'completed' })
+    } else {
+      await touchSchemeSync(db, String(member.scheme_id))
+    }
     return { success: true, data: { contributionId } }
   })
 
   // ── Contributions (pre-delivery waiting-period payments) ────────────────
   safeHandle(ipcMain, 'chits:contributions:record', async (_e, memberId: string, payload: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -1590,6 +1752,12 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (scopedAgentId && member.agent_id !== scopedAgentId) {
       return { success: false, error: 'You do not have access to this member' }
     }
+    // Once a member has won and their remaining balance is waived (see
+    // chits:draws:conduct), there is nothing left to collect — a redeemed
+    // member should never appear in future cycle-contribution collection.
+    if (member.status === 'redeemed') {
+      return { success: false, error: 'This member has already received their product — no further contributions are due' }
+    }
     if (scheme.status !== 'active' && scheme.status !== 'pending') {
       return { success: false, error: `Cannot collect a payment on a ${scheme.status} scheme` }
     }
@@ -1597,6 +1765,27 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       const priorCount = db.prepare(`SELECT COUNT(*) as c FROM chit_contributions WHERE member_id=? AND status='approved'`).get(memberId) as { c: number }
       if (priorCount.c === 0) {
         return { success: false, error: 'Scheme is pending — cannot collect the first installment until minimum members are reached' }
+      }
+    }
+
+    // Business rule (confirmed, flexible contribution handling): a member
+    // may pay a cycle off in multiple installments, overpay (the excess
+    // carries forward as credit toward a future cycle), or underpay and
+    // draw down previously-banked credit to close the gap. What's still
+    // blocked is a genuine DUPLICATE — a new contribution attempt once the
+    // cycle's balance is already fully settled. Scoped by schemeId as well
+    // as memberId/cycleNo since the same customer can be enrolled in
+    // multiple SmartBuy schemes at once and owes a separate payment in
+    // each. A contribution with no cycle_no (e.g. registerHistorical's
+    // backdated initial payment) is never subject to this check — it isn't
+    // claiming to be "for" any specific cycle.
+    const cycleNo = payload.cycle_no !== undefined && payload.cycle_no !== null && payload.cycle_no !== ''
+      ? Number(payload.cycle_no) : null
+    let balanceBefore: { expectedAmount: number; paidAmount: number; creditUsed: number; balanceDue: number } | null = null
+    if (cycleNo !== null) {
+      balanceBefore = computeMemberCycleBalance(db, memberId, String(member.scheme_id), cycleNo, Number(scheme.contribution_amount) || 0)
+      if (balanceBefore.balanceDue <= 0.01) {
+        return { success: false, error: `Cycle ${cycleNo} (Rs.${balanceBefore.expectedAmount}) is already fully paid — no further contribution is needed. If a payment was entered incorrectly, edit, cancel, or reverse the existing entry instead of recording another.` }
       }
     }
 
@@ -1618,7 +1807,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     // Late Fee (Admin Configuration Module) — a scheme with late_payment_days
     // set treats that as the grace period (day-of-month); a cycle
     // contribution recorded past it gets the scheme's flat late_fee_amount
-    // added on top, automatically, no manual entry needed.
+    // added on top, automatically, no manual entry needed. Counted toward
+    // this cycle's paid/credit math same as the base amount — see
+    // computeMemberCycleBalance's comment for the known, accepted
+    // trade-off (a late fee can end up contributing toward carried-forward
+    // credit rather than being purely punitive).
     let lateFeeApplied = 0
     if (Number(scheme.late_payment_days) > 0 && Number(scheme.late_fee_amount) > 0) {
       const dayOfMonth = new Date(paidAt).getDate()
@@ -1628,9 +1821,30 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       }
     }
 
+    // Auto credit-application (only ever for an immediately-approved
+    // payment against a real cycle — a bank-transfer submission sitting at
+    // pending_verification hasn't happened yet as far as the ledger is
+    // concerned, so its credit application is decided later, at
+    // chits:contributions:verify, against balances as they stand then).
+    let creditApplied = 0
+    let creditBalanceAfter = Number(member.credit_balance) || 0
+    let cycleStatusAfter: { paidAmount: number; creditUsed: number; balanceDue: number } | null = null
+    if (status === 'approved' && balanceBefore) {
+      const shortfallAfterCash = money(Math.max(0, balanceBefore.balanceDue - amount))
+      creditApplied = shortfallAfterCash > 0 ? money(Math.min(creditBalanceAfter, shortfallAfterCash)) : 0
+      const newPaidTotal = money(balanceBefore.paidAmount + amount)
+      const newCreditUsedTotal = money(balanceBefore.creditUsed + creditApplied)
+      const overshoot = money(Math.max(0, (newPaidTotal + newCreditUsedTotal) - balanceBefore.expectedAmount))
+      creditBalanceAfter = money(creditBalanceAfter - creditApplied + overshoot)
+      cycleStatusAfter = {
+        paidAmount: newPaidTotal, creditUsed: newCreditUsedTotal,
+        balanceDue: money(Math.max(0, balanceBefore.expectedAmount - newPaidTotal - newCreditUsedTotal)),
+      }
+    }
+
     const row: Record<string, unknown> = {
       id: contributionId, scheme_id: member.scheme_id, member_id: memberId,
-      cycle_no: payload.cycle_no || null, contribution_type: 'cycle', amount, method,
+      cycle_no: cycleNo, contribution_type: 'cycle', amount, method, credit_applied: creditApplied,
       receipt_number: payload.receipt_number || null, reference: payload.reference || null,
       status, received_by: caller.id || null, collected_by_agent_id: collectedByAgentId,
       branch_id: scheme.branch_id,
@@ -1645,32 +1859,47 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       // chits:members:recordRedemption, against the actual product taken.
       db.prepare(`
         INSERT INTO chit_contributions
-          (id, scheme_id, member_id, cycle_no, contribution_type, amount, method, receipt_number,
+          (id, scheme_id, member_id, cycle_no, contribution_type, amount, method, credit_applied, receipt_number,
            reference, status, received_by, collected_by_agent_id, branch_id, commission_amount, notes, paid_at)
-        VALUES (@id,@scheme_id,@member_id,@cycle_no,@contribution_type,@amount,@method,@receipt_number,
+        VALUES (@id,@scheme_id,@member_id,@cycle_no,@contribution_type,@amount,@method,@credit_applied,@receipt_number,
            @reference,@status,@received_by,@collected_by_agent_id,@branch_id,@commission_amount,@notes,@paid_at)
       `).run(row)
       if (status === 'approved') {
-        db.prepare(`UPDATE chit_members SET contributions_paid=contributions_paid+?, updated_at=datetime('now') WHERE id=?`).run(amount, memberId)
+        db.prepare(`
+          UPDATE chit_members SET contributions_paid=contributions_paid+?, credit_balance=?, updated_at=datetime('now') WHERE id=?
+        `).run(amount, creditBalanceAfter, memberId)
       }
       logAudit(db, {
         userId: (caller.id as string) || null, branchId: (scheme.branch_id as string) || null,
         action: 'CHIT_CONTRIBUTION', tableName: 'chit_contributions', recordId: contributionId,
-        newValues: { amount, method },
+        newValues: { amount, method, cycleNo, creditApplied },
       })
     })()
 
     await enqueuSync('chit_contributions', contributionId, 'INSERT', row)
     if (status === 'approved') {
-      await enqueuSync('chit_members', memberId, 'UPDATE', { id: memberId, contributions_paid: money(Number(member.contributions_paid || 0) + amount) })
+      await enqueuSync('chit_members', memberId, 'UPDATE', {
+        id: memberId, contributions_paid: money(Number(member.contributions_paid || 0) + amount), credit_balance: creditBalanceAfter,
+      })
     }
     await touchSchemeSync(db, String(member.scheme_id))
-    return { success: true, data: { id: contributionId, status, amount, lateFeeApplied } }
+    return {
+      success: true,
+      data: {
+        id: contributionId, status, amount, lateFeeApplied, creditApplied,
+        ...(cycleStatusAfter ? {
+          expectedAmount: balanceBefore!.expectedAmount, paidAmount: cycleStatusAfter.paidAmount,
+          creditUsed: cycleStatusAfter.creditUsed, balanceDue: cycleStatusAfter.balanceDue,
+          cycleStatus: cycleStatusAfter.balanceDue <= 0.01 ? 'completed' : 'partial',
+          creditBalance: creditBalanceAfter,
+        } : {}),
+      },
+    }
   })
 
   safeHandle(ipcMain, 'chits:contributions:verify', async (_e, contributionId: string, action: 'approve' | 'reject', notes?: string) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -1691,18 +1920,43 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     }
     let newContributionsPaid: number | null = null
 
+    let creditApplied = 0
+    let creditBalanceAfter: number | null = null
+
     if (action === 'reject') {
       db.prepare(`UPDATE chit_contributions SET status='rejected', verified_by=?, verified_at=datetime('now'), rejected_reason=?, updated_at=datetime('now') WHERE id=?`)
         .run(caller.id || null, notes || null, contributionId)
     } else {
-      const member = db.prepare('SELECT id, agent_id, contributions_paid FROM chit_members WHERE id=?').get(contribution.member_id) as { id: string; agent_id?: unknown; contributions_paid?: number } | undefined
+      // The money has already been collected by this point (a real bank
+      // transfer already happened) — unlike chits:contributions:record,
+      // which can refuse a brand-new submission before anything is
+      // committed, approving a pending payment never hard-blocks just
+      // because the cycle looks already settled. It's processed through
+      // the same credit/balance algorithm and any excess becomes credit,
+      // same as a same-transaction overpayment would (flexible
+      // contribution handling — supersedes the old "reject a conflicting
+      // approved entry" guard here, which would have refused to properly
+      // record real, already-collected funds).
+      const member = db.prepare('SELECT id, agent_id, contributions_paid, credit_balance FROM chit_members WHERE id=?').get(contribution.member_id) as { id: string; agent_id?: unknown; contributions_paid?: number; credit_balance?: number } | undefined
+      creditBalanceAfter = Number(member?.credit_balance) || 0
+      if (contribution.cycle_no !== null && contribution.cycle_no !== undefined) {
+        const scheme = db.prepare('SELECT contribution_amount FROM chit_schemes WHERE id=?').get(contribution.scheme_id) as { contribution_amount: number } | undefined
+        const balanceBefore = computeMemberCycleBalance(db, String(contribution.member_id), String(contribution.scheme_id), Number(contribution.cycle_no), Number(scheme?.contribution_amount) || 0)
+        const amount = Number(contribution.amount) || 0
+        const shortfallAfterCash = money(Math.max(0, balanceBefore.balanceDue - amount))
+        creditApplied = shortfallAfterCash > 0 ? money(Math.min(creditBalanceAfter, shortfallAfterCash)) : 0
+        const newPaidTotal = money(balanceBefore.paidAmount + amount)
+        const newCreditUsedTotal = money(balanceBefore.creditUsed + creditApplied)
+        const overshoot = money(Math.max(0, (newPaidTotal + newCreditUsedTotal) - balanceBefore.expectedAmount))
+        creditBalanceAfter = money(creditBalanceAfter - creditApplied + overshoot)
+      }
       db.transaction(() => {
         // Commission is no longer accrued here — it's computed once, at
         // chits:members:recordRedemption, against the actual product taken.
-        db.prepare(`UPDATE chit_contributions SET status='approved', verified_by=?, verified_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
-          .run(caller.id || null, contributionId)
-        db.prepare(`UPDATE chit_members SET contributions_paid=contributions_paid+?, updated_at=datetime('now') WHERE id=?`)
-          .run(Number(contribution.amount), contribution.member_id)
+        db.prepare(`UPDATE chit_contributions SET status='approved', credit_applied=?, verified_by=?, verified_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
+          .run(creditApplied, caller.id || null, contributionId)
+        db.prepare(`UPDATE chit_members SET contributions_paid=contributions_paid+?, credit_balance=?, updated_at=datetime('now') WHERE id=?`)
+          .run(Number(contribution.amount), creditBalanceAfter, contribution.member_id)
         newContributionsPaid = money(Number(member?.contributions_paid || 0) + (Number(contribution.amount) || 0))
       })()
     }
@@ -1710,28 +1964,30 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     logAudit(db, {
       userId: (caller.id as string) || null, branchId: (contribution.branch_id as string) || null,
       action: action === 'approve' ? 'CHIT_CONTRIBUTION_APPROVED' : 'CHIT_CONTRIBUTION_REJECTED',
-      tableName: 'chit_contributions', recordId: contributionId, newValues: { notes },
+      tableName: 'chit_contributions', recordId: contributionId, newValues: { notes, creditApplied },
     })
     await enqueuSync('chit_contributions', contributionId, 'UPDATE', {
       id: contributionId, status: action === 'approve' ? 'approved' : 'rejected',
-      verified_by: caller.id || null, rejected_reason: notes || null,
+      verified_by: caller.id || null, rejected_reason: notes || null, credit_applied: creditApplied,
     })
     if (action === 'approve') {
       // Must include an actual changed field — the backend's partial-UPDATE
       // path is a no-op when the payload is just { id }, so an id-only
       // enqueue here would silently never push the contributions_paid
       // increment to the cloud at all.
-      await enqueuSync('chit_members', String(contribution.member_id), 'UPDATE', { id: contribution.member_id, contributions_paid: newContributionsPaid })
+      await enqueuSync('chit_members', String(contribution.member_id), 'UPDATE', {
+        id: contribution.member_id, contributions_paid: newContributionsPaid, credit_balance: creditBalanceAfter,
+      })
     }
     await touchSchemeSync(db, String(contribution.scheme_id))
-    return { success: true }
+    return { success: true, data: { creditApplied, creditBalance: creditBalanceAfter } }
   })
 
   safeHandle(ipcMain, 'chits:contributions:pendingTransfers', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, filters.branch_id)
     const conditions = [`cc.status = 'pending_verification'`]
     const params: unknown[] = []
@@ -1756,7 +2012,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, filters.branchId)
     const conditions: string[] = []
     const params: unknown[] = []
@@ -1793,7 +2049,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, filters.branchId)
     const conditions: string[] = []
     const params: unknown[] = []
@@ -1827,7 +2083,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, filters.branchId)
     const conditions: string[] = []
     const params: unknown[] = []
@@ -1861,7 +2117,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, filters.branchId)
     const conditions: string[] = []
     const params: unknown[] = []
@@ -1871,20 +2127,28 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (filters.dateTo) { conditions.push('date(d.draw_date) <= date(?)'); params.push(filters.dateTo) }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
+    // One row per WINNING MEMBER, not per draw event — a final_batch draw
+    // settles multiple members together, each with their own product/
+    // value/invoice (potentially different from each other), which a
+    // single row keyed off chit_draws.winner_member_id (only ever set for
+    // a single-winner draw) cannot represent at all. Matches on
+    // (scheme_id, won_cycle_no) instead, so both single-winner and
+    // final_batch draws produce one accurate row per winner.
     const rows = db.prepare(`
       SELECT d.cycle_no, d.draw_date, d.method, d.settled_count, d.eligible_count, d.notes as reason,
         cs.name as scheme_name, cs.scheme_number, b.name as branch_name,
         c.name as winner_name, wm.redeemed_product_name, wm.redeemed_qty, wm.redeemed_value,
         ri.invoice_number as redemption_invoice_number, u.name as conducted_by_name
-      FROM chit_draws d
-      JOIN chit_schemes cs ON cs.id = d.scheme_id
+      FROM chit_members wm
+      JOIN chit_schemes cs ON cs.id = wm.scheme_id
+      JOIN chit_draws d ON d.scheme_id = wm.scheme_id AND d.cycle_no = wm.won_cycle_no
       LEFT JOIN branches b ON b.id = cs.branch_id
-      LEFT JOIN chit_members wm ON wm.id = d.winner_member_id
       LEFT JOIN customers c ON c.id = wm.customer_id
       LEFT JOIN invoices ri ON ri.id = wm.redemption_invoice_id
       LEFT JOIN users u ON u.id = d.conducted_by
       ${where}
-      ORDER BY d.draw_date DESC
+      ${where ? 'AND' : 'WHERE'} wm.redemption_type IN ('draw', 'final_batch')
+      ORDER BY d.draw_date DESC, wm.join_order
     `).all(...params)
     return { success: true, data: rows }
   })
@@ -1894,7 +2158,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, undefined)
     const where = branchId ? 'WHERE b.id = ?' : ''
     const params = branchId ? [branchId] : []
@@ -1928,7 +2192,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, filters.branchId)
     const conditions: string[] = []
     const params: unknown[] = []
@@ -1969,7 +2233,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, filters.branchId)
     const scopedAgentId = resolveScopedAgentId(caller)
     const conditions: string[] = []
@@ -1991,7 +2255,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         (SELECT COALESCE(SUM(
             CASE WHEN cl.registration_agent_id = a.id THEN cl.registration_commission ELSE 0 END +
             CASE WHEN cl.sales_agent_id = a.id THEN cl.sales_commission ELSE 0 END
-          ), 0) FROM commission_ledger cl WHERE cl.registration_agent_id = a.id OR cl.sales_agent_id = a.id) as commission_earned,
+          ), 0) FROM commission_ledger cl WHERE (cl.registration_agent_id = a.id OR cl.sales_agent_id = a.id)
+            AND cl.status NOT IN ('rejected', 'cancelled')) as commission_earned,
         (SELECT COALESCE(SUM(
             CASE WHEN cl.registration_agent_id = a.id THEN cl.registration_commission ELSE 0 END +
             CASE WHEN cl.sales_agent_id = a.id THEN cl.sales_commission ELSE 0 END
@@ -2055,7 +2320,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         (SELECT COALESCE(SUM(
             CASE WHEN cl.registration_agent_id = ? THEN cl.registration_commission ELSE 0 END +
             CASE WHEN cl.sales_agent_id = ? THEN cl.sales_commission ELSE 0 END
-          ), 0) FROM commission_ledger cl WHERE cl.registration_agent_id = ? OR cl.sales_agent_id = ?) as commission_earned,
+          ), 0) FROM commission_ledger cl WHERE (cl.registration_agent_id = ? OR cl.sales_agent_id = ?)
+            AND cl.status NOT IN ('rejected', 'cancelled')) as commission_earned,
         (SELECT COALESCE(SUM(
             CASE WHEN cl.registration_agent_id = ? THEN cl.registration_commission ELSE 0 END +
             CASE WHEN cl.sales_agent_id = ? THEN cl.sales_commission ELSE 0 END
@@ -2117,10 +2383,78 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     return { success: true, data: rows }
   })
 
+  // ── Member contribution statement (flexible contribution handling) ──────
+  // Full month-by-month breakdown for one member: expected/paid/credit-
+  // used/balance-due per cycle plus the member's current carry-forward
+  // credit and raw payment history. Every per-cycle number is read back
+  // from the same computeMemberCycleBalance() that draw eligibility and
+  // contribution recording use, so the statement can never disagree with
+  // what actually determines eligibility or blocks a duplicate payment.
+  // A distinct, new endpoint rather than folding this into
+  // chits:members:contributionHistory (whose flat-array response shape is
+  // already relied on by MemberPaymentHistoryModal) — additive, not a
+  // breaking change to an existing consumer.
+  safeHandle(ipcMain, 'chits:members:contributionStatement', (_e, memberId: string) => {
+    const db = getDb()
+    const caller = authUser()
+    const perms = currentPerms(caller)
+    const member = db.prepare(`
+      SELECT m.*, cs.branch_id, cs.name as scheme_name, cs.scheme_number, cs.contribution_amount, cs.cycle_count,
+        c.name as customer_name, c.phone as customer_phone
+      FROM chit_members m
+      JOIN chit_schemes cs ON cs.id = m.scheme_id
+      LEFT JOIN customers c ON c.id = m.customer_id
+      WHERE m.id = ?
+    `).get(memberId) as Record<string, unknown> | undefined
+    if (!member) return { success: false, error: 'Member not found' }
+    if (!assertMemberAccess(perms, caller, { branch_id: member.branch_id }, member)) {
+      return { success: false, error: 'You do not have access to this member' }
+    }
+
+    const expectedAmount = Number(member.contribution_amount) || 0
+    const cycleCount = Math.max(0, Number(member.cycle_count) || 0)
+    const cycles: Array<{
+      cycleNo: number; expectedAmount: number; paidAmount: number; creditUsed: number
+      balanceDue: number; status: 'completed' | 'partial' | 'pending'
+    }> = []
+    for (let cycleNo = 1; cycleNo <= cycleCount; cycleNo++) {
+      const balance = computeMemberCycleBalance(db, memberId, String(member.scheme_id), cycleNo, expectedAmount)
+      const hasActivity = balance.paidAmount > 0 || balance.creditUsed > 0
+      cycles.push({
+        cycleNo, expectedAmount: balance.expectedAmount, paidAmount: balance.paidAmount,
+        creditUsed: balance.creditUsed, balanceDue: balance.balanceDue,
+        status: balance.balanceDue <= 0.01 && hasActivity ? 'completed' : hasActivity ? 'partial' : 'pending',
+      })
+    }
+
+    const paymentHistory = db.prepare(`
+      SELECT cc.*, ag.name as collected_by_agent_name, ag.code as collected_by_agent_code,
+        u.name as received_by_name
+      FROM chit_contributions cc
+      LEFT JOIN agents ag ON ag.id = cc.collected_by_agent_id
+      LEFT JOIN users u ON u.id = cc.received_by
+      WHERE cc.member_id = ?
+      ORDER BY cc.paid_at DESC
+    `).all(memberId)
+
+    return {
+      success: true,
+      data: {
+        member: {
+          id: member.id, customerName: member.customer_name, customerPhone: member.customer_phone,
+          schemeName: member.scheme_name, schemeNumber: member.scheme_number, status: member.status,
+        },
+        creditBalance: money(Number(member.credit_balance) || 0),
+        cycles,
+        paymentHistory,
+      },
+    }
+  })
+
   // ── Agent cash remittance / settlement ──────────────────────────────────
   safeHandle(ipcMain, 'chits:remittances:record', async (_e, payload: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -2194,7 +2528,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // since price/tax/stock all come from the product record.
   safeHandle(ipcMain, 'chits:members:recordRedemption', async (_e, memberId: string, payload: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
     const db = getDb()
     const caller = authUser()
@@ -2240,6 +2574,13 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const enqueue: Array<{ table: string; id: string; row: Record<string, unknown>; op: 'INSERT' | 'UPDATE' }> = []
 
     db.transaction(() => {
+      // Re-verified inside the transaction, not just in the pre-transaction
+      // read above — the earlier check is a plain SELECT with no lock, so
+      // this is the actual guard against two near-simultaneous calls both
+      // passing it and double-redeeming the same member.
+      const stillUnredeemed = db.prepare('SELECT redemption_invoice_id FROM chit_members WHERE id=?').get(memberId) as { redemption_invoice_id: string | null } | undefined
+      if (stillUnredeemed?.redemption_invoice_id) throw new Error('A redemption invoice has already been recorded for this member')
+
       const changed = db.prepare(`
         UPDATE stocks SET quantity = quantity - ?, updated_at=datetime('now')
         WHERE product_id=? AND branch_id=? AND quantity >= ?
@@ -2332,7 +2673,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const caller = authUser()
     const perms = currentPerms(caller)
-    if (!canManage(perms)) return { success: false, error: 'Customer management access required' }
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const branchId = resolveScopedBranchId(perms, caller, filters.branchId)
     const schemeWhere = branchId ? 'WHERE cs.branch_id = ?' : ''
     const schemeParams = branchId ? [branchId] : []
@@ -2387,14 +2728,18 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const pendingRemittanceTotal = agentBalances.reduce((sum, a) => sum + Number(a.cash_balance || 0), 0)
     const agentsWithBalance = agentBalances.filter(a => Number(a.cash_balance || 0) > 0).sort((a, b) => Number(b.cash_balance) - Number(a.cash_balance))
 
+    // One row per winning member (not per draw event) — same fix as
+    // chits:reports:winners, so a final_batch draw's multiple winners each
+    // show up with their own product instead of a single NULL row.
     const recentDraws = db.prepare(`
       SELECT d.cycle_no, d.draw_date, d.method, cs.name as scheme_name, cs.scheme_number,
         c.name as winner_name, wm.redeemed_product_name, wm.redeemed_qty, wm.contributions_paid
-      FROM chit_draws d
-      JOIN chit_schemes cs ON cs.id = d.scheme_id
-      LEFT JOIN chit_members wm ON wm.id = d.winner_member_id
+      FROM chit_members wm
+      JOIN chit_schemes cs ON cs.id = wm.scheme_id
+      JOIN chit_draws d ON d.scheme_id = wm.scheme_id AND d.cycle_no = wm.won_cycle_no
       LEFT JOIN customers c ON c.id = wm.customer_id
       ${schemeWhere}
+      ${schemeWhere ? 'AND' : 'WHERE'} wm.redemption_type IN ('draw', 'final_batch')
       ORDER BY d.draw_date DESC
       LIMIT 10
     `).all(...schemeParams)
@@ -2432,7 +2777,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         (SELECT COALESCE(SUM(
             CASE WHEN cl.registration_agent_id = a.id THEN cl.registration_commission ELSE 0 END +
             CASE WHEN cl.sales_agent_id = a.id THEN cl.sales_commission ELSE 0 END
-          ), 0) FROM commission_ledger cl WHERE cl.registration_agent_id = a.id OR cl.sales_agent_id = a.id) as commission_earned,
+          ), 0) FROM commission_ledger cl WHERE (cl.registration_agent_id = a.id OR cl.sales_agent_id = a.id)
+            AND cl.status NOT IN ('rejected', 'cancelled')) as commission_earned,
         (SELECT COALESCE(SUM(cl.base_amount), 0) FROM commission_ledger cl WHERE cl.registration_agent_id = a.id OR cl.sales_agent_id = a.id) as sales,
         (SELECT COUNT(DISTINCT m.customer_id) FROM chit_members m WHERE m.agent_id = a.id) as customers
       FROM agents a

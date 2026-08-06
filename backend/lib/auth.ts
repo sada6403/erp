@@ -782,6 +782,17 @@ export async function ensureTenantCompatibility(dbSchema: string) {
      )`,
     // Who physically collected the cash — distinct from received_by (office user).
     `ALTER TABLE chit_contributions ADD COLUMN collected_by_agent_id CHAR(36) NULL`,
+    // Flexible (partial/excess/installment) contribution handling
+    // supersedes the earlier "exactly one approved contribution per
+    // (member, scheme, cycle)" rule — see the matching SQLite migration
+    // for the full rationale. Drop that rule's generated-column unique
+    // index (a fresh tenant that never had it will just no-op-error here,
+    // swallowed by the catch below same as any other already-applied
+    // migration) and add the running credit-balance columns instead.
+    `ALTER TABLE chit_contributions DROP INDEX idx_chit_contributions_one_approved_per_cycle`,
+    `ALTER TABLE chit_contributions DROP COLUMN approved_cycle_marker`,
+    `ALTER TABLE chit_members ADD COLUMN credit_balance DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_contributions ADD COLUMN credit_applied DECIMAL(14,2) NOT NULL DEFAULT 0`,
 
     // ── Stock counts — were pushed from the app but had no cloud table at
     // all, so every sync for them failed silently ───────────────────────
@@ -941,6 +952,15 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     `ALTER TABLE commission_ledger ADD COLUMN admin_approved_at DATETIME NULL`,
     `UPDATE commission_ledger SET status='pending_manager_approval' WHERE status='pending'`,
     `UPDATE commission_ledger SET status='pending_admin_approval' WHERE status='approved'`,
+    // Mirrors the SQLite-side idx_commission_ledger_source_rule_unique fix —
+    // blocks the same rule firing twice for the same source event while
+    // still allowing a base rule + stacked bonus rules on one source_id
+    // (different rule_id each). InnoDB treats every NULL as distinct for
+    // uniqueness, same as SQLite, so legacy no-rule-match rows never collide.
+    // If a tenant already has genuine duplicate rows this statement warns
+    // (see ensureTenantCompatibility's catch below) rather than aborting
+    // the rest of the migration — manual cleanup, not a crash.
+    `ALTER TABLE commission_ledger ADD UNIQUE INDEX idx_commission_ledger_source_rule_unique (source_table, source_id, rule_id)`,
     `CREATE TABLE IF NOT EXISTS commission_approval_logs (
        id               CHAR(36)     NOT NULL PRIMARY KEY,
        commission_id    CHAR(36)     NOT NULL,
@@ -983,6 +1003,51 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_commission_rule_history_rule (rule_id)
      )`,
 
+    // ── Missing-index sweep across Smart Buy / commission tables — brings
+    // the cloud (MySQL) schema's indexing up to parity with the local
+    // SQLite schema (SmartBuy fix audit, MED-4: schema sync). Every
+    // statement goes through the standard try/catch loop below, which
+    // already swallows "Duplicate key name" — safe to re-run on every boot.
+    `ALTER TABLE chit_schemes ADD INDEX idx_chit_schemes_product (product_id)`,
+    `ALTER TABLE chit_members ADD INDEX idx_chit_members_installment (installment_id)`,
+    `ALTER TABLE chit_members ADD INDEX idx_chit_members_redeemed_product (redeemed_product_id)`,
+    `ALTER TABLE chit_members ADD INDEX idx_chit_members_redemption_invoice (redemption_invoice_id)`,
+    `ALTER TABLE chit_draws ADD INDEX idx_chit_draws_winner (winner_member_id)`,
+    `ALTER TABLE chit_draws ADD INDEX idx_chit_draws_conducted_by (conducted_by)`,
+    `ALTER TABLE chit_contributions ADD INDEX idx_chit_contributions_branch (branch_id)`,
+    `ALTER TABLE chit_contributions ADD INDEX idx_chit_contributions_collected_by (collected_by_agent_id)`,
+    `ALTER TABLE chit_contributions ADD INDEX idx_chit_contributions_received_by (received_by)`,
+    `ALTER TABLE chit_contributions ADD INDEX idx_chit_contributions_verified_by (verified_by)`,
+    `ALTER TABLE chit_contributions ADD INDEX idx_chit_contributions_cycle (cycle_no)`,
+    `ALTER TABLE agent_remittances ADD INDEX idx_agent_remittances_received_by (received_by)`,
+    `ALTER TABLE chit_scheme_branches ADD INDEX idx_chit_scheme_branches_requested_by (requested_by)`,
+    `ALTER TABLE chit_scheme_branches ADD INDEX idx_chit_scheme_branches_responded_by (responded_by)`,
+    `ALTER TABLE commission_rules ADD INDEX idx_commission_rules_brand (brand)`,
+    `ALTER TABLE commission_ledger ADD INDEX idx_commission_ledger_member (member_id)`,
+    `ALTER TABLE commission_ledger ADD INDEX idx_commission_ledger_rule (rule_id)`,
+    `ALTER TABLE commission_ledger ADD INDEX idx_commission_ledger_approved_by (approved_by)`,
+    `ALTER TABLE commission_ledger ADD INDEX idx_commission_ledger_admin_approved (admin_approved_by)`,
+    // idx_commission_ledger_branch exists in SQLite but was missing here —
+    // closes the one gap the audit found running the other direction.
+    `ALTER TABLE commission_ledger ADD INDEX idx_commission_ledger_branch (branch_id)`,
+    `ALTER TABLE commission_payouts ADD INDEX idx_commission_payouts_paid_by (paid_by)`,
+    `ALTER TABLE commission_approval_logs ADD INDEX idx_commission_approval_logs_changed_by (changed_by)`,
+    `ALTER TABLE commission_statement_history ADD INDEX idx_commission_statement_history_generated (generated_by)`,
+    `ALTER TABLE commission_rule_history ADD INDEX idx_commission_rule_history_product (product_id)`,
+    `ALTER TABLE commission_rule_history ADD INDEX idx_commission_rule_history_created_by (created_by)`,
+    // (The commission_ledger(source_table, source_id, rule_id) unique index
+    // for MED-2 already lives above, alongside the other approval-workflow
+    // migrations — not duplicated here.)
+    // Performance indexes for large-dataset reports/dashboard (production
+    // readiness audit) — mirrors the SQLite-side additions.
+    `ALTER TABLE chit_members ADD INDEX idx_chit_members_won_cycle (scheme_id, won_cycle_no)`,
+    `ALTER TABLE chit_contributions ADD INDEX idx_chit_contributions_paid_at (paid_at)`,
+    `ALTER TABLE commission_ledger ADD INDEX idx_commission_ledger_created_at (created_at)`,
+    // audit_logs.ip_address existed in the local SQLite / self-hosted
+    // Postgres schemas but was missing from the multi-tenant MySQL schema —
+    // logAudit() now populates it (SmartBuy fix audit, HIGH-4).
+    `ALTER TABLE audit_logs ADD COLUMN ip_address VARCHAR(64) NULL`,
+
     // ── Edit requests — manager-requested, admin-approved corrections to
     // already-completed invoices/stock ──────────────────────────────────
     `CREATE TABLE IF NOT EXISTS edit_requests (
@@ -1013,7 +1078,12 @@ export async function ensureTenantCompatibility(dbSchema: string) {
       await tp.query(sql)
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      if (!/Duplicate column name|Duplicate key name|already exists/i.test(message)) {
+      // "check that (it) exists" covers MySQL's error text for DROP
+      // INDEX/COLUMN against something that was never created in the first
+      // place (e.g. a fresh tenant that never ran an old, since-removed
+      // migration) — exactly as expected/idempotent as the other patterns
+      // already swallowed here.
+      if (!/Duplicate column name|Duplicate key name|already exists|check that (it |column\/key )?exists/i.test(message)) {
         console.warn(`[ensureTenantCompatibility] Warning running statement: "${sql}". Error: ${message}`)
       }
     }

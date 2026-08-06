@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import Modal from '@/components/shared/Modal'
 import StatCard from '@/components/shared/StatCard'
@@ -16,6 +16,13 @@ export default function ChitSchemeDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user } = useAuthStore()
+  // Manual winner override (chits:draws:conduct, method='manual_pick') is
+  // Company/Super Admin only server-side (SmartBuy fix audit, HIGH-5) — the
+  // option is hidden here for anyone else so a Smart Buy Manager can't fill
+  // out a whole manual-pick form only to be rejected after the fact.
+  const userPermissions = ((user?.role as Record<string, unknown> | undefined)?.permissions
+    || (user as unknown as Record<string, unknown> | undefined)?.permissions) as Record<string, unknown> | undefined
+  const isSuperAdmin = Boolean(userPermissions?.all)
   const [scheme, setScheme] = useState<Row | null>(null)
   const [members, setMembers] = useState<Row[]>([])
   const [draws, setDraws] = useState<Row[]>([])
@@ -355,7 +362,7 @@ export default function ChitSchemeDetailPage() {
           onClose={() => setShowRegisterHistorical(false)} onSave={() => { setShowRegisterHistorical(false); load() }} />
       )}
       {showDraw && (
-        <ConductDrawModal schemeId={id!} cycleNo={nextCycle} isFinalCycle={isFinalCycle}
+        <ConductDrawModal schemeId={id!} cycleNo={nextCycle} isFinalCycle={isFinalCycle} isSuperAdmin={isSuperAdmin}
           onClose={() => setShowDraw(false)} onSave={() => { setShowDraw(false); load() }} />
       )}
       {payingMember && (
@@ -626,8 +633,10 @@ function RegisterHistoricalMemberModal({ schemeId, defaultAgentId, onClose, onSa
   )
 }
 
-function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: {
-  schemeId: string; cycleNo: number; isFinalCycle: boolean; onClose: () => void; onSave: () => void
+const MANUAL_DRAW_MIN_REASON_LENGTH = 10
+
+function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, isSuperAdmin, onClose, onSave }: {
+  schemeId: string; cycleNo: number; isFinalCycle: boolean; isSuperAdmin: boolean; onClose: () => void; onSave: () => void
 }) {
   const [eligible, setEligible] = useState<Row[]>([])
   const [method, setMethod] = useState<'random' | 'manual_pick'>('random')
@@ -635,6 +644,12 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
   const [reason, setReason] = useState('')
   const [loading, setLoading] = useState(true)
   const [conducting, setConducting] = useState(false)
+  // A real product handout hinges on this call — setConducting(true) alone
+  // disables the button, but React state updates aren't guaranteed to be
+  // reflected in the DOM before a second, near-simultaneous click event is
+  // already dispatched. A plain ref updates synchronously, so it closes
+  // that window outright rather than relying on re-render timing.
+  const submittingRef = useRef(false)
 
   useEffect(() => {
     window.api.chits.draws.eligible(schemeId, cycleNo).then((res: Row) => {
@@ -648,8 +663,14 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
   }, [schemeId, cycleNo])
 
   const conduct = async () => {
+    if (submittingRef.current) return
+    if (!isFinalCycle && method === 'manual_pick' && !isSuperAdmin) { toast.error('Only a Company Admin can manually select a winner'); return }
     if (!isFinalCycle && method === 'manual_pick' && !winnerId) { toast.error('Select a member'); return }
-    if (!isFinalCycle && method === 'manual_pick' && !reason.trim()) { toast.error('Enter a reason for the manual pick — kept in the Winner Selection Log'); return }
+    if (!isFinalCycle && method === 'manual_pick' && reason.trim().length < MANUAL_DRAW_MIN_REASON_LENGTH) {
+      toast.error(`Enter a reason of at least ${MANUAL_DRAW_MIN_REASON_LENGTH} characters — kept in the Winner Selection Log`)
+      return
+    }
+    submittingRef.current = true
     setConducting(true)
     try {
       const res = await window.api.chits.draws.conduct(schemeId, cycleNo, { method, winnerMemberId: winnerId, reason: reason.trim() || undefined })
@@ -662,6 +683,7 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
     } catch (err: any) {
       toast.error(err.message || 'Draw failed')
     } finally {
+      submittingRef.current = false
       setConducting(false)
     }
   }
@@ -683,16 +705,22 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, onClose, onSave }: 
             <p className="text-sm" style={{ color: 'var(--text-2)' }}>{eligible.length} member(s) eligible for this cycle's draw.</p>
             <div className="flex gap-2">
               <button onClick={() => setMethod('random')} className={method === 'random' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Random Draw</button>
-              <button onClick={() => setMethod('manual_pick')} className={method === 'manual_pick' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Manual Pick</button>
+              {/* Manual override is Company Admin only server-side (SmartBuy
+                  fix audit, HIGH-5) — hidden here for everyone else so a
+                  Smart Buy Manager can't fill out the whole form only to be
+                  rejected after the fact. */}
+              {isSuperAdmin && (
+                <button onClick={() => setMethod('manual_pick')} className={method === 'manual_pick' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Manual Pick</button>
+              )}
             </div>
-            {method === 'manual_pick' && (
+            {method === 'manual_pick' && isSuperAdmin && (
               <>
                 <select value={winnerId} onChange={e => setWinnerId(e.target.value)} className="input">
                   <option value="">— Select winner —</option>
                   {eligible.map(m => <option key={m.id as string} value={m.id as string}>#{m.join_order as number} — {(m.customer_name as string) || m.id as string}</option>)}
                 </select>
                 <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Reason for Manual Pick *</label>
+                  <label className="block text-xs font-medium text-slate-400 mb-1">Reason for Manual Pick * (min. {MANUAL_DRAW_MIN_REASON_LENGTH} characters)</label>
                   <textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-16 resize-none" placeholder="e.g. Customer dispute resolution, loyalty priority, admin override" />
                   <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>Recorded in the Winner Selection Log for transparency.</p>
                 </div>
@@ -714,6 +742,11 @@ function RecordContributionModal({ member, schemeId, onClose, onSave }: { member
   const [agents, setAgents] = useState<Row[]>([])
   const [collectedByAgentId, setCollectedByAgentId] = useState(String(member.agent_id || ''))
   const [saving, setSaving] = useState(false)
+  // Same synchronous double-submit guard as ConductDrawModal — unlike a
+  // draw or redemption, chits:contributions:record has no database-level
+  // constraint that would catch two near-identical payments recorded a
+  // moment apart, so the frontend is the only line of defense here.
+  const submittingRef = useRef(false)
 
   useEffect(() => {
     window.api.agents.list({}).then((res: { success: boolean; data?: Row[] }) => {
@@ -722,7 +755,9 @@ function RecordContributionModal({ member, schemeId, onClose, onSave }: { member
   }, [])
 
   const save = async () => {
+    if (submittingRef.current) return
     if (amount <= 0) { toast.error('Enter a valid amount'); return }
+    submittingRef.current = true
     setSaving(true)
     try {
       const res = await window.api.chits.contributions.record(member.id, {
@@ -740,6 +775,7 @@ function RecordContributionModal({ member, schemeId, onClose, onSave }: { member
     } catch (err: any) {
       toast.error(err.message || 'Failed to record contribution')
     } finally {
+      submittingRef.current = false
       setSaving(false)
     }
   }
@@ -856,6 +892,12 @@ function RecordRedemptionModal({ member, schemeChitValue, onClose, onSave }: { m
   const [qty, setQty] = useState(1)
   const [saving, setSaving] = useState(false)
   const alreadyRedeemed = Boolean(member.redemption_invoice_id)
+  // Same synchronous double-submit guard as the other SmartBuy action
+  // modals — recordRedemption is itself already race-safe at the database
+  // level (in-transaction re-check + atomic stock decrement), so this is
+  // belt-and-braces UX rather than the only defense, unlike the
+  // contribution modal.
+  const submittingRef = useRef(false)
 
   useEffect(() => {
     window.api.products.list({ is_active: true }).then((res: { success: boolean; data?: Row[] }) => {
@@ -870,8 +912,10 @@ function RecordRedemptionModal({ member, schemeChitValue, onClose, onSave }: { m
   const exceedsLimit = estimatedTotal > schemeChitValue + 0.01
 
   const save = async () => {
+    if (submittingRef.current) return
     if (!productId) { toast.error('Select a product from the catalog'); return }
     if (exceedsLimit) { toast.error(`Product value Rs.${estimatedTotal} exceeds this scheme's entitled value of Rs.${schemeChitValue}`); return }
+    submittingRef.current = true
     setSaving(true)
     try {
       const res = await window.api.chits.members.recordRedemption(member.id, { product_id: productId, qty })
@@ -880,6 +924,7 @@ function RecordRedemptionModal({ member, schemeChitValue, onClose, onSave }: { m
     } catch (err: any) {
       toast.error(err.message || 'Failed to record redemption')
     } finally {
+      submittingRef.current = false
       setSaving(false)
     }
   }

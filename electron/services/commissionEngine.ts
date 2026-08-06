@@ -44,8 +44,13 @@ export function findCommissionRules(
 export function splitCommissionRule(
   rule: Record<string, unknown>, amount: number, registrationAgentId: string | null, salesAgentId: string | null
 ): { registrationCommission: number; salesCommission: number } {
+  // Rounded through money() on both branches — a fixed-rate rule's stored
+  // value is user-entered and not itself constrained to 2 decimals, so
+  // without this it could carry the same float-precision drift into every
+  // downstream commission line that the percentage branch was already
+  // protected against (SmartBuy fix audit, MED-3: money precision).
   const commissionValue = rule.calculation_type === 'fixed'
-    ? Number(rule.rate) || 0
+    ? money(Number(rule.rate) || 0)
     : money(amount * (Number(rule.rate) || 0) / 100)
   let regPct = 0
   let salesPct = 0
