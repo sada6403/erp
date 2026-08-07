@@ -131,6 +131,18 @@ export default function SmartBuyDashboardPage() {
             <p className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}><Clock size={13} /> Pending Payments (Bank Transfer)</p>
             <p className="text-2xl font-bold mt-1" style={{ color: Number(data.pending_payments) > 0 ? '#f59e0b' : 'var(--text-1)' }}>Rs.{money(data.pending_payments)}</p>
           </div>
+          <div className="rounded-xl border p-4" style={{ background: Number(data.pending_withdrawal_requests) > 0 ? 'color-mix(in srgb, #f59e0b 10%, transparent)' : 'var(--bg-card)', borderColor: Number(data.pending_withdrawal_requests) > 0 ? '#f59e0b' : 'var(--border)' }}>
+            <p className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}><X size={13} /> Pending Withdrawal Requests</p>
+            <p className="text-2xl font-bold mt-1" style={{ color: Number(data.pending_withdrawal_requests) > 0 ? '#f59e0b' : 'var(--text-1)' }}>{Number(data.pending_withdrawal_requests || 0)}</p>
+          </div>
+          <button onClick={() => navigate('/admin/smart-buy-reports')} className="rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]" style={{ background: Number(data.delayed_claims_count) > 0 ? 'color-mix(in srgb, #f59e0b 10%, transparent)' : 'var(--bg-card)', borderColor: Number(data.delayed_claims_count) > 0 ? '#f59e0b' : 'var(--border)' }}>
+            <p className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}><Clock size={13} /> Delayed Claims</p>
+            <p className="text-2xl font-bold mt-1" style={{ color: Number(data.delayed_claims_count) > 0 ? '#f59e0b' : 'var(--text-1)' }}>{Number(data.delayed_claims_count || 0)}</p>
+          </button>
+          <button onClick={() => navigate('/admin/smart-buy-reports')} className="rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            <p className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}><Wallet size={13} /> Total SmartBuy Wallet Balance</p>
+            <p className="text-2xl font-bold mt-1" style={{ color: 'var(--text-1)' }}>Rs.{money(data.total_wallet_balance)}</p>
+          </button>
           <button onClick={() => navigate('/admin/commission-rules')} className="rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
             <p className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}><TrendingUp size={13} /> Total Commission</p>
             <p className="text-2xl font-bold mt-1 text-brand-400">Rs.{money(data.total_commission)}</p>

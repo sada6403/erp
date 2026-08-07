@@ -36,6 +36,7 @@ import { registerEditRequestHandlers } from './ipc/editRequests'
 import { startAutoBackup, stopAutoBackup } from './services/backupService'
 import { startLicenseChecks, stopLicenseChecks } from './services/licenseService'
 import { type SyncService, getSyncService } from './services/syncService'
+import { type ClaimReminderService, getClaimReminderService } from './services/claimReminderService'
 
 const isDev = process.env.NODE_ENV === 'development'
 const devPort = process.env.DEV_PORT || '5173'
@@ -68,6 +69,7 @@ protocol.registerSchemesAsPrivileged([
 
 let mainWindow: BrowserWindow | null = null
 let syncService: SyncService | null = null
+let claimReminderService: ClaimReminderService | null = null
 
 function getWindowIconPath() {
   const fs = require('fs') as typeof import('fs')
@@ -223,6 +225,10 @@ async function bootstrap() {
   syncService = getSyncService()
   syncService.start()
 
+  // SmartBuy claim reminder — local-only, independent of cloud sync.
+  claimReminderService = getClaimReminderService()
+  claimReminderService.start()
+
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
@@ -237,6 +243,7 @@ bootstrap().catch((err) => {
 
 app.on('window-all-closed', () => {
   syncService?.stop()
+  claimReminderService?.stop()
   stopAutoBackup()
   stopLicenseChecks()
   if (process.platform !== 'darwin') app.quit()

@@ -105,9 +105,13 @@ const api = {
     reportsWinners:           (filters?: unknown) => ipcRenderer.invoke('chits:reports:winners', filters),
     reportsBranchPerformance: () => ipcRenderer.invoke('chits:reports:branchPerformance'),
     customersList: (filters?: unknown) => ipcRenderer.invoke('chits:customers:list', filters),
+    templates: {
+      list:   (filters?: unknown) => ipcRenderer.invoke('chits:templates:list', filters),
+      create: (payload: unknown)  => ipcRenderer.invoke('chits:templates:create', payload),
+      update: (id: string, payload: unknown) => ipcRenderer.invoke('chits:templates:update', id, payload),
+    },
     members: {
       add:                (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:add', schemeId, payload),
-      remove:             (memberId: string)                   => ipcRenderer.invoke('chits:members:remove', memberId),
       list:               (schemeId: string)                   => ipcRenderer.invoke('chits:members:list', schemeId),
       downloadTemplate:   ()                                   => ipcRenderer.invoke('chits:members:downloadTemplate'),
       importExcel:        (schemeId: string)                   => ipcRenderer.invoke('chits:members:importExcel', schemeId),
@@ -116,6 +120,9 @@ const api = {
       contributionStatement: (memberId: string)                => ipcRenderer.invoke('chits:members:contributionStatement', memberId),
       registerHistorical: (schemeId: string, payload: unknown) => ipcRenderer.invoke('chits:members:registerHistorical', schemeId, payload),
       recordRedemption:   (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:members:recordRedemption', memberId, payload),
+      reverseRedemption:  (memberId: string, reason: string)   => ipcRenderer.invoke('chits:members:reverseRedemption', memberId, reason),
+      extendClaim:        (memberId: string, newDueDate: string, reason: string) => ipcRenderer.invoke('chits:members:extendClaim', memberId, newDueDate, reason),
+      transfer:           (memberId: string, newCustomerId: string, reason: string) => ipcRenderer.invoke('chits:members:transfer', memberId, newCustomerId, reason),
     },
     draws: {
       eligible: (schemeId: string, cycleNo: number) => ipcRenderer.invoke('chits:draws:eligible', schemeId, cycleNo),
@@ -134,6 +141,24 @@ const api = {
     remittances: {
       record: (payload: unknown)   => ipcRenderer.invoke('chits:remittances:record', payload),
       list:   (filters?: unknown)  => ipcRenderer.invoke('chits:remittances:list', filters),
+    },
+    withdrawals: {
+      request: (memberId: string, reason: string) => ipcRenderer.invoke('chits:withdrawals:request', memberId, reason),
+      approve: (id: string, refundAmount: number, reviewReason: string) => ipcRenderer.invoke('chits:withdrawals:approve', id, refundAmount, reviewReason),
+      reject:  (id: string, reviewReason: string)  => ipcRenderer.invoke('chits:withdrawals:reject', id, reviewReason),
+      list:    (filters?: unknown)                 => ipcRenderer.invoke('chits:withdrawals:list', filters),
+    },
+    claims: {
+      delayed: (filters?: unknown) => ipcRenderer.invoke('chits:claims:delayed', filters),
+    },
+    transfers: {
+      list: (filters?: unknown) => ipcRenderer.invoke('chits:transfers:list', filters),
+    },
+    wallet: {
+      list:   (filters?: unknown)                       => ipcRenderer.invoke('chits:wallet:list', filters),
+      usage:  (filters?: unknown)                       => ipcRenderer.invoke('chits:wallet:usage', filters),
+      detail: (customerId: string)                      => ipcRenderer.invoke('chits:wallet:detail', customerId),
+      debit:  (customerId: string, amount: number, notes: string) => ipcRenderer.invoke('chits:wallet:debit', customerId, amount, notes),
     },
     branches: {
       invite:        (schemeId: string, targetBranchId: string, notes?: string) => ipcRenderer.invoke('chits:branches:invite', schemeId, targetBranchId, notes),

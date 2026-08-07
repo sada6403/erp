@@ -794,6 +794,123 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     `ALTER TABLE chit_members ADD COLUMN credit_balance DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_contributions ADD COLUMN credit_applied DECIMAL(14,2) NOT NULL DEFAULT 0`,
 
+    // ── Centralized Scheme Master — see the matching SQLite migration for
+    // full rationale. A reusable, Super-Admin-only catalog of named SmartBuy
+    // "products" (e.g. "SmartBuy 500"); chit_schemes stays the live,
+    // branch-scoped running batch and now records which template it came from.
+    `CREATE TABLE IF NOT EXISTS chit_scheme_templates (
+       id                           CHAR(36)      NOT NULL PRIMARY KEY,
+       scheme_name                  VARCHAR(255)  NOT NULL,
+       monthly_contribution_amount  DECIMAL(14,2) NOT NULL,
+       duration_months              INT           NOT NULL,
+       minimum_members              INT           NOT NULL,
+       product_value                DECIMAL(14,2) NOT NULL,
+       status                       VARCHAR(32)   NOT NULL DEFAULT 'active',
+       created_by                   CHAR(36)      NULL,
+       created_at                   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at                   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at                    DATETIME      NULL,
+       INDEX idx_chit_scheme_templates_status (status)
+     )`,
+    `ALTER TABLE chit_schemes ADD COLUMN template_id CHAR(36) NULL`,
+
+    // ── Member Withdrawal / Exit Management — see the matching SQLite
+    // migration for full rationale (one row per withdrawal, whichever path
+    // — auto-approved pre-activation or Super-Admin-reviewed post-activation).
+    `CREATE TABLE IF NOT EXISTS withdrawal_requests (
+       id                CHAR(36)      NOT NULL PRIMARY KEY,
+       member_id         CHAR(36)      NOT NULL,
+       scheme_id         CHAR(36)      NOT NULL,
+       branch_id         CHAR(36)      NULL,
+       requested_by      CHAR(36)      NULL,
+       requested_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       reason            TEXT          NOT NULL,
+       scheme_was_active TINYINT(1)    NOT NULL DEFAULT 0,
+       status            VARCHAR(32)   NOT NULL DEFAULT 'pending',
+       refund_amount     DECIMAL(14,2) NULL,
+       reviewed_by       CHAR(36)      NULL,
+       reviewed_at       DATETIME      NULL,
+       review_reason     TEXT          NULL,
+       created_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at         DATETIME      NULL,
+       FOREIGN KEY (scheme_id) REFERENCES chit_schemes(id) ON DELETE CASCADE,
+       FOREIGN KEY (member_id) REFERENCES chit_members(id) ON DELETE CASCADE,
+       INDEX idx_withdrawal_requests_scheme (scheme_id),
+       INDEX idx_withdrawal_requests_member (member_id),
+       INDEX idx_withdrawal_requests_status (status)
+     )`,
+
+    // ── Product Redemption Policy — see the matching SQLite migration for
+    // full rationale. actual_product_value is intentionally omitted — the
+    // existing redeemed_value column already means exactly that.
+    `ALTER TABLE chit_members ADD COLUMN claim_status VARCHAR(32) NOT NULL DEFAULT 'pending_claim'`,
+    `ALTER TABLE chit_members ADD COLUMN claim_due_date DATETIME NULL`,
+    `ALTER TABLE chit_members ADD COLUMN claim_reminder_sent_at DATETIME NULL`,
+    `ALTER TABLE chit_members ADD COLUMN claimed_at DATETIME NULL`,
+    `ALTER TABLE chit_members ADD COLUMN transferred_customer_id CHAR(36) NULL`,
+    `ALTER TABLE chit_members ADD COLUMN transfer_reason TEXT NULL`,
+    `ALTER TABLE chit_members ADD COLUMN substitution_flag TINYINT(1) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_members ADD COLUMN substitution_reason TEXT NULL`,
+    `ALTER TABLE chit_members ADD COLUMN entitlement_value DECIMAL(14,2) NULL`,
+    `ALTER TABLE chit_members ADD COLUMN upgrade_amount DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_members ADD COLUMN upgrade_payment_status VARCHAR(32) NULL`,
+    `ALTER TABLE chit_members ADD COLUMN upgrade_payment_method VARCHAR(32) NULL`,
+    `ALTER TABLE chit_members ADD COLUMN upgrade_paid_at DATETIME NULL`,
+    `ALTER TABLE chit_members ADD COLUMN wallet_credit_created DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_members ADD INDEX idx_chit_members_claim_status (claim_status)`,
+    // Production Readiness Audit — see the matching SQLite migration.
+    `ALTER TABLE customers ADD INDEX idx_customers_branch (branch_id)`,
+
+    `CREATE TABLE IF NOT EXISTS smartbuy_wallet (
+       id          CHAR(36)      NOT NULL PRIMARY KEY,
+       customer_id CHAR(36)      NOT NULL UNIQUE,
+       balance     DECIMAL(14,2) NOT NULL DEFAULT 0,
+       created_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at  DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at   DATETIME      NULL
+     )`,
+    `CREATE TABLE IF NOT EXISTS smartbuy_wallet_transactions (
+       id               CHAR(36)      NOT NULL PRIMARY KEY,
+       wallet_id        CHAR(36)      NOT NULL,
+       customer_id      CHAR(36)      NOT NULL,
+       transaction_type VARCHAR(16)   NOT NULL,
+       amount           DECIMAL(14,2) NOT NULL,
+       balance_after    DECIMAL(14,2) NOT NULL,
+       source           VARCHAR(64)   NULL,
+       redemption_id    CHAR(36)      NULL,
+       notes            TEXT          NULL,
+       created_by       CHAR(36)      NULL,
+       created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at        DATETIME      NULL,
+       INDEX idx_smartbuy_wallet_txn_wallet (wallet_id),
+       INDEX idx_smartbuy_wallet_txn_customer (customer_id)
+     )`,
+    // ── SmartBuy Wallet as a POS payment method — see the matching SQLite
+    // migration for full rationale.
+    `ALTER TABLE payments ADD COLUMN wallet_transaction_id CHAR(36) NULL`,
+    `ALTER TABLE smartbuy_wallet_transactions ADD COLUMN invoice_id CHAR(36) NULL`,
+    `ALTER TABLE smartbuy_wallet_transactions ADD INDEX idx_smartbuy_wallet_txn_invoice (invoice_id)`,
+    // Composite index for computeMemberCycleBalance/eligibleMembersForDraw's
+    // member_id+cycle_no(+status) filter on chit_contributions — see the
+    // matching SQLite migration for the full story (proven at 500k-row
+    // scale to fix a 25s query down to sub-second by giving the planner an
+    // unambiguous, selective index instead of the cycle_no-only one it was
+    // otherwise picking).
+    `ALTER TABLE chit_contributions ADD INDEX idx_chit_contributions_member_cycle (member_id, cycle_no, status)`,
+    `CREATE TABLE IF NOT EXISTS smartbuy_transfer_history (
+       id                    CHAR(36)  NOT NULL PRIMARY KEY,
+       member_id             CHAR(36)  NOT NULL,
+       original_customer_id  CHAR(36)  NOT NULL,
+       new_customer_id       CHAR(36)  NOT NULL,
+       reason                TEXT      NOT NULL,
+       approved_by           CHAR(36)  NULL,
+       approved_at           DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       created_at            DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at             DATETIME  NULL,
+       INDEX idx_smartbuy_transfer_history_member (member_id)
+     )`,
+
     // ── Stock counts — were pushed from the app but had no cloud table at
     // all, so every sync for them failed silently ───────────────────────
     `CREATE TABLE IF NOT EXISTS stock_count_sessions (

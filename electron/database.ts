@@ -1096,6 +1096,23 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_commission_ledger_created_at ON commission_ledger(created_at);
   `)
 
+  // computeMemberCycleBalance() and eligibleMembersForDraw()'s rejected-
+  // contribution check (electron/ipc/chits.ts) both filter chit_contributions
+  // by member_id + cycle_no (+ status) — the single most frequently run
+  // query in the whole module (every draw eligibility check, every
+  // contribution recording, every member statement). With only single-
+  // column indexes on scheme_id/member_id/status/cycle_no, SQLite's planner
+  // picked idx_chit_contributions_cycle (the LEAST selective one — cycle_no
+  // alone matches ~1/N of the whole table) over the member_id index,
+  // effectively near-full-scanning the table on every call. Proven at
+  // production scale (500 schemes/50,000 members/500,000 contributions):
+  // chits:draws:eligible took 25s before this index, verified via
+  // EXPLAIN QUERY PLAN which confirmed the bad index choice. This composite
+  // index removes the ambiguity — SQLite has no reason to pick anything else.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_chit_contributions_member_cycle ON chit_contributions(member_id, cycle_no, status);
+  `)
+
   // ── Flexible (partial/excess/installment) contribution handling ─────────
   // Supersedes the earlier "exactly one approved contribution per
   // (member, scheme, cycle)" rule — a member may now pay a cycle off in
@@ -1127,6 +1144,191 @@ function runMigrations(): void {
     // cash/method collected and credit-covered amounts as distinct lines.
     db.exec(`ALTER TABLE chit_contributions ADD COLUMN credit_applied REAL NOT NULL DEFAULT 0`)
   }
+
+  // ── Centralized Scheme Master ────────────────────────────────────────
+  // Super Admin-only catalog of reusable SmartBuy "products" (e.g.
+  // "SmartBuy 500", "SmartBuy Premium") — deliberately has no branch_id/
+  // product_id/agent_id of its own, unlike chit_schemes, which stays a
+  // live, branch-scoped running batch. A Smart Buy Manager starting a new
+  // batch for their branch now picks one of these by id instead of typing
+  // its name/amount/duration/member-count — chits:create derives those
+  // fields from the chosen template server-side and ignores any
+  // client-supplied override for them.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chit_scheme_templates (
+      id                            TEXT PRIMARY KEY,
+      scheme_name                   TEXT NOT NULL,
+      monthly_contribution_amount   REAL NOT NULL,
+      duration_months               INTEGER NOT NULL,
+      minimum_members                INTEGER NOT NULL,
+      product_value                  REAL NOT NULL,
+      status                         TEXT NOT NULL DEFAULT 'active',
+      created_by                     TEXT REFERENCES users(id),
+      created_at                     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at                     TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at                      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_chit_scheme_templates_status ON chit_scheme_templates(status);
+  `)
+  if (!hasColumn('chit_schemes', 'template_id')) {
+    // Nullable — historical schemes created before the Scheme Master
+    // existed have no template of origin. New ones always set this.
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN template_id TEXT REFERENCES chit_scheme_templates(id)`)
+  }
+
+  // ── Member Withdrawal / Exit Management ────────────────────────────────
+  // One row per withdrawal, whatever path it took:
+  //  - Pre-activation (scheme still 'pending'): auto-resolved in the same
+  //    call — status inserted directly as 'approved', refund_amount set to
+  //    the member's full net-paid amount, reviewed_by/reviewed_at/
+  //    review_reason filled in immediately. No separate approval step.
+  //  - Post-activation (scheme 'active'): inserted as 'pending' — the
+  //    member stays 'active' and keeps their seat until a Super Admin
+  //    reviews it. refund_amount is deliberately NOT auto-computed here —
+  //    the business decided against a fixed refund formula, so it's
+  //    whatever the approving Super Admin enters, capped at the member's
+  //    net contribution (chits:withdrawals:approve enforces the cap fresh
+  //    at approval time, not at request time).
+  // Every row this table produces IS the audit trail for that withdrawal —
+  // who requested, who reviewed, when, why, and what was refunded — so no
+  // separate audit table is needed beyond the existing audit_logs entries
+  // already written alongside each state change.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS withdrawal_requests (
+      id                TEXT PRIMARY KEY,
+      member_id         TEXT NOT NULL REFERENCES chit_members(id),
+      scheme_id         TEXT NOT NULL REFERENCES chit_schemes(id),
+      branch_id         TEXT REFERENCES branches(id),
+      requested_by      TEXT REFERENCES users(id),
+      requested_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      reason            TEXT NOT NULL,
+      scheme_was_active INTEGER NOT NULL DEFAULT 0,
+      status            TEXT NOT NULL DEFAULT 'pending',
+      refund_amount     REAL,
+      reviewed_by       TEXT REFERENCES users(id),
+      reviewed_at       TEXT,
+      review_reason     TEXT,
+      created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at         TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_scheme ON withdrawal_requests(scheme_id);
+    CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_member ON withdrawal_requests(member_id);
+    CREATE INDEX IF NOT EXISTS idx_withdrawal_requests_status ON withdrawal_requests(status);
+  `)
+
+  // ── Product Redemption Policy ───────────────────────────────────────────
+  // Claim tracking, transfer, substitution, and upgrade/downgrade fields on
+  // the existing redemption record (chit_members) — deliberately NOT a
+  // separate table, matching how redeemed_product_id/redeemed_qty/etc.
+  // already model "one redemption per member" today. actual_product_value
+  // is intentionally NOT a new column — the existing redeemed_value column
+  // already means exactly that (the audit found it, no duplicate needed).
+  const redemptionPolicyColumns: Array<[string, string]> = [
+    // Claim lifecycle — entitlement never expires; these only drive the
+    // soft reminder system (never block or revoke a claim).
+    ['claim_status', `TEXT NOT NULL DEFAULT 'pending_claim'`],
+    ['claim_due_date', 'TEXT'],
+    ['claim_reminder_sent_at', 'TEXT'],
+    ['claimed_at', 'TEXT'],
+    // Winner transfer (Super Admin only) — original winner (customer_id)
+    // never changes; this is who the entitlement was reassigned to.
+    ['transferred_customer_id', 'TEXT REFERENCES customers(id)'],
+    ['transfer_reason', 'TEXT'],
+    // Substitution consent — set when the redeemed product differs from
+    // the scheme's own nominal product_id.
+    ['substitution_flag', 'INTEGER NOT NULL DEFAULT 0'],
+    ['substitution_reason', 'TEXT'],
+    // Entitlement vs. actual value — frozen at win time (entitlement_value)
+    // vs. what was actually invoiced (the existing redeemed_value column).
+    ['entitlement_value', 'REAL'],
+    ['upgrade_amount', 'REAL NOT NULL DEFAULT 0'],
+    ['upgrade_payment_status', 'TEXT'],
+    ['upgrade_payment_method', 'TEXT'],
+    ['upgrade_paid_at', 'TEXT'],
+    ['wallet_credit_created', 'REAL NOT NULL DEFAULT 0'],
+  ]
+  for (const [column, def] of redemptionPolicyColumns) {
+    if (!hasColumn('chit_members', column)) {
+      db.exec(`ALTER TABLE chit_members ADD COLUMN ${column} ${def}`)
+    }
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_chit_members_claim_status ON chit_members(claim_status)`)
+  // Production Readiness Audit — chits:wallet:list/detail now filter
+  // customers by branch_id (multi-branch isolation fix), and this table
+  // had no index on that column at all despite it being a common
+  // branch-scoping filter well beyond SmartBuy. Purely additive, no
+  // behavior change.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_customers_branch ON customers(branch_id)`)
+
+  // SmartBuy Wallet — created automatically the first time a downgrade
+  // redemption leaves unused entitlement value on the table. One row per
+  // customer (running balance); smartbuy_wallet_transactions is the full
+  // ledger (every credit/debit, in order). Never converts to cash and never
+  // touches a scheme's own contribution/commission accounting.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS smartbuy_wallet (
+      id          TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL UNIQUE REFERENCES customers(id),
+      balance     REAL NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at   TEXT
+    );
+    CREATE TABLE IF NOT EXISTS smartbuy_wallet_transactions (
+      id               TEXT PRIMARY KEY,
+      wallet_id        TEXT NOT NULL REFERENCES smartbuy_wallet(id),
+      customer_id      TEXT NOT NULL REFERENCES customers(id),
+      transaction_type TEXT NOT NULL, -- 'credit' | 'debit'
+      amount           REAL NOT NULL,
+      balance_after    REAL NOT NULL,
+      source           TEXT,
+      redemption_id    TEXT REFERENCES chit_members(id),
+      notes            TEXT,
+      created_by       TEXT REFERENCES users(id),
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_smartbuy_wallet_txn_wallet ON smartbuy_wallet_transactions(wallet_id);
+    CREATE INDEX IF NOT EXISTS idx_smartbuy_wallet_txn_customer ON smartbuy_wallet_transactions(customer_id);
+  `)
+
+  // ── SmartBuy Wallet as a POS payment method ────────────────────────────
+  // Mirrors the existing coupon-payment pattern exactly: a payments row
+  // (method='smartbuy_wallet') records the settlement, and this column
+  // links it back to the specific wallet ledger entry that funded it — no
+  // new "payment_type" column needed, the existing payments.method already
+  // is that. No customer_id added to payments either — already derivable
+  // via invoice_id -> invoices.customer_id, and also directly present on
+  // the linked wallet transaction row itself.
+  if (!hasColumn('payments', 'wallet_transaction_id')) {
+    db.exec(`ALTER TABLE payments ADD COLUMN wallet_transaction_id TEXT REFERENCES smartbuy_wallet_transactions(id)`)
+  }
+  // Links a POS-purchase debit (and its reversal, if the invoice is later
+  // cancelled) back to the specific invoice — nullable, since a
+  // redemption-driven credit or a manual admin debit has no invoice at all.
+  if (!hasColumn('smartbuy_wallet_transactions', 'invoice_id')) {
+    db.exec(`ALTER TABLE smartbuy_wallet_transactions ADD COLUMN invoice_id TEXT REFERENCES invoices(id)`)
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_smartbuy_wallet_txn_invoice ON smartbuy_wallet_transactions(invoice_id)`)
+
+  // Winner transfer history — a permanent record of every exceptional
+  // Super-Admin-approved reassignment, kept separate from chit_members so
+  // the original draw/winner record on chit_members is never overwritten.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS smartbuy_transfer_history (
+      id                  TEXT PRIMARY KEY,
+      member_id           TEXT NOT NULL REFERENCES chit_members(id),
+      original_customer_id TEXT NOT NULL REFERENCES customers(id),
+      new_customer_id     TEXT NOT NULL REFERENCES customers(id),
+      reason              TEXT NOT NULL,
+      approved_by         TEXT REFERENCES users(id),
+      approved_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at           TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_smartbuy_transfer_history_member ON smartbuy_transfer_history(member_id);
+  `)
 
   // Edit requests — a branch manager/cashier wanting to correct an
   // already-completed invoice line item or a direct stock quantity must

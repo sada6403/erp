@@ -15,6 +15,7 @@ export type NotifType =
   | 'commission_pending_manager' | 'commission_pending_admin'
   | 'commission_approved' | 'commission_paid' | 'commission_rejected'
   | 'commission_large_payout' | 'branch_performance_alert'
+  | 'chit_claim_delayed'
 
 export interface Notification {
   id: string

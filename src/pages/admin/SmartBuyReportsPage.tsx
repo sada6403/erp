@@ -10,13 +10,17 @@ type Column = { key: string; label: string; money?: boolean }
 
 const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-type ReportType = 'scheme_summary' | 'members' | 'contributions' | 'winners' | 'branch_performance' | 'commission_ledger' | 'agent_commission' | 'commission_payouts'
+type ReportType = 'scheme_summary' | 'members' | 'contributions' | 'winners' | 'branch_performance' | 'commission_ledger' | 'agent_commission' | 'commission_payouts' | 'delayed_claims' | 'wallet' | 'wallet_usage' | 'transfers'
 
 const REPORT_TYPES: { value: ReportType; label: string }[] = [
   { value: 'scheme_summary', label: 'Scheme Summary (Active / Pending / Completed / Cancelled)' },
   { value: 'members', label: 'Scheme Members (incl. Pending Members)' },
   { value: 'contributions', label: 'Payment Collection' },
   { value: 'winners', label: 'Winner / Winner Product Report' },
+  { value: 'delayed_claims', label: 'Delayed Claims' },
+  { value: 'wallet', label: 'SmartBuy Wallet' },
+  { value: 'wallet_usage', label: 'SmartBuy Wallet Usage' },
+  { value: 'transfers', label: 'Winner Transfers' },
   { value: 'commission_ledger', label: 'Commission Ledger' },
   { value: 'agent_commission', label: 'Agent Commission Report' },
   { value: 'commission_payouts', label: 'Commission Payout History' },
@@ -50,12 +54,37 @@ const COLUMNS: Record<ReportType, Column[]> = {
     { key: 'status', label: 'Status' }, { key: 'commission_amount', label: 'Commission', money: true },
   ],
   winners: [
-    { key: 'draw_date', label: 'Date & Time' }, { key: 'cycle_no', label: 'Cycle' },
+    { key: 'draw_date', label: 'Winning Date' }, { key: 'cycle_no', label: 'Cycle' },
     { key: 'scheme_name', label: 'Scheme' }, { key: 'branch_name', label: 'Branch' },
     { key: 'method', label: 'Method' }, { key: 'winner_name', label: 'Winner' },
-    { key: 'redeemed_product_name', label: 'Product' }, { key: 'redeemed_value', label: 'Value', money: true },
+    { key: 'claim_status', label: 'Claim Status' }, { key: 'claimed_at', label: 'Claimed Date' },
+    { key: 'original_product_name', label: 'Original Product' }, { key: 'redeemed_product_name', label: 'Given Product' },
+    { key: 'redeemed_value', label: 'Product Value', money: true }, { key: 'upgrade_amount', label: 'Upgrade Amount', money: true },
+    { key: 'wallet_credit_created', label: 'Wallet Credit', money: true },
     { key: 'redemption_invoice_number', label: 'Invoice #' }, { key: 'conducted_by_name', label: 'Selected By' },
     { key: 'reason', label: 'Reason' },
+  ],
+  delayed_claims: [
+    { key: 'customer_name', label: 'Winner' }, { key: 'customer_phone', label: 'Phone' },
+    { key: 'scheme_name', label: 'Scheme' }, { key: 'scheme_number', label: 'Scheme #' }, { key: 'branch_name', label: 'Branch' },
+    { key: 'won_date', label: 'Won Date' }, { key: 'claim_due_date', label: 'Claim Due Date' },
+    { key: 'claim_status', label: 'Status' }, { key: 'days_overdue', label: 'Days Overdue' },
+  ],
+  wallet: [
+    { key: 'customer_name', label: 'Customer' }, { key: 'customer_phone', label: 'Phone' },
+    { key: 'opening_balance', label: 'Opening Balance', money: true },
+    { key: 'total_credited', label: 'Credit Created', money: true }, { key: 'total_used', label: 'Credit Used', money: true },
+    { key: 'balance', label: 'Current Balance', money: true },
+  ],
+  wallet_usage: [
+    { key: 'customer_name', label: 'Customer' }, { key: 'invoice_number', label: 'Invoice' },
+    { key: 'amount', label: 'Amount Used', money: true }, { key: 'created_at', label: 'Date' },
+    { key: 'staff_name', label: 'Staff' }, { key: 'source', label: 'Source' },
+  ],
+  transfers: [
+    { key: 'created_at', label: 'Date' }, { key: 'scheme_name', label: 'Scheme' }, { key: 'scheme_number', label: 'Scheme #' },
+    { key: 'original_customer_name', label: 'Original Winner' }, { key: 'new_customer_name', label: 'Recipient' },
+    { key: 'reason', label: 'Reason' }, { key: 'approved_by_name', label: 'Approved By' },
   ],
   commission_ledger: [
     { key: 'created_at', label: 'Date' }, { key: 'scheme_name', label: 'Scheme' },
@@ -136,6 +165,18 @@ export default function SmartBuyReportsPage() {
           break
         case 'winners':
           res = await window.api.chits.reportsWinners({ branchId: branchFilter, schemeId: schemeFilter, dateFrom: from, dateTo: to })
+          break
+        case 'delayed_claims':
+          res = await window.api.chits.claims.delayed({ branchId: branchFilter })
+          break
+        case 'wallet':
+          res = await window.api.chits.wallet.list({ branchId: branchFilter })
+          break
+        case 'wallet_usage':
+          res = await window.api.chits.wallet.usage({ branchId: branchFilter })
+          break
+        case 'transfers':
+          res = await window.api.chits.transfers.list({ branchId: branchFilter })
           break
         case 'commission_ledger':
           res = await window.api.commissions.ledger.list({ branchId: branchFilter, schemeId: schemeFilter, agentId: agentFilter, status: statusFilter, dateFrom: from, dateTo: to })
@@ -292,7 +333,7 @@ export default function SmartBuyReportsPage() {
             Scheme
             <select value={schemeId} onChange={e => setSchemeId(e.target.value)} className="input mt-1">
               <option value="">All Schemes</option>
-              {schemes.map(s => <option key={s.id as string} value={s.id as string}>{s.name as string}</option>)}
+              {schemes.map(s => <option key={s.id as string} value={s.id as string}>{s.scheme_number as string} — {s.name as string} ({s.branch_name as string})</option>)}
             </select>
           </label>
         )}

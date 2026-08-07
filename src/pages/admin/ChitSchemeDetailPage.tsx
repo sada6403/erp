@@ -4,7 +4,7 @@ import Modal from '@/components/shared/Modal'
 import StatCard from '@/components/shared/StatCard'
 import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
 import MemberPaymentHistoryModal from '@/components/shared/MemberPaymentHistoryModal'
-import { ArrowLeft, Plus, Upload, FileDown, Users, Coins, Gift, Shuffle, Pencil, Package, Eye, GitBranch, Check, X } from 'lucide-react'
+import { ArrowLeft, Plus, Upload, FileDown, Users, Coins, Gift, Shuffle, Pencil, Package, Eye, GitBranch, Check, X, CalendarClock, ArrowLeftRight, Undo2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -27,10 +27,11 @@ export default function ChitSchemeDetailPage() {
   const [members, setMembers] = useState<Row[]>([])
   const [draws, setDraws] = useState<Row[]>([])
   const [collaborations, setCollaborations] = useState<Row[]>([])
+  const [withdrawals, setWithdrawals] = useState<Row[]>([])
   const [branches, setBranches] = useState<Row[]>([])
   const [summary, setSummary] = useState<Row>({})
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'members' | 'draws' | 'branches'>('members')
+  const [tab, setTab] = useState<'members' | 'draws' | 'branches' | 'withdrawals'>('members')
   const [importing, setImporting] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [showRegisterHistorical, setShowRegisterHistorical] = useState(false)
@@ -41,13 +42,20 @@ export default function ChitSchemeDetailPage() {
   const [redeemingMember, setRedeemingMember] = useState<Row | null>(null)
   const [redemptionMember, setRedemptionMember] = useState<Row | null>(null)
   const [historyMember, setHistoryMember] = useState<Row | null>(null)
+  const [withdrawingMember, setWithdrawingMember] = useState<Row | null>(null)
+  const [reviewingWithdrawal, setReviewingWithdrawal] = useState<Row | null>(null)
+  const [extendingClaimMember, setExtendingClaimMember] = useState<Row | null>(null)
+  const [transferringMember, setTransferringMember] = useState<Row | null>(null)
+  const [reversingMember, setReversingMember] = useState<Row | null>(null)
   const [showEdit, setShowEdit] = useState(false)
 
   const load = async () => {
     if (!id) return
     setLoading(true)
     try {
-      const [res, b] = await Promise.all([window.api.chits.get(id), window.api.admin.branches.list()])
+      const [res, b, w] = await Promise.all([
+        window.api.chits.get(id), window.api.admin.branches.list(), window.api.chits.withdrawals.list({ schemeId: id }),
+      ])
       if (res.success) {
         setScheme(res.data.scheme)
         setMembers(res.data.members)
@@ -58,6 +66,7 @@ export default function ChitSchemeDetailPage() {
         toast.error(res.error || 'Failed to load Smart Buy scheme')
       }
       if (b.success) setBranches(b.data as Row[])
+      if (w.success) setWithdrawals(w.data as Row[])
     } catch (err: any) {
       toast.error(err.message || 'Failed to load Smart Buy scheme')
     } finally {
@@ -94,15 +103,7 @@ export default function ChitSchemeDetailPage() {
     }
   }
 
-  const removeMember = async (memberId: string) => {
-    try {
-      const res = await window.api.chits.members.remove(memberId)
-      if (res.success) { toast.success('Member removed'); load() }
-      else toast.error(res.error || 'Could not remove member')
-    } catch (err: any) {
-      toast.error(err.message || 'Could not remove member')
-    }
-  }
+  const pendingWithdrawalCount = withdrawals.filter(w => w.status === 'pending').length
 
   const respondCollaboration = async (collaborationId: string, action: 'approve' | 'reject') => {
     try {
@@ -182,6 +183,9 @@ export default function ChitSchemeDetailPage() {
           <button onClick={() => setTab('draws')} className={tab === 'draws' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Draw History</button>
           <button onClick={() => setTab('branches')} className={tab === 'branches' ? 'btn-primary btn-sm gap-1.5' : 'btn-secondary btn-sm gap-1.5'}>
             <GitBranch size={13} /> Branches {pendingCollabCount > 0 && <span className="badge-yellow ml-1">{pendingCollabCount}</span>}
+          </button>
+          <button onClick={() => setTab('withdrawals')} className={tab === 'withdrawals' ? 'btn-primary btn-sm gap-1.5' : 'btn-secondary btn-sm gap-1.5'}>
+            <X size={13} /> Withdrawals {pendingWithdrawalCount > 0 && <span className="badge-yellow ml-1">{pendingWithdrawalCount}</span>}
           </button>
         </div>
         <div className="flex gap-2">
@@ -304,12 +308,21 @@ export default function ChitSchemeDetailPage() {
                       {m.status === 'active' && Boolean(m.is_early_redemption) && (
                         <button onClick={() => setRedeemingMember(m)} className="btn-ghost btn-sm p-1.5" title="Early Redeem"><Gift size={13} /></button>
                       )}
-                      {m.status === 'redeemed' && (
+                      {m.status === 'redeemed' && !m.redemption_invoice_id && (
                         <button onClick={() => setRedemptionMember(m)} className="btn-ghost btn-sm p-1.5" title="Record Redemption Product"><Package size={13} /></button>
+                      )}
+                      {m.status === 'redeemed' && !m.redemption_invoice_id && (
+                        <button onClick={() => setExtendingClaimMember(m)} className="btn-ghost btn-sm p-1.5" title="Extend Claim Reminder"><CalendarClock size={13} /></button>
+                      )}
+                      {m.status === 'redeemed' && !m.redemption_invoice_id && isSuperAdmin && (
+                        <button onClick={() => setTransferringMember(m)} className="btn-ghost btn-sm p-1.5" title="Transfer Winner Entitlement"><ArrowLeftRight size={13} /></button>
+                      )}
+                      {m.status === 'redeemed' && Boolean(m.redemption_invoice_id) && isSuperAdmin && (
+                        <button onClick={() => setReversingMember(m)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Reverse Redemption"><Undo2 size={13} /></button>
                       )}
                       <button onClick={() => setHistoryMember(m)} className="btn-ghost btn-sm p-1.5" title="Payment History"><Eye size={13} /></button>
                       {m.status === 'active' && (
-                        <button onClick={() => removeMember(m.id as string)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Withdraw">✕</button>
+                        <button onClick={() => setWithdrawingMember(m)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Withdraw">✕</button>
                       )}
                     </div>
                   </td>
@@ -318,7 +331,7 @@ export default function ChitSchemeDetailPage() {
             </tbody>
           </table>
           </>
-        ) : (
+        ) : tab === 'draws' ? (
           <table className="w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
@@ -350,6 +363,39 @@ export default function ChitSchemeDetailPage() {
               })}
             </tbody>
           </table>
+        ) : (
+          <table className="w-full">
+            <thead className="sticky top-0 bg-surface-900 z-10">
+              <tr>
+                {['Member', 'Requested', 'Reason', 'Scheme Active?', 'Status', 'Refund', 'Reviewed By', 'Review Reason', ''].map(h => (
+                  <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {withdrawals.length === 0 ? (
+                <tr><td colSpan={9} className="text-center py-16 text-slate-500">No withdrawal requests for this scheme</td></tr>
+              ) : withdrawals.map(w => (
+                <tr key={w.id as string} className="table-row">
+                  <td className="table-cell font-medium">{(w.customer_name as string) || '—'}</td>
+                  <td className="table-cell text-xs text-slate-400">{w.requested_at ? new Date(String(w.requested_at)).toLocaleString() : '—'}<br />by {(w.requested_by_name as string) || '—'}</td>
+                  <td className="table-cell text-xs text-slate-400 max-w-[12rem] truncate" title={w.reason as string}>{(w.reason as string) || '—'}</td>
+                  <td className="table-cell">{w.scheme_was_active ? <span className="badge-blue">Active</span> : <span className="badge-gray">Pre-activation</span>}</td>
+                  <td className="table-cell">
+                    <span className={w.status === 'approved' ? 'badge-green' : w.status === 'rejected' ? 'badge-red' : 'badge-yellow'}>{w.status as string}</span>
+                  </td>
+                  <td className="table-cell">{w.refund_amount !== null && w.refund_amount !== undefined ? `Rs.${money(w.refund_amount)}` : '—'}</td>
+                  <td className="table-cell text-xs text-slate-400">{(w.reviewed_by_name as string) || '—'}</td>
+                  <td className="table-cell text-xs text-slate-400 max-w-[10rem] truncate" title={w.review_reason as string}>{(w.review_reason as string) || '—'}</td>
+                  <td className="table-cell">
+                    {w.status === 'pending' && isSuperAdmin && (
+                      <button onClick={() => setReviewingWithdrawal(w)} className="btn-secondary btn-sm">Review</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
 
@@ -374,11 +420,31 @@ export default function ChitSchemeDetailPage() {
           onClose={() => setRedeemingMember(null)} onSave={() => { setRedeemingMember(null); load() }} />
       )}
       {redemptionMember && (
-        <RecordRedemptionModal member={redemptionMember} schemeChitValue={Number(scheme.chit_value)}
+        <RecordRedemptionModal member={redemptionMember} schemeChitValue={Number(redemptionMember.entitlement_value ?? scheme.chit_value)} schemeProductId={(scheme.product_id as string) || ''}
           onClose={() => setRedemptionMember(null)} onSave={() => { setRedemptionMember(null); load() }} />
       )}
       {historyMember && (
         <MemberPaymentHistoryModal memberId={historyMember.id as string} onClose={() => setHistoryMember(null)} />
+      )}
+      {withdrawingMember && (
+        <WithdrawMemberModal member={withdrawingMember} schemeActive={scheme.status === 'active'}
+          onClose={() => setWithdrawingMember(null)} onSave={() => { setWithdrawingMember(null); load() }} />
+      )}
+      {reviewingWithdrawal && (
+        <ReviewWithdrawalModal withdrawal={reviewingWithdrawal}
+          onClose={() => setReviewingWithdrawal(null)} onSave={() => { setReviewingWithdrawal(null); load() }} />
+      )}
+      {extendingClaimMember && (
+        <ExtendClaimModal member={extendingClaimMember}
+          onClose={() => setExtendingClaimMember(null)} onSave={() => { setExtendingClaimMember(null); load() }} />
+      )}
+      {transferringMember && (
+        <TransferWinnerModal member={transferringMember}
+          onClose={() => setTransferringMember(null)} onSave={() => { setTransferringMember(null); load() }} />
+      )}
+      {reversingMember && (
+        <ReverseRedemptionModal member={reversingMember}
+          onClose={() => setReversingMember(null)} onSave={() => { setReversingMember(null); load() }} />
       )}
       {showInvite && (
         <InviteBranchModal schemeId={id!} schemeBranchId={(scheme.branch_id as string) || ''}
@@ -886,10 +952,118 @@ function EarlyRedeemModal({ member, minAmount, onClose, onSave }: { member: Row;
   )
 }
 
-function RecordRedemptionModal({ member, schemeChitValue, onClose, onSave }: { member: Row; schemeChitValue: number; onClose: () => void; onSave: () => void }) {
+function WithdrawMemberModal({ member, schemeActive, onClose, onSave }: {
+  member: Row; schemeActive: boolean; onClose: () => void; onSave: () => void
+}) {
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const submittingRef = useRef(false)
+
+  const submit = async () => {
+    if (submittingRef.current) return
+    if (!reason.trim()) { toast.error('A withdrawal reason is required'); return }
+    submittingRef.current = true
+    setSaving(true)
+    try {
+      const res = await window.api.chits.withdrawals.request(member.id, reason.trim())
+      if (res.success) {
+        toast.success(res.data?.status === 'approved'
+          ? `Withdrawn — full refund of Rs.${money(res.data.refundAmount)} recorded`
+          : 'Withdrawal request submitted — pending Super Admin approval')
+        onSave()
+      } else {
+        toast.error(String(res.error || 'Withdrawal request failed'))
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Withdrawal request failed')
+    } finally {
+      submittingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Withdraw — ${(member.customer_name as string) || 'Member'}`} onClose={onClose}
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={submit} disabled={saving} className="btn-primary">{saving ? 'Submitting...' : schemeActive ? 'Submit Request' : 'Withdraw'}</button></>}>
+      <div className="space-y-3">
+        {schemeActive ? (
+          <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+            This scheme is already active. Withdrawal requires Super Admin approval before it takes effect — the member keeps their seat until then. The refund amount is decided by the approver during review, not calculated automatically.
+          </p>
+        ) : (
+          <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+            This scheme hasn't activated yet, so withdrawal is immediate and the member's full paid amount (Rs.{money(member.contributions_paid)}) is refunded automatically.
+          </p>
+        )}
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Reason for withdrawal *</label>
+          <textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-20 resize-none" placeholder="e.g. relocating, no longer interested, financial hardship..." />
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function ReviewWithdrawalModal({ withdrawal, onClose, onSave }: { withdrawal: Row; onClose: () => void; onSave: () => void }) {
+  const [refundAmount, setRefundAmount] = useState(0)
+  const [reviewReason, setReviewReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const submittingRef = useRef(false)
+
+  const respond = async (action: 'approve' | 'reject') => {
+    if (submittingRef.current) return
+    if (!reviewReason.trim()) { toast.error(`A${action === 'approve' ? 'n approval' : ' rejection'} reason is required`); return }
+    if (action === 'approve' && refundAmount < 0) { toast.error('Refund amount cannot be negative'); return }
+    submittingRef.current = true
+    setSaving(true)
+    try {
+      const res = action === 'approve'
+        ? await window.api.chits.withdrawals.approve(withdrawal.id, refundAmount, reviewReason.trim())
+        : await window.api.chits.withdrawals.reject(withdrawal.id, reviewReason.trim())
+      if (res.success) { toast.success(action === 'approve' ? 'Withdrawal approved' : 'Withdrawal rejected'); onSave() }
+      else toast.error(String(res.error || 'Failed to process withdrawal review'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to process withdrawal review')
+    } finally {
+      submittingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Review Withdrawal — ${(withdrawal.customer_name as string) || 'Member'}`} onClose={onClose}
+      footer={<>
+        <button onClick={onClose} className="btn-secondary">Cancel</button>
+        <button onClick={() => respond('reject')} disabled={saving} className="btn-secondary text-red-400">Reject</button>
+        <button onClick={() => respond('approve')} disabled={saving} className="btn-primary">Approve</button>
+      </>}>
+      <div className="space-y-3">
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+          Member's withdrawal reason: <span className="italic">"{(withdrawal.reason as string) || '—'}"</span>
+        </p>
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Refund amount (Rs.) — only used if approving</label>
+          <input type="number" value={refundAmount} onChange={e => setRefundAmount(parseFloat(e.target.value) || 0)} className="input" min={0} />
+          <p className="text-xs text-slate-500 mt-1">No fixed formula — enter whatever the business decides is fair for this case. It cannot exceed the member's net contribution (checked on submit).</p>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Approval / rejection reason *</label>
+          <textarea value={reviewReason} onChange={e => setReviewReason(e.target.value)} className="input h-20 resize-none" placeholder="Required either way — explain the decision for the audit trail" />
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+function RecordRedemptionModal({ member, schemeChitValue, schemeProductId, onClose, onSave }: {
+  member: Row; schemeChitValue: number; schemeProductId: string; onClose: () => void; onSave: () => void
+}) {
   const [products, setProducts] = useState<Row[]>([])
   const [productId, setProductId] = useState('')
   const [qty, setQty] = useState(1)
+  const [substitutionReason, setSubstitutionReason] = useState('')
+  const [customerAccepted, setCustomerAccepted] = useState(false)
+  const [upgradePaymentMethod, setUpgradePaymentMethod] = useState('cash')
   const [saving, setSaving] = useState(false)
   const alreadyRedeemed = Boolean(member.redemption_invoice_id)
   // Same synchronous double-submit guard as the other SmartBuy action
@@ -909,16 +1083,24 @@ function RecordRedemptionModal({ member, schemeChitValue, onClose, onSave }: { m
   const unitPrice = Number(selectedProduct?.selling_price || 0)
   const taxRate = Number(selectedProduct?.tax_rate || 0)
   const estimatedTotal = Math.round(unitPrice * qty * (1 + taxRate / 100) * 100) / 100
-  const exceedsLimit = estimatedTotal > schemeChitValue + 0.01
+  const isSubstitution = Boolean(schemeProductId && productId && schemeProductId !== productId)
+  const upgradeAmount = Math.max(0, Math.round((estimatedTotal - schemeChitValue) * 100) / 100)
+  const walletCreditAmount = Math.max(0, Math.round((schemeChitValue - estimatedTotal) * 100) / 100)
 
   const save = async () => {
     if (submittingRef.current) return
     if (!productId) { toast.error('Select a product from the catalog'); return }
-    if (exceedsLimit) { toast.error(`Product value Rs.${estimatedTotal} exceeds this scheme's entitled value of Rs.${schemeChitValue}`); return }
+    if (isSubstitution && !substitutionReason.trim()) { toast.error('Record a substitution reason — this differs from the scheme\'s own product'); return }
+    if (isSubstitution && !customerAccepted) { toast.error('Customer acceptance is required before completing a substituted redemption'); return }
+    if (upgradeAmount > 0 && !upgradePaymentMethod) { toast.error('Select how the customer paid the upgrade top-up'); return }
     submittingRef.current = true
     setSaving(true)
     try {
-      const res = await window.api.chits.members.recordRedemption(member.id, { product_id: productId, qty })
+      const res = await window.api.chits.members.recordRedemption(member.id, {
+        product_id: productId, qty,
+        ...(isSubstitution ? { substitution_reason: substitutionReason.trim(), customer_accepted: customerAccepted } : {}),
+        ...(upgradeAmount > 0 ? { upgrade_payment_method: upgradePaymentMethod } : {}),
+      })
       if (res.success) { toast.success(`Redemption recorded — invoice ${res.data?.invoiceNumber || ''}`); onSave() }
       else toast.error(String(res.error || 'Failed to record redemption'))
     } catch (err: any) {
@@ -939,22 +1121,200 @@ function RecordRedemptionModal({ member, schemeChitValue, onClose, onSave }: { m
     )
   }
 
+  const canSave = Boolean(productId) && (!isSubstitution || (substitutionReason.trim() && customerAccepted)) && (upgradeAmount === 0 || Boolean(upgradePaymentMethod))
+
   return (
     <Modal title={`Record Redemption — ${(member.customer_name as string) || 'Member'}`} onClose={onClose}
-      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving || !productId || exceedsLimit} className="btn-primary">{saving ? 'Saving...' : 'Record & Generate Invoice'}</button></>}>
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving || !canSave} className="btn-primary">{saving ? 'Saving...' : 'Record & Generate Invoice'}</button></>}>
       <div className="space-y-3">
-        <p className="text-sm" style={{ color: 'var(--text-2)' }}>Entitled product value: <strong>Rs.{money(schemeChitValue)}</strong> — recording this generates a real invoice, decrements stock, and cannot be undone from here.</p>
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>Entitled value: <strong>Rs.{money(schemeChitValue)}</strong> — recording this generates a real invoice and decrements stock. A mistake can only be corrected afterward via Super Admin's "Reverse Redemption".</p>
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Product *</label>
           <ProductSearchSelect products={products} value={productId} onChange={setProductId} />
         </div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Quantity</label><input type="number" value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="input" min={1} /></div>
         {productId && (
-          <p className="text-xs" style={{ color: exceedsLimit ? '#ef4444' : 'var(--text-3)' }}>
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>
             Unit price Rs.{money(unitPrice)} × {qty} {taxRate > 0 ? `+ ${taxRate}% tax` : ''} = <strong>Rs.{money(estimatedTotal)}</strong>
-            {exceedsLimit ? ' — exceeds entitled value' : ''}
           </p>
         )}
+        {upgradeAmount > 0 && (
+          <div className="rounded-lg border p-3 text-xs space-y-2" style={{ borderColor: '#f59e0b', background: 'color-mix(in srgb, #f59e0b 10%, transparent)' }}>
+            <p style={{ color: 'var(--text-1)' }}>This product exceeds the entitlement by <strong>Rs.{money(upgradeAmount)}</strong> — a customer top-up payment (not a loan/installment), collected now, as part of this same redemption.</p>
+            <div>
+              <label className="block font-medium text-slate-400 mb-1">Upgrade payment method *</label>
+              <select value={upgradePaymentMethod} onChange={e => setUpgradePaymentMethod(e.target.value)} className="input">
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="bank_transfer">Bank Transfer</option>
+              </select>
+            </div>
+          </div>
+        )}
+        {walletCreditAmount > 0 && (
+          <div className="rounded-lg border p-3 text-xs" style={{ borderColor: 'var(--brand-primary)', background: 'color-mix(in srgb, var(--brand-primary) 8%, transparent)' }}>
+            <p style={{ color: 'var(--text-1)' }}>This product is below the entitlement — the remaining <strong>Rs.{money(walletCreditAmount)}</strong> is carried to the customer's SmartBuy Wallet as credit (never cash) for a future purchase.</p>
+          </div>
+        )}
+        {isSubstitution && (
+          <div className="rounded-lg border p-3 text-xs space-y-2" style={{ borderColor: '#ef4444', background: 'color-mix(in srgb, #ef4444 8%, transparent)' }}>
+            <p style={{ color: 'var(--text-1)' }}>This differs from the scheme's own product — a substitution reason and customer acceptance are required before this redemption can complete.</p>
+            <div>
+              <label className="block font-medium text-slate-400 mb-1">Substitution reason *</label>
+              <textarea value={substitutionReason} onChange={e => setSubstitutionReason(e.target.value)} className="input h-16 resize-none" placeholder="e.g. original product out of stock" />
+            </div>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={customerAccepted} onChange={e => setCustomerAccepted(e.target.checked)} className="w-4 h-4" />
+              <span style={{ color: 'var(--text-2)' }}>Customer has accepted this substituted product</span>
+            </label>
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+function ExtendClaimModal({ member, onClose, onSave }: { member: Row; onClose: () => void; onSave: () => void }) {
+  const [newDueDate, setNewDueDate] = useState(() => {
+    const base = member.claim_due_date ? new Date(String(member.claim_due_date)) : new Date()
+    base.setDate(base.getDate() + 30)
+    return base.toISOString().slice(0, 10)
+  })
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const submittingRef = useRef(false)
+
+  const save = async () => {
+    if (submittingRef.current) return
+    if (!reason.trim()) { toast.error('An extension reason is required'); return }
+    submittingRef.current = true
+    setSaving(true)
+    try {
+      const res = await window.api.chits.members.extendClaim(member.id, newDueDate, reason.trim())
+      if (res.success) { toast.success('Claim reminder date extended'); onSave() }
+      else toast.error(String(res.error || 'Failed to extend claim date'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to extend claim date')
+    } finally {
+      submittingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Extend Claim — ${(member.customer_name as string) || 'Member'}`} onClose={onClose}
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Extend'}</button></>}>
+      <div className="space-y-3">
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+          The entitlement never expires — this only resets the soft reminder so the claim stops showing as delayed. Current due date: <strong>{member.claim_due_date ? new Date(String(member.claim_due_date)).toLocaleDateString() : '—'}</strong>
+        </p>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">New claim due date *</label><input type="date" value={newDueDate} onChange={e => setNewDueDate(e.target.value)} className="input" /></div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Extension reason *</label><textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-20 resize-none" placeholder="Required for the audit trail" /></div>
+      </div>
+    </Modal>
+  )
+}
+
+function TransferWinnerModal({ member, onClose, onSave }: { member: Row; onClose: () => void; onSave: () => void }) {
+  const [query, setQuery] = useState('')
+  const [matches, setMatches] = useState<Row[]>([])
+  const [selectedCustomer, setSelectedCustomer] = useState<Row | null>(null)
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const submittingRef = useRef(false)
+
+  useEffect(() => {
+    if (!query.trim() || selectedCustomer) { setMatches([]); return }
+    const t = setTimeout(async () => {
+      try {
+        const res = await window.api.customers.search(query.trim())
+        if (res.success) setMatches(res.data as Row[])
+      } catch { /* ignore */ }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [query, selectedCustomer])
+
+  const save = async () => {
+    if (submittingRef.current) return
+    if (!selectedCustomer) { toast.error('Select the recipient customer'); return }
+    if (!reason.trim()) { toast.error('A transfer reason is required'); return }
+    submittingRef.current = true
+    setSaving(true)
+    try {
+      const res = await window.api.chits.members.transfer(member.id, selectedCustomer.id, reason.trim())
+      if (res.success) { toast.success('Winner entitlement transferred'); onSave() }
+      else toast.error(String(res.error || 'Failed to transfer winner entitlement'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to transfer winner entitlement')
+    } finally {
+      submittingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Transfer Winner Entitlement — ${(member.customer_name as string) || 'Original Winner'}`} onClose={onClose}
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Transferring...' : 'Approve Transfer'}</button></>}>
+      <div className="space-y-3">
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+          Exceptional, Super Admin-only action. The original winner (<strong>{(member.customer_name as string) || '—'}</strong>), draw history, and scheme winner record are never changed — this only records who will actually claim the product.
+        </p>
+        {selectedCustomer ? (
+          <div className="flex items-center justify-between rounded-lg border p-2" style={{ borderColor: 'var(--border)' }}>
+            <span className="text-sm">{selectedCustomer.name as string} — {selectedCustomer.phone as string}</span>
+            <button onClick={() => { setSelectedCustomer(null); setQuery('') }} className="btn-ghost btn-sm">Change</button>
+          </div>
+        ) : (
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Recipient customer *</label>
+            <input value={query} onChange={e => setQuery(e.target.value)} className="input" placeholder="Search by name or phone..." />
+            {matches.length > 0 && (
+              <div className="mt-1 rounded-lg border divide-y max-h-40 overflow-auto" style={{ borderColor: 'var(--border)' }}>
+                {matches.map(c => (
+                  <button key={c.id as string} onClick={() => { setSelectedCustomer(c); setMatches([]) }} className="w-full text-left px-3 py-2 text-sm hover:bg-white/5">
+                    {c.name as string} — {c.phone as string}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Transfer reason *</label><textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-20 resize-none" placeholder="Required for the audit trail" /></div>
+      </div>
+    </Modal>
+  )
+}
+
+function ReverseRedemptionModal({ member, onClose, onSave }: { member: Row; onClose: () => void; onSave: () => void }) {
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const submittingRef = useRef(false)
+
+  const save = async () => {
+    if (submittingRef.current) return
+    if (!reason.trim()) { toast.error('A reversal reason is required'); return }
+    submittingRef.current = true
+    setSaving(true)
+    try {
+      const res = await window.api.chits.members.reverseRedemption(member.id, reason.trim())
+      if (res.success) { toast.success('Redemption reversed — the member is now won and unclaimed again'); onSave() }
+      else toast.error(String(res.error || 'Failed to reverse redemption'))
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reverse redemption')
+    } finally {
+      submittingRef.current = false
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Reverse Redemption — ${(member.customer_name as string) || 'Member'}`} onClose={onClose}
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Reversing...' : 'Reverse'}</button></>}>
+      <div className="space-y-3">
+        <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+          This voids invoice <strong>{(member.redeemed_product_name as string) || '—'}</strong> × {member.redeemed_qty as number}, reverses the stock deduction, cancels any commission earned on it, and claws back any SmartBuy Wallet credit it created. The member stays a winner — just unclaimed again, so staff can redo the redemption.
+        </p>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Reversal reason *</label><textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-20 resize-none" placeholder="Required for the audit trail" /></div>
       </div>
     </Modal>
   )

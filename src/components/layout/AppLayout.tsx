@@ -97,6 +97,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Smart Buy', icon: Coins, perm: ['chits'], module: 'customers',
     items: [
       { to: '/admin/smart-buy', label: 'Dashboard', perm: ['chits'] },
+      { to: '/admin/scheme-master', label: 'Scheme Master', adminOnly: true },
       { to: '/admin/chits', label: 'Schemes', perm: ['chits'] },
       { to: '/admin/chit-customers', label: 'Customers', perm: ['chits'] },
       { to: '/admin/smart-buy-agents', label: 'Agents', perm: ['chits'] },

@@ -287,6 +287,12 @@ export class SyncService {
       'product_uom', 'product_batches', 'audit_logs',
       // Chit Fund
       'chit_schemes',
+      // Smart Buy centralized Scheme Master — a template created by Super
+      // Admin on one device must reach every other branch's device so it
+      // "immediately appears in the Manager dropdown" there too. Pulled
+      // directly (like chit_schemes itself), not via the scheme-related-ids
+      // dance below, since it's a company-wide catalog, not scheme-scoped.
+      'chit_scheme_templates',
       // Edit requests
       'edit_requests',
       // credit_ledger is pushed from invoices.ts but was missing here, so it
@@ -297,6 +303,10 @@ export class SyncService {
       // agent_id, not scheme_id), so it's pulled directly, not via the
       // chit_schemes-related-ids dance below.
       'agent_remittances',
+      // Smart Buy Product Redemption Policy — wallet is customer-keyed
+      // (not scheme-scoped at all), transfer history is member-keyed, not
+      // scheme_id-keyed, so both are pulled directly like agent_remittances.
+      'smartbuy_wallet', 'smartbuy_wallet_transactions', 'smartbuy_transfer_history',
       // Smart Buy Enterprise Commission Engine — pulled directly (not via
       // the chit_schemes-related-ids dance) since commission_rules can be
       // global/company-wide (not scheme-specific) and agents/reports need
@@ -464,6 +474,8 @@ export class SyncService {
           await sleep(REQUEST_DELAY_MS)
           const schemeBranches = await cloud.related('chit_scheme_branches', 'scheme_id', ids)
           await sleep(REQUEST_DELAY_MS)
+          const withdrawals = await cloud.related('withdrawal_requests', 'scheme_id', ids)
+          await sleep(REQUEST_DELAY_MS)
           db.transaction(() => {
             for (const member of members) {
               try { this.insertFiltered(db, 'chit_members', member) }
@@ -480,6 +492,10 @@ export class SyncService {
             for (const schemeBranch of schemeBranches) {
               try { this.insertFiltered(db, 'chit_scheme_branches', schemeBranch) }
               catch (err) { console.error(`[SyncService] Skipping chit_scheme_branch (${schemeBranch.id}):`, err) }
+            }
+            for (const withdrawal of withdrawals) {
+              try { this.insertFiltered(db, 'withdrawal_requests', withdrawal) }
+              catch (err) { console.error(`[SyncService] Skipping withdrawal_request (${withdrawal.id}):`, err) }
             }
           })()
         }

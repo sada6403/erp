@@ -26,6 +26,7 @@ import SmartBuyDashboardPage from '@/pages/admin/SmartBuyDashboardPage'
 import CommissionRulesPage from '@/pages/admin/CommissionRulesPage'
 import SmartBuyReportsPage from '@/pages/admin/SmartBuyReportsPage'
 import SmartBuySettingsPage from '@/pages/admin/SmartBuySettingsPage'
+import SchemeMasterPage from '@/pages/admin/SchemeMasterPage'
 import AuditLogsPage from '@/pages/admin/AuditLogsPage'
 import EditRequestsPage from '@/pages/admin/EditRequestsPage'
 import OperationsHubPage from '@/pages/admin/OperationsHubPage'
@@ -196,6 +197,7 @@ export default function App() {
         <Route path="/admin/commission-rules" element={<RequireSmartBuyAccess><CommissionRulesPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-reports" element={<RequireSmartBuyAccess><SmartBuyReportsPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-settings" element={<RequireSuperAdmin><SmartBuySettingsPage /></RequireSuperAdmin>} />
+        <Route path="/admin/scheme-master" element={<RequireSuperAdmin><SchemeMasterPage /></RequireSuperAdmin>} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
         <Route path="/admin/edit-requests" element={<EditRequestsPage />} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />

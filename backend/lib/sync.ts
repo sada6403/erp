@@ -20,6 +20,15 @@ export const ALLOWED_TABLES = new Set([
   'product_uom', 'product_batches',
   // Chit Fund
   'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions',
+  // Smart Buy centralized Scheme Master — company-wide template catalog,
+  // not scheme-scoped (no related-key entry needed, same as chit_schemes).
+  'chit_scheme_templates',
+  // Smart Buy Member Withdrawal / Exit Management.
+  'withdrawal_requests',
+  // Smart Buy Product Redemption Policy — wallet (customer-keyed, not
+  // scheme-scoped) and transfer history (member-keyed, pulled directly
+  // like agent_remittances rather than via the scheme-related-ids dance).
+  'smartbuy_wallet', 'smartbuy_wallet_transactions', 'smartbuy_transfer_history',
   // Edit requests
   'edit_requests',
   // Stock counts + discounts — pushed from the app but were missing here,
@@ -48,6 +57,7 @@ const RELATED_KEYS: Record<string, Set<string>> = {
   chit_draws:             new Set(['scheme_id']),
   chit_contributions:     new Set(['scheme_id']),
   chit_scheme_branches:   new Set(['scheme_id']),
+  withdrawal_requests:    new Set(['scheme_id']),
 }
 
 export function assertTable(table: unknown): asserts table is string {

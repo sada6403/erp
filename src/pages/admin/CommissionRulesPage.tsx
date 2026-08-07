@@ -235,7 +235,7 @@ function RuleFormModal({ rule, schemes, products, categories, onClose, onSave }:
               <label className="block text-xs font-medium text-slate-400 mb-1">Scheme</label>
               <select value={form.scheme_id} onChange={e => setForm(f => ({ ...f, scheme_id: e.target.value }))} className="input">
                 <option value="">— Select —</option>
-                {schemes.map(s => <option key={s.id as string} value={s.id as string}>{s.name as string}</option>)}
+                {schemes.map(s => <option key={s.id as string} value={s.id as string}>{s.scheme_number as string} — {s.name as string} ({s.branch_name as string})</option>)}
               </select>
             </div>
           )}

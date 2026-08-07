@@ -6,7 +6,7 @@ import { useKeyboard } from '@/hooks/useKeyboard'
 import type { BillType } from '@/store/cartStore'
 import {
   X, CreditCard, Banknote, Building2, Calendar, Printer, CheckCircle2,
-  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Keyboard, Handshake, UserPlus, Ticket, ChefHat
+  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Keyboard, Handshake, UserPlus, Ticket, ChefHat, Wallet
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { PaymentMethod } from '@/types'
@@ -71,6 +71,11 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [couponInfo, setCouponInfo]     = useState<Record<string, unknown> | null>(null)
   const [couponAmount, setCouponAmount] = useState('0')
   const [couponChecking, setCouponChecking] = useState(false)
+  // SmartBuy Wallet — tied directly to the selected customer, no code to
+  // scan/type (unlike a coupon, a wallet has no separate "bearer").
+  const [walletBalance, setWalletBalance] = useState(0)
+  const [walletAmount, setWalletAmount]   = useState('0')
+  const [useWallet, setUseWallet]         = useState(false)
   const receivedRef = useRef<HTMLInputElement>(null)
   const navigate    = useNavigate()
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null)
@@ -150,6 +155,18 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     })
   }, [cart.customer?.id])
 
+  // Load SmartBuy Wallet balance when customer changes — "using another
+  // customer's wallet" is prevented by construction (this always reads the
+  // CART's own selected customer, there's no separate wallet-owner field).
+  useEffect(() => {
+    if (!cart.customer?.id) { setWalletBalance(0); setUseWallet(false); setWalletAmount('0'); return }
+    window.api.chits.wallet.detail(cart.customer.id).then((r: { success: boolean; data?: { wallet: Record<string, unknown> | null } }) => {
+      const balance = r.success ? Number(r.data?.wallet?.balance || 0) : 0
+      setWalletBalance(balance)
+      if (balance <= 0) { setUseWallet(false); setWalletAmount('0') }
+    }).catch(() => { setWalletBalance(0); setUseWallet(false) })
+  }, [cart.customer?.id])
+
   const isQuotation = billType === 'QUOTATION'
   const isCredit    = billType === 'CREDIT'
   const isRetail    = billType === 'RETAIL'
@@ -176,6 +193,14 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     couponInfo?.customer_id && cartCustomerId && String(couponInfo.customer_id) !== String(cartCustomerId)
   )
 
+  // SmartBuy Wallet — same "optional add-on, chained after coupon" shape,
+  // requires a selected customer (no bearer concept, unlike a coupon).
+  const walletEligible = billType === 'RETAIL' && method !== 'installment' && Boolean(cart.customer?.id) && walletBalance > 0
+  const walletApplied = walletEligible && useWallet
+    ? Number(Math.min(Math.max(0, parseFloat(walletAmount) || 0), walletBalance, totalAfterCoupon).toFixed(2))
+    : 0
+  const totalAfterWallet = Math.max(0, Number((totalAfterCoupon - walletApplied).toFixed(2)))
+
   const validateCoupon = async () => {
     const code = couponCode.trim()
     if (!code) return
@@ -198,15 +223,15 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const clearCoupon = () => { setCouponInfo(null); setCouponCode(''); setCouponAmount('0') }
 
   useEffect(() => {
-    if (method === 'cash') setReceived(String(totalAfterCoupon.toFixed(2)))
+    if (method === 'cash') setReceived(String(totalAfterWallet.toFixed(2)))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [method, cart.total, loyaltyDiscount, couponApplied])
+  }, [method, cart.total, loyaltyDiscount, couponApplied, walletApplied])
 
   const receivedAmount      = parseFloat(received) || 0
   const effectivePaidAmount = isCredit || method === 'installment'
     ? 0
-    : receivedAmount + couponApplied
-  const change = Math.max(0, receivedAmount - totalAfterCoupon)
+    : receivedAmount + couponApplied + walletApplied
+  const change = Math.max(0, receivedAmount - totalAfterWallet)
 
   const buildPayments = (): PaymentLine[] | undefined => {
     if (!isRetail || method === 'installment') return undefined
@@ -238,18 +263,21 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     paid_amount:       method === 'installment' ? Number(downPayment || 0) : effectivePaidAmount,
     change_amount:     change,
     payment_method:    isCredit ? 'credit' : method === 'installment' ? 'installment'
-                        : couponApplied > 0 && receivedAmount > 0 ? 'split'
+                        : (couponApplied > 0 || walletApplied > 0) && receivedAmount > 0 ? 'split'
+                        : walletApplied > 0 && totalAfterWallet <= 0 && couponApplied <= 0 ? 'smartbuy_wallet'
                         : couponApplied > 0 && totalAfterCoupon <= 0 ? 'coupon'
                         : method,
     payment_reference: method === 'installment'
       ? `Down payment — balance Rs.${Math.max(0, cart.total - Number(downPayment || 0)).toFixed(2)}`
       : reference,
-    // Print payload only — the coupon line is display-only here; the real
-    // payments row is inserted by the main process during invoices:create.
+    // Print payload only — the coupon/wallet lines are display-only here;
+    // the real payments rows are inserted by the main process during
+    // invoices:create.
     payments:          method === 'installment'
       ? [{ method: 'installment', amount: Number(downPayment || 0), reference: `Balance Rs.${Math.max(0, cart.total - Number(downPayment || 0)).toFixed(2)}` }]
       : [
           ...(couponApplied > 0 ? [{ method: 'coupon' as PaymentMethod, amount: couponApplied, reference: String(couponInfo?.code || couponCode) }] : []),
+          ...(walletApplied > 0 ? [{ method: 'smartbuy_wallet' as PaymentMethod, amount: walletApplied, reference: 'SmartBuy Wallet' }] : []),
           ...(buildPayments() || []),
         ],
     agent_code:        agentCode.trim() || undefined,
@@ -297,10 +325,14 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       return
     }
 
-    if (isRetail && method !== 'installment' && receivedAmount < totalAfterCoupon) {
+    if (isRetail && method !== 'installment' && receivedAmount < totalAfterWallet) {
       toast.error('Insufficient payment amount')
       receivedRef.current?.focus()
       receivedRef.current?.select()
+      return
+    }
+    if (walletApplied > 0 && !cart.customer?.id) {
+      toast.error('SmartBuy Wallet requires a customer to be selected')
       return
     }
     if (isCredit && !cart.customer) {
@@ -348,6 +380,12 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
         coupon: couponApplied > 0 && couponInfo
           ? { code: String(couponInfo.code), amount: couponApplied }
           : undefined,
+        // SmartBuy Wallet: same pattern — the main process validates the
+        // balance, debits it, and inserts the payments row itself inside
+        // the same transaction. Never sent as a plain payment line.
+        smartbuy_wallet: walletApplied > 0
+          ? { amount: walletApplied }
+          : undefined,
       })
 
       if (!res.success) {
@@ -388,7 +426,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   }, [loading, isRetail, isCredit, isQuotation, method, receivedAmount, reference,
       cart, billType, validUntil, dueDate,
       effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentId,
-      planId, downPayment, plans, couponApplied, couponInfo, totalAfterCoupon])
+      planId, downPayment, plans, couponApplied, couponInfo, totalAfterCoupon,
+      walletApplied, totalAfterWallet])
 
   const handlePrint = useCallback(async (design: 'dot' | 'thermal' | 'a4' = printDesign) => {
     if (!receiptPayload) return
@@ -587,7 +626,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               {isQuotation ? 'Quoted Amount' : isCredit ? 'Credit Amount' : 'Total Amount'}
             </p>
             <p className="text-4xl font-bold" style={{ color: 'var(--text-1)' }}>
-              Rs.{(couponApplied > 0 ? totalAfterCoupon : totalAfterLoyalty).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              Rs.{(walletApplied > 0 ? totalAfterWallet : couponApplied > 0 ? totalAfterCoupon : totalAfterLoyalty).toLocaleString(undefined, { maximumFractionDigits: 2 })}
             </p>
             {loyaltyDiscount > 0 && (
               <p className="text-xs mt-1 text-green-400">
@@ -597,6 +636,11 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
             {couponApplied > 0 && (
               <p className="text-xs mt-1 text-indigo-400">
                 Rs.{couponApplied.toFixed(2)} paid by coupon {String(couponInfo?.code || '')}
+              </p>
+            )}
+            {walletApplied > 0 && (
+              <p className="text-xs mt-1 text-teal-400">
+                Rs.{walletApplied.toFixed(2)} paid by SmartBuy Wallet
               </p>
             )}
           </div>
@@ -757,6 +801,53 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
             </div>
           )}
 
+          {/* SmartBuy Wallet payment — tied to the selected customer, no
+              code to enter. Requires: 1. customer selected, 2. system
+              checks their balance (fetched above), 3. cashier opts in,
+              4. balance applied, 5. remainder payable by the method chosen
+              above. */}
+          {isRetail && method !== 'installment' && (
+            <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)', background: 'color-mix(in srgb, #14b8a6 6%, transparent)' }}>
+              <div className="flex items-center gap-2 mb-2">
+                <Wallet size={15} className="text-teal-400" />
+                <p className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>SmartBuy Wallet</p>
+                {walletEligible && (
+                  <label className="flex items-center gap-1.5 cursor-pointer ml-auto">
+                    <input type="checkbox" checked={useWallet} onChange={e => {
+                      setUseWallet(e.target.checked)
+                      if (e.target.checked) setWalletAmount(String(Math.min(walletBalance, totalAfterCoupon).toFixed(2)))
+                    }} className="w-3.5 h-3.5 accent-teal-500" />
+                    <span className="text-xs font-medium text-teal-400">Use Wallet</span>
+                  </label>
+                )}
+              </div>
+              {!cart.customer?.id ? (
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Select a customer (F2) to check their SmartBuy Wallet balance.</p>
+              ) : !walletEligible ? (
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>This customer has no SmartBuy Wallet credit available.</p>
+              ) : useWallet ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    value={walletAmount}
+                    onChange={e => setWalletAmount(e.target.value)}
+                    className="input py-1 text-sm w-32"
+                    min={0}
+                    max={Math.min(walletBalance, totalAfterCoupon)}
+                    step="0.01"
+                  />
+                  <span className="text-xs" style={{ color: 'var(--text-3)' }}>
+                    of Rs.{walletBalance.toFixed(2)} balance — applying Rs.{walletApplied.toFixed(2)}
+                  </span>
+                  <button onClick={() => setWalletAmount(String(Math.min(walletBalance, totalAfterCoupon).toFixed(2)))}
+                    className="text-xs text-teal-400 underline ml-auto">Max</button>
+                </div>
+              ) : (
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Rs.{walletBalance.toFixed(2)} available.</p>
+              )}
+            </div>
+          )}
+
           {/* QUOTATION: valid until */}
           {isQuotation && (
             <div>
@@ -837,7 +928,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                       }
                     }}
                     className="input text-2xl font-bold text-center h-14"
-                    min={totalAfterCoupon}
+                    min={totalAfterWallet}
                     step="0.01"
                     autoFocus
                   />

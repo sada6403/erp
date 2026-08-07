@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -274,10 +274,10 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
   branches: Row[]; agents: Row[]; products: Row[]
   onClose: () => void; onSave: (id: string) => void
 }) {
+  const [templates, setTemplates] = useState<Row[]>([])
+  const [loadingTemplates, setLoadingTemplates] = useState(true)
   const [form, setForm] = useState({
-    name: '', branch_id: '', product_id: '', agent_id: '',
-    member_count: 50, cycle_count: 12, min_members: 50, frequency: 'monthly',
-    contribution_amount: 0, chit_value: 0,
+    template_id: '', branch_id: '', product_id: '', agent_id: '', member_count: 0,
     early_redemption_count: 0, early_redemption_amount: 0,
     repayment_months: 12, agent_commission_pct: 0,
     start_date: new Date().toISOString().slice(0, 10), notes: '',
@@ -285,6 +285,22 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
     late_payment_days: 5, late_fee_amount: 0,
   })
   const [saving, setSaving] = useState(false)
+  // A plain ref, not just the `saving` state, guards against a double-
+  // click creating two live branch schemes off the same template — React
+  // state updates aren't guaranteed to reflect in the DOM (disabling the
+  // button) before a second, near-simultaneous click event is dispatched.
+  const submittingRef = useRef(false)
+
+  // Centralized Scheme Master: the manager picks one of these by name — the
+  // amount/duration/member-count are never typed here, only ever looked up
+  // server-side from the chosen template (chits:create re-derives and
+  // ignores any client-supplied override for those fields regardless).
+  useEffect(() => {
+    window.api.chits.templates.list({ status: 'active' }).then((res: { success: boolean; data?: Row[]; error?: string }) => {
+      if (res.success) setTemplates(res.data || [])
+      else toast.error(String(res.error || 'Failed to load SmartBuy schemes'))
+    }).catch(() => {}).finally(() => setLoadingTemplates(false))
+  }, [])
 
   // Pre-fill company-wide Smart Buy defaults (Admin Configuration Module) —
   // still fully overridable per scheme below.
@@ -293,7 +309,6 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
       if (!res.success || !res.data) return
       setForm(p => ({
         ...p,
-        min_members: Number(res.data!.smartbuy_default_min_members ?? p.min_members),
         late_payment_days: Number(res.data!.smartbuy_default_late_payment_days ?? p.late_payment_days),
         late_fee_amount: Number(res.data!.smartbuy_default_late_fee_amount ?? p.late_fee_amount),
         repayment_months: Number(res.data!.smartbuy_default_repayment_months ?? p.repayment_months),
@@ -304,12 +319,25 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(p => ({ ...p, [k]: e.target.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value }))
 
+  const selectedTemplate = templates.find(t => t.id === form.template_id) || null
+
+  // Picking a scheme defaults the batch size to its minimum — still
+  // adjustable (a branch can run a bigger batch than the minimum-to-
+  // activate), but never below it.
+  const onTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const id = e.target.value
+    const t = templates.find(tpl => tpl.id === id)
+    setForm(p => ({ ...p, template_id: id, member_count: t ? Number(t.minimum_members || 0) : p.member_count }))
+  }
+
   const save = async () => {
-    if (!form.name.trim()) { toast.error('Scheme name is required'); return }
+    if (submittingRef.current) return
+    if (!form.template_id) { toast.error('Select a SmartBuy scheme'); return }
     if (form.member_count <= 0) { toast.error('Member count must be greater than 0'); return }
-    if (form.cycle_count <= 0) { toast.error('Cycle count must be greater than 0'); return }
-    if (form.min_members <= 0) { toast.error('Minimum members must be greater than 0'); return }
-    if (form.min_members > form.member_count) { toast.error('Minimum members cannot exceed member count (capacity)'); return }
+    if (selectedTemplate && form.member_count < Number(selectedTemplate.minimum_members || 0)) {
+      toast.error(`Member count cannot be less than this scheme's minimum members (${selectedTemplate.minimum_members})`); return
+    }
+    submittingRef.current = true
     setSaving(true)
     try {
       const res = await window.api.chits.create(form)
@@ -322,6 +350,7 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
     } catch (err: any) {
       toast.error(err.message || 'Save failed')
     } finally {
+      submittingRef.current = false
       setSaving(false)
     }
   }
@@ -330,7 +359,31 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
     <Modal title="New Smart Buy Scheme" size="lg" onClose={onClose}
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Create Scheme'}</button></>}>
       <div className="space-y-4">
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Scheme Name *</label><input value={form.name} onChange={f('name')} className="input" placeholder="e.g. Rice Cooker Chit — Batch 4" /></div>
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Select Scheme *</label>
+          <select value={form.template_id} onChange={onTemplateChange} className="input">
+            <option value="">{loadingTemplates ? 'Loading...' : '— Select a SmartBuy scheme —'}</option>
+            {templates.map(t => <option key={t.id as string} value={t.id as string}>{t.scheme_name as string}</option>)}
+          </select>
+          {!loadingTemplates && templates.length === 0 && (
+            <p className="text-xs text-amber-400 mt-1">No active SmartBuy schemes yet — ask a Super Admin to add one in Scheme Master first.</p>
+          )}
+        </div>
+        {selectedTemplate && (
+          <div className="grid grid-cols-3 gap-3 text-xs rounded-lg border border-slate-700 p-3">
+            <div><span className="text-slate-500">Monthly Contribution</span><p className="font-semibold">Rs.{Number(selectedTemplate.monthly_contribution_amount || 0).toLocaleString()}</p></div>
+            <div><span className="text-slate-500">Duration</span><p className="font-semibold">{Number(selectedTemplate.duration_months || 0)} month(s)</p></div>
+            <div><span className="text-slate-500">Minimum Members</span><p className="font-semibold">{Number(selectedTemplate.minimum_members || 0)}</p></div>
+            <div className="col-span-3"><span className="text-slate-500">Product Value</span><p className="font-semibold">Rs.{Number(selectedTemplate.product_value || 0).toLocaleString()}</p></div>
+          </div>
+        )}
+        {selectedTemplate && (
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Member Count for This Batch *</label>
+            <input type="number" value={form.member_count} onChange={f('member_count')} className="input" min={Number(selectedTemplate.minimum_members || 1)} />
+            <p className="text-xs text-slate-500 mt-1">This branch's batch size — must be at least this scheme's minimum members ({Number(selectedTemplate.minimum_members || 0)}). If it exceeds the draw duration ({Number(selectedTemplate.duration_months || 0)} cycles), all remaining members receive their product together at the final cycle.</p>
+          </div>
+        )}
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Branch</label>
@@ -354,24 +407,6 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
               {agents.map(a => <option key={a.id as string} value={a.id as string}>{a.name as string} ({a.code as string})</option>)}
             </select>
           </div>
-        </div>
-        <div className="grid grid-cols-3 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Member Count *</label><input type="number" value={form.member_count} onChange={f('member_count')} className="input" min={1} /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Draw Cycles *</label><input type="number" value={form.cycle_count} onChange={f('cycle_count')} className="input" min={1} /></div>
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Frequency</label>
-            <select value={form.frequency} onChange={f('frequency')} className="input">
-              <option value="monthly">Monthly</option>
-              <option value="weekly">Weekly</option>
-            </select>
-          </div>
-        </div>
-        <p className="text-xs text-slate-500 -mt-2">If member count exceeds draw cycles, all remaining members receive their product together at the final cycle.</p>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Minimum Members to Activate *</label><input type="number" value={form.min_members} onChange={f('min_members')} className="input" min={1} /></div>
-        <p className="text-xs text-slate-500 -mt-2">Scheme stays "Pending" — no draws, no first installment collection — until enrolled members reach this number.</p>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Contribution / Cycle (Rs.)</label><input type="number" value={form.contribution_amount} onChange={f('contribution_amount')} className="input" min={0} /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Full Chit Value (Rs.)</label><input type="number" value={form.chit_value} onChange={f('chit_value')} className="input" min={0} /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Slots</label><input type="number" value={form.early_redemption_count} onChange={f('early_redemption_count')} className="input" min={0} /></div>

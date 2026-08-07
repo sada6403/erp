@@ -7,6 +7,7 @@ import Store from 'electron-store'
 import { insertStockMovement } from '../services/stockMovement'
 import { syncStockRow, syncCustomerRow } from '../services/stockSync'
 import { redeemCouponInTransaction, reverseCouponForInvoice, type CouponRedemptionResult } from './coupons'
+import { debitWalletForInvoice, reverseWalletForInvoice, type WalletDebitResult, type WalletReversalResult } from '../services/smartbuyWallet'
 import { resolveApplicableDiscount } from './discounts'
 import { safeHandle } from './ipcHandler'
 import { computeAndRecordCommission } from '../services/commissionEngine'
@@ -103,6 +104,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const commissionEnqueue: Array<{ table: string; id: string; row: Record<string, unknown>; op: 'INSERT' }> = []
       let creditLedgerRecord: Record<string, unknown> | null = null
       let couponResult: CouponRedemptionResult | null = null
+      let walletDebitResult: WalletDebitResult | null = null
       const agentCode = String(payload.agent_code || '').trim() || null
       const agentName = String(payload.agent_name || '').trim() || null
       const agentId = String(payload.agent_id || '').trim() || null
@@ -176,6 +178,27 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const rendererPaymentLines = Array.isArray(payload.payments) ? payload.payments : (payload.payment ? [payload.payment] : [])
       if (rendererPaymentLines.some((p: Record<string, unknown>) => String(p?.method || '').toLowerCase() === 'coupon')) {
         return { success: false, error: 'Coupon payments must be sent via the coupon field, not as a payment line' }
+      }
+
+      // --- SmartBuy Wallet validation ---
+      // Same pattern as coupons: the renderer never gets to claim a trusted
+      // wallet amount as a plain payment line (a modified client could
+      // otherwise just assert "paid Rs.X via wallet" with no server-side
+      // balance check) — it's sent via its own field and the main process
+      // validates + debits + inserts the payments row itself, inside the
+      // same invoice transaction so a failed sale never spends wallet balance.
+      if (rendererPaymentLines.some((p: Record<string, unknown>) => String(p?.method || '').toLowerCase() === 'smartbuy_wallet')) {
+        return { success: false, error: 'SmartBuy Wallet payments must be sent via the smartbuy_wallet field, not as a payment line' }
+      }
+      const walletRequest = payload.smartbuy_wallet as { amount?: number } | undefined
+      const walletAmount = walletRequest ? Number(walletRequest.amount || 0) : 0
+      if (walletAmount > 0) {
+        if (billType !== 'RETAIL') return { success: false, error: 'SmartBuy Wallet can only be used on retail bills' }
+        // "Prevent: using another customer's wallet" is enforced by
+        // construction below (debitWalletForInvoice always resolves the
+        // wallet via THIS invoice's own customer_id) — this check only
+        // covers the simpler, equally-required case of no customer at all.
+        if (!payload.customer_id) return { success: false, error: 'SmartBuy Wallet requires a customer to be selected' }
       }
 
       const insertInvoice = db.transaction(() => {
@@ -328,6 +351,15 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           })
         }
 
+        // SmartBuy Wallet — debit inside the same transaction; a throw
+        // (insufficient balance, no wallet, concurrent balance change) rolls
+        // the whole sale back, same as coupon redemption above.
+        if (walletAmount > 0) {
+          walletDebitResult = debitWalletForInvoice(db, {
+            customerId: String(payload.customer_id), amount: walletAmount, invoiceId: id, branchId, userId: (user?.id as string) || null,
+          })
+        }
+
         // Credit bill: update credit_ledger and customer outstanding
         if (billType === 'CREDIT') {
           const dueAmt = payload.total_amount - (payload.paid_amount || 0)
@@ -404,6 +436,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (redeemed) {
         await enqueuSync('coupons', redeemed.couponId, 'UPDATE', redeemed.couponRow)
         await enqueuSync('coupon_redemptions', redeemed.redemptionId, 'INSERT', redeemed.redemptionRow)
+      }
+      const walletDebit = walletDebitResult as WalletDebitResult | null
+      if (walletDebit) {
+        await enqueuSync('smartbuy_wallet', walletDebit.walletId, 'UPDATE', walletDebit.walletRow)
+        await enqueuSync('smartbuy_wallet_transactions', walletDebit.transactionId, 'INSERT', walletDebit.transactionRow)
+        await enqueuSync('payments', walletDebit.paymentId, 'INSERT', walletDebit.paymentRow)
       }
 
       return { success: true, data: { id, invoice_number: invoiceNumber, bill_type: billType } }
@@ -639,6 +677,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (invoice.locked_at) return { success: false, error: 'Invoice is locked for day-end. Contact admin.' }
       const movementRecords: Record<string, unknown>[] = []
       let couponReversals: CouponRedemptionResult[] = []
+      let walletReversals: WalletReversalResult[] = []
 
       const cancel = db.transaction(() => {
         // Restore stock for RETAIL and CREDIT bills (not QUOTATION — stock was never deducted)
@@ -682,6 +721,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           couponReversals = reverseCouponForInvoice(db, id, (user?.id as string) || null)
         }
 
+        // Restore SmartBuy Wallet balance for any POS-purchase debit on this
+        // invoice — a new reversal transaction, never deleting the original.
+        if (invoice.status !== 'cancelled') {
+          walletReversals = reverseWalletForInvoice(db, id, (user?.id as string) || null)
+        }
+
         db.prepare(`UPDATE invoices SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
 
         logAudit(db, {
@@ -703,6 +748,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       for (const reversal of couponReversals) {
         await enqueuSync('coupons', reversal.couponId, 'UPDATE', reversal.couponRow)
         await enqueuSync('coupon_redemptions', reversal.redemptionId, 'INSERT', reversal.redemptionRow)
+      }
+      for (const reversal of walletReversals) {
+        await enqueuSync('smartbuy_wallet', reversal.walletId, 'UPDATE', reversal.walletRow)
+        await enqueuSync('smartbuy_wallet_transactions', reversal.transactionId, 'INSERT', reversal.transactionRow)
       }
       return { success: true }
   })
