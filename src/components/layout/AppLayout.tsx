@@ -97,10 +97,13 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Smart Buy', icon: Coins, perm: ['chits'], module: 'customers',
     items: [
       { to: '/admin/smart-buy', label: 'Dashboard', perm: ['chits'] },
+      { to: '/admin/smart-buy-award', label: 'Award Winners', perm: ['chits'] },
       { to: '/admin/scheme-master', label: 'Scheme Master', adminOnly: true },
       { to: '/admin/chits', label: 'Schemes', perm: ['chits'] },
+      { to: '/admin/smart-buy-calculator', label: 'Viability Calculator', perm: ['chits'] },
       { to: '/admin/chit-customers', label: 'Customers', perm: ['chits'] },
       { to: '/admin/smart-buy-agents', label: 'Agents', perm: ['chits'] },
+      { to: '/admin/smart-buy-reminders', label: 'Payment Reminders', perm: ['chits'] },
       { to: '/admin/smart-buy-reports', label: 'Reports', perm: ['chits'] },
       { to: '/admin/commission-rules', label: 'Commission Rules', adminOnly: true },
       { to: '/admin/smart-buy-settings', label: 'Admin Configuration', adminOnly: true },

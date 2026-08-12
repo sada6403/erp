@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Pencil, Trash2, Percent, Gift, Clock } from 'lucide-react'
+import { Plus, Pencil, Trash2, Percent, Gift, Clock, ChevronDown, ChevronUp } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
@@ -193,6 +193,12 @@ function RuleFormModal({ rule, schemes, products, categories, onClose, onSave }:
     notes: String(rule?.notes || ''),
   })
   const [saving, setSaving] = useState(false)
+  // Collapsed by default — who earns the commission, priority, and bonus
+  // stacking are real policy decisions, but the defaults (100% to the
+  // registration agent, priority 0, active, not a bonus) cover the common
+  // "just add a straightforward commission rate" case without asking a
+  // basic user to understand all of them up front.
+  const [showAdvanced, setShowAdvanced] = useState(false)
 
   const save = async () => {
     if (!form.name.trim()) { toast.error('Rule name is required'); return }
@@ -277,38 +283,48 @@ function RuleFormModal({ rule, schemes, products, categories, onClose, onSave }:
           </div>
         </div>
 
-        <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Ownership Model — who earns this commission</label>
-          <select value={form.ownership_model} onChange={e => setForm(f => ({ ...f, ownership_model: e.target.value }))} className="input">
-            <option value="registration">Registration Agent (who enrolled the member)</option>
-            <option value="sales">Sales Agent (who collected this payment)</option>
-            <option value="split">Split between both</option>
-          </select>
-        </div>
-        {form.ownership_model === 'split' && (
-          <div className="grid grid-cols-2 gap-3">
-            <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Share %</label><input type="number" value={form.registration_share_pct} onChange={e => setForm(f => ({ ...f, registration_share_pct: parseFloat(e.target.value) || 0 }))} className="input" min={0} max={100} /></div>
-            <div><label className="block text-xs font-medium text-slate-400 mb-1">Sales Share %</label><input type="number" value={form.sales_share_pct} onChange={e => setForm(f => ({ ...f, sales_share_pct: parseFloat(e.target.value) || 0 }))} className="input" min={0} max={100} /></div>
+        <button type="button" onClick={() => setShowAdvanced(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-semibold w-full pt-1" style={{ color: 'var(--brand-primary)' }}>
+          {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          Advanced Settings (optional — who earns it, priority, bonus stacking)
+        </button>
+
+        {showAdvanced && (
+          <div className="space-y-4 rounded-lg border p-3" style={{ borderColor: 'var(--border)' }}>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Ownership Model — who earns this commission</label>
+              <select value={form.ownership_model} onChange={e => setForm(f => ({ ...f, ownership_model: e.target.value }))} className="input">
+                <option value="registration">Registration Agent (who enrolled the member)</option>
+                <option value="sales">Sales Agent (who collected this payment)</option>
+                <option value="split">Split between both</option>
+              </select>
+            </div>
+            {form.ownership_model === 'split' && (
+              <div className="grid grid-cols-2 gap-3">
+                <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Share %</label><input type="number" value={form.registration_share_pct} onChange={e => setForm(f => ({ ...f, registration_share_pct: parseFloat(e.target.value) || 0 }))} className="input" min={0} max={100} /></div>
+                <div><label className="block text-xs font-medium text-slate-400 mb-1">Sales Share %</label><input type="number" value={form.sales_share_pct} onChange={e => setForm(f => ({ ...f, sales_share_pct: parseFloat(e.target.value) || 0 }))} className="input" min={0} max={100} /></div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Priority (higher wins if multiple base rules match)</label><input type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: parseInt(e.target.value) || 0 }))} className="input" min={0} /></div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Status</label>
+                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="input">
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                </select>
+              </div>
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={form.is_bonus} onChange={e => setForm(f => ({ ...f, is_bonus: e.target.checked }))} className="w-4 h-4" />
+              <span className="text-xs" style={{ color: 'var(--text-2)' }}>Bonus / Campaign — stacks additively on top of the one matching base rule, instead of replacing it</span>
+            </label>
+
+            <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input h-16 resize-none" /></div>
           </div>
         )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Priority (higher wins if multiple base rules match)</label><input type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: parseInt(e.target.value) || 0 }))} className="input" min={0} /></div>
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Status</label>
-            <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="input">
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </div>
-        </div>
-
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" checked={form.is_bonus} onChange={e => setForm(f => ({ ...f, is_bonus: e.target.checked }))} className="w-4 h-4" />
-          <span className="text-xs" style={{ color: 'var(--text-2)' }}>Bonus / Campaign — stacks additively on top of the one matching base rule, instead of replacing it</span>
-        </label>
-
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} className="input h-16 resize-none" /></div>
       </div>
     </Modal>
   )

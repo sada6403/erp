@@ -88,11 +88,20 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   safeHandleModule(ipcMain, 'purchases:create', 'purchase_orders', async (_e, payload) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
+      const perms = currentPerms()
+      if (!perms.all && !perms.inventory) throw new Error('Inventory access required')
       if (!payload.supplier_id)       throw new Error('Supplier is required')
       if (!payload.items?.length)     throw new Error('At least one item is required')
       if (!payload.branch_id && !user?.branch_id) throw new Error('Branch is required')
 
-      const branchId = payload.branch_id || user?.branch_id as string
+      // A non-admin can only raise a PO for their own branch — the client's
+      // branch_id is only trusted for admins (who legitimately manage POs
+      // across branches).
+      const branchId = perms.all ? (payload.branch_id || user?.branch_id as string) : (user?.branch_id as string)
+      if (!branchId) throw new Error('Branch is required')
+      if (!perms.all && payload.branch_id && payload.branch_id !== user?.branch_id) {
+        throw new Error('Cannot raise a purchase order for another branch')
+      }
       const id = crypto.randomUUID()
       const po_number = getNextPONumber(branchId)
 
@@ -159,8 +168,14 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   safeHandleModule(ipcMain, 'purchases:updateStatus', 'purchase_orders', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
+      const perms = currentPerms()
       const po = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!po) throw new Error('Purchase order not found')
+
+      if (!perms.all && !perms.inventory) throw new Error('Inventory access required')
+      if (!perms.all && user?.branch_id && po.branch_id !== user.branch_id) {
+        throw new Error('Cannot update a purchase order from another branch')
+      }
 
       const allowed = PO_TRANSITIONS[String(po.status)]
       if (!allowed?.includes(status)) {
@@ -170,7 +185,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       // Only a Company Admin can mark stock as received — this is the point
       // new stock actually enters the company (PARTIAL also increments stock
       // and can auto-promote to RECEIVED below, so it's gated too).
-      if ((status === 'RECEIVED' || status === 'PARTIAL') && !currentPerms().all) {
+      if ((status === 'RECEIVED' || status === 'PARTIAL') && !perms.all) {
         throw new Error('Only a Company Admin can mark a purchase order as received.')
       }
 
@@ -262,9 +277,24 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   safeHandleModule(ipcMain, 'purchases:update', 'purchase_orders', async (_e, id: string, payload: Record<string, unknown>) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
+      const perms = currentPerms()
       const po = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!po) throw new Error('Purchase order not found')
+      if (!perms.all && !perms.inventory) throw new Error('Inventory access required')
+      if (!perms.all && user?.branch_id && po.branch_id !== user.branch_id) {
+        throw new Error('Cannot edit a purchase order from another branch')
+      }
       if (po.status !== 'DRAFT') throw new Error('Only DRAFT purchase orders can be edited')
+
+      if (payload.items) {
+        for (const item of payload.items as Record<string, unknown>[]) {
+          if (!item.product_id) throw new Error('Each item must have a product_id')
+          const qty = Number(item.quantity) || 0
+          const unitCost = Number(item.unit_cost) || 0
+          if (qty <= 0) throw new Error('Item quantity must be greater than zero')
+          if (unitCost <= 0) throw new Error('Item unit cost must be greater than zero')
+        }
+      }
 
       const newItems: Record<string, unknown>[] = []
 

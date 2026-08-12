@@ -31,6 +31,15 @@ export function registerBackupHandlers(): void {
   })
 
   safeHandle(ipcMain, 'backup:export', async (_e, filepath: string) => {
+    // Destination is dialog-chosen (safe), but `filepath` (the SOURCE being
+    // copied) comes straight from the IPC argument — without this check any
+    // renderer-side call could copy an arbitrary local file out through the
+    // save dialog (e.g. `backup:export('C:\\Users\\...\\credentials.json')`),
+    // same class of bug as backup:delete already guards against.
+    const backupDir = getBackupDir()
+    if (!filepath.startsWith(backupDir)) {
+      return { success: false, error: 'Invalid path' }
+    }
     const result = await dialog.showSaveDialog({
       title: 'Export Backup',
       defaultPath: path.basename(filepath),

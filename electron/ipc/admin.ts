@@ -525,9 +525,32 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true }
   })
 
-  safeHandle(ipcMain, 'admin:users:toggleActive', (_e, id: string, active: boolean) => {
+  // Resolves the caller's perms + confirms they may act on `targetUser` at
+  // all: employee-management access, same branch unless global, and the
+  // seeded super admin account is untouchable by anyone but itself — same
+  // protection admin:users:hardDelete already applies to deletion, extended
+  // here since enable/disable, password reset, and force-password-change
+  // are all equally capable of locking out (or handing over) that account.
+  function assertCanManageUser(id: string): { db: ReturnType<typeof getDb>; caller: Record<string, unknown>; error?: string } {
     const db = getDb()
     const caller = authUser()
+    const perms = currentPerms(caller)
+    if (!perms.all && !perms.employees) return { db, caller, error: 'Employee management access required' }
+    const SUPER_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
+    if (id === SUPER_ADMIN_ID && String(caller.id) !== SUPER_ADMIN_ID) {
+      return { db, caller, error: 'Only the super admin account can modify itself' }
+    }
+    const user = db.prepare('SELECT id, branch_id FROM users WHERE id=?').get(id) as { id: string; branch_id: string | null } | undefined
+    if (!user) return { db, caller, error: 'User not found' }
+    if (!perms.all && caller.branch_id && user.branch_id !== caller.branch_id) {
+      return { db, caller, error: 'Cannot manage users from another branch' }
+    }
+    return { db, caller }
+  }
+
+  safeHandle(ipcMain, 'admin:users:toggleActive', (_e, id: string, active: boolean) => {
+    const { db, caller, error } = assertCanManageUser(id)
+    if (error) return { success: false, error }
     db.prepare(`UPDATE users SET is_active=?, updated_at=datetime('now') WHERE id=?`).run(active ? 1 : 0, id)
     logAudit(db, {
       userId: caller.id as string, branchId: caller.branch_id as string,
@@ -540,8 +563,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'admin:users:resetPassword', async (_e, id: string, newPassword: string) => {
     if (!newPassword || newPassword.length < 8) return { success: false, error: 'Password must be at least 8 characters' }
-    const db = getDb()
-    const caller = authUser()
+    const { db, caller, error } = assertCanManageUser(id)
+    if (error) return { success: false, error }
     const hash = await bcrypt.hash(newPassword, 10)
     db.prepare(`UPDATE users SET password_hash=?, force_password_change=1, updated_at=datetime('now') WHERE id=?`).run(hash, id)
     logAudit(db, { userId: caller.id as string, branchId: caller.branch_id as string, action: 'PASSWORD_RESET_BY_ADMIN', tableName: 'users', recordId: id })
@@ -550,8 +573,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
 
   safeHandle(ipcMain, 'admin:users:forcePasswordChange', (_e, id: string, force: boolean) => {
-    const db = getDb()
-    const caller = authUser()
+    const { db, caller, error } = assertCanManageUser(id)
+    if (error) return { success: false, error }
     db.prepare(`UPDATE users SET force_password_change=?, updated_at=datetime('now') WHERE id=?`).run(force ? 1 : 0, id)
     logAudit(db, { userId: caller.id as string, branchId: caller.branch_id as string, action: 'FORCE_PASSWORD_CHANGE_SET', tableName: 'users', recordId: id })
     return { success: true }
@@ -1562,6 +1585,30 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   // ── Force Reset (called when cloud detects company was deleted by SuperAdmin) ─
   // No permission check — this is triggered by the cloud, not the logged-in user.
   safeHandle(ipcMain, 'admin:forceReset', async () => {
+    // This is meant to fire ONLY from AppLayout's own tenant-deletion check
+    // (3 consecutive 401s from the cloud /api/brand endpoint) — but any
+    // renderer-side code (devtools console, a compromised dependency) can
+    // invoke ANY IPC channel directly, and this one wipes every local table
+    // with no undo. The renderer's "3 consecutive 401s" counter is just a
+    // debounce in its own state, not something this handler can trust — so
+    // re-verify the actual precondition here, against the main process's
+    // OWN stored cloud settings, before doing anything destructive. No cloud
+    // config, a reachable non-401 response, or a network error all abort.
+    const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const apiUrl = String(appSettings.cloud_api_url || '')
+    const apiKey = String(appSettings.cloud_api_key || '')
+    if (!apiUrl || !apiKey) {
+      return { success: false, error: 'Reset refused: no cloud configuration to verify against' }
+    }
+    try {
+      const resp = await fetch(`${apiUrl}/api/brand`, { headers: { 'x-api-key': apiKey } })
+      if (resp.status !== 401) {
+        return { success: false, error: 'Reset refused: cloud did not confirm this tenant is gone' }
+      }
+    } catch {
+      return { success: false, error: 'Reset refused: could not reach cloud to verify' }
+    }
+
     const db = getDb()
 
     // Safety net: this wipes every local table with no undo. Keep a hot

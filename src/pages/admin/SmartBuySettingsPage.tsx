@@ -17,6 +17,9 @@ export default function SmartBuySettingsPage() {
     smartbuy_default_late_fee_amount: 0,
     smartbuy_default_repayment_months: 12,
     smartbuy_enforce_registration_lock: true,
+    smartbuy_calc_good_margin_pct: 15,
+    smartbuy_calc_min_margin_pct: 0,
+    smartbuy_calc_cash_risk_pct: 10,
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -30,6 +33,9 @@ export default function SmartBuySettingsPage() {
           smartbuy_default_late_fee_amount: Number(res.data!.smartbuy_default_late_fee_amount ?? f.smartbuy_default_late_fee_amount),
           smartbuy_default_repayment_months: Number(res.data!.smartbuy_default_repayment_months ?? f.smartbuy_default_repayment_months),
           smartbuy_enforce_registration_lock: res.data!.smartbuy_enforce_registration_lock !== false,
+          smartbuy_calc_good_margin_pct: Number(res.data!.smartbuy_calc_good_margin_pct ?? f.smartbuy_calc_good_margin_pct),
+          smartbuy_calc_min_margin_pct: Number(res.data!.smartbuy_calc_min_margin_pct ?? f.smartbuy_calc_min_margin_pct),
+          smartbuy_calc_cash_risk_pct: Number(res.data!.smartbuy_calc_cash_risk_pct ?? f.smartbuy_calc_cash_risk_pct),
         }))
       } else if (!res.success) {
         toast.error('Failed to load settings')
@@ -105,6 +111,28 @@ export default function SmartBuySettingsPage() {
             <span className="text-sm" style={{ color: 'var(--text-2)' }}>Enforce each scheme's Registration Opens / Closes dates</span>
           </label>
           <p className="text-xs" style={{ color: 'var(--text-3)' }}>When on, new-member enrollment is rejected outside a scheme's registration window (set per scheme). Turn off to allow enrollment any time regardless of those dates.</p>
+        </div>
+
+        <div className="card space-y-4">
+          <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Viability Calculator Thresholds</h3>
+          <div className="grid grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Good Margin % (🟢 threshold)</label>
+              <input type="number" value={form.smartbuy_calc_good_margin_pct} onChange={num('smartbuy_calc_good_margin_pct')} className="input" min={0} step="0.1" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Minimum Margin % (🔴 floor)</label>
+              <input type="number" value={form.smartbuy_calc_min_margin_pct} onChange={num('smartbuy_calc_min_margin_pct')} className="input" step="0.1" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Cash Flow Risk % (of income)</label>
+              <input type="number" value={form.smartbuy_calc_cash_risk_pct} onChange={num('smartbuy_calc_cash_risk_pct')} className="input" min={0} step="0.1" />
+            </div>
+          </div>
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+            The Scheme Viability Calculator classifies a projection 🟢 Profitable at or above the Good Margin, 🔴 Loss below the Minimum Margin (or a negative profit), and 🟡 Low Profit in between.
+            Cash-flow risk is 🟢 Low when the projection never dips cash-negative, 🔴 High when the peak cash requirement exceeds this % of expected income, and 🟡 Medium in between.
+          </p>
         </div>
       </div>
     </div>

@@ -3,12 +3,19 @@ import crypto from 'crypto'
 import Store from 'electron-store'
 import { getDb } from '../database'
 import { enqueuSync } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
 function currentUser() {
   return store.get('auth_user') as Record<string, unknown> | undefined
+}
+
+function currentPerms(caller: Record<string, unknown> | undefined = currentUser()): Record<string, unknown> {
+  return ((caller?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller?.permissions as Record<string, unknown>)
+    || {}
 }
 
 export function registerOrderHandlers(ipcMain: IpcMain) {
@@ -39,9 +46,16 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'orders:create', async (_e, payload) => {
     const db = getDb()
       const user = currentUser()
+      const perms = currentPerms(user)
+      if (!perms.all && !perms.employees && !perms.pos) throw new Error('Access required to create an order')
       const id = crypto.randomUUID()
-      const branchId = payload.branch_id || user?.branch_id
+      // A non-admin can only place an order under their own branch — the
+      // client's branch_id is only trusted for admins.
+      const branchId = perms.all ? (payload.branch_id || user?.branch_id) : user?.branch_id
       if (!branchId) throw new Error('A branch is required')
+      if (!perms.all && payload.branch_id && payload.branch_id !== user?.branch_id) {
+        throw new Error('Cannot create an order for another branch')
+      }
       if (!payload.customer_name) throw new Error('Customer name is required')
       if (!Array.isArray(payload.items) || payload.items.length === 0) throw new Error('Add at least one product')
       const orderNumber = `ORD-${String(branchId).slice(0, 3).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`
@@ -79,14 +93,30 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
         delivery_date: payload.delivery_date || null, notes: payload.notes || null,
       })
       for (const row of rows) await enqueuSync('customer_order_items', String(row.id), 'INSERT', row)
+      logAudit(db, { userId: (user?.id as string) || null, branchId: String(branchId), action: 'ORDER_CREATED', tableName: 'customer_orders', recordId: id, newValues: { order_number: orderNumber, total } })
       return { success: true, data: { id, order_number: orderNumber } }
   })
 
-  safeHandle(ipcMain, 'orders:updateStatus', async (_e, id: string, status: string, details = {}) => {
+  // Only these caller-supplied fields are ever allowed into the UPDATE —
+  // `details` used to be spread directly into the SQL SET clause's column
+  // list, so an arbitrary key from the renderer became an arbitrary column
+  // reference. Whitelisting closes that off regardless of what's in details.
+  const ORDER_UPDATE_ALLOWED_FIELDS = ['notes', 'delivery_date', 'payment_status', 'paid_amount'] as const
+
+  safeHandle(ipcMain, 'orders:updateStatus', async (_e, id: string, status: string, details: Record<string, unknown> = {}) => {
     const allowed = ['pending','confirmed','processing','preparing','ready_for_delivery','dispatched','in_transit','delivered','cancelled','returned']
       if (!allowed.includes(status)) throw new Error('Invalid order status')
       const user = currentUser()
-      const patch: Record<string, unknown> = { status, ...details }
+      const perms = currentPerms(user)
+      if (!perms.all && !perms.employees && !perms.pos) throw new Error('Access required to update an order')
+      const db0 = getDb()
+      const order = db0.prepare('SELECT branch_id FROM customer_orders WHERE id=?').get(id) as { branch_id: string | null } | undefined
+      if (!order) throw new Error('Order not found')
+      if (!perms.all && user?.branch_id && order.branch_id !== user.branch_id) {
+        throw new Error('Cannot update an order from another branch')
+      }
+      const patch: Record<string, unknown> = { status }
+      for (const k of ORDER_UPDATE_ALLOWED_FIELDS) if (details[k] !== undefined) patch[k] = details[k]
       if (status === 'confirmed') patch.approved_by = user?.id || null
       if (status === 'ready_for_delivery') patch.released_by = user?.id || null
       if (status === 'dispatched') patch.dispatch_at = new Date().toISOString()
@@ -95,9 +125,10 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
         patch.delivery_confirmed_by = user?.id || null
       }
       const fields = Object.keys(patch).map(k => `${k}=@${k}`).join(',')
-      getDb().prepare(`UPDATE customer_orders SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
+      db0.prepare(`UPDATE customer_orders SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
         .run({ id, ...patch })
       await enqueuSync('customer_orders', id, 'UPDATE', { id, ...patch })
+      logAudit(db0, { userId: (user?.id as string) || null, branchId: order.branch_id, action: 'ORDER_STATUS_UPDATED', tableName: 'customer_orders', recordId: id, newValues: { status } })
       return { success: true }
   })
 }

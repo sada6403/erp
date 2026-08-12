@@ -317,6 +317,18 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
 
       const db = getDb()
+      const product = db.prepare('SELECT id, branch_id FROM products WHERE id = ?').get(id) as { id: string; branch_id: string | null } | undefined
+      if (!product) return { success: false, error: 'Product not found' }
+      // A branch-tagged product may only be deactivated by an admin or a
+      // caller from that same branch — global (NULL branch_id) products
+      // remain admin-only in practice since perms.inventory without perms.all
+      // still belongs to a specific branch.
+      if (!perms.all) {
+        const callerBranch = (caller?.branch_id as string) || null
+        if (product.branch_id ? product.branch_id !== callerBranch : true) {
+          return { success: false, error: 'Cannot deactivate a product from another branch' }
+        }
+      }
       db.prepare("UPDATE products SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id)
       await enqueuSync('products', id, 'UPDATE', { id, is_active: 0 })
       return { success: true }

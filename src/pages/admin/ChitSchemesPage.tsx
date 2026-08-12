@@ -4,8 +4,8 @@ import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import StatCard from '@/components/shared/StatCard'
 import TypeToConfirmModal from '@/components/shared/TypeToConfirmModal'
-import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
-import { Plus, Users, Coins, Repeat, Search, Download, FileSpreadsheet, FileText, Trash2, Power, PowerOff, Flame } from 'lucide-react'
+import SmartBuyViabilityCalculator from '@/components/shared/SmartBuyViabilityCalculator'
+import { Plus, Users, Coins, Repeat, Search, Download, FileSpreadsheet, FileText, Trash2, Power, PowerOff, Flame, ChevronDown, ChevronUp, Calculator } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -21,7 +21,6 @@ export default function ChitSchemesPage() {
   const [purging, setPurging] = useState<Row | null>(null)
   const [branches, setBranches] = useState<Row[]>([])
   const [agents, setAgents] = useState<Row[]>([])
-  const [products, setProducts] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [search, setSearch] = useState('')
@@ -32,11 +31,10 @@ export default function ChitSchemesPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [s, b, a, p] = await Promise.all([
+      const [s, b, a] = await Promise.all([
         window.api.chits.list(),
         window.api.admin.branches.list(),
         window.api.agents.list(),
-        window.api.products.list(),
       ])
       if (s.success) setSchemes(s.data as Row[])
       else toast.error(String(s.error || 'Failed to load chit schemes'))
@@ -44,8 +42,6 @@ export default function ChitSchemesPage() {
       else toast.error(String(b.error || 'Failed to load branches'))
       if (a.success) setAgents(a.data as Row[])
       else toast.error(String(a.error || 'Failed to load agents'))
-      if (p.success) setProducts(p.data as Row[])
-      else toast.error(String(p.error || 'Failed to load products'))
     } catch (err: any) {
       toast.error(err.message || 'Failed to load data')
     } finally {
@@ -105,16 +101,18 @@ export default function ChitSchemesPage() {
     return true
   })
 
-  const totals = schemes.reduce<{ members: number; contributions: number; active: number }>((acc, s) => ({
+  const totals = schemes.reduce<{ members: number; contributions: number; active: number; profit: number }>((acc, s) => ({
     members: acc.members + Number(s.members_enrolled || 0),
     contributions: acc.contributions + Number(s.contributions_collected || 0),
     active: acc.active + (s.status === 'active' ? 1 : 0),
-  }), { members: 0, contributions: 0, active: 0 })
+    profit: acc.profit + Number(s.profit || 0),
+  }), { members: 0, contributions: 0, active: 0, profit: 0 })
 
   const exportRows = () => filtered.map(s => ({
     'Scheme #': s.scheme_number, Name: s.name, Branch: s.branch_name, Agent: s.agent_name,
     Status: s.status, Members: `${s.members_enrolled}/${s.member_count}`, Cycles: `${s.cycles_completed}/${s.cycle_count}`,
     'Chit Value': `Rs.${money(s.chit_value)}`, Collected: `Rs.${money(s.contributions_collected)}`,
+    'Profit / Loss': `Rs.${money(s.profit)}`,
   }))
   const exportMeta = { 'Report': 'Smart Buy Scheme Summary', Branch: branches.find(b => b.id === branchFilter)?.name as string || 'All Branches', Generated: new Date().toLocaleString() }
   const filename = `smartbuy-schemes-${new Date().toISOString().slice(0, 10)}`
@@ -156,10 +154,11 @@ export default function ChitSchemesPage() {
         }
       />
 
-      <div className="grid grid-cols-3 gap-3 px-6 py-4 flex-shrink-0">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 px-6 py-4 flex-shrink-0">
         <StatCard label="Active Schemes" value={totals.active} icon={Repeat} color="brand" />
         <StatCard label="Members Enrolled" value={totals.members} icon={Users} color="blue" />
         <StatCard label="Contributions Collected" value={`Rs.${money(totals.contributions)}`} icon={Coins} color="green" />
+        <StatCard label="Total Profit / Loss" value={`Rs.${money(totals.profit)}`} icon={Coins} color={totals.profit >= 0 ? 'green' : 'red'} />
       </div>
 
       <div className="flex flex-wrap gap-3 px-6 pb-3 flex-shrink-0">
@@ -185,16 +184,16 @@ export default function ChitSchemesPage() {
         <table className="w-full">
           <thead className="sticky top-0 bg-surface-900 z-10">
             <tr>
-              {['Scheme #', 'Name', 'Product', 'Agent', 'Members', 'Cycles', 'Contributions', 'Status', ''].map(h => (
+              {['Scheme #', 'Name', 'Product', 'Agent', 'Members', 'Cycles', 'Contributions', 'Profit / Loss', 'Status', ''].map(h => (
                 <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="text-center py-16 text-slate-500">Loading...</td></tr>
+              <tr><td colSpan={10} className="text-center py-16 text-slate-500">Loading...</td></tr>
             ) : filtered.length === 0 ? (
-              <tr><td colSpan={9} className="text-center py-16 text-slate-500">{schemes.length === 0 ? 'No chit schemes yet — create one to get started' : 'No schemes match your search'}</td></tr>
+              <tr><td colSpan={10} className="text-center py-16 text-slate-500">{schemes.length === 0 ? 'No chit schemes yet — create one to get started' : 'No schemes match your search'}</td></tr>
             ) : filtered.map(s => (
               <tr key={s.id as string} className="table-row cursor-pointer" onClick={() => navigate(`/admin/chits/${s.id}`)}>
                 <td className="table-cell font-mono text-xs font-semibold">{s.scheme_number as string}</td>
@@ -211,6 +210,7 @@ export default function ChitSchemesPage() {
                 </td>
                 <td className="table-cell">{Number(s.cycles_completed || 0)} / {Number(s.cycle_count || 0)}</td>
                 <td className="table-cell text-brand-400 font-semibold">Rs.{money(s.contributions_collected)}</td>
+                <td className={`table-cell font-semibold ${Number(s.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>Rs.{money(s.profit)}</td>
                 <td className="table-cell">
                   <span className={s.status === 'active' ? 'badge-green' : s.status === 'pending' ? 'badge-yellow' : s.status === 'completed' ? 'badge-blue' : 'badge-gray'}>{s.status as string}</span>
                 </td>
@@ -252,7 +252,7 @@ export default function ChitSchemesPage() {
       </div>
 
       {showForm && (
-        <ChitSchemeForm branches={branches} agents={agents} products={products}
+        <ChitSchemeForm branches={branches} agents={agents}
           onClose={() => setShowForm(false)}
           onSave={(id) => { setShowForm(false); load(); navigate(`/admin/chits/${id}`) }} />
       )}
@@ -270,37 +270,38 @@ export default function ChitSchemesPage() {
   )
 }
 
-function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
-  branches: Row[]; agents: Row[]; products: Row[]
+function ChitSchemeForm({ branches, agents, onClose, onSave }: {
+  branches: Row[]; agents: Row[]
   onClose: () => void; onSave: (id: string) => void
 }) {
-  const [templates, setTemplates] = useState<Row[]>([])
-  const [loadingTemplates, setLoadingTemplates] = useState(true)
   const [form, setForm] = useState({
-    template_id: '', branch_id: '', product_id: '', agent_id: '', member_count: 0,
+    name: '', contribution_amount: 0, cycle_count: 12, chit_value: 0,
+    branch_id: '', agent_id: '', member_count: 0,
     early_redemption_count: 0, early_redemption_amount: 0,
     repayment_months: 12, agent_commission_pct: 0,
     start_date: new Date().toISOString().slice(0, 10), notes: '',
     registration_start_date: '', registration_end_date: '',
     late_payment_days: 5, late_fee_amount: 0,
+    projected_early_winners: 0, avg_product_cost: 0, other_expenses: 0,
   })
   const [saving, setSaving] = useState(false)
+  // New Scheme flow (§27): Enter Basic Details → Calculate Viability →
+  // Review → Confirm → Create Scheme. The calculator only hands its
+  // assumptions back via onUseValues below — it never creates a scheme
+  // itself, "Create Scheme" below is still the only thing that does that.
+  const [showCalculator, setShowCalculator] = useState(false)
+  // Collapsed by default — early redemption, repayment terms, commission %,
+  // registration window, and late-fee rules are all real settings a manager
+  // may need, but showing all 14 fields at once overwhelms someone who just
+  // wants to start a straightforward scheme with the sensible defaults
+  // already pre-filled above. Everything here still saves normally if left
+  // untouched — this only changes what's visible, not the form's behavior.
+  const [showAdvanced, setShowAdvanced] = useState(false)
   // A plain ref, not just the `saving` state, guards against a double-
-  // click creating two live branch schemes off the same template — React
-  // state updates aren't guaranteed to reflect in the DOM (disabling the
-  // button) before a second, near-simultaneous click event is dispatched.
+  // click creating two live branch schemes — React state updates aren't
+  // guaranteed to reflect in the DOM (disabling the button) before a
+  // second, near-simultaneous click event is dispatched.
   const submittingRef = useRef(false)
-
-  // Centralized Scheme Master: the manager picks one of these by name — the
-  // amount/duration/member-count are never typed here, only ever looked up
-  // server-side from the chosen template (chits:create re-derives and
-  // ignores any client-supplied override for those fields regardless).
-  useEffect(() => {
-    window.api.chits.templates.list({ status: 'active' }).then((res: { success: boolean; data?: Row[]; error?: string }) => {
-      if (res.success) setTemplates(res.data || [])
-      else toast.error(String(res.error || 'Failed to load SmartBuy schemes'))
-    }).catch(() => {}).finally(() => setLoadingTemplates(false))
-  }, [])
 
   // Pre-fill company-wide Smart Buy defaults (Admin Configuration Module) —
   // still fully overridable per scheme below.
@@ -319,24 +320,13 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(p => ({ ...p, [k]: e.target.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value }))
 
-  const selectedTemplate = templates.find(t => t.id === form.template_id) || null
-
-  // Picking a scheme defaults the batch size to its minimum — still
-  // adjustable (a branch can run a bigger batch than the minimum-to-
-  // activate), but never below it.
-  const onTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const id = e.target.value
-    const t = templates.find(tpl => tpl.id === id)
-    setForm(p => ({ ...p, template_id: id, member_count: t ? Number(t.minimum_members || 0) : p.member_count }))
-  }
-
   const save = async () => {
     if (submittingRef.current) return
-    if (!form.template_id) { toast.error('Select a SmartBuy scheme'); return }
-    if (form.member_count <= 0) { toast.error('Member count must be greater than 0'); return }
-    if (selectedTemplate && form.member_count < Number(selectedTemplate.minimum_members || 0)) {
-      toast.error(`Member count cannot be less than this scheme's minimum members (${selectedTemplate.minimum_members})`); return
-    }
+    if (!form.name.trim()) { toast.error('Enter a scheme name'); return }
+    if (form.contribution_amount <= 0) { toast.error('Enter the contribution amount'); return }
+    if (form.cycle_count <= 0) { toast.error('Enter the duration (months)'); return }
+    if (form.chit_value <= 0) { toast.error('Enter the product value'); return }
+    if (form.member_count <= 0) { toast.error('Enter the maximum number of members'); return }
     submittingRef.current = true
     setSaving(true)
     try {
@@ -359,46 +349,65 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
     <Modal title="New Smart Buy Scheme" size="lg" onClose={onClose}
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Create Scheme'}</button></>}>
       <div className="space-y-4">
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Scheme Name *</label><input value={form.name} onChange={f('name')} className="input" placeholder="e.g. Rs.5000 Scheme" /></div>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Contribution Amount (Rs.) *</label>
+            <input type="number" value={form.contribution_amount} onChange={f('contribution_amount')} className="input" min={0} />
+            <p className="text-[11px] text-slate-500 mt-1">Paid per member, per cycle</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Duration (months) *</label>
+            <input type="number" value={form.cycle_count} onChange={f('cycle_count')} className="input" min={1} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Product Value (Rs.) *</label>
+            <input type="number" value={form.chit_value} onChange={f('chit_value')} className="input" min={0} />
+            <p className="text-[11px] text-slate-500 mt-1">What a winner receives</p>
+          </div>
+        </div>
+
         <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Select Scheme *</label>
-          <select value={form.template_id} onChange={onTemplateChange} className="input">
-            <option value="">{loadingTemplates ? 'Loading...' : '— Select a SmartBuy scheme —'}</option>
-            {templates.map(t => <option key={t.id as string} value={t.id as string}>{t.scheme_name as string}</option>)}
-          </select>
-          {!loadingTemplates && templates.length === 0 && (
-            <p className="text-xs text-amber-400 mt-1">No active SmartBuy schemes yet — ask a Super Admin to add one in Scheme Master first.</p>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Maximum Members *</label>
+          <input type="number" value={form.member_count} onChange={f('member_count')} className="input" min={1} />
+          <p className="text-xs text-slate-500 mt-1">This scheme activates once enrollment reaches this number. If it exceeds the duration ({Number(form.cycle_count) || 0} cycles), all remaining members receive their product together at the final cycle.</p>
+        </div>
+
+        <div>
+          <button type="button" onClick={() => setShowCalculator(v => !v)} className="btn-secondary btn-sm gap-1.5">
+            <Calculator size={14} /> {showCalculator ? 'Hide' : 'Calculate Viability'}
+          </button>
+          {showCalculator && (
+            <div className="mt-3">
+              <SmartBuyViabilityCalculator
+                initialValues={{
+                  monthlyPayment: form.contribution_amount,
+                  duration: form.cycle_count,
+                  productEntitlement: form.chit_value,
+                  participants: form.member_count,
+                  earlyWinners: form.projected_early_winners,
+                  avgProductCost: form.avg_product_cost,
+                  commissionPct: form.agent_commission_pct,
+                  otherExpenses: form.other_expenses,
+                }}
+                onUseValues={({ earlyWinners, avgProductCost, otherExpenses }) => {
+                  setForm(p => ({ ...p, projected_early_winners: earlyWinners, avg_product_cost: avgProductCost, other_expenses: otherExpenses }))
+                  setShowCalculator(false)
+                  toast.success('Viability assumptions applied — review below, then Create Scheme')
+                }}
+              />
+            </div>
           )}
         </div>
-        {selectedTemplate && (
-          <div className="grid grid-cols-3 gap-3 text-xs rounded-lg border border-slate-700 p-3">
-            <div><span className="text-slate-500">Monthly Contribution</span><p className="font-semibold">Rs.{Number(selectedTemplate.monthly_contribution_amount || 0).toLocaleString()}</p></div>
-            <div><span className="text-slate-500">Duration</span><p className="font-semibold">{Number(selectedTemplate.duration_months || 0)} month(s)</p></div>
-            <div><span className="text-slate-500">Minimum Members</span><p className="font-semibold">{Number(selectedTemplate.minimum_members || 0)}</p></div>
-            <div className="col-span-3"><span className="text-slate-500">Product Value</span><p className="font-semibold">Rs.{Number(selectedTemplate.product_value || 0).toLocaleString()}</p></div>
-          </div>
-        )}
-        {selectedTemplate && (
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Member Count for This Batch *</label>
-            <input type="number" value={form.member_count} onChange={f('member_count')} className="input" min={Number(selectedTemplate.minimum_members || 1)} />
-            <p className="text-xs text-slate-500 mt-1">This branch's batch size — must be at least this scheme's minimum members ({Number(selectedTemplate.minimum_members || 0)}). If it exceeds the draw duration ({Number(selectedTemplate.duration_months || 0)} cycles), all remaining members receive their product together at the final cycle.</p>
-          </div>
-        )}
-        <div className="grid grid-cols-3 gap-3">
+
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Branch</label>
             <select value={form.branch_id} onChange={f('branch_id')} className="input">
               <option value="">— Select —</option>
               {branches.map(b => <option key={b.id as string} value={b.id as string}>{b.name as string}</option>)}
             </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Product</label>
-            <ProductSearchSelect
-              products={products}
-              value={form.product_id}
-              onChange={id => setForm(p => ({ ...p, product_id: id }))}
-            />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Agent</label>
@@ -408,27 +417,44 @@ function ChitSchemeForm({ branches, agents, products, onClose, onSave }: {
             </select>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Slots</label><input type="number" value={form.early_redemption_count} onChange={f('early_redemption_count')} className="input" min={0} /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Amount (Rs.)</label><input type="number" value={form.early_redemption_amount} onChange={f('early_redemption_amount')} className="input" min={0} /></div>
-        </div>
-        <p className="text-xs text-slate-500 -mt-2">The first N members (by join order) can take the product immediately for this starting amount, then repay the rest afterward.</p>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Repayment Duration (months)</label><input type="number" value={form.repayment_months} onChange={f('repayment_months')} className="input" min={1} /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Agent Commission %</label><input type="number" value={form.agent_commission_pct} onChange={f('agent_commission_pct')} className="input" min={0} max={100} step="0.01" /></div>
-        </div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Start Date</label><input type="date" value={form.start_date} onChange={f('start_date')} className="input" /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Opens</label><input type="date" value={form.registration_start_date} onChange={f('registration_start_date')} className="input" /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Closes</label><input type="date" value={form.registration_end_date} onChange={f('registration_end_date')} className="input" /></div>
-        </div>
-        <p className="text-xs text-slate-500 -mt-2">Leave blank for no registration lock — new members can enroll any time.</p>
-        <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Late Payment Grace (days into month)</label><input type="number" value={form.late_payment_days} onChange={f('late_payment_days')} className="input" min={0} /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Late Fee (Rs.)</label><input type="number" value={form.late_fee_amount} onChange={f('late_fee_amount')} className="input" min={0} /></div>
-        </div>
-        <p className="text-xs text-slate-500 -mt-2">A cycle payment collected after this day of the month automatically adds the late fee. Set grace days to 0 to disable.</p>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><textarea value={form.notes} onChange={f('notes')} className="input h-20 resize-none" /></div>
+
+        <button type="button" onClick={() => setShowAdvanced(v => !v)}
+          className="flex items-center gap-1.5 text-xs font-semibold w-full pt-1" style={{ color: 'var(--brand-primary)' }}>
+          {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          Advanced Settings (optional — sensible defaults already filled in)
+        </button>
+
+        {showAdvanced && (
+          <div className="space-y-4 rounded-lg border p-3" style={{ borderColor: 'var(--border)' }}>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Slots</label><input type="number" value={form.early_redemption_count} onChange={f('early_redemption_count')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Amount (Rs.)</label><input type="number" value={form.early_redemption_amount} onChange={f('early_redemption_amount')} className="input" min={0} /></div>
+            </div>
+            <p className="text-xs text-slate-500 -mt-2">The first N members (by join order) can take the product immediately for this starting amount, then repay the rest afterward.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Repayment Duration (months)</label><input type="number" value={form.repayment_months} onChange={f('repayment_months')} className="input" min={1} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Agent Commission %</label><input type="number" value={form.agent_commission_pct} onChange={f('agent_commission_pct')} className="input" min={0} max={100} step="0.01" /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Opens</label><input type="date" value={form.registration_start_date} onChange={f('registration_start_date')} className="input" /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Closes</label><input type="date" value={form.registration_end_date} onChange={f('registration_end_date')} className="input" /></div>
+            </div>
+            <p className="text-xs text-slate-500 -mt-2">Leave blank for no registration lock — new members can enroll any time.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Late Payment Grace (days into month)</label><input type="number" value={form.late_payment_days} onChange={f('late_payment_days')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Late Fee (Rs.)</label><input type="number" value={form.late_fee_amount} onChange={f('late_fee_amount')} className="input" min={0} /></div>
+            </div>
+            <p className="text-xs text-slate-500 -mt-2">A cycle payment collected after this day of the month automatically adds the late fee. Set grace days to 0 to disable.</p>
+            <div className="grid grid-cols-3 gap-3">
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Projected Early Winners</label><input type="number" value={form.projected_early_winners} onChange={f('projected_early_winners')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Avg. Product Cost (Rs.)</label><input type="number" value={form.avg_product_cost} onChange={f('avg_product_cost')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Other Expenses (Rs.)</label><input type="number" value={form.other_expenses} onChange={f('other_expenses')} className="input" min={0} /></div>
+            </div>
+            <p className="text-xs text-slate-500 -mt-2">Viability Calculator planning inputs (unrelated to Early Redemption Slots above) — how many monthly-draw winners this plan expects, and the assumed product cost/expenses used for this scheme's Projected financial view. Use "Calculate Viability" above to fill these in automatically.</p>
+          </div>
+        )}
       </div>
     </Modal>
   )

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Pencil, Power, PowerOff, Layers } from 'lucide-react'
+import { Plus, Pencil, Power, PowerOff, Layers, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Row = Record<string, unknown>
@@ -166,6 +166,14 @@ function TemplateFormModal({ template, onClose, onSave }: { template: Row | null
           <div><label className="block text-xs font-medium text-slate-400 mb-1">Minimum Members *</label><input type="number" value={form.minimum_members} onChange={f('minimum_members')} className="input" min={1} /></div>
           <div><label className="block text-xs font-medium text-slate-400 mb-1">Product Value (Rs.) *</label><input type="number" value={form.product_value} onChange={f('product_value')} className="input" min={0} /></div>
         </div>
+        {form.monthly_contribution_amount * form.duration_months !== form.product_value && form.monthly_contribution_amount > 0 && form.duration_months > 0 && form.product_value > 0 && (
+          <div className="rounded-lg p-3 flex items-start gap-2 text-xs" style={{ background: 'color-mix(in srgb, #f59e0b 10%, transparent)', border: '1px solid #f59e0b' }}>
+            <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" style={{ color: '#f59e0b' }} />
+            <span style={{ color: 'var(--text-1)' }}>
+              ⚠ VALUE MISMATCH — Monthly Payment × Duration = Rs.{(form.monthly_contribution_amount * form.duration_months).toLocaleString()}, but Product Entitlement = Rs.{form.product_value.toLocaleString()}. Please review before saving.
+            </span>
+          </div>
+        )}
         <p className="text-xs text-slate-500">
           These are the only details a Smart Buy Manager ever sees for this scheme — they select it by name and everything above comes along locked. Branch, product, agent, and start date are still chosen per batch when a Manager starts a new scheme.
         </p>

@@ -168,6 +168,17 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
+      // Deliberately no permission gate (see comment below) since this also
+      // fires on every product-form save — but it must still stay inside
+      // the caller's own branch, or a direct IPC call from any session
+      // could silently set stock for a branch the caller has nothing to do
+      // with.
+      {
+        const perms = currentPerms()
+        if (!perms.all && user?.branch_id && branch_id !== user.branch_id) {
+          return { success: false, error: 'Cannot adjust stock for another branch' }
+        }
+      }
 
       const existing = db.prepare(`
         SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
@@ -296,6 +307,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       }
       if (payload.from_branch_id === payload.to_branch_id) throw new Error('Branches must be different')
       if (Number(payload.quantity) <= 0) throw new Error('Quantity must be greater than zero')
+      if (!currentPerms().all && user?.branch_id && payload.from_branch_id !== user.branch_id) {
+        throw new Error('You can only request a transfer out of your own branch')
+      }
       const record = {
         id, transfer_number: transferNumber, product_id: payload.product_id,
         from_branch_id: payload.from_branch_id, to_branch_id: payload.to_branch_id,
@@ -496,6 +510,16 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const user = store.get('auth_user') as Record<string, unknown>
       const transfer = db.prepare('SELECT * FROM stock_transfers WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!transfer) throw new Error('Transfer not found')
+      {
+        // perms.employees alone is a global flag, not branch-scoped — without
+        // this, any branch's manager could approve/receive/reject a transfer
+        // between two completely different branches.
+        const cperms = currentPerms()
+        const callerBranch = String(user?.branch_id || '')
+        if (!cperms.all && callerBranch && String(transfer.from_branch_id) !== callerBranch && String(transfer.to_branch_id) !== callerBranch) {
+          throw new Error('You do not have access to this transfer')
+        }
+      }
 
       // Two supported flows:
       //  • Quick accept (dashboard): pending -> received (source deducted + dest
@@ -1041,7 +1065,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'stockCounts:create', async (_e, payload: Record<string, unknown> = {}) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
-      const isGlobal = Boolean(currentPerms().all)
+      const perms = currentPerms()
+      if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory access required' }
+      const isGlobal = Boolean(perms.all)
       // Non-admins are always scoped to their own branch — an explicit
       // branch_id from a non-admin caller is ignored. Admins may target
       // any branch, defaulting to their own if none is given.
@@ -1094,6 +1120,12 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'stockCounts:updateItem', async (_e, sessionId: string, itemId: string, countedQty: number) => {
     const db = getDb()
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const session = db.prepare('SELECT branch_id FROM stock_count_sessions WHERE id=?').get(sessionId) as { branch_id: unknown } | undefined
+      if (!session) return { success: false, error: 'Stock count not found' }
+      if (!currentPerms().all && user?.branch_id && session.branch_id !== user.branch_id) {
+        return { success: false, error: 'Cannot update a stock count from another branch' }
+      }
       db.prepare(`
         UPDATE stock_count_items SET counted_qty = ?, updated_at = datetime('now')
         WHERE id = ? AND session_id = ?
@@ -1108,6 +1140,13 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const session = db.prepare('SELECT * FROM stock_count_sessions WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!session) return { success: false, error: 'Stock count not found' }
       if (session.status === 'completed') return { success: false, error: 'Stock count already completed' }
+      {
+        const perms = currentPerms()
+        if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory access required to finalize a stock count' }
+        if (!perms.all && user?.branch_id && session.branch_id !== user.branch_id) {
+          return { success: false, error: 'Cannot finalize a stock count from another branch' }
+        }
+      }
       const items = db.prepare('SELECT * FROM stock_count_items WHERE session_id=? AND counted_qty IS NOT NULL').all(id) as Record<string, unknown>[]
       const movementRecords: Record<string, unknown>[] = []
 
@@ -1150,11 +1189,23 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
         await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
       }
+      logAudit(db, {
+        userId: (user?.id as string) || null, branchId: (session.branch_id as string) || null,
+        action: 'STOCK_COUNT_FINALIZED', tableName: 'stock_count_sessions', recordId: id,
+        newValues: { itemsAdjusted: movementRecords.length },
+      })
       return { success: true }
   })
 
   safeHandle(ipcMain, 'stockCounts:cancel', async (_e, id: string) => {
-    getDb().prepare(`UPDATE stock_count_sessions SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
+    const db = getDb()
+    const user = store.get('auth_user') as Record<string, unknown> | undefined
+    const session = db.prepare('SELECT branch_id FROM stock_count_sessions WHERE id=?').get(id) as { branch_id: unknown } | undefined
+    if (!session) return { success: false, error: 'Stock count not found' }
+    if (!currentPerms().all && user?.branch_id && session.branch_id !== user.branch_id) {
+      return { success: false, error: 'Cannot cancel a stock count from another branch' }
+    }
+    db.prepare(`UPDATE stock_count_sessions SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
     await enqueuSync('stock_count_sessions', id, 'UPDATE', { id, status: 'cancelled' })
     return { success: true }
   })

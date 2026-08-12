@@ -25,8 +25,11 @@ import SmartBuyAgentsPage from '@/pages/admin/SmartBuyAgentsPage'
 import SmartBuyDashboardPage from '@/pages/admin/SmartBuyDashboardPage'
 import CommissionRulesPage from '@/pages/admin/CommissionRulesPage'
 import SmartBuyReportsPage from '@/pages/admin/SmartBuyReportsPage'
+import PaymentRemindersPage from '@/pages/admin/PaymentRemindersPage'
 import SmartBuySettingsPage from '@/pages/admin/SmartBuySettingsPage'
 import SchemeMasterPage from '@/pages/admin/SchemeMasterPage'
+import SmartBuyAwardWizardPage from '@/pages/admin/SmartBuyAwardWizardPage'
+import SmartBuySchemeCalculatorPage from '@/pages/admin/SmartBuySchemeCalculatorPage'
 import AuditLogsPage from '@/pages/admin/AuditLogsPage'
 import EditRequestsPage from '@/pages/admin/EditRequestsPage'
 import OperationsHubPage from '@/pages/admin/OperationsHubPage'
@@ -194,8 +197,11 @@ export default function App() {
         <Route path="/admin/chit-customers" element={<RequireSmartBuyAccess><ChitCustomersPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-agents" element={<RequireSmartBuyAccess><SmartBuyAgentsPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy" element={<RequireSmartBuyAccess><SmartBuyDashboardPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/smart-buy-award" element={<RequireSmartBuyAccess><SmartBuyAwardWizardPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/smart-buy-calculator" element={<RequireSmartBuyAccess><SmartBuySchemeCalculatorPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/commission-rules" element={<RequireSmartBuyAccess><CommissionRulesPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-reports" element={<RequireSmartBuyAccess><SmartBuyReportsPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/smart-buy-reminders" element={<RequireSmartBuyAccess><PaymentRemindersPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-settings" element={<RequireSuperAdmin><SmartBuySettingsPage /></RequireSuperAdmin>} />
         <Route path="/admin/scheme-master" element={<RequireSuperAdmin><SchemeMasterPage /></RequireSuperAdmin>} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />

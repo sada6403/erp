@@ -699,6 +699,24 @@ function runMigrations(): void {
   if (!hasColumn('chit_schemes', 'late_fee_amount')) {
     db.exec(`ALTER TABLE chit_schemes ADD COLUMN late_fee_amount REAL NOT NULL DEFAULT 0`)
   }
+  // SmartBuy Scheme Viability Calculator — planning-only inputs, persisted
+  // so an existing scheme's "Projected" financial view (as opposed to its
+  // real, transaction-derived "Actual" figures) can be recomputed at any
+  // time from the scheme's own configured assumptions. Deliberately
+  // unrelated to early_redemption_count/is_early_redemption (the separate,
+  // join_order-based earlyRedeem mechanism) — projected_early_winners here
+  // means "how many monthly-draw winners this scheme's plan expects before
+  // the final cycle," a pure projection number that never gates or drives
+  // chits:draws:conduct itself.
+  if (!hasColumn('chit_schemes', 'projected_early_winners')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN projected_early_winners INTEGER NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('chit_schemes', 'avg_product_cost')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN avg_product_cost REAL NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('chit_schemes', 'other_expenses')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN other_expenses REAL NOT NULL DEFAULT 0`)
+  }
   if (!hasColumn('chit_members', 'agent_id')) {
     db.exec(`ALTER TABLE chit_members ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
   }
@@ -735,7 +753,7 @@ function runMigrations(): void {
       winner_member_id  TEXT REFERENCES chit_members(id),
       settled_count     INTEGER NOT NULL DEFAULT 1,
       eligible_count    INTEGER NOT NULL DEFAULT 0,
-      method            TEXT NOT NULL DEFAULT 'random',
+      method            TEXT NOT NULL DEFAULT 'manual_pick',
       conducted_by      TEXT REFERENCES users(id),
       notes             TEXT,
       created_at        TEXT NOT NULL DEFAULT (datetime('now')),
@@ -771,6 +789,36 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_scheme ON chit_contributions(scheme_id);
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_member ON chit_contributions(member_id);
     CREATE INDEX IF NOT EXISTS idx_chit_contributions_status ON chit_contributions(status);
+  `)
+
+  // Manual Draw Result form fields — witness/reference are optional, per the
+  // manual-only draw workflow (random selection has been removed entirely).
+  if (!hasColumn('chit_draws', 'witness_name')) {
+    db.exec(`ALTER TABLE chit_draws ADD COLUMN witness_name TEXT`)
+    db.exec(`ALTER TABLE chit_draws ADD COLUMN reference_number TEXT`)
+  }
+
+  // Payment reminder history — distinct from the existing chit_payment_due
+  // notification sweep (which only fires an internal admin-facing alert);
+  // this tracks each individual customer-facing reminder message sent for
+  // one member's one cycle, for dedup ("Last Reminder Sent") and audit.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS chit_payment_reminders (
+      id               TEXT PRIMARY KEY,
+      member_id        TEXT NOT NULL REFERENCES chit_members(id),
+      scheme_id        TEXT NOT NULL REFERENCES chit_schemes(id),
+      cycle_no         INTEGER NOT NULL,
+      reminder_type    TEXT NOT NULL DEFAULT 'payment_due',
+      message          TEXT NOT NULL,
+      sent_at          TEXT NOT NULL DEFAULT (datetime('now')),
+      sent_by          TEXT REFERENCES users(id),
+      delivery_status  TEXT NOT NULL DEFAULT 'sent',
+      notes            TEXT,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_chit_payment_reminders_member ON chit_payment_reminders(member_id);
+    CREATE INDEX IF NOT EXISTS idx_chit_payment_reminders_scheme ON chit_payment_reminders(scheme_id);
   `)
   // Note: collected_by_agent_id is declared directly in the CREATE TABLE
   // above. It used to also be added via a separate hasColumn-guarded ALTER
@@ -1781,6 +1829,35 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_invoice ON coupon_redemptions(invoice_id);
     CREATE INDEX IF NOT EXISTS idx_coupon_redemptions_branch  ON coupon_redemptions(branch_id);
   `)
+
+  // SmartBuy Remaining-Entitlement Voucher — a downgrade redemption (winner
+  // picks a cheaper product than their frozen entitlement) auto-issues the
+  // leftover as a real coupon instead of losing it. source_type/source_id is
+  // the generic "how was this coupon born" pair (useful for any future
+  // non-SmartBuy auto-issuer); the smartbuy_* columns are the specific
+  // Scheme/Member/Cycle/entitlement/product-value traceability the business
+  // requires, frozen at issuance time the same way chit_members.entitlement_
+  // value/redeemed_value are already frozen at win/redemption time.
+  const couponSourceColumns: Array<[string, string]> = [
+    ['source_type', 'TEXT'],
+    ['source_id', 'TEXT'],
+    ['smartbuy_scheme_id', 'TEXT REFERENCES chit_schemes(id)'],
+    ['smartbuy_member_id', 'TEXT REFERENCES chit_members(id)'],
+    ['smartbuy_cycle_no', 'INTEGER'],
+    ['smartbuy_entitlement_value', 'REAL'],
+    ['smartbuy_product_value', 'REAL'],
+  ]
+  for (const [column, def] of couponSourceColumns) {
+    if (!hasColumn('coupons', column)) db.exec(`ALTER TABLE coupons ADD COLUMN ${column} ${def}`)
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_coupons_source ON coupons(source_type, source_id)`)
+
+  // Points a redeemed member at the voucher (if any) issued for their
+  // leftover entitlement — added here, after the coupons table exists,
+  // rather than in the earlier redemptionPolicyColumns block.
+  if (!hasColumn('chit_members', 'voucher_id')) {
+    db.exec(`ALTER TABLE chit_members ADD COLUMN voucher_id TEXT REFERENCES coupons(id)`)
+  }
 
   // Grant coupon permissions to the system Branch Manager role (idempotent)
   try {

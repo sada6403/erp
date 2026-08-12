@@ -81,6 +81,8 @@ function defaultBranchId() {
   return 'b1111111-1111-4111-8111-111111111111'
 }
 
+const money = (v: number) => Math.round((Number(v) || 0) * 100) / 100
+
 export function registerInvoiceHandlers(ipcMain: IpcMain) {
   // Get next bill number preview
   safeHandle(ipcMain, 'invoices:nextNumber', (_e, billType: BillType = 'RETAIL') => {
@@ -113,30 +115,83 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       // used to type in. A line with no matching rule earns nothing.
       let agentCommissionAmount = 0
 
+      // --- Server-side price integrity (renderer is untrusted) ---
+      // unit_price/tax_rate/line_total used to be taken as-is from the
+      // payload — a modified client (or a direct IPC call) could set ANY
+      // price. There's no "custom price" feature anywhere in this app, so
+      // every line's unit_price must match the product's real, current
+      // selling_price; quantity must be a positive whole number. This is
+      // the actual amount downstream discount/credit/total logic trusts.
+      const priceByProduct = new Map<string, { selling_price: number; tax_rate: number }>()
+      for (const item of (payload.items || [])) {
+        const qty = Number(item.quantity)
+        if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
+          return { success: false, error: 'Every item must have a whole-number quantity greater than zero' }
+        }
+        const productId = String(item.product_id || '')
+        if (!priceByProduct.has(productId)) {
+          const product = db.prepare('SELECT selling_price, tax_rate FROM products WHERE id=?')
+            .get(productId) as { selling_price: number; tax_rate: number } | undefined
+          if (!product) return { success: false, error: `Product not found: ${productId}` }
+          priceByProduct.set(productId, product)
+        }
+        const real = priceByProduct.get(productId)!
+        if (Math.abs(Number(item.unit_price || 0) - Number(real.selling_price || 0)) > 0.01) {
+          return { success: false, error: 'A product price changed since this was added to the cart — please refresh and try again' }
+        }
+      }
+
       // --- Discount cap validation (server-side; the client-side cap in
-      // Cart.tsx can be bypassed by a modified renderer) ---
+      // Cart.tsx can be bypassed by a modified renderer) — and, in the same
+      // pass, the server-authoritative subtotal/discount/tax this handler
+      // now uses for the invoice header instead of trusting payload totals.
       const maxDiscountPct = resolveMaxDiscountPct(user)
-      if (maxDiscountPct !== null) {
+      let itemsSubtotal = 0, itemsDiscountTotal = 0, itemsTaxTotal = 0
+      {
         const TOLERANCE = 0.5 // absorb client-side rounding
-        let itemDiscountTotal = 0
+        let clientItemDiscountTotal = 0
         for (const item of (payload.items || [])) {
-          const unitPrice = Number(item.unit_price || 0)
+          const real = priceByProduct.get(String(item.product_id))!
+          const unitPrice = money(real.selling_price)
+          const qty = Number(item.quantity)
           const pct = Number(item.discount_pct || 0)
-          itemDiscountTotal += Number(item.discount_amount || 0)
-          if (unitPrice <= 0) continue
+          clientItemDiscountTotal += Number(item.discount_amount || 0)
+          const discountAmount = money(unitPrice * qty * Math.max(0, Math.min(100, pct)) / 100)
+          const taxable = money(unitPrice * qty - discountAmount)
+          itemsSubtotal += unitPrice * qty
+          itemsDiscountTotal += discountAmount
+          itemsTaxTotal += money(taxable * (Number(real.tax_rate) || 0) / 100)
+          if (maxDiscountPct === null || unitPrice <= 0) continue
           const auto = resolveApplicableDiscount(db, item.product_id, unitPrice, branchId)
           const allowed = Math.max(maxDiscountPct, auto?.pct || 0)
           if (pct > allowed + TOLERANCE) {
             return { success: false, error: `Discount ${pct}% on an item exceeds your allowed limit (${allowed.toFixed(1)}%)` }
           }
         }
-        const subtotal = Number(payload.subtotal || 0)
-        const globalDiscountAmount = Number(payload.discount_amount || 0) - itemDiscountTotal
-        const globalDiscountPct = subtotal > 0 ? (globalDiscountAmount / subtotal) * 100 : 0
-        if (globalDiscountPct > maxDiscountPct + TOLERANCE) {
-          return { success: false, error: `Overall discount ${globalDiscountPct.toFixed(1)}% exceeds your allowed limit (${maxDiscountPct}%)` }
+        itemsSubtotal = money(itemsSubtotal)
+        itemsDiscountTotal = money(itemsDiscountTotal)
+        itemsTaxTotal = money(itemsTaxTotal)
+        if (maxDiscountPct !== null) {
+          const subtotal = Number(payload.subtotal || 0)
+          const globalDiscountAmount = Number(payload.discount_amount || 0) - clientItemDiscountTotal
+          const globalDiscountPct = subtotal > 0 ? (globalDiscountAmount / subtotal) * 100 : 0
+          if (globalDiscountPct > maxDiscountPct + TOLERANCE) {
+            return { success: false, error: `Overall discount ${globalDiscountPct.toFixed(1)}% exceeds your allowed limit (${maxDiscountPct}%)` }
+          }
         }
       }
+      // Whole-bill discount on top of item-level discounts (e.g. a manager
+      // knocking a flat amount off the total) — its percentage is already
+      // capped above; only the portion beyond the items' own discounts
+      // survives into the authoritative total.
+      const globalDiscount = Math.max(0, money(Number(payload.discount_amount || 0)) - money(
+        (payload.items || []).reduce((sum: number, item: Record<string, unknown>) => sum + (Number(item.discount_amount) || 0), 0)
+      ))
+      const finalSubtotal = itemsSubtotal
+      const finalDiscountAmount = money(itemsDiscountTotal + globalDiscount)
+      const finalTaxAmount = itemsTaxTotal
+      const finalTotalAmount = money(finalSubtotal - finalDiscountAmount + finalTaxAmount)
+      const finalDueAmount = money(Math.max(0, finalTotalAmount - Number(payload.paid_amount || 0)))
 
       // --- Credit bill validation ---
       if (billType === 'CREDIT') {
@@ -153,10 +208,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
             FROM credit_ledger WHERE customer_id = ? AND status = 'outstanding'
           `).get(payload.customer_id) as { balance: number }
           const currentOutstanding = Math.max(customer.outstanding_due, ledger.balance)
-          if (customer.credit_limit > 0 && currentOutstanding + payload.total_amount > customer.credit_limit) {
+          if (customer.credit_limit > 0 && currentOutstanding + finalTotalAmount > customer.credit_limit) {
             return {
               success: false,
-              error: `Credit limit exceeded. Limit: ${customer.credit_limit.toFixed(2)}, Outstanding: ${currentOutstanding.toFixed(2)}, This bill: ${payload.total_amount.toFixed(2)}`
+              error: `Credit limit exceeded. Limit: ${customer.credit_limit.toFixed(2)}, Outstanding: ${currentOutstanding.toFixed(2)}, This bill: ${finalTotalAmount.toFixed(2)}`
             }
           }
         }
@@ -227,12 +282,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           valid_until:     billType === 'QUOTATION' ? (payload.valid_until || null) : null,
           due_date:        billType === 'CREDIT' ? (payload.due_date || null) : null,
           approved_by:     billType === 'CREDIT' ? (payload.approved_by || null) : null,
-          subtotal:        payload.subtotal,
-          discount_amount: payload.discount_amount || 0,
-          tax_amount:      payload.tax_amount || 0,
-          total_amount:    payload.total_amount,
+          subtotal:        finalSubtotal,
+          discount_amount: finalDiscountAmount,
+          tax_amount:      finalTaxAmount,
+          total_amount:    finalTotalAmount,
           paid_amount:     payload.paid_amount || 0,
-          due_amount:      payload.due_amount || 0,
+          due_amount:      finalDueAmount,
           agent_code:      agentCode,
           agent_name:      agentName,
           agent_id:        agentId,
@@ -244,19 +299,32 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           notes:           payload.notes || null,
         })
 
-        // Insert line items
+        // Insert line items — money fields recomputed from the product's
+        // real price/tax_rate (validated above) and the already-capped
+        // discount_pct, never taken as-is from the payload. Only the
+        // percentage is trusted (it passed the discount-cap check above);
+        // every absolute rupee figure is derived from it server-side.
         for (const item of (payload.items || [])) {
+          const real = priceByProduct.get(String(item.product_id))!
+          const unitPrice = money(real.selling_price)
+          const qty = Number(item.quantity)
+          const discountPct = Math.max(0, Math.min(100, Number(item.discount_pct) || 0))
+          const discountAmount = money(unitPrice * qty * discountPct / 100)
+          const taxRate = Number(real.tax_rate) || 0
+          const taxableAmount = money(unitPrice * qty - discountAmount)
+          const taxAmount = money(taxableAmount * taxRate / 100)
+          const lineTotal = money(taxableAmount + taxAmount)
           const itemRow = {
             id:              crypto.randomUUID(),
             invoice_id:      id,
             product_id:      item.product_id,
-            quantity:        item.quantity,
-            unit_price:      item.unit_price,
-            discount_pct:    item.discount_pct || 0,
-            discount_amount: item.discount_amount || 0,
-            tax_rate:        item.tax_rate || 0,
-            tax_amount:      item.tax_amount || 0,
-            line_total:      item.line_total,
+            quantity:        qty,
+            unit_price:      unitPrice,
+            discount_pct:    discountPct,
+            discount_amount: discountAmount,
+            tax_rate:        taxRate,
+            tax_amount:      taxAmount,
+            line_total:      lineTotal,
           }
           db.prepare(`
             INSERT INTO invoice_items (id, invoice_id, product_id, quantity, unit_price,
@@ -304,8 +372,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         }
 
         if (agentCommissionAmount > 0) {
-          const subtotalNum = Number(payload.subtotal) || 0
-          const derivedPct = subtotalNum > 0 ? Number(((agentCommissionAmount / subtotalNum) * 100).toFixed(2)) : 0
+          const derivedPct = finalSubtotal > 0 ? Number(((agentCommissionAmount / finalSubtotal) * 100).toFixed(2)) : 0
           db.prepare(`UPDATE invoices SET agent_commission_pct=?, agent_commission_amount=? WHERE id=?`)
             .run(derivedPct, agentCommissionAmount, id)
         }
@@ -362,7 +429,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
         // Credit bill: update credit_ledger and customer outstanding
         if (billType === 'CREDIT') {
-          const dueAmt = payload.total_amount - (payload.paid_amount || 0)
+          const dueAmt = finalDueAmount
           if (dueAmt > 0) {
             const ledgerId = crypto.randomUUID()
             db.prepare(`
@@ -380,33 +447,33 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
               UPDATE customers SET outstanding_due = outstanding_due + ?, updated_at = datetime('now') WHERE id = ?
             `).run(dueAmt, payload.customer_id)
           }
-        } else if (payload.customer_id && (payload.due_amount || 0) > 0) {
+        } else if (payload.customer_id && finalDueAmount > 0) {
           db.prepare(`
             UPDATE customers SET outstanding_due = outstanding_due + ?, updated_at = datetime('now') WHERE id = ?
-          `).run(payload.due_amount, payload.customer_id)
+          `).run(finalDueAmount, payload.customer_id)
         }
 
         // Audit log
         logAudit(db, {
           userId: user?.id as string, branchId,
           action: `CREATE_${billType}_BILL`, tableName: 'invoices', recordId: id,
-          newValues: { bill_type: billType, total: payload.total_amount },
+          newValues: { bill_type: billType, total: finalTotalAmount },
         })
       })
 
       insertInvoice()
 
-      const commissionPctForSync = agentCommissionAmount > 0 && Number(payload.subtotal) > 0
-        ? Number(((agentCommissionAmount / Number(payload.subtotal)) * 100).toFixed(2))
+      const commissionPctForSync = agentCommissionAmount > 0 && finalSubtotal > 0
+        ? Number(((agentCommissionAmount / finalSubtotal) * 100).toFixed(2))
         : 0
       await enqueuSync('invoices', id, 'INSERT', {
         id, invoice_number: invoiceNumber, branch_id: branchId,
         customer_id: payload.customer_id || null,
         cashier_id: (user?.id as string) || 'u9999999-9999-4999-8999-999999999999',
         bill_type: billType, status: billType === 'QUOTATION' ? 'draft' : 'completed',
-        subtotal: payload.subtotal, discount_amount: payload.discount_amount || 0,
-        tax_amount: payload.tax_amount || 0, total_amount: payload.total_amount,
-        paid_amount: payload.paid_amount || 0, due_amount: payload.due_amount || 0,
+        subtotal: finalSubtotal, discount_amount: finalDiscountAmount,
+        tax_amount: finalTaxAmount, total_amount: finalTotalAmount,
+        paid_amount: payload.paid_amount || 0, due_amount: finalDueAmount,
         agent_code: agentCode, agent_name: agentName, agent_id: agentId,
         agent_commission_pct: commissionPctForSync,
         agent_commission_amount: agentCommissionAmount,
@@ -428,7 +495,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (creditLedgerRecord) {
         await enqueuSync('credit_ledger', String((creditLedgerRecord as Record<string, unknown>).id), 'INSERT', creditLedgerRecord)
       }
-      if (payload.customer_id && (billType === 'CREDIT' || (payload.due_amount || 0) > 0)) {
+      if (payload.customer_id && (billType === 'CREDIT' || finalDueAmount > 0)) {
         await syncCustomerRow(db, String(payload.customer_id))
       }
       // (cast: TS cannot see the assignment inside the transaction closure)
@@ -456,6 +523,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (invoice.bill_type !== 'QUOTATION') return { success: false, error: 'Only QUOTATION bills can be converted' }
       if (invoice.status === 'cancelled' || invoice.status === 'expired') {
         return { success: false, error: 'Cannot convert a cancelled or expired quotation' }
+      }
+      {
+        const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+        if (!perms.all && user?.branch_id && invoice.branch_id !== user.branch_id) {
+          return { success: false, error: 'Cannot convert a quotation from another branch' }
+        }
       }
 
       const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(id) as
@@ -520,6 +593,13 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (invoice.cashier_id === (user?.id as string)) {
         return { success: false, error: 'Creator cannot approve. Another manager must approve.' }
       }
+      {
+        const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+        if (!perms.all && !perms.employees) return { success: false, error: 'Manager access required to approve a credit bill' }
+        if (!perms.all && user?.branch_id && invoice.branch_id !== user.branch_id) {
+          return { success: false, error: 'Cannot approve a credit bill from another branch' }
+        }
+      }
 
       db.prepare(`
         UPDATE invoices SET approved_by=?, status='completed', updated_at=datetime('now') WHERE id=?
@@ -540,6 +620,13 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const user = getAuthUser()
       const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(payload.invoice_id) as Record<string, unknown>
       if (!invoice) return { success: false, error: 'Invoice not found' }
+      if (!(Number(payload.amount) > 0)) return { success: false, error: 'Enter a valid payment amount' }
+      {
+        const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+        if (!perms.all && user?.branch_id && invoice.branch_id !== user.branch_id) {
+          return { success: false, error: 'Cannot post a payment against a bill from another branch' }
+        }
+      }
 
       let paymentRow: Record<string, unknown> | null = null
       let updatedInvoice: Record<string, unknown> | null = null
@@ -663,6 +750,13 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'invoices:hold', async (_e, id: string) => {
       const db = getDb()
+      const user = getAuthUser()
+      const invoice = db.prepare('SELECT branch_id FROM invoices WHERE id=?').get(id) as { branch_id: unknown } | undefined
+      if (!invoice) return { success: false, error: 'Invoice not found' }
+      const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+      if (!perms.all && user?.branch_id && invoice.branch_id !== user.branch_id) {
+        return { success: false, error: 'Cannot hold a bill from another branch' }
+      }
       db.prepare("UPDATE invoices SET status='held', updated_at=datetime('now') WHERE id=?").run(id)
       await enqueuSync('invoices', id, 'UPDATE', { id, status: 'held' })
       return { success: true }
@@ -675,6 +769,21 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const invoice = db.prepare('SELECT * FROM invoices WHERE id=?').get(id) as Record<string, unknown>
       if (!invoice) return { success: false, error: 'Invoice not found' }
       if (invoice.locked_at) return { success: false, error: 'Invoice is locked for day-end. Contact admin.' }
+
+      // Cancelling a RETAIL/CREDIT bill reverses real stock, credit ledger,
+      // coupon, and wallet state — that needs a manager, not just whoever's
+      // logged in. A QUOTATION never touched stock, so its own creator can
+      // still cancel it (matches existing UI: QuotationsPage lets a cashier
+      // cancel a quote they raised); anyone else still needs manager+.
+      const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+      const isManager = Boolean(perms.all || perms.employees)
+      const isOwnQuotation = invoice.bill_type === 'QUOTATION' && String(invoice.cashier_id) === String(user?.id)
+      if (!isManager && !isOwnQuotation) {
+        return { success: false, error: 'Manager access required to cancel this bill' }
+      }
+      if (!perms.all && user?.branch_id && invoice.branch_id !== user.branch_id) {
+        return { success: false, error: 'Cannot cancel a bill from another branch' }
+      }
       const movementRecords: Record<string, unknown>[] = []
       let couponReversals: CouponRedemptionResult[] = []
       let walletReversals: WalletReversalResult[] = []

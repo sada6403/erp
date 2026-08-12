@@ -6,7 +6,7 @@ import { sendWhatsApp } from './whatsappService'
 
 const store = new Store<Record<string, unknown>>()
 
-function channelsEnabled() {
+export function channelsEnabled() {
   return {
     email: Boolean(store.get('email_enabled', false)),
     sms: Boolean(store.get('sms_enabled', false)),
@@ -20,24 +20,34 @@ function companyName() {
 
 // Best-effort, non-blocking send across whichever channels are configured
 // and the customer has contact info for — a missing/failed channel never
-// blocks the others or the caller's transaction.
-async function notifyCustomer(customer: { phone?: unknown; email?: unknown } | undefined, subject: string, message: string) {
-  if (!customer) return
+// blocks the others or the caller's transaction. Returns which channels were
+// actually attempted and which succeeded, so an on-demand caller (unlike the
+// sweep functions below, which don't need to know) can record a delivery
+// outcome — e.g. the payment reminder log.
+export async function notifyCustomer(
+  customer: { phone?: unknown; email?: unknown } | undefined, subject: string, message: string
+): Promise<{ attempted: string[]; sent: string[] }> {
+  if (!customer) return { attempted: [], sent: [] }
   const enabled = channelsEnabled()
-  const jobs: Promise<unknown>[] = []
+  const attempted: string[] = []
+  const jobs: Promise<{ channel: string; ok: boolean }>[] = []
   if (enabled.email && customer.email) {
+    attempted.push('email')
     jobs.push(sendEmail({
       to: String(customer.email), subject,
       html: `<div style="font-family:sans-serif;max-width:480px;margin:auto"><h2 style="color:#4f46e5">${companyName()}</h2><p>${message.replace(/\n/g, '<br/>')}</p></div>`,
-    }).catch(() => {}))
+    }).then(r => ({ channel: 'email', ok: Boolean(r?.success) })).catch(() => ({ channel: 'email', ok: false })))
   }
   if (enabled.sms && customer.phone) {
-    jobs.push(sendSms({ to: String(customer.phone), message }).catch(() => {}))
+    attempted.push('sms')
+    jobs.push(sendSms({ to: String(customer.phone), message }).then(r => ({ channel: 'sms', ok: Boolean(r?.success) })).catch(() => ({ channel: 'sms', ok: false })))
   }
   if (enabled.whatsapp && customer.phone) {
-    jobs.push(sendWhatsApp({ to: String(customer.phone), message }).catch(() => {}))
+    attempted.push('whatsapp')
+    jobs.push(sendWhatsApp({ to: String(customer.phone), message }).then(r => ({ channel: 'whatsapp', ok: Boolean(r?.success) })).catch(() => ({ channel: 'whatsapp', ok: false })))
   }
-  await Promise.all(jobs)
+  const results = await Promise.all(jobs)
+  return { attempted, sent: results.filter(r => r.ok).map(r => r.channel) }
 }
 
 // Winner Selected + Product Ready — sent right after a draw settles a

@@ -104,7 +104,17 @@ const api = {
     reportsContributions:     (filters?: unknown) => ipcRenderer.invoke('chits:reports:contributions', filters),
     reportsWinners:           (filters?: unknown) => ipcRenderer.invoke('chits:reports:winners', filters),
     reportsBranchPerformance: () => ipcRenderer.invoke('chits:reports:branchPerformance'),
+    reportsMemberPayments:    (filters?: unknown) => ipcRenderer.invoke('chits:reports:memberPayments', filters),
+    reportsOutstanding:       (filters?: unknown) => ipcRenderer.invoke('chits:reports:outstanding', filters),
+    reportsCycleCollection:   (filters?: unknown) => ipcRenderer.invoke('chits:reports:cycleCollection', filters),
+    reportsFinancialOverview: (filters?: unknown) => ipcRenderer.invoke('chits:reports:financialOverview', filters),
     customersList: (filters?: unknown) => ipcRenderer.invoke('chits:customers:list', filters),
+    viability: {
+      calculate: (payload: unknown) => ipcRenderer.invoke('chits:viability:calculate', payload),
+    },
+    schemes: {
+      financials: (schemeId: string) => ipcRenderer.invoke('chits:schemes:financials', schemeId),
+    },
     templates: {
       list:   (filters?: unknown) => ipcRenderer.invoke('chits:templates:list', filters),
       create: (payload: unknown)  => ipcRenderer.invoke('chits:templates:create', payload),
@@ -128,6 +138,14 @@ const api = {
       eligible: (schemeId: string, cycleNo: number) => ipcRenderer.invoke('chits:draws:eligible', schemeId, cycleNo),
       conduct:  (schemeId: string, cycleNo: number, options?: unknown) => ipcRenderer.invoke('chits:draws:conduct', schemeId, cycleNo, options),
       list:     (schemeId: string) => ipcRenderer.invoke('chits:draws:list', schemeId),
+    },
+    cycles: {
+      paymentProgress: (schemeId: string, cycleNo?: number) => ipcRenderer.invoke('chits:cycles:paymentProgress', schemeId, cycleNo),
+    },
+    reminders: {
+      preview: (memberId: string, cycleNo?: number) => ipcRenderer.invoke('chits:reminders:preview', memberId, cycleNo),
+      send:    (memberId: string, cycleNo?: number, force?: boolean) => ipcRenderer.invoke('chits:reminders:send', memberId, cycleNo, force),
+      list:    (filters?: unknown) => ipcRenderer.invoke('chits:reminders:list', filters),
     },
     contributions: {
       record:           (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:contributions:record', memberId, payload),
@@ -308,6 +326,7 @@ const api = {
     resetFailed:  () => ipcRenderer.invoke('sync:resetFailed'),
     discardItem:  (id: string) => ipcRenderer.invoke('sync:discardItem', id),
     fixInvoices:  () => ipcRenderer.invoke('sync:fixInvoices'),
+    fixOrphanedParents: () => ipcRenderer.invoke('sync:fixOrphanedParents'),
   },
 
   // Printer

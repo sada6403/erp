@@ -9,9 +9,34 @@ import { safeHandleModule } from './ipcHandler'
 
 const store = new Store()
 
+function authUser(): Record<string, unknown> {
+  return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+}
+
 function currentUserId(): string | null {
-  const user = store.get('auth_user') as Record<string, unknown> | undefined
-  return (user?.id as string) || null
+  return (authUser().id as string) || null
+}
+
+function currentPerms(caller: Record<string, unknown> = authUser()): Record<string, unknown> {
+  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller.permissions as Record<string, unknown>)
+    || {}
+}
+
+// This whole module previously had ZERO access control — any authenticated
+// renderer call could move real stock between branches. `requireBranch`
+// checks the caller has inventory access and (unless global) belongs to one
+// of the branches actually party to the transfer.
+function requireBranch(...branchIds: Array<string | null | undefined>): string | null {
+  const caller = authUser()
+  const perms = currentPerms(caller)
+  if (!perms.all && !perms.inventory) return 'Inventory access required'
+  if (perms.all) return null
+  const callerBranch = String(caller.branch_id || '')
+  if (!callerBranch || !branchIds.some(b => String(b || '') === callerBranch)) {
+    return 'You do not have access to this branch transfer'
+  }
+  return null
 }
 
 function logTransferAction(db: ReturnType<typeof getDb>, transferId: string, action: string, oldValues: any = null, newValues: any = null, notes: string | null = null) {
@@ -42,10 +67,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       const transferNumber = `BTR-${Date.now().toString(36).toUpperCase()}`
       
       const { from_branch_id, to_branch_id, status, items, ...rest } = payload
-      
+
       if (!from_branch_id || !to_branch_id || !items || !items.length) {
         throw new Error('Missing required fields for transfer')
       }
+      const branchErr = requireBranch(from_branch_id)
+      if (branchErr) return { success: false, error: branchErr }
 
       const transfer: Record<string, any> = {
         id: transferId,
@@ -240,7 +267,11 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
-      
+      {
+        const branchErr = requireBranch(transfer.from_branch_id, transfer.to_branch_id)
+        if (branchErr) return { success: false, error: branchErr }
+      }
+
       const now = new Date().toISOString()
       const patch: any = { status }
       
@@ -311,7 +342,11 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
-      
+      {
+        const branchErr = requireBranch(transfer.to_branch_id)
+        if (branchErr) return { success: false, error: branchErr }
+      }
+
       const { items, received_by_name, received_designation, notes } = payload
       // items should be [{ item_id, received_qty, damaged_qty }]
       
@@ -432,7 +467,11 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
-      
+      {
+        const branchErr = requireBranch(transfer.from_branch_id, transfer.to_branch_id)
+        if (branchErr) return { success: false, error: branchErr }
+      }
+
       const { item_id, reason_category, detailed_reason } = payload
       
       const item = db.prepare('SELECT * FROM branch_transfer_items WHERE id=?').get(item_id) as any
@@ -498,7 +537,14 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
-      
+      {
+        // Reconciling a reported mismatch (short/damaged shipment) is a
+        // Company-Admin call, not either branch's own — same reasoning as
+        // stock_transfers' existing discrepancy-resolution flow.
+        const perms = currentPerms()
+        if (!perms.all) return { success: false, error: 'Super Admin access required to resolve a transfer mismatch' }
+      }
+
       const { admin_reason } = payload
       
       let logRecord: Record<string, unknown> | null = null

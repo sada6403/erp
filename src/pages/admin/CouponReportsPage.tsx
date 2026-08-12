@@ -19,12 +19,19 @@ type TabKey = typeof TABS[number]['key']
 
 const money = (n: unknown) => `Rs.${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
+const SOURCE_TYPES = [
+  { value: 'all', label: 'All Sources' },
+  { value: 'pos', label: 'POS' },
+  { value: 'smartbuy', label: 'SmartBuy' },
+] as const
+
 // Column layouts per report type: [key, header, isMoney]
 const COLUMNS: Record<TabKey, Array<[string, string, boolean?]>> = {
   issued: [
     ['created_at', 'Issued On'], ['code', 'Code'], ['name', 'Name'], ['customer_name', 'Customer'],
     ['initial_value', 'Value', true], ['used_amount', 'Used', true], ['balance', 'Balance', true],
     ['status', 'Status'], ['valid_until', 'Valid Until'], ['branch_name', 'Branch'], ['issued_by_name', 'Issued By'],
+    ['smartbuy_scheme_number', 'SmartBuy Scheme'], ['smartbuy_cycle_no', 'Cycle'],
   ],
   redeemed: [
     ['created_at', 'Date'], ['code', 'Code'], ['coupon_name', 'Coupon'], ['customer_name', 'Customer'],
@@ -34,11 +41,13 @@ const COLUMNS: Record<TabKey, Array<[string, string, boolean?]>> = {
   completed: [
     ['created_at', 'Issued On'], ['code', 'Code'], ['name', 'Name'], ['customer_name', 'Customer'],
     ['initial_value', 'Value', true], ['used_amount', 'Used', true], ['branch_name', 'Branch'],
+    ['smartbuy_scheme_number', 'SmartBuy Scheme'], ['smartbuy_cycle_no', 'Cycle'],
   ],
   expired: [
     ['created_at', 'Issued On'], ['code', 'Code'], ['name', 'Name'], ['customer_name', 'Customer'],
     ['initial_value', 'Value', true], ['used_amount', 'Used', true], ['balance', 'Forfeited', true],
     ['valid_until', 'Expired On'], ['branch_name', 'Branch'],
+    ['smartbuy_scheme_number', 'SmartBuy Scheme'], ['smartbuy_cycle_no', 'Cycle'],
   ],
   customerSummary: [
     ['customer_name', 'Customer'], ['customer_phone', 'Phone'], ['coupons_issued', 'Coupons'],
@@ -53,6 +62,7 @@ export default function CouponReportsPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo]     = useState('')
   const [search, setSearch]     = useState('')
+  const [sourceType, setSourceType] = useState<'all' | 'pos' | 'smartbuy'>('all')
   const [loading, setLoading]   = useState(false)
   const [viewingId, setViewingId] = useState<string | null>(null)
   const [printingId, setPrintingId] = useState<string | null>(null)
@@ -80,6 +90,7 @@ export default function CouponReportsPage() {
         dateFrom: dateFrom || undefined,
         dateTo: dateTo || undefined,
         search: search || undefined,
+        sourceType,
       })
       if (res.success) {
         const data = res.data as { rows: Row[]; summary: Record<string, unknown> }
@@ -89,7 +100,7 @@ export default function CouponReportsPage() {
     } catch (err: any) {
       toast.error(err.message || 'Failed to load report')
     } finally { setLoading(false) }
-  }, [tab, dateFrom, dateTo, search])
+  }, [tab, dateFrom, dateTo, search, sourceType])
 
   useEffect(() => { load() }, [load])
 
@@ -182,6 +193,9 @@ export default function CouponReportsPage() {
           ))}
         </div>
         <div className="flex items-center gap-2">
+          <select value={sourceType} onChange={e => setSourceType(e.target.value as typeof sourceType)} className="input py-1.5 text-xs w-32">
+            {SOURCE_TYPES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input py-1.5 text-xs w-36" />
           <span className="text-xs" style={{ color: 'var(--text-3)' }}>to</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input py-1.5 text-xs w-36" />

@@ -1165,6 +1165,28 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     // logAudit() now populates it (SmartBuy fix audit, HIGH-4).
     `ALTER TABLE audit_logs ADD COLUMN ip_address VARCHAR(64) NULL`,
 
+    // ── Manual-only draw workflow — random selection removed entirely;
+    // these two are the remaining "Manual Draw Result" form fields not
+    // already covered by conducted_by/notes/draw_date. ─────────────────
+    `ALTER TABLE chit_draws ADD COLUMN witness_name VARCHAR(255) NULL`,
+    `ALTER TABLE chit_draws ADD COLUMN reference_number VARCHAR(128) NULL`,
+    `CREATE TABLE IF NOT EXISTS chit_payment_reminders (
+       id              CHAR(36)     NOT NULL PRIMARY KEY,
+       member_id       CHAR(36)     NOT NULL,
+       scheme_id       CHAR(36)     NOT NULL,
+       cycle_no        INT          NOT NULL,
+       reminder_type   VARCHAR(32)  NOT NULL DEFAULT 'payment_due',
+       message         TEXT         NOT NULL,
+       sent_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       sent_by         CHAR(36)     NULL,
+       delivery_status VARCHAR(20)  NOT NULL DEFAULT 'sent',
+       notes           TEXT         NULL,
+       created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at       DATETIME     NULL,
+       INDEX idx_chit_payment_reminders_member (member_id),
+       INDEX idx_chit_payment_reminders_scheme (scheme_id)
+     )`,
+
     // ── Edit requests — manager-requested, admin-approved corrections to
     // already-completed invoices/stock ──────────────────────────────────
     `CREATE TABLE IF NOT EXISTS edit_requests (
@@ -1188,6 +1210,13 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_edit_requests_status (status),
        INDEX idx_edit_requests_requester (requested_by)
      )`,
+
+    // SmartBuy Scheme Viability Calculator — see the matching SQLite
+    // migration in electron/database.ts for full rationale. Planning-only
+    // inputs, unrelated to early_redemption_count/is_early_redemption.
+    `ALTER TABLE chit_schemes ADD COLUMN projected_early_winners INT NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_schemes ADD COLUMN avg_product_cost DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_schemes ADD COLUMN other_expenses DECIMAL(14,2) NOT NULL DEFAULT 0`,
   ]
 
   for (const sql of [...statements, ...stockTransferColumns]) {

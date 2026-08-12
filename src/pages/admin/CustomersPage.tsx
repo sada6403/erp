@@ -351,6 +351,12 @@ function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: (
                   <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                     Join order #{cm.join_order as number} · Paid Rs.{Number(cm.contributions_paid).toLocaleString()} of Rs.{Number(cm.chit_value).toLocaleString()}
                   </p>
+                  {Boolean(cm.voucher_code) && (
+                    <p className="text-xs mt-1" style={{ color: 'var(--brand-primary)' }}>
+                      SmartBuy Voucher {cm.voucher_code as string} — Rs.{Number(cm.voucher_balance || 0).toLocaleString()} balance
+                      {cm.voucher_status && cm.voucher_status !== 'active' ? ` (${cm.voucher_status as string})` : ''}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>

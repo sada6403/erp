@@ -10,13 +10,17 @@ type Column = { key: string; label: string; money?: boolean }
 
 const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-type ReportType = 'scheme_summary' | 'members' | 'contributions' | 'winners' | 'branch_performance' | 'commission_ledger' | 'agent_commission' | 'commission_payouts' | 'delayed_claims' | 'wallet' | 'wallet_usage' | 'transfers'
+type ReportType = 'scheme_summary' | 'members' | 'contributions' | 'winners' | 'branch_performance' | 'commission_ledger' | 'agent_commission' | 'commission_payouts' | 'delayed_claims' | 'wallet' | 'wallet_usage' | 'transfers' | 'member_payments' | 'outstanding' | 'cycle_collection' | 'financial_overview'
 
 const REPORT_TYPES: { value: ReportType; label: string }[] = [
+  { value: 'financial_overview', label: 'Financial Overview (Company-Wide Profit & Loss)' },
   { value: 'scheme_summary', label: 'Scheme Summary (Active / Pending / Completed / Cancelled)' },
   { value: 'members', label: 'Scheme Members (incl. Pending Members)' },
   { value: 'contributions', label: 'Payment Collection' },
-  { value: 'winners', label: 'Winner / Winner Product Report' },
+  { value: 'member_payments', label: 'Member Payment Report' },
+  { value: 'outstanding', label: 'Outstanding Report' },
+  { value: 'cycle_collection', label: 'Cycle Collection Report' },
+  { value: 'winners', label: 'Winner / Draw Result Report' },
   { value: 'delayed_claims', label: 'Delayed Claims' },
   { value: 'wallet', label: 'SmartBuy Wallet' },
   { value: 'wallet_usage', label: 'SmartBuy Wallet Usage' },
@@ -28,6 +32,16 @@ const REPORT_TYPES: { value: ReportType; label: string }[] = [
 ]
 
 const COLUMNS: Record<ReportType, Column[]> = {
+  financial_overview: [
+    { key: 'scheme_number', label: 'Scheme #' }, { key: 'name', label: 'Name' },
+    { key: 'branch_name', label: 'Branch' }, { key: 'status', label: 'Status' },
+    { key: 'contributions_collected', label: 'Income', money: true },
+    { key: 'product_cost_total', label: 'Product Cost', money: true },
+    { key: 'commission_accrued', label: 'Commission', money: true },
+    { key: 'other_expenses', label: 'Expenses', money: true },
+    { key: 'profit', label: 'Profit / Loss', money: true },
+    { key: 'profit_margin_pct', label: 'Margin %' },
+  ],
   scheme_summary: [
     { key: 'scheme_number', label: 'Scheme #' }, { key: 'name', label: 'Name' },
     { key: 'branch_name', label: 'Branch' }, { key: 'agent_name', label: 'Agent' },
@@ -36,6 +50,8 @@ const COLUMNS: Record<ReportType, Column[]> = {
     { key: 'cycles_completed', label: 'Cycles' }, { key: 'chit_value', label: 'Chit Value', money: true },
     { key: 'contributions_collected', label: 'Collected', money: true },
     { key: 'commission_accrued', label: 'Commission', money: true },
+    { key: 'product_cost_total', label: 'Product Cost', money: true },
+    { key: 'profit', label: 'Profit / Loss', money: true },
   ],
   members: [
     { key: 'scheme_name', label: 'Scheme' }, { key: 'scheme_number', label: 'Scheme #' },
@@ -60,9 +76,31 @@ const COLUMNS: Record<ReportType, Column[]> = {
     { key: 'claim_status', label: 'Claim Status' }, { key: 'claimed_at', label: 'Claimed Date' },
     { key: 'original_product_name', label: 'Original Product' }, { key: 'redeemed_product_name', label: 'Given Product' },
     { key: 'redeemed_value', label: 'Product Value', money: true }, { key: 'upgrade_amount', label: 'Upgrade Amount', money: true },
-    { key: 'wallet_credit_created', label: 'Wallet Credit', money: true },
-    { key: 'redemption_invoice_number', label: 'Invoice #' }, { key: 'conducted_by_name', label: 'Selected By' },
-    { key: 'reason', label: 'Reason' },
+    { key: 'wallet_credit_created', label: 'SmartBuy Voucher Value', money: true },
+    { key: 'voucher_code', label: 'Voucher #' }, { key: 'voucher_balance', label: 'Voucher Balance', money: true },
+    { key: 'redemption_invoice_number', label: 'Invoice #' }, { key: 'conducted_by_name', label: 'Conducted By' },
+    { key: 'witness_name', label: 'Witness' }, { key: 'reference_number', label: 'Reference #' },
+    { key: 'reason', label: 'Remarks' },
+  ],
+  member_payments: [
+    { key: 'member_name', label: 'Member' }, { key: 'member_phone', label: 'Phone' },
+    { key: 'scheme_name', label: 'Scheme' }, { key: 'scheme_number', label: 'Scheme #' }, { key: 'branch_name', label: 'Branch' },
+    { key: 'cycle_no', label: 'Cycle' }, { key: 'month', label: 'Month' },
+    { key: 'required', label: 'Required', money: true }, { key: 'paid', label: 'Paid', money: true }, { key: 'balance', label: 'Balance', money: true },
+    { key: 'status', label: 'Status' },
+  ],
+  outstanding: [
+    { key: 'member_name', label: 'Member' }, { key: 'member_phone', label: 'Phone' },
+    { key: 'scheme_name', label: 'Scheme' }, { key: 'branch_name', label: 'Branch' },
+    { key: 'cycle_no', label: 'Cycle' }, { key: 'month', label: 'Month' },
+    { key: 'required', label: 'Required', money: true }, { key: 'paid', label: 'Paid', money: true }, { key: 'balance', label: 'Balance', money: true },
+    { key: 'due_date', label: 'Due Date' }, { key: 'days_overdue', label: 'Days Overdue' }, { key: 'status', label: 'Status' },
+  ],
+  cycle_collection: [
+    { key: 'scheme_name', label: 'Scheme' }, { key: 'scheme_number', label: 'Scheme #' }, { key: 'branch_name', label: 'Branch' },
+    { key: 'cycle_no', label: 'Cycle' }, { key: 'total_expected', label: 'Total Expected', money: true },
+    { key: 'total_collected', label: 'Total Collected', money: true }, { key: 'total_outstanding', label: 'Total Outstanding', money: true },
+    { key: 'paid_members', label: 'Paid Members' }, { key: 'total_members', label: 'Total Members' }, { key: 'completion_pct', label: 'Completion %' },
   ],
   delayed_claims: [
     { key: 'customer_name', label: 'Winner' }, { key: 'customer_phone', label: 'Phone' },
@@ -131,6 +169,7 @@ export default function SmartBuyReportsPage() {
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [rows, setRows] = useState<Row[]>([])
+  const [financialSummary, setFinancialSummary] = useState<Row | null>(null)
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [purging, setPurging] = useState<Row | null>(null)
@@ -153,7 +192,14 @@ export default function SmartBuyReportsPage() {
       const from = dateFrom || undefined
       const to = dateTo || undefined
       let res: { success: boolean; data?: Row[]; error?: string }
+      setFinancialSummary(null)
       switch (reportType) {
+        case 'financial_overview': {
+          const raw = await window.api.chits.reportsFinancialOverview({ branchId: branchFilter, schemeId: schemeFilter, agentId: agentFilter, status: statusFilter, dateFrom: from, dateTo: to })
+          if (raw.success) { setFinancialSummary(raw.data as Row); res = { success: true, data: (raw.data?.schemes || []) as Row[] } }
+          else res = { success: false, error: raw.error }
+          break
+        }
         case 'scheme_summary':
           res = await window.api.chits.reports({ branchId: branchFilter, schemeId: schemeFilter, status: statusFilter, dateFrom: from, dateTo: to })
           break
@@ -162,6 +208,15 @@ export default function SmartBuyReportsPage() {
           break
         case 'contributions':
           res = await window.api.chits.reportsContributions({ branchId: branchFilter, schemeId: schemeFilter, agentId: agentFilter, dateFrom: from, dateTo: to })
+          break
+        case 'member_payments':
+          res = await window.api.chits.reportsMemberPayments({ branchId: branchFilter, schemeId: schemeFilter, status: statusFilter })
+          break
+        case 'outstanding':
+          res = await window.api.chits.reportsOutstanding({ branchId: branchFilter, schemeId: schemeFilter })
+          break
+        case 'cycle_collection':
+          res = await window.api.chits.reportsCycleCollection({ branchId: branchFilter })
           break
         case 'winners':
           res = await window.api.chits.reportsWinners({ branchId: branchFilter, schemeId: schemeFilter, dateFrom: from, dateTo: to })
@@ -294,10 +349,10 @@ export default function SmartBuyReportsPage() {
     }
   }
 
-  const needsScheme = ['scheme_summary', 'members', 'contributions', 'winners', 'commission_ledger'].includes(reportType)
-  const needsAgent = ['contributions', 'commission_ledger', 'commission_payouts'].includes(reportType)
-  const needsStatus = ['scheme_summary', 'members', 'commission_ledger'].includes(reportType)
-  const needsDate = ['scheme_summary', 'contributions', 'winners', 'commission_ledger'].includes(reportType)
+  const needsScheme = ['scheme_summary', 'members', 'contributions', 'winners', 'commission_ledger', 'member_payments', 'outstanding', 'financial_overview'].includes(reportType)
+  const needsAgent = ['contributions', 'commission_ledger', 'commission_payouts', 'financial_overview'].includes(reportType)
+  const needsStatus = ['scheme_summary', 'members', 'commission_ledger', 'member_payments', 'financial_overview'].includes(reportType)
+  const needsDate = ['scheme_summary', 'contributions', 'winners', 'commission_ledger', 'financial_overview'].includes(reportType)
   const needsBranch = reportType !== 'branch_performance'
 
   return (
@@ -316,7 +371,18 @@ export default function SmartBuyReportsPage() {
         <label className="text-xs font-semibold text-slate-400">
           Report Type
           <select value={reportType} onChange={e => setReportType(e.target.value as ReportType)} className="input mt-1">
-            {REPORT_TYPES.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            <optgroup label="Schemes &amp; Members">
+              {REPORT_TYPES.filter(r => ['scheme_summary', 'members', 'contributions', 'winners', 'delayed_claims'].includes(r.value))
+                .map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </optgroup>
+            <optgroup label="Wallet &amp; Transfers">
+              {REPORT_TYPES.filter(r => ['wallet', 'wallet_usage', 'transfers'].includes(r.value))
+                .map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </optgroup>
+            <optgroup label="Commission &amp; Branches">
+              {REPORT_TYPES.filter(r => ['commission_ledger', 'agent_commission', 'commission_payouts', 'branch_performance'].includes(r.value))
+                .map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
+            </optgroup>
           </select>
         </label>
         {needsBranch && (
@@ -366,6 +432,13 @@ export default function SmartBuyReportsPage() {
                   <option value="redeemed">Redeemed</option>
                   <option value="withdrawn">Withdrawn</option>
                 </>
+              ) : reportType === 'member_payments' ? (
+                <>
+                  <option value="paid">Paid</option>
+                  <option value="partial">Partial</option>
+                  <option value="pending">Pending</option>
+                  <option value="overdue">Overdue</option>
+                </>
               ) : (
                 <>
                   <option value="pending">Pending</option>
@@ -387,6 +460,34 @@ export default function SmartBuyReportsPage() {
       </div>
 
       <div className="flex-1 overflow-auto p-6">
+        {reportType === 'financial_overview' && financialSummary ? (
+          <div className="rounded-xl p-4 mb-4 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm">
+              <SummaryStat label="Total Schemes" value={String(financialSummary.totalSchemes)} sub={`${financialSummary.activeSchemes} active · ${financialSummary.completedSchemes} completed`} />
+              <SummaryStat label="Total Participants" value={String(financialSummary.totalParticipants)} />
+              <SummaryStat label="Total Income" value={`Rs.${money(financialSummary.totalIncome)}`} />
+              <SummaryStat label="Total Outcome" value={`Rs.${money(financialSummary.totalOutcome)}`} sub={`Cost + Commission + Expenses`} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-sm pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+              <SummaryStat label="Total Profit" value={`Rs.${money(financialSummary.totalProfit)}`} color={Number(financialSummary.totalProfit) >= 0 ? '#22c55e' : '#ef4444'} />
+              <SummaryStat label="Overall Profit Margin" value={`${Number(financialSummary.overallMarginPct).toFixed(2)}%`} />
+              <SummaryStat label="Most Profitable Scheme" value={String((financialSummary.mostProfitable as Row | null)?.name || '—')} />
+              <SummaryStat label="Lowest Profit Scheme" value={String((financialSummary.lowestProfit as Row | null)?.name || '—')} />
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 text-sm pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+              <SummaryStat label="Total Amount Waived" value={`Rs.${money(financialSummary.totalAmountWaived)}`} />
+              <SummaryStat label="Voucher Value Issued" value={`Rs.${money(financialSummary.totalVoucherValueIssued)}`} />
+              <SummaryStat label="Voucher Value Redeemed" value={`Rs.${money(financialSummary.totalVoucherValueRedeemed)}`} />
+              <SummaryStat label="Voucher Balance Outstanding" value={`Rs.${money(financialSummary.totalVoucherBalanceOutstanding)}`} />
+              <SummaryStat label="POS Sales via SmartBuy Vouchers" value={`Rs.${money(financialSummary.totalPosSalesViaVouchers)}`} />
+            </div>
+            {Array.isArray(financialSummary.lossMakingSchemes) && (financialSummary.lossMakingSchemes as Row[]).length > 0 && (
+              <p className="text-xs pt-1" style={{ color: '#ef4444' }}>
+                🔴 {(financialSummary.lossMakingSchemes as Row[]).length} loss-making scheme(s): {(financialSummary.lossMakingSchemes as Row[]).map(s => s.name).join(', ')}
+              </p>
+            )}
+          </div>
+        ) : null}
         <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
           <table className="w-full text-sm">
             <thead>
@@ -437,6 +538,16 @@ export default function SmartBuyReportsPage() {
           onConfirm={purgeScheme}
         />
       )}
+    </div>
+  )
+}
+
+function SummaryStat({ label, value, sub, color }: { label: string; value: string; sub?: string; color?: string }) {
+  return (
+    <div>
+      <div className="text-xs" style={{ color: 'var(--text-3)' }}>{label}</div>
+      <div className="text-base font-semibold" style={{ color: color || 'var(--text-1)' }}>{value}</div>
+      {sub && <div className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>{sub}</div>}
     </div>
   )
 }

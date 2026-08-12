@@ -144,11 +144,24 @@ function createWindow() {
 async function bootstrap() {
   await app.whenReady()
 
-  // Register custom protocol handler for offline image loading
+  // Register custom protocol handler for offline image loading.
+  // SECURITY: urlPath comes from a product's stored image_url (renderer
+  // src/lib/imageUrl.ts builds `app-img://<value>` from it) — that column is
+  // reachable via CSV/Excel import and cloud sync, not just the built-in
+  // upload picker, so it must be treated as untrusted input. Without the
+  // containment check below, a value like `../../../../Windows/System32/...`
+  // or an encoded equivalent resolves outside the uploads directory and lets
+  // the app read (and serve back into the renderer) an arbitrary file on
+  // disk — e.g. the app's own SQLite DB or OS files. Resolving the final
+  // path and verifying it's still inside uploadsDir closes that off; any
+  // request that would escape is rejected with 403 instead of served.
+  const uploadsDir = path.join(app.getPath('userData'), 'uploads')
   protocol.handle('app-img', (request) => {
     const urlPath = decodeURIComponent(request.url.replace('app-img://', ''))
-    const userDataPath = app.getPath('userData')
-    const filePath = path.join(userDataPath, 'uploads', urlPath)
+    const filePath = path.resolve(uploadsDir, urlPath)
+    if (filePath !== uploadsDir && !filePath.startsWith(uploadsDir + path.sep)) {
+      return new Response('Forbidden', { status: 403 })
+    }
     return net.fetch(pathToFileURL(filePath).toString())
   })
 

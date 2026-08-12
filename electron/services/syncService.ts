@@ -319,6 +319,8 @@ export class SyncService {
       // Multi-level commission approval — audit trail, statement downloads,
       // rate history. Same direct-pull treatment (not scheme-keyed).
       'commission_approval_logs', 'commission_statement_history', 'commission_rule_history',
+      // Cycle payment reminder history — member-keyed, pulled directly.
+      'chit_payment_reminders',
     ]
 
     let pulledInstallmentIds: string[] = []

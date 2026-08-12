@@ -140,11 +140,13 @@ beforeAll(async () => {
   const { registerAgentHandlers } = await import('../ipc/agents')
   const { registerCustomerHandlers } = await import('../ipc/customers')
   const { registerInvoiceHandlers } = await import('../ipc/invoices')
+  const { registerCouponHandlers } = await import('../ipc/coupons')
   registerChitHandlers(fakeIpcMain)
   registerCommissionHandlers(fakeIpcMain)
   registerAgentHandlers(fakeIpcMain)
   registerCustomerHandlers(fakeIpcMain)
   registerInvoiceHandlers(fakeIpcMain)
+  registerCouponHandlers(fakeIpcMain)
 
   const { getClaimReminderService } = await import('../services/claimReminderService')
   claimReminderService = getClaimReminderService()
@@ -241,6 +243,18 @@ describe('SmartBuy QA', () => {
     const res = await createSchemeViaTemplate({
       name: 'QA Scheme 1', branch_id: BR_A, product_id: PROD1, member_count: 5, cycle_count: 5,
       min_members: 3, chit_value: 60000, contribution_amount: 1000, agent_commission_pct: 5,
+      // Flags every member in this shared scheme as early-redemption-
+      // eligible (join_order-based, chits:members:earlyRedeem — a separate
+      // mechanism from the monthly draw, unaffected by the SmartBuy
+      // Voucher change). Many downstream tests in this shared-scheme block
+      // exercise chits:members:recordRedemption's own product/upgrade/
+      // downgrade/substitution/commission mechanics — under the voucher
+      // model, a monthly-draw winner no longer reaches recordRedemption at
+      // all (they get a full voucher automatically), so those tests now
+      // drive their member to redemption_type='early' via earlyRedeem
+      // first, then call recordRedemption exactly as before — the
+      // recordRedemption behavior itself is completely unchanged.
+      early_redemption_count: 5, early_redemption_amount: 1000,
     })
     expect(res.success).toBe(true)
     schemeId = res.data.id
@@ -298,6 +312,7 @@ describe('SmartBuy QA', () => {
   })
 
   let collabId: string
+  let collabMemberId: string
 
   it('4. branch collaboration — invite, self-approve rejected, target approves, can now enroll for own branch only', async () => {
     setSession(mgrA)
@@ -318,7 +333,7 @@ describe('SmartBuy QA', () => {
     const addByB = await call('chits:members:add', schemeId, { customer_name: 'Collab Cust', customer_phone: '0772222222', agent_id: AGENT_OTHER })
     if (!addByB.success) note(`HIGH: Branch B (approved collaborator) could NOT enroll a member after approval: ${addByB.error}`)
     expect(addByB.success).toBe(true)
-    const collabMemberId = addByB.data.id
+    collabMemberId = addByB.data.id
 
     const memberRow = db.prepare('SELECT enrolled_branch_id FROM chit_members WHERE id=?').get(collabMemberId) as any
     if (memberRow.enrolled_branch_id !== BR_B) note(`MEDIUM: member enrolled by Branch B has enrolled_branch_id=${memberRow.enrolled_branch_id}, expected ${BR_B}`)
@@ -362,15 +377,25 @@ describe('SmartBuy QA', () => {
     const contribRow = db.prepare('SELECT commission_amount FROM chit_contributions WHERE member_id=?').get(member4) as any
     if (Number(contribRow?.commission_amount || 0) !== 0) note(`HIGH: chit_contributions.commission_amount should be 0 (commission moved to redemption-time), got ${contribRow?.commission_amount}`)
 
+    // Cycle-readiness gate requires EVERY active member to have settled this
+    // cycle, not just the one being drawn — member1/member2/member3 (test 2)
+    // and the Branch-B collaborator (test 4) are all still active candidates
+    // for cycle 3 alongside member4, so they must all pay it off first.
+    for (const otherMember of [member1, member2, member3, collabMemberId]) {
+      const otherPay = await call('chits:contributions:record', otherMember, {
+        amount: 1000, method: 'cash', cycle_no: 3, paid_at: '2026-01-03T10:00:00.000Z',
+      })
+      expect(otherPay.success).toBe(true)
+    }
+
     // Drive member4 to redemption_type-set, then redeem PROD1 — the product
-    // the rule above actually matches. Manual pick is Company-Admin-only
-    // (SmartBuy fix audit, HIGH-5) — mgrA (chits:true, not 'all') cannot
-    // do this itself, so switch to SUPER_ADMIN for just this call, then
-    // back to mgrA for the ordinary redemption that follows.
-    setSession(SUPER_ADMIN)
-    const draw = await call('chits:draws:conduct', schemeId, 3, { method: 'manual_pick', winnerMemberId: member4, reason: 'QA commission test winner' })
-    expect(draw.success).toBe(true)
-    setSession(mgrA)
+    // the rule above actually matches. A monthly-draw winner now receives a
+    // full SmartBuy Voucher automatically (no product pick, no per-product
+    // commission) — recordRedemption's own product/commission mechanics
+    // (what this test actually verifies) are still fully exercised via the
+    // separate, unaffected earlyRedeem path instead.
+    const earlyRedeem = await call('chits:members:earlyRedeem', member4, { amount: 1000, method: 'cash' })
+    expect(earlyRedeem.success).toBe(true)
     const redemption = await call('chits:members:recordRedemption', member4, { product_id: PROD1, qty: 1 })
     expect(redemption.success).toBe(true)
 
@@ -457,12 +482,22 @@ describe('SmartBuy QA', () => {
     const member1Cycle1 = await call('chits:contributions:record', member1, { amount: 1000, method: 'cash', cycle_no: 1 })
     expect(member1Cycle1.success).toBe(true)
 
-    // Make member1 a winner via manual pick so they're redemption_type-set.
-    // Manual pick is Company-Admin-only (SmartBuy fix audit, HIGH-5).
-    setSession(SUPER_ADMIN)
-    const draw = await call('chits:draws:conduct', schemeId, 1, { method: 'manual_pick', winnerMemberId: member1, reason: 'QA test winner' })
-    expect(draw.success).toBe(true)
-    setSession(mgrA)
+    // Cycle-readiness gate requires EVERY active member to have settled this
+    // cycle — member4 already won cycle 3 (test 5) and dropped out of the
+    // active pool, but member2/member3/the Branch-B collaborator are still
+    // active candidates for cycle 1 and must also pay it off.
+    for (const otherMember of [member2, member3, collabMemberId]) {
+      const otherPay = await call('chits:contributions:record', otherMember, { amount: 1000, method: 'cash', cycle_no: 1 })
+      expect(otherPay.success).toBe(true)
+    }
+
+    // Drive member1 to redemption_type-set via earlyRedeem — a monthly-draw
+    // winner now gets a full voucher automatically (no recordRedemption
+    // call at all, so no stock-shortage path to exercise there); this
+    // test's actual target is recordRedemption's own stock-shortage
+    // handling, still fully live and unchanged for earlyRedeem members.
+    const earlyRedeem = await call('chits:members:earlyRedeem', member1, { amount: 1000, method: 'cash' })
+    expect(earlyRedeem.success).toBe(true)
 
     const beforeStock = stockQty(PROD2, BR_A)
     const redemption = await call('chits:members:recordRedemption', member1, { product_id: PROD2, qty: 5 }) // only 1 in stock
@@ -689,9 +724,14 @@ describe('SmartBuy QA', () => {
 
     // The ACTUAL draw pool must apply the identical exclusion (this is the
     // exact bug HIGH-1 fixed — the two used to disagree). With memberBad
-    // excluded, the pool has exactly one member, so the random draw is
-    // deterministic: memberGood must win.
-    const draw = await call('chits:draws:conduct', eligSchemeId, 2, { method: 'random' })
+    // excluded, the pool has exactly one member — manual entry now requires
+    // an explicit winnerMemberId (random selection was removed entirely per
+    // the manual-only draw requirement), so memberGood is named directly;
+    // the assertion below still independently confirms the eligibility
+    // exclusion actually held (the call would have thrown otherwise).
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', eligSchemeId, 2, { winnerMemberId: memberGood, reason: 'QA HIGH-1 eligibility regression winner' })
+    setSession(mgrA)
     expect(draw.success).toBe(true)
     const drawRow = db.prepare('SELECT winner_member_id FROM chit_draws WHERE scheme_id=? AND cycle_no=2').get(eligSchemeId) as any
     if (drawRow?.winner_member_id === memberBad) note(`CRITICAL: chits:draws:conduct selected a member with a rejected prior-cycle payment as the winner — HIGH-1 eligibility mismatch regressed`)
@@ -739,6 +779,10 @@ describe('SmartBuy QA', () => {
     // reasons calls just below don't reach the eligibility check at all).
     const g1Pay = await call('chits:contributions:record', g1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
     expect(g1Pay.success).toBe(true)
+    // Cycle-readiness gate requires EVERY active member to have settled —
+    // g2 must also pay cycle 1 before any draw on this cycle can succeed.
+    const g2Pay = await call('chits:contributions:record', g2.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
+    expect(g2Pay.success).toBe(true)
 
     // mgrA has 'chits' but not 'all' — must be rejected outright, regardless
     // of reason quality.
@@ -834,6 +878,13 @@ describe('SmartBuy QA', () => {
     const contrib = await call('chits:contributions:record', w1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
     expect(contrib.success).toBe(true)
 
+    // Cycle-readiness gate requires EVERY active member to have settled this
+    // cycle before a draw — w2/w3 must also pay cycle 1 off.
+    const w2Cycle1Pre = await call('chits:contributions:record', w2.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
+    expect(w2Cycle1Pre.success).toBe(true)
+    const w3Cycle1Pre = await call('chits:contributions:record', w3.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
+    expect(w3Cycle1Pre.success).toBe(true)
+
     setSession(SUPER_ADMIN)
     const draw = await call('chits:draws:conduct', waiverSchemeId, 1, { method: 'manual_pick', winnerMemberId: w1.data.id, reason: 'QA winner balance waiver test' })
     expect(draw.success).toBe(true)
@@ -861,7 +912,9 @@ describe('SmartBuy QA', () => {
     const nonWinner2 = db.prepare('SELECT status, installment_id FROM chit_members WHERE id=?').get(w2.data.id) as any
     if (nonWinner2.status !== 'active') note(`CRITICAL: non-winning member status changed unexpectedly to '${nonWinner2.status}'`)
 
-    const nonWinnerContrib = await call('chits:contributions:record', w2.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
+    // w2 already settled cycle 1 (paid pre-draw, above, to satisfy the
+    // cycle-readiness gate) — cycle 3 is the still-open one here.
+    const nonWinnerContrib = await call('chits:contributions:record', w2.data.id, { amount: 1000, method: 'cash', cycle_no: 3 })
     if (!nonWinnerContrib.success) note(`CRITICAL: a non-winning member's normal cycle contribution was rejected: ${nonWinnerContrib.error}`)
     expect(nonWinnerContrib.success).toBe(true)
 
@@ -1057,6 +1110,11 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Final Cycle Low Stock Scheme', branch_id: BR_A, product_id: PROD2, member_count: 2, cycle_count: 1,
       min_members: 2, chit_value: 60000, contribution_amount: 1000,
+      // A final-batch draw now auto-issues a full voucher (no product pick,
+      // so no stock-shortage path to exercise there) — this test's actual
+      // target is recordRedemption's own stock-shortage handling for two
+      // members sharing tight stock, still fully live via earlyRedeem.
+      early_redemption_count: 2, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const lsSchemeId = schemeRes.data.id
@@ -1066,16 +1124,15 @@ describe('SmartBuy QA', () => {
     expect(lsA.success).toBe(true)
     expect(lsB.success).toBe(true)
 
-    // cycle_count=1 -> cycle 1 IS the final cycle, so both members are
-    // settled together in a single final_batch draw with no earlier round.
+    // Both members reach redemption_type='early' via earlyRedeem — same
+    // "ready for recordRedemption, product/stock mechanics still to be
+    // exercised" precondition a final_batch draw used to set up.
     for (const m of [lsA, lsB]) {
-      const pay = await call('chits:contributions:record', m.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
-      expect(pay.success).toBe(true)
+      const earlyRedeem = await call('chits:members:earlyRedeem', m.data.id, { amount: 1000, method: 'cash' })
+      expect(earlyRedeem.success).toBe(true)
     }
-    const draw = await call('chits:draws:conduct', lsSchemeId, 1, {})
-    expect(draw.success).toBe(true)
     const scheme = db.prepare('SELECT status FROM chit_schemes WHERE id=?').get(lsSchemeId) as any
-    if (scheme.status !== 'completed') note(`HIGH: scheme should be completed once its only cycle's final batch settles everyone, got '${scheme.status}'`)
+    if (scheme.status !== 'completed') note(`HIGH: scheme should be completed once every member has received their product/voucher, got '${scheme.status}'`)
 
     // PROD2 has exactly 1 unit of stock at BR_A (seeded, untouched by any
     // earlier successful redemption in this suite).
@@ -1111,6 +1168,7 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Commission Final Batch Scheme', branch_id: BR_A, product_id: PROD1, member_count: 2, cycle_count: 1,
       min_members: 2, chit_value: 60000, contribution_amount: 1000,
+      early_redemption_count: 2, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const cmSchemeId = schemeRes.data.id
@@ -1127,13 +1185,14 @@ describe('SmartBuy QA', () => {
     const ledgerAtEnrollment = db.prepare(`SELECT COUNT(*) as c FROM commission_ledger WHERE member_id IN (?,?)`).get(mCA.data.id, mCB.data.id) as any
     if (ledgerAtEnrollment.c !== 0) note(`CRITICAL: ${ledgerAtEnrollment.c} commission_ledger row(s) exist immediately after enrollment — commission must only accrue at redemption`)
 
-    // cycle_count=1 -> single final cycle settles both members together.
+    // Both members reach redemption_type='early' via earlyRedeem — a
+    // final-batch draw now auto-issues a full voucher with no product
+    // pick, so it can no longer set up "ready for recordRedemption" for
+    // this test's actual target: commission computed at product redemption.
     for (const m of [mCA, mCB]) {
-      const pay = await call('chits:contributions:record', m.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
-      expect(pay.success).toBe(true)
+      const earlyRedeem = await call('chits:members:earlyRedeem', m.data.id, { amount: 1000, method: 'cash' })
+      expect(earlyRedeem.success).toBe(true)
     }
-    const draw = await call('chits:draws:conduct', cmSchemeId, 1, {})
-    expect(draw.success).toBe(true)
 
     // PROD1 has TWO active rules by this point in the suite (test 5's base
     // 10% product rule + test 14's 2% bonus rule, both product-scoped to
@@ -1254,14 +1313,13 @@ describe('SmartBuy QA', () => {
       const pay = await call('chits:contributions:record', m.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
       expect(pay.success).toBe(true)
     }
-    // cycle_count=1 -> single final cycle settles both together as one final_batch draw.
+    // cycle_count=1 -> single final cycle settles both together as one
+    // final_batch draw — each winner now receives their full voucher
+    // immediately as part of this same call (status='redeemed' and the
+    // scheme's own completion both already happen here, no separate
+    // recordRedemption step exists for a final-batch winner any more).
     const draw = await call('chits:draws:conduct', repSchemeId, 1, {})
     expect(draw.success).toBe(true)
-
-    const redA = await call('chits:members:recordRedemption', rA.data.id, { product_id: PROD1, qty: 1 })
-    const redB = await call('chits:members:recordRedemption', rB.data.id, { product_id: PROD1, qty: 1 })
-    expect(redA.success).toBe(true)
-    expect(redB.success).toBe(true)
 
     // 1. Scheme summary — total/redeemed member counts and completed status.
     const summary = await call('chits:reports', { schemeId: repSchemeId })
@@ -1282,8 +1340,18 @@ describe('SmartBuy QA', () => {
     const winnerNames = winnerRows.map((r: any) => r.winner_name)
     if (!winnerNames.includes('Report Winner A')) note(`CRITICAL: chits:reports:winners is missing final-batch winner "Report Winner A"`)
     if (!winnerNames.includes('Report Winner B')) note(`CRITICAL: chits:reports:winners is missing final-batch winner "Report Winner B"`)
-    if (winnerRows.some((r: any) => !r.redeemed_product_name)) note(`CRITICAL: a winner report row is missing its redeemed product name`)
-    if (winnerRows.some((r: any) => !r.redemption_invoice_number)) note(`CRITICAL: a winner report row is missing its redemption invoice number`)
+    // A final-batch winner now gets a full voucher immediately — no
+    // dedicated product/invoice exists to check any more; the report's
+    // voucher_code/voucher_balance columns are the new "already handled"
+    // signal instead (see chits:reports:winners' coupons LEFT JOIN).
+    if (winnerRows.some((r: any) => !r.voucher_code)) note(`CRITICAL: a final-batch winner report row is missing its voucher_code`)
+    if (winnerRows.some((r: any) => Number(r.voucher_balance) !== 60000)) note(`CRITICAL: a final-batch winner's voucher_balance should be the full Rs.60,000 entitlement`)
+    // Award wizard regression — member_id/scheme_id/customer_id/branch_id
+    // were added so the Winner -> Product Awarding UI can link a report row
+    // straight to chits:get/recordRedemption without a second query.
+    if (winnerRows.some((r: any) => !r.member_id)) note(`CRITICAL: chits:reports:winners is missing member_id — the award wizard cannot select a winner without it`)
+    if (winnerRows.some((r: any) => !r.scheme_id)) note(`CRITICAL: chits:reports:winners is missing scheme_id`)
+    if (winnerRows.some((r: any) => !r.customer_id)) note(`CRITICAL: chits:reports:winners is missing customer_id`)
 
     // 3. Draw history (chits:draws:list, one row per draw EVENT) must name
     // BOTH winners, not just whichever one used to win winner_member_id's
@@ -1327,6 +1395,7 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Commission Earned Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 60000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const ceSchemeId = schemeRes.data.id
@@ -1334,8 +1403,11 @@ describe('SmartBuy QA', () => {
     expect(m.success).toBe(true)
     const pay = await call('chits:contributions:record', m.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
     expect(pay.success).toBe(true)
-    const draw = await call('chits:draws:conduct', ceSchemeId, 1, {})
-    expect(draw.success).toBe(true)
+    // A monthly-draw winner now gets a full voucher (no per-product
+    // commission at redemption) — earlyRedeem still drives this member
+    // through the real recordRedemption/commission path this test targets.
+    const earlyRedeem = await call('chits:members:earlyRedeem', m.data.id, { amount: 1000, method: 'cash' })
+    expect(earlyRedeem.success).toBe(true)
     const redemption = await call('chits:members:recordRedemption', m.data.id, { product_id: PROD1, qty: 1 })
     expect(redemption.success).toBe(true)
 
@@ -1390,11 +1462,17 @@ describe('SmartBuy QA', () => {
     // once. better-sqlite3 is synchronous and Node is single-threaded, so
     // within one process these two IPC calls cannot actually interleave
     // mid-transaction — but this proves the outcome is safe regardless:
-    // exactly one draw is created, the other is rejected cleanly.
+    // exactly one draw is created, the other is rejected cleanly. Manual
+    // entry now requires an explicit winnerMemberId + Company Admin session
+    // (random selection was removed entirely) — both concurrent attempts
+    // deliberately target the SAME member, since the race being tested is
+    // purely "who wins the chit_draws insert," not which member is picked.
+    setSession(SUPER_ADMIN)
     const [resultA, resultB] = await Promise.all([
-      call('chits:draws:conduct', ccSchemeId, 1, { method: 'random' }),
-      call('chits:draws:conduct', ccSchemeId, 1, { method: 'random' }),
+      call('chits:draws:conduct', ccSchemeId, 1, { winnerMemberId: c1.data.id, reason: 'QA concurrent draw attempt A' }),
+      call('chits:draws:conduct', ccSchemeId, 1, { winnerMemberId: c1.data.id, reason: 'QA concurrent draw attempt B' }),
     ])
+    setSession(mgrA)
     const successes = [resultA, resultB].filter(r => r.success)
     if (successes.length !== 1) note(`CRITICAL: exactly one of two concurrent draw attempts for the same cycle should succeed, got ${successes.length}`)
     expect(successes.length).toBe(1)
@@ -1413,6 +1491,7 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Concurrent Redemption Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 60000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const crSchemeId = schemeRes.data.id
@@ -1420,8 +1499,12 @@ describe('SmartBuy QA', () => {
     expect(cm.success).toBe(true)
     const pay = await call('chits:contributions:record', cm.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
     expect(pay.success).toBe(true)
-    const draw = await call('chits:draws:conduct', crSchemeId, 1, {})
-    expect(draw.success).toBe(true)
+    // A monthly-draw winner now gets a full voucher automatically (no
+    // recordRedemption call at all) — earlyRedeem still drives this member
+    // to redemption_type-set so recordRedemption's own concurrency safety
+    // (this test's actual target) is still fully exercised.
+    const earlyRedeem = await call('chits:members:earlyRedeem', cm.data.id, { amount: 1000, method: 'cash' })
+    expect(earlyRedeem.success).toBe(true)
 
     const beforeStock = stockQty(PROD1, BR_A)
     const [redA, redB] = await Promise.all([
@@ -1645,6 +1728,13 @@ describe('SmartBuy QA', () => {
     if (!eligibleIds.includes(memberA1.data.id)) note(`CRITICAL: member A1 (paid cycle 2) should be eligible for cycle 2's draw`)
     if (eligibleIds.includes(memberA2.data.id)) note(`CRITICAL: member A2 (no cycle-2 payment) should NOT be eligible for cycle 2's draw`)
 
+    // The eligibility snapshot above already proved A2's exclusion while
+    // unpaid — now settle A2's cycle 2 too, since the cycle-readiness gate
+    // requires EVERY active member paid before a draw can proceed at all
+    // (a lone eligible member is no longer sufficient).
+    const payA2Cycle2 = await call('chits:contributions:record', memberA2.data.id, { amount: 1000, method: 'cash', cycle_no: 2 })
+    expect(payA2Cycle2.success).toBe(true)
+
     setSession(SUPER_ADMIN)
     const draw = await call('chits:draws:conduct', schemeAId, 2, { method: 'manual_pick', winnerMemberId: memberA1.data.id, reason: 'QA one-approved-per-cycle regression, draw eligibility check' })
     expect(draw.success).toBe(true)
@@ -1742,15 +1832,15 @@ describe('SmartBuy QA', () => {
 
     // A manual-pick draw targeting this still-owing member must be rejected
     // outright. Neither member has settled cycle 1 yet at this point (the
-    // filler never paid at all), so the eligible pool is empty and the
-    // rejection surfaces as "no eligible members" rather than the
-    // per-winner "not eligible" message — both are the correct outcome:
-    // this member must never be selectable while a balance is outstanding.
+    // filler never paid at all), so the cycle-readiness gate (EVERY active
+    // member must be paid, not just the one being drawn) blocks the draw
+    // before eligibility for a specific winner is even considered — this
+    // member must never be selectable while a balance is outstanding.
     setSession(SUPER_ADMIN)
     const blockedDraw = await call('chits:draws:conduct', schemeId, 1, { method: 'manual_pick', winnerMemberId: memberInstall.data.id, reason: 'QA flexible-contribution regression: should be rejected' })
     if (blockedDraw.success) note(`CRITICAL: a draw was allowed to select a member with an outstanding cycle balance as winner`)
     expect(blockedDraw.success).toBe(false)
-    expect(String(blockedDraw.error || '')).toMatch(/not eligible|no eligible members/i)
+    expect(String(blockedDraw.error || '')).toMatch(/not ready for the draw/i)
     setSession(mgrA)
 
     // Customer pays in multiple installments: installment #2 closes the gap exactly.
@@ -1766,6 +1856,12 @@ describe('SmartBuy QA', () => {
     const eligibleIdsAfter = (eligibleAfterSettle.data || []).map((m: any) => m.id)
     if (!eligibleIdsAfter.includes(memberInstall.data.id)) note(`CRITICAL: a member whose installments now fully settle the cycle should be draw-eligible`)
     expect(eligibleIdsAfter.includes(memberInstall.data.id)).toBe(true)
+
+    // The filler is still an active candidate for cycle 1 and has never
+    // paid — the cycle-readiness gate needs them settled too before the
+    // draw below can proceed, regardless of memberInstall's own eligibility.
+    const fillerPay = await call('chits:contributions:record', memberFiller.data.id, { amount: 5000, method: 'cash', cycle_no: 1 })
+    expect(fillerPay.success).toBe(true)
 
     setSession(SUPER_ADMIN)
     const allowedDraw = await call('chits:draws:conduct', schemeId, 1, { method: 'manual_pick', winnerMemberId: memberInstall.data.id, reason: 'QA flexible-contribution regression: should now succeed' })
@@ -2494,14 +2590,18 @@ describe('SmartBuy QA', () => {
     const delayedNotifCount = (db.prepare(`SELECT COUNT(*) as c FROM notifications WHERE type='chit_claim_delayed' AND data LIKE ?`).get(`%${m1.data.id}%`) as any).c
     if (Number(delayedNotifCount) < 2) note(`CRITICAL: expected a second notification on the delayed_claim escalation, got ${delayedNotifCount} total`)
 
-    // Despite being 'delayed_claim', the winner can still claim right now —
-    // the entitlement was never revoked or blocked at any point.
-    const redemption = await call('chits:members:recordRedemption', m1.data.id, { product_id: PROD1, qty: 1 })
-    if (!redemption.success) note(`CRITICAL: a delayed_claim winner should still be able to redeem — entitlement must never expire: ${redemption.error}`)
-    expect(redemption.success).toBe(true)
-    const afterRedeem = db.prepare('SELECT claim_status, claimed_at FROM chit_members WHERE id=?').get(m1.data.id) as any
-    if (afterRedeem.claim_status !== 'redeemed') note(`CRITICAL: claim_status should be 'redeemed' once actually claimed, got '${afterRedeem.claim_status}'`)
-    if (!afterRedeem.claimed_at) note(`CRITICAL: claimed_at should be stamped at the moment of actual redemption (distinct from the win date)`)
+    // Despite being 'delayed_claim', the winner's entitlement was never
+    // revoked or blocked at any point — a monthly-draw winner now proves
+    // this via their voucher (issued in full at win time) rather than a
+    // recordRedemption call: it must still be a fully spendable, active
+    // coupon regardless of how the claim_status escalated above.
+    const memberWithVoucher = db.prepare('SELECT voucher_id FROM chit_members WHERE id=?').get(m1.data.id) as any
+    if (!memberWithVoucher.voucher_id) note('CRITICAL: a draw winner has no voucher_id at all — entitlement was never issued')
+    else {
+      const voucherRow = db.prepare('SELECT status, balance, initial_value FROM coupons WHERE id=?').get(memberWithVoucher.voucher_id) as any
+      if (!voucherRow || voucherRow.status !== 'active') note(`CRITICAL: a delayed_claim winner's voucher should still be 'active' and spendable — entitlement must never expire, got status='${voucherRow?.status}'`)
+      if (Number(voucherRow?.balance) !== 60000) note(`CRITICAL: the voucher's balance should remain the full Rs.60,000 entitlement, untouched by claim-status escalation, got ${voucherRow?.balance}`)
+    }
   })
 
   it('54. Super Admin can extend a claim due date with a mandatory reason and full audit trail; Manager cannot', async () => {
@@ -2645,21 +2745,40 @@ describe('SmartBuy QA', () => {
 
     // A second transfer attempt on the same still-unclaimed member should
     // still succeed (nothing here blocks re-transferring before claim) —
-    // but claiming afterward must route the invoice to whichever customer
-    // is currently the recipient.
-    const redemption = await call('chits:members:recordRedemption', m1.data.id, { product_id: PROD1, qty: 1 })
-    expect(redemption.success).toBe(true)
-    const invoiceRow = db.prepare('SELECT customer_id FROM invoices WHERE id=?').get(redemption.data.invoiceId) as any
-    if (invoiceRow.customer_id !== recipientId) note(`CRITICAL: the redemption invoice should be issued to the transferred recipient, got customer_id='${invoiceRow.customer_id}'`)
+    // and since this winner's entitlement is now a real POS voucher (no
+    // product pick), the voucher itself must move to whichever customer is
+    // currently the recipient, not just the chit_members bookkeeping field.
+    const voucherAfterTransfer = db.prepare('SELECT voucher_id FROM chit_members WHERE id=?').get(m1.data.id) as any
+    const couponAfterTransfer = db.prepare('SELECT customer_id FROM coupons WHERE id=?').get(voucherAfterTransfer.voucher_id) as any
+    if (couponAfterTransfer?.customer_id !== recipientId) note(`CRITICAL: the voucher should now belong to the transferred recipient, got customer_id='${couponAfterTransfer?.customer_id}'`)
     const memberAfterClaim = db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(m1.data.id) as any
-    if (memberAfterClaim.customer_id !== originalCustomerId) note(`CRITICAL: the original winner record must still be intact after the recipient claimed the product`)
+    if (memberAfterClaim.customer_id !== originalCustomerId) note(`CRITICAL: the original winner record must still be intact after the voucher moved to the recipient`)
 
-    // Once claimed, a further transfer must be rejected.
+    // Once the voucher has actually been spent, a further transfer must be
+    // rejected — same "no transfer after the entitlement starts being
+    // consumed" rule the old invoice-based check enforced, now checked
+    // against the voucher's own balance.
+    setSession(SUPER_ADMIN)
+    const spendProd = 'prod-transfer-spend'
+    db.prepare(`INSERT OR IGNORE INTO products (id, category_id, supplier_id, sku, name, unit, cost_price, selling_price, tax_rate) VALUES (?,NULL,NULL,?,?,?,?,?,?)`)
+      .run(spendProd, spendProd, 'Transfer Spend Product', 'pcs', 7500, 10000, 0)
+    db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,NULL,?)`).run(crypto.randomUUID(), spendProd, BR_A, 5)
+    setSession(mgrA)
+    const couponCodeRow = db.prepare('SELECT code FROM coupons WHERE id=?').get(voucherAfterTransfer.voucher_id) as any
+    const spendSale = await call('invoices:create', {
+      branch_id: BR_A, customer_id: recipientId, bill_type: 'RETAIL',
+      subtotal: 10000, discount_amount: 0, tax_amount: 0, total_amount: 10000, paid_amount: 10000, due_amount: 0,
+      items: [{ product_id: spendProd, quantity: 1, unit_price: 10000, discount_pct: 0, discount_amount: 0, tax_rate: 0, tax_amount: 0, line_total: 10000 }],
+      coupon: { code: couponCodeRow.code, amount: 10000 },
+    })
+    expect(spendSale.success).toBe(true)
+
     const recipient2Id = crypto.randomUUID()
     db.prepare(`INSERT INTO customers (id, branch_id, name, phone) VALUES (?,?,?,?)`).run(recipient2Id, BR_A, 'Second Recipient', '0771150006')
-    const postClaimTransfer = await call('chits:members:transfer', m1.data.id, recipient2Id, 'Trying to transfer after already claimed')
-    if (postClaimTransfer.success) note(`CRITICAL: a transfer was allowed AFTER the product was already claimed`)
-    expect(postClaimTransfer.success).toBe(false)
+    setSession(SUPER_ADMIN)
+    const postSpendTransfer = await call('chits:members:transfer', m1.data.id, recipient2Id, 'Trying to transfer after the voucher was already spent')
+    if (postSpendTransfer.success) note(`CRITICAL: a transfer was allowed AFTER the voucher was already partially spent`)
+    expect(postSpendTransfer.success).toBe(false)
     setSession(mgrA)
   })
 
@@ -2673,6 +2792,7 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Wallet Downgrade Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 60000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const schemeId = schemeRes.data.id
@@ -2680,9 +2800,10 @@ describe('SmartBuy QA', () => {
     expect(m1.success).toBe(true)
     const customerId = (db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(m1.data.id) as any).customer_id
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeId, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA wallet downgrade regression' })).success).toBe(true)
-    setSession(mgrA)
+    // A monthly-draw winner now gets a full voucher (no downgrade/wallet-
+    // credit path at all) — earlyRedeem still drives this member through
+    // recordRedemption's own downgrade/wallet-credit mechanics unchanged.
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
 
     // This product also differs from the scheme's own nominal product
     // (PROD1) — a downgrade and a substitution can legitimately co-occur,
@@ -2744,6 +2865,7 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Upgrade Policy Scheme', branch_id: BR_A, product_id: PROD1, member_count: 2, cycle_count: 2,
       min_members: 2, chit_value: 60000, contribution_amount: 1000, agent_commission_pct: 5,
+      early_redemption_count: 2, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const schemeId = schemeRes.data.id
@@ -2756,10 +2878,11 @@ describe('SmartBuy QA', () => {
     // mBaseline also needs its cycle-2 payment before it's draw-eligible
     // for the final cycle.
     expect((await call('chits:contributions:record', mBaseline.data.id, { amount: 1000, method: 'cash', cycle_no: 2 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeId, 1, { method: 'manual_pick', winnerMemberId: mUpgrade.data.id, reason: 'QA upgrade regression - winner 1' })).success).toBe(true)
-    expect((await call('chits:draws:conduct', schemeId, 2, { method: 'manual_pick', winnerMemberId: mBaseline.data.id, reason: 'QA upgrade regression - winner 2 (final)' })).success).toBe(true)
-    setSession(mgrA)
+    // Both members redeem via the join_order-based early-redemption path —
+    // this test's own intent is recordRedemption's upgrade/top-up mechanics,
+    // which chits:draws:conduct's new win-time full voucher would now block.
+    expect((await call('chits:members:earlyRedeem', mUpgrade.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
+    expect((await call('chits:members:earlyRedeem', mBaseline.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
 
     // Blocked without a top-up payment method — this product also differs
     // from the scheme's own nominal product (PROD1), so substitution
@@ -2825,15 +2948,14 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Substitution Policy Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 60000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const schemeId = schemeRes.data.id
     const m1 = await call('chits:members:add', schemeId, { customer_name: 'Substitution Winner', customer_phone: '0771150010', agent_id: AGENT_REG })
     expect(m1.success).toBe(true)
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeId, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA substitution policy regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
 
     const noReason = await call('chits:members:recordRedemption', m1.data.id, { product_id: substituteProd, qty: 1, customer_accepted: true })
     if (noReason.success) note(`CRITICAL: a substituted redemption completed WITHOUT a substitution reason`)
@@ -2878,15 +3000,14 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Reversal Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 60000, contribution_amount: 1000, agent_commission_pct: 5,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const schemeId = schemeRes.data.id
     const m1 = await call('chits:members:add', schemeId, { customer_name: 'Reversal Winner', customer_phone: '0771150012', agent_id: AGENT_REG })
     expect(m1.success).toBe(true)
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeId, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA reversal regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
 
     const stockBefore = (db.prepare('SELECT COALESCE(SUM(quantity),0) as q FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_A) as any).q
     const redemption = await call('chits:members:recordRedemption', m1.data.id, { product_id: PROD1, qty: 1 })
@@ -2941,6 +3062,7 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA Reversal Wallet Clawback Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 60000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const schemeId = schemeRes.data.id
@@ -2948,9 +3070,7 @@ describe('SmartBuy QA', () => {
     expect(m1.success).toBe(true)
     const customerId = (db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(m1.data.id) as any).customer_id
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeId, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA reversal wallet clawback regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
 
     // 60000 entitlement - 40000 product = 20000 credit.
     const redemption = await call('chits:members:recordRedemption', m1.data.id, {
@@ -3019,34 +3139,27 @@ describe('SmartBuy QA', () => {
       }
     }
 
-    // Normal (exact entitlement) redemption — same shape as before this
-    // feature: one payment line, one stock movement, commission on the
-    // actual invoice, no upgrade/wallet/substitution fields set.
-    const stockBefore = (db.prepare('SELECT COALESCE(SUM(quantity),0) as q FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_A) as any).q
-    const redemption = await call('chits:members:recordRedemption', m1.data.id, { product_id: PROD1, qty: 1 })
-    if (!redemption.success) note(`CRITICAL: REGRESSION — normal redemption no longer works: ${redemption.error}`)
-    expect(redemption.success).toBe(true)
-    expect(redemption.data.upgradeAmount).toBe(0)
-    expect(redemption.data.walletCreditAmount).toBe(0)
-    expect(redemption.data.isSubstitution).toBe(false)
-
-    const stockAfter = (db.prepare('SELECT COALESCE(SUM(quantity),0) as q FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_A) as any).q
-    if (stockAfter !== stockBefore - 1) note(`CRITICAL: REGRESSION — stock deduction on redemption is no longer correct`)
-
-    const invoice = db.prepare('SELECT * FROM invoices WHERE id=?').get(redemption.data.invoiceId) as any
-    if (Number(invoice.total_amount) !== 60000 || Number(invoice.paid_amount) !== 60000 || Number(invoice.due_amount) !== 0) {
-      note(`CRITICAL: REGRESSION — normal redemption invoice totals incorrect`)
+    // Winners no longer pick a product — they receive the full entitlement
+    // as a real POS voucher at win time. Verify that hasn't regressed either.
+    const m1Voucher = db.prepare(`
+      SELECT cm.voucher_id, c.status, c.balance, c.initial_value
+      FROM chit_members cm JOIN coupons c ON c.id = cm.voucher_id WHERE cm.id=?
+    `).get(m1.data.id) as any
+    if (!m1Voucher?.voucher_id) note(`CRITICAL: REGRESSION — single-winner draw no longer issues a SmartBuy voucher`)
+    else if (Number(m1Voucher.initial_value) !== 60000 || Number(m1Voucher.balance) !== 60000 || m1Voucher.status !== 'active') {
+      note(`CRITICAL: REGRESSION — single-winner voucher should be active with initial_value=balance=60000, got ${JSON.stringify(m1Voucher)}`)
     }
-    const paymentRows = db.prepare('SELECT * FROM payments WHERE invoice_id=?').all(redemption.data.invoiceId) as any[]
-    if (paymentRows.length !== 1 || paymentRows[0].method !== 'chit_redemption' || Number(paymentRows[0].amount) !== 60000) {
-      note(`CRITICAL: REGRESSION — normal redemption should produce exactly one chit_redemption payment line for the full amount`)
-    }
-    const commissionRow = db.prepare('SELECT * FROM commission_ledger WHERE source_id=?').get(redemption.data.invoiceId) as any
-    if (!commissionRow) note(`CRITICAL: REGRESSION — commission was not accrued for a normal redemption`)
+    const commissionRow = db.prepare('SELECT * FROM commission_ledger WHERE source_id=?').get(m1Voucher?.voucher_id) as any
+    if (!commissionRow) note(`CRITICAL: REGRESSION — commission was not accrued for a single-winner voucher issuance`)
 
-    const memberAfter = db.prepare('SELECT upgrade_amount, wallet_credit_created, substitution_flag FROM chit_members WHERE id=?').get(m1.data.id) as any
-    if (Number(memberAfter.upgrade_amount) !== 0 || Number(memberAfter.wallet_credit_created) !== 0 || memberAfter.substitution_flag !== 0) {
-      note(`CRITICAL: a normal redemption should leave all new upgrade/wallet/substitution fields at their zero/false defaults`)
+    for (const m of [m2, m3]) {
+      const row = db.prepare(`
+        SELECT cm.voucher_id, c.status, c.balance, c.initial_value
+        FROM chit_members cm JOIN coupons c ON c.id = cm.voucher_id WHERE cm.id=?
+      `).get(m.data.id) as any
+      if (!row?.voucher_id || Number(row.initial_value) !== 60000 || Number(row.balance) !== 60000 || row.status !== 'active') {
+        note(`CRITICAL: REGRESSION — final_batch voucher issuance incorrect for ${m.data.id}, got ${JSON.stringify(row)}`)
+      }
     }
     setSession(mgrA)
   })
@@ -3190,6 +3303,7 @@ describe('SmartBuy QA', () => {
     const schemeA = await createSchemeViaTemplate({
       name: 'QA Wallet Branch Scope Scheme A', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 60000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeA.success).toBe(true)
     const sharedPhone = '0771150017'
@@ -3197,9 +3311,7 @@ describe('SmartBuy QA', () => {
     expect(mA.success).toBe(true)
     const customerId = (db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(mA.data.id) as any).customer_id
     expect((await call('chits:contributions:record', mA.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeA.data.id, 1, { method: 'manual_pick', winnerMemberId: mA.data.id, reason: 'QA wallet branch scope regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', mA.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
     // Downgrade at Branch A creates wallet credit for this customer, whose
     // "home" branch_id is Branch A (they were created here first).
     const redemption = await call('chits:members:recordRedemption', mA.data.id, {
@@ -3295,15 +3407,14 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA POS Wallet Source Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 20000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const m1 = await call('chits:members:add', schemeRes.data.id, { customer_name: 'POS Wallet Source Winner', customer_phone: '0771160001', agent_id: AGENT_REG })
     expect(m1.success).toBe(true)
     const customerId = (db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(m1.data.id) as any).customer_id
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeRes.data.id, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA POS wallet source regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
 
     // 20000 entitlement - 5000 product = 15000 credit, matching the
     // worked example in the request (customer wallet balance 15000).
@@ -3427,15 +3538,14 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA POS Cancel Wallet Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 15000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const m1 = await call('chits:members:add', schemeRes.data.id, { customer_name: 'POS Cancel Wallet Winner', customer_phone: '0771160002', agent_id: AGENT_REG })
     expect(m1.success).toBe(true)
     const customerId = (db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(m1.data.id) as any).customer_id
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeRes.data.id, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA POS cancel wallet regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
     const downgradeRedemption = await call('chits:members:recordRedemption', m1.data.id, {
       product_id: downgradeProd, qty: 1, substitution_reason: 'Customer chose a cheaper product', customer_accepted: true,
     })
@@ -3483,15 +3593,14 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA POS Branch Isolation Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 15000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const m1 = await call('chits:members:add', schemeRes.data.id, { customer_name: 'POS Branch Isolation Winner', customer_phone: '0771160003', agent_id: AGENT_REG })
     expect(m1.success).toBe(true)
     const customerId = (db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(m1.data.id) as any).customer_id
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeRes.data.id, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA POS branch isolation regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
     expect((await call('chits:members:recordRedemption', m1.data.id, {
       product_id: downgradeProd, qty: 1, substitution_reason: 'Customer chose a cheaper product', customer_accepted: true,
     })).success).toBe(true)
@@ -3535,15 +3644,14 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA POS Permission Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 15000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const m1 = await call('chits:members:add', schemeRes.data.id, { customer_name: 'POS Permission Winner', customer_phone: '0771160004', agent_id: AGENT_REG })
     expect(m1.success).toBe(true)
     const customerId = (db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(m1.data.id) as any).customer_id
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeRes.data.id, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA POS permission regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
     expect((await call('chits:members:recordRedemption', m1.data.id, {
       product_id: downgradeProd, qty: 1, substitution_reason: 'Customer chose a cheaper product', customer_accepted: true,
     })).success).toBe(true)
@@ -3574,15 +3682,14 @@ describe('SmartBuy QA', () => {
     const schemeRes = await createSchemeViaTemplate({
       name: 'QA POS Boundary Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
       min_members: 1, chit_value: 15000, contribution_amount: 1000,
+      early_redemption_count: 1, early_redemption_amount: 1000,
     })
     expect(schemeRes.success).toBe(true)
     const m1 = await call('chits:members:add', schemeRes.data.id, { customer_name: 'POS Boundary Winner', customer_phone: '0771160005', agent_id: AGENT_REG })
     expect(m1.success).toBe(true)
     const customerId = (db.prepare('SELECT customer_id FROM chit_members WHERE id=?').get(m1.data.id) as any).customer_id
     expect((await call('chits:contributions:record', m1.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
-    setSession(SUPER_ADMIN)
-    expect((await call('chits:draws:conduct', schemeRes.data.id, 1, { method: 'manual_pick', winnerMemberId: m1.data.id, reason: 'QA POS boundary regression' })).success).toBe(true)
-    setSession(mgrA)
+    expect((await call('chits:members:earlyRedeem', m1.data.id, { amount: 1000, method: 'cash' })).success).toBe(true)
     expect((await call('chits:members:recordRedemption', m1.data.id, {
       product_id: downgradeProd, qty: 1, substitution_reason: 'Customer chose a cheaper product', customer_accepted: true,
     })).success).toBe(true)
@@ -3760,6 +3867,591 @@ describe('SmartBuy QA', () => {
     const actualContributionTotal = (db.prepare(`SELECT COALESCE(SUM(amount),0) t FROM chit_contributions WHERE scheme_id LIKE 'perf3-scheme-%' AND status='approved'`).get() as any).t
     if (Number(actualContributionTotal) !== expectedContributionTotal) note(`CRITICAL: seeded contribution total mismatch — expected Rs.${expectedContributionTotal}, actual sum Rs.${actualContributionTotal}`)
   }, 300000)
+
+  // ── Cycle Payment Gating, Manual-Only Draw, Payment Reminders ───────────
+  // New rules added this session: (1) a cycle is never draw-ready until
+  // EVERY active member has paid in full — not just "at least one eligible
+  // member" — and this is re-checked inside the draw transaction; (2) random/
+  // automatic winner selection has been removed outright, manual entry
+  // (Company Admin only) is the only path; (3) a new payment reminder
+  // system with preview/send/duplicate-guard/history.
+  it('64. draw blocked with 9/10 members paid — clear counts in the error, cyclePaymentProgress agrees', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Cycle Gate Scheme', branch_id: BR_A, product_id: PROD1, member_count: 10, cycle_count: 3,
+      min_members: 10, chit_value: 60000, contribution_amount: 1000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const gateSchemeId = schemeRes.data.id
+
+    const members: any[] = []
+    for (let i = 0; i < 10; i++) {
+      const m = await call('chits:members:add', gateSchemeId, { customer_name: `Gate Member ${i}`, customer_phone: `07711198${String(i).padStart(2, '0')}`, agent_id: AGENT_REG })
+      expect(m.success).toBe(true)
+      members.push(m.data)
+    }
+    const afterEnroll = db.prepare('SELECT status FROM chit_schemes WHERE id=?').get(gateSchemeId) as any
+    if (afterEnroll.status !== 'active') note(`CRITICAL: scheme did not auto-activate at min_members=10 with exactly 10 enrolled`)
+
+    // 9 of 10 pay in full; the 10th stays unpaid.
+    for (let i = 0; i < 9; i++) {
+      const pay = await call('chits:contributions:record', members[i].id, { amount: 1000, method: 'cash', cycle_no: 1 })
+      expect(pay.success).toBe(true)
+    }
+
+    const progress = await call('chits:cycles:paymentProgress', gateSchemeId, 1)
+    expect(progress.success).toBe(true)
+    if (progress.data.totalMembers !== 10 || progress.data.paidMembers !== 9) {
+      note(`CRITICAL: cyclePaymentProgress reports totalMembers=${progress.data.totalMembers}, paidMembers=${progress.data.paidMembers} — expected 10/9`)
+    }
+    if (progress.data.status !== 'waiting_for_payments') note(`CRITICAL: computeCycleStatus should be 'waiting_for_payments' at 9/10 paid, got '${progress.data.status}'`)
+    if (progress.data.pendingMembers?.length !== 1 || progress.data.pendingMembers[0]?.member_id !== members[9].id) {
+      note(`CRITICAL: pendingMembers should contain exactly the 1 unpaid member (member index 9)`)
+    }
+
+    setSession(SUPER_ADMIN)
+    const blockedDraw = await call('chits:draws:conduct', gateSchemeId, 1, { winnerMemberId: members[0].id, reason: 'QA cycle gate — should be blocked at 9/10 paid' })
+    setSession(mgrA)
+    if (blockedDraw.success) note(`CRITICAL: chits:draws:conduct succeeded with 9/10 members paid — the "must never become ready until everyone pays" rule is not enforced`)
+    expect(blockedDraw.success).toBe(false)
+    expect(String(blockedDraw.error || '')).toMatch(/9 of 10/)
+
+    // The 10th member now pays — cycle must flip to ready, and the draw
+    // that was just rejected must now succeed.
+    const finalPay = await call('chits:contributions:record', members[9].id, { amount: 1000, method: 'cash', cycle_no: 1 })
+    expect(finalPay.success).toBe(true)
+
+    const progressAfter = await call('chits:cycles:paymentProgress', gateSchemeId, 1)
+    if (progressAfter.data.status !== 'ready_for_manual_draw') note(`CRITICAL: cycle did not flip to 'ready_for_manual_draw' once the 10th member paid`)
+
+    setSession(SUPER_ADMIN)
+    const readyDraw = await call('chits:draws:conduct', gateSchemeId, 1, { winnerMemberId: members[0].id, reason: 'QA cycle gate — should now succeed at 10/10 paid' })
+    setSession(mgrA)
+    if (!readyDraw.success) note(`CRITICAL: draw still rejected after all 10 members paid: ${readyDraw.error}`)
+    expect(readyDraw.success).toBe(true)
+  })
+
+  it('65. final-cycle batch settlement is ALSO blocked until every remaining member has paid (not just single-winner draws)', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Final Cycle Gate Scheme', branch_id: BR_A, product_id: PROD1, member_count: 2, cycle_count: 1,
+      min_members: 2, chit_value: 60000, contribution_amount: 1000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const fcgSchemeId = schemeRes.data.id
+    const fA = await call('chits:members:add', fcgSchemeId, { customer_name: 'FC Gate A', customer_phone: '0771119971', agent_id: AGENT_REG })
+    const fB = await call('chits:members:add', fcgSchemeId, { customer_name: 'FC Gate B', customer_phone: '0771119972', agent_id: AGENT_REG })
+    expect(fA.success).toBe(true)
+    expect(fB.success).toBe(true)
+
+    // Only ONE of the two pays — cycle_count=1, so this is the final cycle.
+    const pay = await call('chits:contributions:record', fA.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+
+    const blockedFinal = await call('chits:draws:conduct', fcgSchemeId, 1, {})
+    if (blockedFinal.success) note(`CRITICAL: final-cycle batch settlement proceeded with 1 of 2 members paid — the payment gate must apply to final_batch too, not just single-winner manual picks`)
+    expect(blockedFinal.success).toBe(false)
+  })
+
+  it('66. random/automatic winner selection is fully removed — an omitted or bogus winnerMemberId is rejected, never silently auto-picked', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA No Random Scheme', branch_id: BR_A, product_id: PROD1, member_count: 2, cycle_count: 3,
+      min_members: 2, chit_value: 60000, contribution_amount: 1000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const nrSchemeId = schemeRes.data.id
+    const nrA = await call('chits:members:add', nrSchemeId, { customer_name: 'No Random A', customer_phone: '0771119981', agent_id: AGENT_REG })
+    const nrB = await call('chits:members:add', nrSchemeId, { customer_name: 'No Random B', customer_phone: '0771119982', agent_id: AGENT_REG })
+    expect(nrA.success).toBe(true)
+    expect(nrB.success).toBe(true)
+    for (const m of [nrA, nrB]) {
+      expect((await call('chits:contributions:record', m.data.id, { amount: 1000, method: 'cash', cycle_no: 1 })).success).toBe(true)
+    }
+
+    setSession(SUPER_ADMIN)
+    // No winnerMemberId at all — must be rejected, never fall back to
+    // picking someone automatically the way the old random path did.
+    const noWinner = await call('chits:draws:conduct', nrSchemeId, 1, { reason: 'QA no-random regression: omitted winnerMemberId' })
+    if (noWinner.success) note(`CRITICAL: chits:draws:conduct succeeded with no winnerMemberId at all — an automatic/implicit selection path still exists`)
+    expect(noWinner.success).toBe(false)
+
+    // A caller literally still passing method:'random' (e.g. a stale client
+    // build) must not trigger any special random behavior — it's simply
+    // ignored, and the call is judged solely on whether a valid
+    // winnerMemberId was supplied.
+    const bogusMethod = await call('chits:draws:conduct', nrSchemeId, 1, { method: 'random', reason: 'QA no-random regression: legacy method value ignored' } as any)
+    if (bogusMethod.success) note(`CRITICAL: passing method:'random' still produced a successful draw without an explicit winnerMemberId — random path not fully removed`)
+    expect(bogusMethod.success).toBe(false)
+    setSession(mgrA)
+  })
+
+  it('67. payment reminders — preview reflects the real balance, send records history, same-day resend requires confirmation', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Reminder Scheme', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 3,
+      min_members: 1, chit_value: 60000, contribution_amount: 10000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const remSchemeId = schemeRes.data.id
+    const remMember = await call('chits:members:add', remSchemeId, { customer_name: 'Kumar QA', customer_phone: '0771130099', agent_id: AGENT_REG })
+    expect(remMember.success).toBe(true)
+
+    // Partial payment — Rs.6,000 of a Rs.10,000 requirement, matching the
+    // spec's own worked example shape (John/Kumar: paid < required).
+    const partial = await call('chits:contributions:record', remMember.data.id, { amount: 6000, method: 'cash', cycle_no: 1 })
+    expect(partial.success).toBe(true)
+
+    const preview = await call('chits:reminders:preview', remMember.data.id, 1)
+    expect(preview.success).toBe(true)
+    if (Number(preview.data.requiredAmount) !== 10000 || Number(preview.data.paidAmount) !== 6000 || Number(preview.data.balanceDue) !== 4000) {
+      note(`CRITICAL: reminder preview numbers wrong — required=${preview.data.requiredAmount} paid=${preview.data.paidAmount} balance=${preview.data.balanceDue}, expected 10000/6000/4000`)
+    }
+    if (!String(preview.data.message || '').includes('Kumar QA') || !String(preview.data.message || '').includes('4000')) {
+      note(`HIGH: reminder message doesn't clearly include the customer name and remaining balance`)
+    }
+
+    const sent = await call('chits:reminders:send', remMember.data.id, 1)
+    expect(sent.success).toBe(true)
+    const historyRow = db.prepare('SELECT id FROM chit_payment_reminders WHERE member_id=? AND cycle_no=1').get(remMember.data.id) as any
+    if (!historyRow) note(`CRITICAL: chits:reminders:send did not persist a chit_payment_reminders row`)
+
+    // Same-day resend without force must be blocked with a confirmation
+    // prompt, not silently duplicated.
+    const resendNoForce = await call('chits:reminders:send', remMember.data.id, 1)
+    if (resendNoForce.success) note(`HIGH: a same-day reminder resend succeeded without requiring confirmation — duplicate-reminder guard missing`)
+    expect(resendNoForce.success).toBe(false)
+    expect(resendNoForce.requiresConfirmation).toBe(true)
+
+    // Deliberate resend with force:true must still be allowed.
+    const resendForced = await call('chits:reminders:send', remMember.data.id, 1, true)
+    if (!resendForced.success) note(`HIGH: a forced reminder resend was still blocked — staff must be able to deliberately resend`)
+    expect(resendForced.success).toBe(true)
+
+    const list = await call('chits:reminders:list', { memberId: remMember.data.id })
+    expect(list.success).toBe(true)
+    if ((list.data || []).length !== 2) note(`CRITICAL: expected exactly 2 reminder history rows (initial + forced resend), got ${(list.data || []).length}`)
+
+    // Fully paying the member must make preview refuse — nothing left to remind about.
+    const topUp = await call('chits:contributions:record', remMember.data.id, { amount: 4000, method: 'cash', cycle_no: 1 })
+    expect(topUp.success).toBe(true)
+    const previewAfterPaid = await call('chits:reminders:preview', remMember.data.id, 1)
+    if (previewAfterPaid.success) note(`CRITICAL: chits:reminders:preview allowed a reminder for a member who has already paid in full`)
+    expect(previewAfterPaid.success).toBe(false)
+  })
+
+  it('76. chits:viability:calculate — permission gate, correct waiver-model math, and input validation', async () => {
+    const payload = {
+      monthlyPayment: 5000, duration: 12, productEntitlement: 60000, participants: 50,
+      earlyWinners: 11, avgProductCost: 45000, commissionPct: 5, otherExpenses: 50000,
+    }
+
+    // No SmartBuy access at all -> rejected outright.
+    setSession(makeSession({ id: 'u-nobody', branchId: BR_A, permissions: {} }))
+    const noPerm = await call('chits:viability:calculate', payload)
+    if (noPerm.success) note(`CRITICAL: chits:viability:calculate served a simulation to a session with no chits/all permission`)
+    expect(noPerm.success).toBe(false)
+
+    // A normal SmartBuy Manager session (has 'chits') can use the calculator
+    // — this is a read-only planning tool, not a financial mutation.
+    setSession(mgrA)
+    const res = await call('chits:viability:calculate', payload)
+    expect(res.success).toBe(true)
+    const { simulation, breakEven } = res.data
+    if (!simulation.valid) note(`CRITICAL: a valid 50/11 viability payload was rejected: ${simulation.error}`)
+    // Corrected waiver-model figures (11 early winners pay only up to their
+    // winning cycle, then their balance is waived — NOT the naive
+    // participants × monthly × duration).
+    if (simulation.totals.expectedIncome !== 2670000) note(`CRITICAL: viability engine expectedIncome wrong — expected 2670000, got ${simulation.totals.expectedIncome}`)
+    if (simulation.totals.productCost !== 2250000) note(`CRITICAL: viability engine productCost wrong — expected 2250000, got ${simulation.totals.productCost}`)
+    if (simulation.totals.commission !== 150000) note(`CRITICAL: viability engine commission wrong — expected 150000, got ${simulation.totals.commission}`)
+    if (simulation.totals.expectedProfit !== 220000) note(`CRITICAL: viability engine expectedProfit wrong — expected 220000, got ${simulation.totals.expectedProfit}`)
+    if (simulation.totals.totalRedemptions !== 50 || simulation.totals.earlyRedemptions !== 11 || simulation.totals.finalRedemptions !== 39) {
+      note(`CRITICAL: viability engine redemption counts wrong — got total=${simulation.totals.totalRedemptions} early=${simulation.totals.earlyRedemptions} final=${simulation.totals.finalRedemptions}`)
+    }
+    if (breakEven.minMembers == null) note(`HIGH: break-even search found no viable member count for a scheme that is itself profitable at 50 members`)
+    setSession(SUPER_ADMIN)
+
+    // Invalid inputs — earlyWinners exceeding duration-1 must be rejected,
+    // not silently clamped.
+    const invalid = await call('chits:viability:calculate', { ...payload, earlyWinners: 12 })
+    if (invalid.success) note(`CRITICAL: chits:viability:calculate accepted earlyWinners=12 for a 12-cycle scheme (must leave the final cycle for batch settlement)`)
+    expect(invalid.success).toBe(false)
+  })
+
+  it('77. chits:schemes:financials — Projected (from the scheme\'s own persisted planning fields) vs Actual (real transactions), never blended', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Viability Scheme', branch_id: BR_A, product_id: PROD1, member_count: 3, cycle_count: 3,
+      min_members: 3, chit_value: 60000, contribution_amount: 20000, agent_commission_pct: 10,
+      projected_early_winners: 1, avg_product_cost: 40000, other_expenses: 5000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const vSchemeId = schemeRes.data.id
+
+    const v1 = await call('chits:members:add', vSchemeId, { customer_name: 'Viability One', customer_phone: '0771160001', agent_id: AGENT_REG })
+    const v2 = await call('chits:members:add', vSchemeId, { customer_name: 'Viability Two', customer_phone: '0771160002', agent_id: AGENT_REG })
+    const v3 = await call('chits:members:add', vSchemeId, { customer_name: 'Viability Three', customer_phone: '0771160003', agent_id: AGENT_REG })
+    expect(v1.success).toBe(true); expect(v2.success).toBe(true); expect(v3.success).toBe(true)
+
+    // Before any transactions: Projected must already reflect the scheme's
+    // persisted planning fields (1 early winner, avg cost 40000, expenses 5000).
+    const beforeAny = await call('chits:schemes:financials', vSchemeId)
+    expect(beforeAny.success).toBe(true)
+    if (!beforeAny.data.projected.valid) note(`CRITICAL: Projected financials invalid for a freshly created scheme with valid planning fields: ${beforeAny.data.projected.error}`)
+    // No income/cost/commission yet, but other_expenses (5000, set at
+    // creation) is treated as already-incurred for Actual accounting —
+    // profit before any transactions is exactly -other_expenses, not 0.
+    if (beforeAny.data.actual != null && Number(beforeAny.data.actual.profit) !== -5000) {
+      note(`CRITICAL: Actual profit before any contributions/redemptions should be -5000 (just the persisted other_expenses), got ${beforeAny.data.actual.profit}`)
+    }
+
+    // Pay everyone cycle 1, draw a winner (waived), redeem their product —
+    // real transactions now exist for the "Actual" half.
+    for (const m of [v1, v2, v3]) {
+      const pay = await call('chits:contributions:record', m.data.id, { amount: 20000, method: 'cash', cycle_no: 1 })
+      expect(pay.success).toBe(true)
+    }
+    setSession(SUPER_ADMIN)
+    // The winner now receives their full entitlement as a real POS voucher
+    // at win time (no product pick, no invoice) — real transaction data for
+    // the "Actual" half still exists via the contributions collected above
+    // and the commission the win-time voucher issuance accrues.
+    const draw = await call('chits:draws:conduct', vSchemeId, 1, { winnerMemberId: v1.data.id, reason: 'QA viability financials regression test' })
+    expect(draw.success).toBe(true)
+    setSession(mgrA)
+
+    const after = await call('chits:schemes:financials', vSchemeId)
+    expect(after.success).toBe(true)
+    const realCollected = (db.prepare(`SELECT COALESCE(SUM(amount),0) as s FROM chit_contributions WHERE scheme_id=? AND status='approved'`).get(vSchemeId) as any).s
+    if (Number(after.data.actual?.contributions_collected) !== Number(realCollected)) {
+      note(`CRITICAL: Actual income does not match the real sum of approved contributions — actual=${after.data.actual?.contributions_collected} real=${realCollected}`)
+    }
+    // Projected and Actual must never be blended into a single value —
+    // confirm they're reported as two genuinely separate numbers, not
+    // silently overwriting each other.
+    if (after.data.projected.totals.expectedIncome === after.data.actual?.contributions_collected && after.data.actual?.contributions_collected !== undefined) {
+      // Coincidental equality is fine; what matters is both are present and independently computed — sanity check both exist.
+    }
+    if (!after.data.projected.valid) note(`CRITICAL: Projected financials became invalid after real transactions were recorded — should be independent of Actual`)
+    if (after.data.actual == null) note(`CRITICAL: Actual financials missing after real transactions were recorded`)
+  })
+
+  it('78. chits:reports:financialOverview — branch-scoped aggregate, real numbers only, never mixed with projections', async () => {
+    setSession(mgrA)
+    const schemeA = await createSchemeViaTemplate({
+      name: 'QA Financial Overview A', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 10000, contribution_amount: 10000,
+    })
+    expect(schemeA.success).toBe(true)
+    const mA = await call('chits:members:add', schemeA.data.id, { customer_name: 'Overview A Member', customer_phone: '0771160010', agent_id: AGENT_REG })
+    expect(mA.success).toBe(true)
+    const payA = await call('chits:contributions:record', mA.data.id, { amount: 10000, method: 'cash', cycle_no: 1 })
+    expect(payA.success).toBe(true)
+
+    setSession(mgrB)
+    const schemeB = await createSchemeViaTemplate({
+      name: 'QA Financial Overview B', branch_id: BR_B, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 10000, contribution_amount: 10000,
+    })
+    expect(schemeB.success).toBe(true)
+
+    // Branch A manager's overview must include Scheme A's real income but
+    // never leak Branch B's scheme into the totals/list.
+    setSession(mgrA)
+    const overviewA = await call('chits:reports:financialOverview', {})
+    expect(overviewA.success).toBe(true)
+    const namesA = (overviewA.data.schemes || []).map((s: any) => s.name)
+    if (!namesA.includes('QA Financial Overview A')) note(`CRITICAL: chits:reports:financialOverview for Branch A manager is missing their own scheme`)
+    if (namesA.includes('QA Financial Overview B')) note(`CRITICAL: chits:reports:financialOverview leaked Branch B's scheme to a Branch A manager`)
+    expect(namesA.includes('QA Financial Overview B')).toBe(false)
+
+    // Super Admin sees both, and the aggregate totals are a real SUM, not a
+    // simulation — totalIncome must be at least the two real payments above.
+    setSession(SUPER_ADMIN)
+    const overviewAll = await call('chits:reports:financialOverview', { schemeId: schemeA.data.id })
+    expect(overviewAll.success).toBe(true)
+    if (Number(overviewAll.data.totalIncome) !== 10000) note(`CRITICAL: financialOverview scoped to schemeAId should total exactly its own Rs.10,000 contribution, got ${overviewAll.data.totalIncome}`)
+    if (!Array.isArray(overviewAll.data.lossMakingSchemes)) note(`CRITICAL: financialOverview did not return a lossMakingSchemes array`)
+  })
+
+  // ── Voucher-Based Winner Redemption (existing POS coupons system) ────────
+  it('79. draw winners receive their FULL scheme-value entitlement as a real POS voucher (coupons) immediately — no product pick, no repayment schedule, regardless of how much they had paid', async () => {
+    setSession(SUPER_ADMIN)
+    const ruleRes = await call('commissions:rules:create', {
+      name: 'QA Voucher Scheme Commission', scope: 'scheme', scheme_id: undefined,
+      calculation_type: 'percentage', rate: 5, ownership_model: 'registration', status: 'active',
+    })
+    // scope:'scheme' rules need scheme_id filled in after the scheme exists —
+    // created below and the rule updated to point at it.
+    expect(ruleRes.success).toBe(true)
+
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Voucher Winners Scheme', branch_id: BR_A, product_id: PROD1, member_count: 3, cycle_count: 3,
+      min_members: 3, chit_value: 60000, contribution_amount: 5000, agent_commission_pct: 5,
+    })
+    expect(schemeRes.success).toBe(true)
+    const vSchemeId = schemeRes.data.id
+    db.prepare(`UPDATE commission_rules SET scheme_id=? WHERE id=?`).run(vSchemeId, ruleRes.data.id)
+
+    const v1 = await call('chits:members:add', vSchemeId, { customer_name: 'Voucher Winner One', customer_phone: '0771170001', agent_id: AGENT_REG })
+    const v2 = await call('chits:members:add', vSchemeId, { customer_name: 'Voucher Winner Two', customer_phone: '0771170002', agent_id: AGENT_REG })
+    const v3 = await call('chits:members:add', vSchemeId, { customer_name: 'Voucher Filler Three', customer_phone: '0771170003', agent_id: AGENT_REG })
+    expect(v1.success).toBe(true); expect(v2.success).toBe(true); expect(v3.success).toBe(true)
+
+    // Cycle 1: all 3 pay, member v1 wins having paid only Rs.5,000.
+    for (const m of [v1, v2, v3]) {
+      const pay = await call('chits:contributions:record', m.data.id, { amount: 5000, method: 'cash', cycle_no: 1 })
+      expect(pay.success).toBe(true)
+    }
+    setSession(SUPER_ADMIN)
+    const draw1 = await call('chits:draws:conduct', vSchemeId, 1, { winnerMemberId: v1.data.id, reason: 'QA voucher regression — cycle 1 winner' })
+    expect(draw1.success).toBe(true)
+    const voucher1 = (draw1.data.vouchers || [])[0]
+    if (!voucher1 || Number(voucher1.amount) !== 60000) note(`CRITICAL: cycle-1 winner (paid only Rs.5,000) did not receive a full Rs.60,000 voucher — got ${JSON.stringify(voucher1)}`)
+    expect(voucher1?.amount).toBe(60000)
+
+    const v1Row = db.prepare('SELECT * FROM chit_members WHERE id=?').get(v1.data.id) as any
+    if (v1Row.installment_id) note(`CRITICAL: a draw winner has installment_id set — a repayment schedule was generated despite the confirmed no-financing waiver rule`)
+    expect(v1Row.installment_id).toBeNull()
+    if (v1Row.voucher_id !== voucher1.voucherId) note(`CRITICAL: chit_members.voucher_id does not match the voucher actually issued`)
+    if (v1Row.redemption_invoice_id) note(`CRITICAL: a voucher-based winner should have no redemption_invoice_id — no product was ever picked`)
+
+    const coupon1 = db.prepare('SELECT * FROM coupons WHERE id=?').get(voucher1.voucherId) as any
+    if (!coupon1) { note('CRITICAL: no coupons row exists for the issued voucher — the existing POS voucher system was not actually used'); }
+    else {
+      if (Number(coupon1.initial_value) !== 60000 || Number(coupon1.balance) !== 60000) note(`CRITICAL: voucher coupon initial_value/balance wrong — got ${coupon1.initial_value}/${coupon1.balance}`)
+      if (coupon1.status !== 'active') note(`CRITICAL: freshly issued voucher should be status='active', got '${coupon1.status}'`)
+      if (coupon1.source_type !== 'smartbuy_redemption') note(`CRITICAL: voucher source_type should be 'smartbuy_redemption', got '${coupon1.source_type}'`)
+      if (coupon1.smartbuy_scheme_id !== vSchemeId) note(`CRITICAL: voucher not traceable to the correct scheme`)
+      if (coupon1.smartbuy_member_id !== v1.data.id) note(`CRITICAL: voucher not traceable to the correct member`)
+      if (Number(coupon1.smartbuy_cycle_no) !== 1) note(`CRITICAL: voucher not traceable to the correct cycle — expected 1, got ${coupon1.smartbuy_cycle_no}`)
+      if (!coupon1.customer_id) note('CRITICAL: voucher has no customer_id — cannot be used at POS or seen on the customer profile')
+    }
+
+    const commission1 = db.prepare('SELECT * FROM commission_ledger WHERE source_id=?').get(voucher1.voucherId) as any
+    if (!commission1) note('HIGH: no commission_ledger row was created for the voucher issuance despite an active scheme-scoped commission rule')
+    else if (Math.abs(Number(commission1.total_commission) - 3000) > 0.01) note(`CRITICAL: commission wrong — expected 5% of Rs.60,000 = Rs.3,000, got ${commission1.total_commission}`)
+
+    // Cycle 2: v2 and v3 pay (v1 already dropped out of the active pool),
+    // v2 wins having now paid Rs.10,000 total — STILL a full Rs.60,000
+    // voucher, not scaled by how much they contributed.
+    setSession(mgrA)
+    for (const m of [v2, v3]) {
+      const pay = await call('chits:contributions:record', m.data.id, { amount: 5000, method: 'cash', cycle_no: 2 })
+      expect(pay.success).toBe(true)
+    }
+    setSession(SUPER_ADMIN)
+    const draw2 = await call('chits:draws:conduct', vSchemeId, 2, { winnerMemberId: v2.data.id, reason: 'QA voucher regression — cycle 2 winner' })
+    expect(draw2.success).toBe(true)
+    const voucher2 = (draw2.data.vouchers || [])[0]
+    if (!voucher2 || Number(voucher2.amount) !== 60000) note(`CRITICAL: cycle-2 winner (paid Rs.10,000 total) did not receive a full Rs.60,000 voucher — got ${JSON.stringify(voucher2)}`)
+    expect(voucher2?.amount).toBe(60000)
+  })
+
+  it('80. final-batch settlement issues every remaining member their own full-value voucher in one call', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Voucher Final Settlement', branch_id: BR_A, product_id: PROD1, member_count: 2, cycle_count: 1,
+      min_members: 2, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const fSchemeId = schemeRes.data.id
+    const f1 = await call('chits:members:add', fSchemeId, { customer_name: 'Final Voucher One', customer_phone: '0771170004', agent_id: AGENT_REG })
+    const f2 = await call('chits:members:add', fSchemeId, { customer_name: 'Final Voucher Two', customer_phone: '0771170005', agent_id: AGENT_REG })
+    expect(f1.success).toBe(true); expect(f2.success).toBe(true)
+
+    for (const m of [f1, f2]) {
+      const pay = await call('chits:contributions:record', m.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+      expect(pay.success).toBe(true)
+    }
+    setSession(SUPER_ADMIN)
+    // Final cycle (cycle_count=1) settles everyone together — no winnerMemberId needed.
+    const finalDraw = await call('chits:draws:conduct', fSchemeId, 1, { reason: 'QA final settlement voucher regression' })
+    expect(finalDraw.success).toBe(true)
+    const vouchers = finalDraw.data.vouchers || []
+    if (vouchers.length !== 2) note(`CRITICAL: final settlement should issue exactly 2 vouchers (one per remaining member), got ${vouchers.length}`)
+    for (const v of vouchers) {
+      if (Number(v.amount) !== 60000) note(`CRITICAL: a final-settlement voucher is not the full Rs.60,000 entitlement — got ${v.amount}`)
+      const memberRow = db.prepare('SELECT installment_id, voucher_id FROM chit_members WHERE id=?').get(v.memberId) as any
+      if (memberRow.installment_id) note(`CRITICAL: a final-settlement member has a repayment schedule — should be waived/voucher-only`)
+      if (memberRow.voucher_id !== v.voucherId) note('CRITICAL: final-settlement member voucher_id mismatch')
+    }
+  })
+
+  it('81. chits:members:recordRedemption rejects a member who already received a full SmartBuy voucher (duplicate-protection)', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Voucher Duplicate Protection', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const dSchemeId = schemeRes.data.id
+    const d1 = await call('chits:members:add', dSchemeId, { customer_name: 'Duplicate Protection Winner', customer_phone: '0771170006', agent_id: AGENT_REG })
+    expect(d1.success).toBe(true)
+    const pay = await call('chits:contributions:record', d1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', dSchemeId, 1, { reason: 'QA duplicate protection regression' })
+    expect(draw.success).toBe(true)
+
+    setSession(mgrA)
+    const dup = await call('chits:members:recordRedemption', d1.data.id, { product_id: PROD1, qty: 1 })
+    if (dup.success) note('CRITICAL: recordRedemption succeeded for a member who already received a full SmartBuy voucher — duplicate issuance risk')
+    expect(dup.success).toBe(false)
+    expect(String(dup.error || '')).toMatch(/already received a full SmartBuy voucher/i)
+  })
+
+  it('82. a SmartBuy-issued voucher is spent through the real, unmodified POS invoices:create flow — partial usage across two separate purchases', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Voucher POS Spend', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const pSchemeId = schemeRes.data.id
+    const p1 = await call('chits:members:add', pSchemeId, { customer_name: 'POS Spend Winner', customer_phone: '0771170007', agent_id: AGENT_REG })
+    expect(p1.success).toBe(true)
+    const pay = await call('chits:contributions:record', p1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', pSchemeId, 1, { reason: 'QA POS spend regression' })
+    expect(draw.success).toBe(true)
+    const voucher = (draw.data.vouchers || [])[0]
+    expect(voucher).toBeTruthy()
+    const couponRow = db.prepare('SELECT code, customer_id FROM coupons WHERE id=?').get(voucher.voucherId) as any
+    const voucherCode = couponRow.code
+
+    // Seed two affordable products to spend the voucher against.
+    const prodA = 'prod-voucher-spend-a', prodB = 'prod-voucher-spend-b'
+    db.prepare(`INSERT OR IGNORE INTO products (id, category_id, supplier_id, sku, name, unit, cost_price, selling_price, tax_rate) VALUES (?,NULL,NULL,?,?,?,?,?,?)`)
+      .run(prodA, prodA, 'Voucher Spend Product A', 'pcs', 15000, 20000, 0)
+    db.prepare(`INSERT OR IGNORE INTO products (id, category_id, supplier_id, sku, name, unit, cost_price, selling_price, tax_rate) VALUES (?,NULL,NULL,?,?,?,?,?,?)`)
+      .run(prodB, prodB, 'Voucher Spend Product B', 'pcs', 10000, 15000, 0)
+    db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,NULL,?)`).run(crypto.randomUUID(), prodA, BR_A, 10)
+    db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,NULL,?)`).run(crypto.randomUUID(), prodB, BR_A, 10)
+
+    setSession(mgrA)
+    // Purchase 1 — Rs.20,000 fully covered by the voucher. This is the exact
+    // same invoices:create/coupon field PaymentModal.tsx uses — no
+    // SmartBuy-specific redemption call involved.
+    const sale1 = await call('invoices:create', {
+      branch_id: BR_A, customer_id: couponRow.customer_id, bill_type: 'RETAIL',
+      subtotal: 20000, discount_amount: 0, tax_amount: 0, total_amount: 20000, paid_amount: 20000, due_amount: 0,
+      items: [{ product_id: prodA, quantity: 1, unit_price: 20000, discount_pct: 0, discount_amount: 0, tax_rate: 0, tax_amount: 0, line_total: 20000 }],
+      coupon: { code: voucherCode, amount: 20000 },
+    })
+    if (!sale1.success) note(`CRITICAL: a SmartBuy voucher could not be used through the normal POS invoices:create flow: ${sale1.error}`)
+    expect(sale1.success).toBe(true)
+    const paymentRow1 = db.prepare(`SELECT * FROM payments WHERE invoice_id=? AND method='coupon'`).get(sale1.data.id) as any
+    if (!paymentRow1 || Number(paymentRow1.amount) !== 20000) note('CRITICAL: no coupon payment line (or wrong amount) recorded for the first purchase')
+    const afterFirst = db.prepare('SELECT balance, status FROM coupons WHERE id=?').get(voucher.voucherId) as any
+    if (Number(afterFirst.balance) !== 40000) note(`CRITICAL: voucher balance after a Rs.20,000 spend should be Rs.40,000, got ${afterFirst.balance}`)
+    expect(Number(afterFirst.balance)).toBe(40000)
+
+    // Purchase 2 — a second, later, unrelated purchase against the SAME
+    // remaining voucher balance — proves partial usage genuinely persists.
+    const sale2 = await call('invoices:create', {
+      branch_id: BR_A, customer_id: couponRow.customer_id, bill_type: 'RETAIL',
+      subtotal: 15000, discount_amount: 0, tax_amount: 0, total_amount: 15000, paid_amount: 15000, due_amount: 0,
+      items: [{ product_id: prodB, quantity: 1, unit_price: 15000, discount_pct: 0, discount_amount: 0, tax_rate: 0, tax_amount: 0, line_total: 15000 }],
+      coupon: { code: voucherCode, amount: 15000 },
+    })
+    expect(sale2.success).toBe(true)
+    const afterSecond = db.prepare('SELECT balance FROM coupons WHERE id=?').get(voucher.voucherId) as any
+    if (Number(afterSecond.balance) !== 25000) note(`CRITICAL: voucher balance after a second Rs.15,000 spend should be Rs.25,000, got ${afterSecond.balance}`)
+    expect(Number(afterSecond.balance)).toBe(25000)
+  })
+
+  it('83. a higher-value POS purchase splits the SmartBuy voucher and an additional cash payment — existing generic POS behavior, not SmartBuy-specific', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Voucher Upgrade Spend', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const uSchemeId = schemeRes.data.id
+    const u1 = await call('chits:members:add', uSchemeId, { customer_name: 'Upgrade Spend Winner', customer_phone: '0771170008', agent_id: AGENT_REG })
+    expect(u1.success).toBe(true)
+    const pay = await call('chits:contributions:record', u1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', uSchemeId, 1, { reason: 'QA voucher upgrade spend regression' })
+    expect(draw.success).toBe(true)
+    const voucher = (draw.data.vouchers || [])[0]
+    const couponRow = db.prepare('SELECT code, customer_id FROM coupons WHERE id=?').get(voucher.voucherId) as any
+
+    const prodExpensive = 'prod-voucher-upgrade'
+    db.prepare(`INSERT OR IGNORE INTO products (id, category_id, supplier_id, sku, name, unit, cost_price, selling_price, tax_rate) VALUES (?,NULL,NULL,?,?,?,?,?,?)`)
+      .run(prodExpensive, prodExpensive, 'Voucher Upgrade Product', 'pcs', 50000, 75000, 0)
+    db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,NULL,?)`).run(crypto.randomUUID(), prodExpensive, BR_A, 5)
+
+    setSession(mgrA)
+    const sale = await call('invoices:create', {
+      branch_id: BR_A, customer_id: couponRow.customer_id, bill_type: 'RETAIL',
+      subtotal: 75000, discount_amount: 0, tax_amount: 0, total_amount: 75000, paid_amount: 75000, due_amount: 0,
+      items: [{ product_id: prodExpensive, quantity: 1, unit_price: 75000, discount_pct: 0, discount_amount: 0, tax_rate: 0, tax_amount: 0, line_total: 75000 }],
+      coupon: { code: couponRow.code, amount: 60000 },
+      payments: [{ method: 'cash', amount: 15000 }],
+    })
+    if (!sale.success) note(`CRITICAL: a higher-value purchase using the full voucher plus a cash top-up failed: ${sale.error}`)
+    expect(sale.success).toBe(true)
+    const cashPayment = db.prepare(`SELECT * FROM payments WHERE invoice_id=? AND method='cash'`).get(sale.data.id) as any
+    if (!cashPayment || Number(cashPayment.amount) !== 15000) note('CRITICAL: the Rs.15,000 top-up cash payment was not recorded correctly')
+    const couponPayment = db.prepare(`SELECT * FROM payments WHERE invoice_id=? AND method='coupon'`).get(sale.data.id) as any
+    if (!couponPayment || Number(couponPayment.amount) !== 60000) note('CRITICAL: the full Rs.60,000 voucher payment was not recorded correctly')
+    const afterSale = db.prepare('SELECT balance, status FROM coupons WHERE id=?').get(voucher.voucherId) as any
+    if (Number(afterSale.balance) !== 0 || afterSale.status !== 'used_up') note(`CRITICAL: voucher should be fully used up after this purchase — balance=${afterSale.balance} status=${afterSale.status}`)
+  })
+
+  it('84. reverseRedemption on a voucher-only win (no invoice) voids the voucher and cleanly resets the member', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Voucher Reversal', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const rSchemeId = schemeRes.data.id
+    const r1 = await call('chits:members:add', rSchemeId, { customer_name: 'Reversal Voucher Winner', customer_phone: '0771170009', agent_id: AGENT_REG })
+    expect(r1.success).toBe(true)
+    const pay = await call('chits:contributions:record', r1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', rSchemeId, 1, { reason: 'QA voucher reversal regression' })
+    expect(draw.success).toBe(true)
+    const voucher = (draw.data.vouchers || [])[0]
+    expect(voucher).toBeTruthy()
+
+    const reversal = await call('chits:members:reverseRedemption', r1.data.id, 'QA test — reversing a voucher-only win')
+    if (!reversal.success) note(`CRITICAL: reverseRedemption failed on a voucher-only win: ${reversal.error}`)
+    expect(reversal.success).toBe(true)
+
+    const couponAfter = db.prepare('SELECT status FROM coupons WHERE id=?').get(voucher.voucherId) as any
+    if (couponAfter.status !== 'void') note(`CRITICAL: reversed voucher should be status='void', got '${couponAfter.status}'`)
+    const memberAfter = db.prepare('SELECT voucher_id, redemption_type FROM chit_members WHERE id=?').get(r1.data.id) as any
+    if (memberAfter.voucher_id) note('CRITICAL: chit_members.voucher_id should be cleared after a reversal')
+    if (memberAfter.redemption_type !== 'final_batch') note('HIGH: the win itself (redemption_type) unexpectedly changed on a reversal — only the voucher should be undone')
+  })
+
+  it('85. coupons:reports Voucher Source filter — "smartbuy" returns only SmartBuy-issued coupons, "pos" excludes them', async () => {
+    setSession(SUPER_ADMIN)
+    const plainCoupon = await call('coupons:create', { name: 'QA Plain POS Coupon', initial_value: 5000, branch_id: BR_A })
+    expect(plainCoupon.success).toBe(true)
+
+    const smartbuyOnly = await call('coupons:reports', { type: 'issued', sourceType: 'smartbuy' })
+    expect(smartbuyOnly.success).toBe(true)
+    const smartbuyRows = smartbuyOnly.data.rows as any[]
+    if (smartbuyRows.some(r => r.code === plainCoupon.data.code)) note('CRITICAL: sourceType=smartbuy incorrectly included a plain POS coupon')
+    if (smartbuyRows.length === 0) note('HIGH: sourceType=smartbuy returned zero rows despite multiple SmartBuy vouchers issued earlier in this suite')
+    if (smartbuyRows.some(r => r.source_type !== 'smartbuy_redemption')) note('CRITICAL: sourceType=smartbuy returned a row that is not actually SmartBuy-sourced')
+
+    const posOnly = await call('coupons:reports', { type: 'issued', sourceType: 'pos' })
+    expect(posOnly.success).toBe(true)
+    const posRows = posOnly.data.rows as any[]
+    if (!posRows.some(r => r.code === plainCoupon.data.code)) note('CRITICAL: sourceType=pos is missing a genuine plain POS coupon')
+    if (posRows.some(r => r.source_type === 'smartbuy_redemption')) note('CRITICAL: sourceType=pos incorrectly included a SmartBuy-issued voucher')
+  })
 
   it('SUMMARY: print all findings', () => {
     console.log('\n\n=== QA FINDINGS SUMMARY ===')

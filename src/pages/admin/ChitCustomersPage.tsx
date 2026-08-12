@@ -136,7 +136,7 @@ export default function ChitCustomersPage() {
                   </span>
                 </td>
                 <td className="table-cell">
-                  <button onClick={() => setViewing(c)} className="btn-ghost btn-sm p-1.5"><Eye size={13} /></button>
+                  <button onClick={() => setViewing(c)} className="btn-secondary btn-sm gap-1"><Eye size={13} /> View</button>
                 </td>
               </tr>
             ))}

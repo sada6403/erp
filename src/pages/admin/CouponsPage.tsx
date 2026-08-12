@@ -372,6 +372,14 @@ function CouponDetailModal({ coupon, canVoid, onPrint, onVoid, onClose }: {
           </div>
         </div>
 
+        {coupon.source_type === 'smartbuy_redemption' && (
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+            Issued via: {String(coupon.smartbuy_scheme_name || 'SmartBuy Scheme')}
+            {coupon.smartbuy_scheme_number ? ` (${String(coupon.smartbuy_scheme_number)})` : ''}
+            {coupon.smartbuy_cycle_no ? `, Cycle ${String(coupon.smartbuy_cycle_no)}` : ''}
+          </p>
+        )}
+
         <div>
           <h3 className="font-semibold text-sm mb-2" style={{ color: 'var(--text-1)' }}>Redemption History</h3>
           {redemptions.length === 0 ? (

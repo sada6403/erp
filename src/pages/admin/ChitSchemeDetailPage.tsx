@@ -4,7 +4,8 @@ import Modal from '@/components/shared/Modal'
 import StatCard from '@/components/shared/StatCard'
 import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
 import MemberPaymentHistoryModal from '@/components/shared/MemberPaymentHistoryModal'
-import { ArrowLeft, Plus, Upload, FileDown, Users, Coins, Gift, Shuffle, Pencil, Package, Eye, GitBranch, Check, X, CalendarClock, ArrowLeftRight, Undo2 } from 'lucide-react'
+import SendReminderModal from '@/components/shared/SendReminderModal'
+import { ArrowLeft, Plus, Upload, FileDown, Users, Coins, Gift, Shuffle, Pencil, Package, Eye, GitBranch, Check, X, CalendarClock, ArrowLeftRight, Undo2, Trophy, Target, PartyPopper, AlertCircle, Send, TrendingUp } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -31,7 +32,7 @@ export default function ChitSchemeDetailPage() {
   const [branches, setBranches] = useState<Row[]>([])
   const [summary, setSummary] = useState<Row>({})
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'members' | 'draws' | 'branches' | 'withdrawals'>('members')
+  const [tab, setTab] = useState<'members' | 'draws' | 'branches' | 'withdrawals' | 'payments' | 'financials'>('members')
   const [importing, setImporting] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [showRegisterHistorical, setShowRegisterHistorical] = useState(false)
@@ -166,15 +167,18 @@ export default function ChitSchemeDetailPage() {
 
       {scheme.status === 'pending' && (
         <div className="mx-6 mt-4 rounded-lg border px-4 py-3 text-sm flex-shrink-0" style={{ background: 'color-mix(in srgb, #f59e0b 10%, transparent)', borderColor: '#f59e0b', color: '#a16207' }}>
-          <strong>Waiting for Minimum Members</strong> — Need {Math.max(0, Number(scheme.min_members || 0) - membersEnrolled)} More Members.
+          <strong>Waiting for Members</strong> — {membersEnrolled} / {Number(scheme.min_members || 0)} · {Math.max(0, Number(scheme.min_members || 0) - membersEnrolled)} More Member(s) Required to activate.
         </div>
       )}
 
-      <div className="grid grid-cols-4 gap-3 px-6 py-4 flex-shrink-0">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 px-6 py-4 flex-shrink-0">
         <StatCard label="Members" value={`${membersEnrolled} / ${scheme.member_count}`} icon={Users} color="brand" />
         <StatCard label="Cycles Drawn" value={`${draws.length} / ${scheme.cycle_count}`} icon={Shuffle} color="blue" />
         <StatCard label="Contributions Collected" value={`Rs.${money(summary.total_collected)}`} icon={Coins} color="green" />
         <StatCard label="Agent Commission" value={`Rs.${money(summary.total_commission)}`} icon={Gift} color="purple" />
+        <StatCard label="Profit / Loss" value={`Rs.${money(summary.profit)}`}
+          sub={`Cost Rs.${money(summary.product_cost_total)} · Refunds Rs.${money(summary.withdrawal_refunds_total)}`}
+          icon={Coins} color={Number(summary.profit || 0) >= 0 ? 'green' : 'red'} />
       </div>
 
       <div className="flex items-center justify-between px-6 pb-3 flex-shrink-0">
@@ -186,6 +190,12 @@ export default function ChitSchemeDetailPage() {
           </button>
           <button onClick={() => setTab('withdrawals')} className={tab === 'withdrawals' ? 'btn-primary btn-sm gap-1.5' : 'btn-secondary btn-sm gap-1.5'}>
             <X size={13} /> Withdrawals {pendingWithdrawalCount > 0 && <span className="badge-yellow ml-1">{pendingWithdrawalCount}</span>}
+          </button>
+          <button onClick={() => setTab('payments')} className={tab === 'payments' ? 'btn-primary btn-sm gap-1.5' : 'btn-secondary btn-sm gap-1.5'}>
+            <Coins size={13} /> Cycle Payments
+          </button>
+          <button onClick={() => setTab('financials')} className={tab === 'financials' ? 'btn-primary btn-sm gap-1.5' : 'btn-secondary btn-sm gap-1.5'}>
+            <TrendingUp size={13} /> Financials
           </button>
         </div>
         <div className="flex gap-2">
@@ -201,7 +211,7 @@ export default function ChitSchemeDetailPage() {
             <button onClick={() => setShowInvite(true)} className="btn-primary btn-sm gap-1.5"><GitBranch size={14} /> Invite Branch</button>
           )}
           {scheme.status === 'active' && (
-            <button onClick={() => setShowDraw(true)} className="btn-primary btn-sm gap-1.5"><Shuffle size={14} /> Conduct Draw (Cycle {nextCycle})</button>
+            <button onClick={() => setShowDraw(true)} className="btn-primary btn-sm gap-1.5"><Target size={14} /> Conduct Draw (Cycle {nextCycle})</button>
           )}
         </div>
       </div>
@@ -272,7 +282,7 @@ export default function ChitSchemeDetailPage() {
           <table className="w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
-                {['#', 'Customer', 'Phone', 'Agent', 'Early?', 'Contributions Paid', 'Status', 'Won Cycle', 'Redeemed Product', ''].map(h => (
+                {['#', 'Customer', 'Phone', 'Agent', 'Early?', 'Contributions Paid', 'Status', 'Won Cycle', 'Redeemed Product', 'Actions'].map(h => (
                   <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
                 ))}
               </tr>
@@ -301,28 +311,44 @@ export default function ChitSchemeDetailPage() {
                     ) : '—'}
                   </td>
                   <td className="table-cell">
-                    <div className="flex gap-1">
+                    <div className="flex flex-wrap gap-1.5">
                       {m.status === 'active' && (
-                        <button onClick={() => setPayingMember(m)} className="btn-ghost btn-sm p-1.5" title="Record Contribution"><Coins size={13} /></button>
+                        <button onClick={() => setPayingMember(m)} className="btn-secondary btn-sm gap-1" title="Record this member's payment for the current month">
+                          <Coins size={13} /> Pay
+                        </button>
                       )}
                       {m.status === 'active' && Boolean(m.is_early_redemption) && (
-                        <button onClick={() => setRedeemingMember(m)} className="btn-ghost btn-sm p-1.5" title="Early Redeem"><Gift size={13} /></button>
+                        <button onClick={() => setRedeemingMember(m)} className="btn-secondary btn-sm gap-1" title="This member can take the product early">
+                          <Gift size={13} /> Redeem Early
+                        </button>
                       )}
                       {m.status === 'redeemed' && !m.redemption_invoice_id && (
-                        <button onClick={() => setRedemptionMember(m)} className="btn-ghost btn-sm p-1.5" title="Record Redemption Product"><Package size={13} /></button>
+                        <button onClick={() => setRedemptionMember(m)} className="btn-primary btn-sm gap-1" title="Record which product this winner received">
+                          <Package size={13} /> Give Product
+                        </button>
                       )}
                       {m.status === 'redeemed' && !m.redemption_invoice_id && (
-                        <button onClick={() => setExtendingClaimMember(m)} className="btn-ghost btn-sm p-1.5" title="Extend Claim Reminder"><CalendarClock size={13} /></button>
+                        <button onClick={() => setExtendingClaimMember(m)} className="btn-ghost btn-sm gap-1" title="Give this winner more time to claim their product">
+                          <CalendarClock size={13} /> Extend Time
+                        </button>
                       )}
                       {m.status === 'redeemed' && !m.redemption_invoice_id && isSuperAdmin && (
-                        <button onClick={() => setTransferringMember(m)} className="btn-ghost btn-sm p-1.5" title="Transfer Winner Entitlement"><ArrowLeftRight size={13} /></button>
+                        <button onClick={() => setTransferringMember(m)} className="btn-ghost btn-sm gap-1" title="Let someone else claim this prize instead">
+                          <ArrowLeftRight size={13} /> Transfer
+                        </button>
                       )}
                       {m.status === 'redeemed' && Boolean(m.redemption_invoice_id) && isSuperAdmin && (
-                        <button onClick={() => setReversingMember(m)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Reverse Redemption"><Undo2 size={13} /></button>
+                        <button onClick={() => setReversingMember(m)} className="btn-ghost btn-sm gap-1 text-red-400" title="Undo — this product was given by mistake">
+                          <Undo2 size={13} /> Reverse
+                        </button>
                       )}
-                      <button onClick={() => setHistoryMember(m)} className="btn-ghost btn-sm p-1.5" title="Payment History"><Eye size={13} /></button>
+                      <button onClick={() => setHistoryMember(m)} className="btn-ghost btn-sm gap-1" title="See every payment this member has made">
+                        <Eye size={13} /> History
+                      </button>
                       {m.status === 'active' && (
-                        <button onClick={() => setWithdrawingMember(m)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Withdraw">✕</button>
+                        <button onClick={() => setWithdrawingMember(m)} className="btn-ghost btn-sm gap-1 text-red-400" title="Remove this member from the scheme">
+                          <X size={13} /> Withdraw
+                        </button>
                       )}
                     </div>
                   </td>
@@ -335,16 +361,26 @@ export default function ChitSchemeDetailPage() {
           <table className="w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
-                {['Cycle', 'Date & Time', 'Winner', 'Method', 'Selected By', 'Reason', 'Settled', 'Eligible', 'Product Chosen'].map(h => (
+                {['Cycle', 'Date & Time', 'Winner', 'Method', 'Selected By', 'Reason', 'Settled', 'Eligible', 'Claim Status', 'Product Chosen'].map(h => (
                   <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {draws.length === 0 ? (
-                <tr><td colSpan={9} className="text-center py-16 text-slate-500">No draws conducted yet</td></tr>
+                <tr><td colSpan={10} className="text-center py-16 text-slate-500">No draws conducted yet</td></tr>
               ) : draws.map(d => {
-                const winnerMember = members.find(m => m.id === d.winner_member_id)
+                // winner_member_id is only ever set for a single-winner draw
+                // (random/manual_pick) — a final_batch draw settles multiple
+                // members at once and leaves it NULL, so this cycle's real
+                // winner(s) are found by matching won_cycle_no instead, the
+                // same way winner_name itself is already built server-side.
+                const cycleWinners = members.filter(m => m.won_cycle_no === d.cycle_no && ['draw', 'final_batch'].includes(m.redemption_type as string))
+                const claimedCount = cycleWinners.filter(m => m.redemption_invoice_id).length
+                const productList = cycleWinners
+                  .filter(m => m.redeemed_product_name)
+                  .map(m => `${m.redeemed_product_name as string} × ${m.redeemed_qty as number}`)
+                const productSummary = productList.length > 2 ? `${productList.slice(0, 2).join(', ')} +${productList.length - 2} more` : productList.join(', ')
                 return (
                 <tr key={d.id as string} className="table-row">
                   <td className="table-cell font-semibold">{d.cycle_no as number}</td>
@@ -355,15 +391,22 @@ export default function ChitSchemeDetailPage() {
                   <td className="table-cell text-xs text-slate-400">{(d.notes as string) || '—'}</td>
                   <td className="table-cell">{d.settled_count as number}</td>
                   <td className="table-cell text-slate-400">{d.eligible_count as number}</td>
-                  <td className="table-cell text-xs text-slate-400">
-                    {winnerMember?.redeemed_product_name ? `${winnerMember.redeemed_product_name as string} × ${winnerMember.redeemed_qty as number}` : '—'}
+                  <td className="table-cell">
+                    {cycleWinners.length === 0 ? '—' : (
+                      <span className={claimedCount === cycleWinners.length ? 'badge-green' : claimedCount === 0 ? 'badge-red' : 'badge-yellow'}>
+                        {claimedCount}/{cycleWinners.length} Claimed
+                      </span>
+                    )}
+                  </td>
+                  <td className="table-cell text-xs text-slate-400" title={productList.join(', ')}>
+                    {productSummary || '—'}
                   </td>
                 </tr>
                 )
               })}
             </tbody>
           </table>
-        ) : (
+        ) : tab === 'withdrawals' ? (
           <table className="w-full">
             <thead className="sticky top-0 bg-surface-900 z-10">
               <tr>
@@ -396,6 +439,10 @@ export default function ChitSchemeDetailPage() {
               ))}
             </tbody>
           </table>
+        ) : tab === 'payments' ? (
+          <CyclePaymentsTab schemeId={id!} nextCycle={nextCycle} />
+        ) : (
+          <FinancialsTab schemeId={id!} />
         )}
       </div>
 
@@ -412,7 +459,7 @@ export default function ChitSchemeDetailPage() {
           onClose={() => setShowDraw(false)} onSave={() => { setShowDraw(false); load() }} />
       )}
       {payingMember && (
-        <RecordContributionModal member={payingMember} schemeId={id!}
+        <RecordContributionModal member={payingMember} schemeId={id!} defaultCycleNo={nextCycle}
           onClose={() => setPayingMember(null)} onSave={() => { setPayingMember(null); load() }} />
       )}
       {redeemingMember && (
@@ -701,15 +748,52 @@ function RegisterHistoricalMemberModal({ schemeId, defaultAgentId, onClose, onSa
 
 const MANUAL_DRAW_MIN_REASON_LENGTH = 10
 
+function MemberAvatar({ name }: { name: string }) {
+  const initial = (name || '?').trim().charAt(0).toUpperCase() || '?'
+  return (
+    <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
+      style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc' }}>
+      {initial}
+    </div>
+  )
+}
+
+function EligibleMembersList({ members, highlightId }: { members: Row[]; highlightId?: string }) {
+  return (
+    <div className="rounded-lg divide-y max-h-40 overflow-y-auto" style={{ border: '1px solid var(--border)' }}>
+      {members.map(m => (
+        <div key={m.id as string} className="flex items-center gap-2.5 px-3 py-2"
+          style={{ background: m.id === highlightId ? 'rgba(234,179,8,0.10)' : undefined, borderColor: 'var(--border)' }}>
+          <MemberAvatar name={(m.customer_name as string) || ''} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium truncate" style={{ color: 'var(--text-1)' }}>{(m.customer_name as string) || '—'}</p>
+            <p className="text-xs" style={{ color: 'var(--text-3)' }}>Join order #{m.join_order as number}{m.customer_phone ? ` · ${m.customer_phone as string}` : ''}</p>
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, isSuperAdmin, onClose, onSave }: {
   schemeId: string; cycleNo: number; isFinalCycle: boolean; isSuperAdmin: boolean; onClose: () => void; onSave: () => void
 }) {
   const [eligible, setEligible] = useState<Row[]>([])
-  const [method, setMethod] = useState<'random' | 'manual_pick'>('random')
+  const [progress, setProgress] = useState<Row | null>(null)
   const [winnerId, setWinnerId] = useState('')
   const [reason, setReason] = useState('')
+  const [witnessName, setWitnessName] = useState('')
+  const [referenceNumber, setReferenceNumber] = useState('')
   const [loading, setLoading] = useState(true)
   const [conducting, setConducting] = useState(false)
+  const [payingMember, setPayingMember] = useState<Row | null>(null)
+  const [remindingMemberId, setRemindingMemberId] = useState<string | null>(null)
+  // Result of a successful draw, shown as a reveal screen inside this same
+  // modal instead of closing straight to a toast — the whole point of a
+  // "lucky draw" feature is the reveal moment, and staff/customers standing
+  // at the counter should see the winner's name right here, not have to
+  // find them again in the history table after the modal vanishes.
+  const [result, setResult] = useState<{ winners: Row[]; vouchers: Row[] } | null>(null)
   // A real product handout hinges on this call — setConducting(true) alone
   // disables the button, but React state updates aren't guaranteed to be
   // reflected in the DOM before a second, near-simultaneous click event is
@@ -717,32 +801,48 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, isSuperAdmin, onClo
   // that window outright rather than relying on re-render timing.
   const submittingRef = useRef(false)
 
-  useEffect(() => {
-    window.api.chits.draws.eligible(schemeId, cycleNo).then((res: Row) => {
-      if (res.success) setEligible(res.data as Row[])
-      else toast.error(String(res.error || 'Failed to load eligible members'))
-      setLoading(false)
+  const load = () => {
+    setLoading(true)
+    Promise.all([
+      window.api.chits.draws.eligible(schemeId, cycleNo),
+      window.api.chits.cycles.paymentProgress(schemeId, cycleNo),
+    ]).then(([elRes, progRes]: [Row, Row]) => {
+      if (elRes.success) setEligible(elRes.data as Row[])
+      else toast.error(String(elRes.error || 'Failed to load eligible members'))
+      if (progRes.success) setProgress(progRes.data as Row)
+      else toast.error(String(progRes.error || 'Failed to load cycle payment progress'))
     }).catch((err: any) => {
-      toast.error(err.message || 'Failed to load eligible members')
-      setLoading(false)
-    })
-  }, [schemeId, cycleNo])
+      toast.error(err.message || 'Failed to load draw data')
+    }).finally(() => setLoading(false))
+  }
+
+  useEffect(load, [schemeId, cycleNo]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const totalMembers = Number(progress?.totalMembers || 0)
+  const paidMembers = Number(progress?.paidMembers || 0)
+  const isReady = totalMembers > 0 && paidMembers >= totalMembers
+  const pendingMembers = (progress?.pendingMembers || []) as Row[]
 
   const conduct = async () => {
     if (submittingRef.current) return
-    if (!isFinalCycle && method === 'manual_pick' && !isSuperAdmin) { toast.error('Only a Company Admin can manually select a winner'); return }
-    if (!isFinalCycle && method === 'manual_pick' && !winnerId) { toast.error('Select a member'); return }
-    if (!isFinalCycle && method === 'manual_pick' && reason.trim().length < MANUAL_DRAW_MIN_REASON_LENGTH) {
-      toast.error(`Enter a reason of at least ${MANUAL_DRAW_MIN_REASON_LENGTH} characters — kept in the Winner Selection Log`)
+    if (!isReady) { toast.error('Cycle is not ready for the draw yet'); return }
+    if (!isFinalCycle && !isSuperAdmin) { toast.error('Only a Company Admin can record a manual draw result'); return }
+    if (!isFinalCycle && !winnerId) { toast.error('Select the winning member'); return }
+    if (!isFinalCycle && reason.trim().length < MANUAL_DRAW_MIN_REASON_LENGTH) {
+      toast.error(`Enter draw remarks of at least ${MANUAL_DRAW_MIN_REASON_LENGTH} characters — kept in the Winner Selection Log`)
       return
     }
     submittingRef.current = true
     setConducting(true)
     try {
-      const res = await window.api.chits.draws.conduct(schemeId, cycleNo, { method, winnerMemberId: winnerId, reason: reason.trim() || undefined })
+      const res = await window.api.chits.draws.conduct(schemeId, cycleNo, {
+        winnerMemberId: winnerId, reason: reason.trim() || undefined,
+        witnessName: witnessName.trim() || undefined, referenceNumber: referenceNumber.trim() || undefined,
+      })
       if (res.success) {
-        toast.success(isFinalCycle ? `Final settlement: ${res.data.settledCount} member(s) received their product` : 'Draw completed')
-        onSave()
+        const winnerIds: string[] = res.data?.winnerMemberIds || []
+        const winners = eligible.filter(m => winnerIds.includes(m.id as string))
+        setResult({ winners: winners.length ? winners : eligible, vouchers: (res.data?.vouchers || []) as Row[] })
       } else {
         toast.error(String(res.error || 'Draw failed'))
       }
@@ -754,52 +854,326 @@ function ConductDrawModal({ schemeId, cycleNo, isFinalCycle, isSuperAdmin, onClo
     }
   }
 
+  const finish = () => onSave()
+
+  // ── Result / reveal screen ────────────────────────────────────────────
+  if (result) {
+    const single = result.winners.length === 1 ? result.winners[0] : null
+    const singleVoucher = single ? result.vouchers.find(v => v.memberId === single.id) : null
+    return (
+      <Modal title={isFinalCycle ? 'Final Settlement Complete' : 'We have a winner!'} onClose={finish}
+        footer={<button onClick={finish} className="btn-primary w-full">Done</button>}>
+        <div className="flex flex-col items-center text-center gap-3 py-2">
+          <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
+            style={{ background: 'rgba(234,179,8,0.15)', border: '1px solid rgba(234,179,8,0.3)' }}>
+            {isFinalCycle ? <PartyPopper size={28} className="text-yellow-400" /> : <Trophy size={28} className="text-yellow-400" />}
+          </div>
+          {single ? (
+            <div>
+              <p className="text-xl font-bold" style={{ color: 'var(--text-1)' }}>{(single.customer_name as string) || 'Winner'}</p>
+              <p className="text-sm mt-0.5" style={{ color: 'var(--text-3)' }}>
+                Join order #{single.join_order as number} · Cycle {cycleNo} · Manually recorded
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+              <strong>{result.winners.length}</strong> member(s) settled together in the final cycle.
+            </p>
+          )}
+          {!single && result.winners.length > 0 && (
+            <div className="w-full text-left">
+              <EligibleMembersList members={result.winners} />
+            </div>
+          )}
+          <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+            {isFinalCycle ? 'Every remaining balance was waived and product claim tracking has started.' : "The winner's remaining balance was waived — product claim tracking has started."}
+          </p>
+          {single && singleVoucher ? (
+            <div className="w-full text-left rounded-lg p-3 space-y-1" style={{ background: 'color-mix(in srgb, #22c55e 10%, transparent)', border: '1px solid #22c55e' }}>
+              <p className="text-sm font-semibold" style={{ color: '#22c55e' }}>✓ POS Voucher Created</p>
+              <p className="text-xs" style={{ color: 'var(--text-1)' }}>Voucher Number: <strong>{String(singleVoucher.voucherCode)}</strong></p>
+              <p className="text-xs" style={{ color: 'var(--text-1)' }}>Voucher Value: Rs.{money(singleVoucher.amount)}</p>
+              <p className="text-xs" style={{ color: 'var(--text-3)' }}>The member can now shop normally at POS using this voucher — no product needs to be selected here.</p>
+            </div>
+          ) : !single && result.vouchers.length > 0 ? (
+            <div className="w-full text-left rounded-lg p-3" style={{ background: 'color-mix(in srgb, #22c55e 10%, transparent)', border: '1px solid #22c55e' }}>
+              <p className="text-sm font-semibold" style={{ color: '#22c55e' }}>✓ {result.vouchers.length} POS Voucher(s) Created</p>
+              <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>Each settled member can now shop normally at POS using their own voucher.</p>
+            </div>
+          ) : null}
+        </div>
+      </Modal>
+    )
+  }
+
   return (
     <Modal title={`Conduct Draw — Cycle ${cycleNo}${isFinalCycle ? ' (Final Settlement)' : ''}`} onClose={onClose}
-      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={conduct} disabled={conducting || loading || eligible.length === 0} className="btn-primary">{conducting ? 'Processing...' : isFinalCycle ? 'Settle All Remaining Members' : 'Draw Winner'}</button></>}>
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button>
+        <button onClick={conduct} disabled={conducting || loading || !isReady || (!isFinalCycle && !isSuperAdmin)} className="btn-primary gap-1.5">
+          {conducting ? 'Processing...' : <>{isFinalCycle ? <PartyPopper size={14} /> : <Target size={14} />} {isFinalCycle ? 'Settle All Remaining Members' : 'Confirm Draw Result'}</>}
+        </button></>}>
       <div className="space-y-3">
         {loading ? (
-          <p className="text-sm text-slate-500">Loading eligible members...</p>
+          <p className="text-sm text-slate-500">Loading cycle payment status...</p>
+        ) : !isReady ? (
+          <>
+            <div className="rounded-lg p-3 flex items-start gap-2" style={{ background: 'color-mix(in srgb, #ef4444 10%, transparent)', border: '1px solid #ef4444' }}>
+              <AlertCircle size={16} className="text-red-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium" style={{ color: '#b91c1c' }}>Draw cannot be conducted yet — all members must complete their required payment.</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>{paidMembers} of {totalMembers} members have completed payment. {totalMembers - paidMembers} member(s) still pending.</p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide mb-1.5" style={{ color: 'var(--text-3)' }}>Pending Members</p>
+              <div className="rounded-lg divide-y max-h-56 overflow-y-auto" style={{ border: '1px solid var(--border)' }}>
+                {pendingMembers.map(pm => (
+                  <div key={pm.member_id as string} className="flex items-center gap-2.5 px-3 py-2">
+                    <MemberAvatar name={(pm.customer_name as string) || ''} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium truncate" style={{ color: 'var(--text-1)' }}>{(pm.customer_name as string) || '—'}</p>
+                      <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                        Balance Rs.{money(pm.balance)} · <span className={pm.status === 'partial' ? 'badge-yellow' : 'badge-gray'}>{pm.status as string}</span>
+                      </p>
+                    </div>
+                    <button onClick={() => setPayingMember({ id: pm.member_id, agent_id: pm.agent_id, customer_name: pm.customer_name })}
+                      className="btn-secondary btn-sm">Record Payment</button>
+                    <button onClick={() => setRemindingMemberId(pm.member_id as string)} className="btn-ghost btn-sm p-1.5" title="Send Reminder">
+                      <Send size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
         ) : eligible.length === 0 ? (
           <p className="text-sm text-slate-500">No eligible members remain for this scheme.</p>
         ) : isFinalCycle ? (
-          <p className="text-sm" style={{ color: 'var(--text-2)' }}>
-            This is the final cycle. All <strong>{eligible.length}</strong> remaining member(s) will receive their product together in this settlement.
-          </p>
+          <>
+            <p className="text-sm" style={{ color: 'var(--text-2)' }}>
+              This is the final cycle. All <strong>{eligible.length}</strong> remaining member(s) will receive their product together in this settlement.
+            </p>
+            <EligibleMembersList members={eligible} />
+          </>
+        ) : !isSuperAdmin ? (
+          <p className="text-sm text-slate-500">Only a Company Admin can record a manual draw result for this cycle.</p>
         ) : (
           <>
-            <p className="text-sm" style={{ color: 'var(--text-2)' }}>{eligible.length} member(s) eligible for this cycle's draw.</p>
-            <div className="flex gap-2">
-              <button onClick={() => setMethod('random')} className={method === 'random' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Random Draw</button>
-              {/* Manual override is Company Admin only server-side (SmartBuy
-                  fix audit, HIGH-5) — hidden here for everyone else so a
-                  Smart Buy Manager can't fill out the whole form only to be
-                  rejected after the fact. */}
-              {isSuperAdmin && (
-                <button onClick={() => setMethod('manual_pick')} className={method === 'manual_pick' ? 'btn-primary btn-sm' : 'btn-secondary btn-sm'}>Manual Pick</button>
-              )}
+            <div className="flex items-center gap-1.5 text-sm" style={{ color: 'var(--text-2)' }}>
+              <Users size={14} /> <strong>{eligible.length}</strong> member(s) eligible — the physical draw has already been conducted; enter its result below.
             </div>
-            {method === 'manual_pick' && isSuperAdmin && (
-              <>
-                <select value={winnerId} onChange={e => setWinnerId(e.target.value)} className="input">
-                  <option value="">— Select winner —</option>
-                  {eligible.map(m => <option key={m.id as string} value={m.id as string}>#{m.join_order as number} — {(m.customer_name as string) || m.id as string}</option>)}
-                </select>
-                <div>
-                  <label className="block text-xs font-medium text-slate-400 mb-1">Reason for Manual Pick * (min. {MANUAL_DRAW_MIN_REASON_LENGTH} characters)</label>
-                  <textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-16 resize-none" placeholder="e.g. Customer dispute resolution, loyalty priority, admin override" />
-                  <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>Recorded in the Winner Selection Log for transparency.</p>
-                </div>
-              </>
-            )}
+            <EligibleMembersList members={eligible} highlightId={winnerId} />
+            <select value={winnerId} onChange={e => setWinnerId(e.target.value)} className="input">
+              <option value="">— Select the winning member —</option>
+              {eligible.map(m => <option key={m.id as string} value={m.id as string}>#{m.join_order as number} — {(m.customer_name as string) || m.id as string}</option>)}
+            </select>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Witness / Staff Name</label><input value={witnessName} onChange={e => setWitnessName(e.target.value)} className="input" placeholder="optional" /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Draw Reference Number</label><input value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} className="input" placeholder="optional" /></div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Remarks * (min. {MANUAL_DRAW_MIN_REASON_LENGTH} characters)</label>
+              <textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-16 resize-none" placeholder="e.g. Physical lucky draw conducted at branch counter, ticket #42 drawn" />
+              <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>Recorded in the Winner Selection Log for transparency.</p>
+            </div>
           </>
         )}
       </div>
+      {payingMember && (
+        <RecordContributionModal member={payingMember} schemeId={schemeId} defaultCycleNo={cycleNo}
+          onClose={() => setPayingMember(null)} onSave={() => { setPayingMember(null); load() }} />
+      )}
+      {remindingMemberId && (
+        <SendReminderModal memberId={remindingMemberId} cycleNo={cycleNo} onClose={() => setRemindingMemberId(null)} />
+      )}
     </Modal>
   )
 }
 
-function RecordContributionModal({ member, schemeId, onClose, onSave }: { member: Row; schemeId: string; onClose: () => void; onSave: () => void }) {
+// Dedicated, always-reachable "who is blocking this cycle" view — the same
+// data ConductDrawModal shows when a draw isn't ready yet, but reachable
+// without opening the draw flow, per the request's standalone Pending
+// Members view.
+function CyclePaymentsTab({ schemeId, nextCycle }: { schemeId: string; nextCycle: number }) {
+  const [progress, setProgress] = useState<Row | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [payingMember, setPayingMember] = useState<Row | null>(null)
+  const [remindingMemberId, setRemindingMemberId] = useState<string | null>(null)
+  const [historyMemberId, setHistoryMemberId] = useState<string | null>(null)
+
+  const load = () => {
+    setLoading(true)
+    window.api.chits.cycles.paymentProgress(schemeId, nextCycle).then((res: Row) => {
+      if (res.success) setProgress(res.data as Row)
+      else toast.error(String(res.error || 'Failed to load cycle payment progress'))
+    }).catch((err: any) => toast.error(err.message || 'Failed to load cycle payment progress')).finally(() => setLoading(false))
+  }
+  useEffect(load, [schemeId, nextCycle]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (loading) return <p className="text-center py-16 text-slate-500">Loading...</p>
+  if (!progress) return <p className="text-center py-16 text-slate-500">No payment data available</p>
+
+  const totalMembers = Number(progress.totalMembers || 0)
+  const paidMembers = Number(progress.paidMembers || 0)
+  const pct = totalMembers > 0 ? Math.round((paidMembers / totalMembers) * 100) : 0
+  const pendingMembers = (progress.pendingMembers || []) as Row[]
+  const statusLabel = totalMembers === 0 ? 'No active members' : paidMembers >= totalMembers ? 'Ready for Manual Draw' : 'Waiting for Payments'
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-xl border p-4" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Cycle {nextCycle} Payment Progress</p>
+          <span className={paidMembers >= totalMembers && totalMembers > 0 ? 'badge-blue' : 'badge-yellow'}>{statusLabel}</span>
+        </div>
+        <p className="text-sm mb-2" style={{ color: 'var(--text-2)' }}>{paidMembers} / {totalMembers} Members Paid</p>
+        <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-soft)' }}>
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 100 ? '#22c55e' : '#6366f1' }} />
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-xs">
+          <div><span style={{ color: 'var(--text-3)' }}>Total Expected</span><p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Rs.{money(progress.totalExpected)}</p></div>
+          <div><span style={{ color: 'var(--text-3)' }}>Total Collected</span><p className="text-sm font-semibold text-green-500">Rs.{money(progress.totalCollected)}</p></div>
+          <div><span style={{ color: 'var(--text-3)' }}>Total Outstanding</span><p className="text-sm font-semibold" style={{ color: '#f59e0b' }}>Rs.{money(progress.totalOutstanding)}</p></div>
+          <div><span style={{ color: 'var(--text-3)' }}>Partial / Pending</span><p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{Number(progress.countPartial || 0)} / {Number(progress.countPending || 0)}</p></div>
+        </div>
+      </div>
+
+      <div>
+        <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-1)' }}>Pending Members</p>
+        <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr style={{ background: 'var(--bg-soft)' }}>
+                {['Member', 'Phone', 'Required', 'Paid', 'Balance', 'Status', ''].map(h => (
+                  <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-3)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {pendingMembers.length === 0 ? (
+                <tr><td colSpan={7} className="text-center py-8" style={{ color: 'var(--text-3)' }}>Everyone has paid — cycle is ready for the draw</td></tr>
+              ) : pendingMembers.map(pm => (
+                <tr key={pm.member_id as string} className="border-t" style={{ borderColor: 'var(--border)' }}>
+                  <td className="px-3 py-2" style={{ color: 'var(--text-1)' }}>{(pm.customer_name as string) || '—'}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-3)' }}>{(pm.customer_phone as string) || '—'}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-xs">Rs.{money(pm.required_amount)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-xs">Rs.{money(pm.paid_amount)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: '#f59e0b' }}>Rs.{money(pm.balance)}</td>
+                  <td className="px-3 py-2"><span className={pm.status === 'partial' ? 'badge-yellow' : 'badge-gray'}>{pm.status as string}</span></td>
+                  <td className="px-3 py-2">
+                    <div className="flex gap-1">
+                      <button onClick={() => setPayingMember({ id: pm.member_id, agent_id: pm.agent_id, customer_name: pm.customer_name })}
+                        className="btn-secondary btn-sm">Record Payment</button>
+                      <button onClick={() => setRemindingMemberId(pm.member_id as string)} className="btn-ghost btn-sm p-1.5" title="Send Reminder"><Send size={13} /></button>
+                      <button onClick={() => setHistoryMemberId(pm.member_id as string)} className="btn-ghost btn-sm p-1.5" title="View History"><Eye size={13} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {payingMember && (
+        <RecordContributionModal member={payingMember} schemeId={schemeId} defaultCycleNo={nextCycle}
+          onClose={() => setPayingMember(null)} onSave={() => { setPayingMember(null); load() }} />
+      )}
+      {remindingMemberId && (
+        <SendReminderModal memberId={remindingMemberId} cycleNo={nextCycle} onClose={() => setRemindingMemberId(null)} />
+      )}
+      {historyMemberId && (
+        <MemberPaymentHistoryModal memberId={historyMemberId} onClose={() => setHistoryMemberId(null)} />
+      )}
+    </div>
+  )
+}
+
+// §28/29 — Projected (re-simulated fresh from this scheme's own persisted
+// planning fields, via chits:schemes:financials) vs Actual (real,
+// transaction-derived figures) — never blended into one number (§31).
+function FinancialsTab({ schemeId }: { schemeId: string }) {
+  const [data, setData] = useState<Row | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    window.api.chits.schemes.financials(schemeId).then((res: Row) => {
+      if (res.success) setData(res.data as Row)
+      else toast.error(String(res.error || 'Failed to load scheme financials'))
+    }).catch((err: any) => toast.error(err.message || 'Failed to load scheme financials')).finally(() => setLoading(false))
+  }, [schemeId])
+
+  if (loading) return <p className="text-center py-16" style={{ color: 'var(--text-3)' }}>Loading...</p>
+  if (!data) return <p className="text-center py-16" style={{ color: 'var(--text-3)' }}>No financial data available</p>
+
+  const projected = data.projected as Row | undefined
+  const projTotals = projected?.totals as Row | undefined
+  const projCashFlow = projected?.cashFlow as Row | undefined
+  const projStatus = projected?.status as Row | undefined
+  const actual = data.actual as Row | null
+
+  return (
+    <div className="grid gap-4 lg:grid-cols-2">
+      <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>Projected</div>
+        {projected?.valid && projTotals && projCashFlow && projStatus ? (
+          <div className="space-y-2 text-sm">
+            <Row2 label="Projected Income" value={`Rs.${money(projTotals.expectedIncome)}`} />
+            <Row2 label="Projected Product Cost" value={`Rs.${money(projTotals.productCost)}`} />
+            <Row2 label="Projected Commission" value={`Rs.${money(projTotals.commission)}`} />
+            <Row2 label="Projected Expenses" value={`Rs.${money(projTotals.otherExpenses)}`} />
+            <Row2 label="Projected Profit" value={`Rs.${money(projTotals.expectedProfit)}`} bold color={Number(projTotals.expectedProfit) >= 0 ? '#22c55e' : '#ef4444'} />
+            <Row2 label="Projected Profit Margin" value={`${Number(projTotals.profitMarginPct).toFixed(2)}%`} />
+            <Row2 label="Peak Cash Requirement" value={`Rs.${money(projCashFlow.peakCashRequirement)}`} />
+            <p className="text-xs pt-1" style={{ color: 'var(--text-3)' }}>{String(projStatus.label)}</p>
+          </div>
+        ) : (
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+            {String(projected?.error || 'Set Projected Early Winners / Avg. Product Cost / Other Expenses in the scheme\'s Advanced Settings to see a projection here.')}
+          </p>
+        )}
+      </div>
+
+      <div className="rounded-xl p-4 space-y-3" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+        <div className="text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>Actual</div>
+        {actual ? (
+          <div className="space-y-2 text-sm">
+            <Row2 label="Actual Income" value={`Rs.${money(actual.contributions_collected)}`} />
+            <Row2 label="Actual Product Cost" value={`Rs.${money(actual.product_cost_total)}`} />
+            <Row2 label="Actual Commission" value={`Rs.${money(actual.commission_accrued)}`} />
+            <Row2 label="Actual Expenses" value={`Rs.${money(actual.other_expenses)}`} />
+            <Row2 label="Actual Profit" value={`Rs.${money(actual.profit)}`} bold color={Number(actual.profit) >= 0 ? '#22c55e' : '#ef4444'} />
+            <Row2 label="Actual Profit Margin" value={`${Number(actual.profit_margin_pct).toFixed(2)}%`} />
+          </div>
+        ) : (
+          <p className="text-xs" style={{ color: 'var(--text-3)' }}>No actual figures yet.</p>
+        )}
+      </div>
+
+      {projected?.valid && actual ? (
+        <div className="lg:col-span-2 rounded-xl p-4" style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+          <div className="text-sm font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--text-3)' }}>Projected vs Actual</div>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <Row2 label="Profit — Projected" value={`Rs.${money(projTotals?.expectedProfit)}`} />
+            <Row2 label="Profit — Actual" value={`Rs.${money(actual.profit)}`} />
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function Row2({ label, value, bold, color }: { label: string; value: string; bold?: boolean; color?: string }) {
+  return (
+    <div className="flex justify-between gap-3">
+      <span style={{ color: 'var(--text-3)' }}>{label}</span>
+      <span className={bold ? 'font-semibold' : ''} style={{ color: color || 'var(--text-1)' }}>{value}</span>
+    </div>
+  )
+}
+
+function RecordContributionModal({ member, schemeId, defaultCycleNo, onClose, onSave }: { member: Row; schemeId: string; defaultCycleNo: number; onClose: () => void; onSave: () => void }) {
   const [amount, setAmount] = useState(0)
   const [method, setMethod] = useState('cash')
   const [reference, setReference] = useState('')
@@ -807,6 +1181,13 @@ function RecordContributionModal({ member, schemeId, onClose, onSave }: { member
   const [paidAt, setPaidAt] = useState(() => new Date().toISOString().slice(0, 10))
   const [agents, setAgents] = useState<Row[]>([])
   const [collectedByAgentId, setCollectedByAgentId] = useState(String(member.agent_id || ''))
+  // Without a cycle number, chits:contributions:record stores cycle_no=NULL
+  // — a payment that can never satisfy draw eligibility (which matches on
+  // an exact cycle_no) no matter how much is paid. Defaults to the scheme's
+  // next-due cycle since that's who staff mean to be paying for in the
+  // overwhelming majority of cases, but stays editable for catching up an
+  // earlier missed cycle.
+  const [cycleNo, setCycleNo] = useState(defaultCycleNo)
   const [saving, setSaving] = useState(false)
   // Same synchronous double-submit guard as ConductDrawModal — unlike a
   // draw or redemption, chits:contributions:record has no database-level
@@ -828,7 +1209,7 @@ function RecordContributionModal({ member, schemeId, onClose, onSave }: { member
     try {
       const res = await window.api.chits.contributions.record(member.id, {
         amount, method, reference, receipt_number: receiptNumber || undefined,
-        paid_at: paidAt, collected_by_agent_id: collectedByAgentId || null,
+        paid_at: paidAt, collected_by_agent_id: collectedByAgentId || null, cycle_no: cycleNo,
       })
       if (res.success) {
         toast.success(res.data.status === 'approved' ? 'Contribution recorded' : 'Contribution submitted for verification')
@@ -850,7 +1231,13 @@ function RecordContributionModal({ member, schemeId, onClose, onSave }: { member
     <Modal title={`Record Contribution — ${(member.customer_name as string) || 'Member'}`} onClose={onClose}
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Record Payment'}</button></>}>
       <div className="space-y-3">
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><input type="number" value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><input type="number" value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">For cycle #</label>
+            <input type="number" value={cycleNo} onChange={e => setCycleNo(parseInt(e.target.value) || 1)} className="input" min={1} />
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Method</label>
@@ -1065,6 +1452,7 @@ function RecordRedemptionModal({ member, schemeChitValue, schemeProductId, onClo
   const [customerAccepted, setCustomerAccepted] = useState(false)
   const [upgradePaymentMethod, setUpgradePaymentMethod] = useState('cash')
   const [saving, setSaving] = useState(false)
+  const [voucherResult, setVoucherResult] = useState<{ code: string; balance: number } | null>(null)
   const alreadyRedeemed = Boolean(member.redemption_invoice_id)
   // Same synchronous double-submit guard as the other SmartBuy action
   // modals — recordRedemption is itself already race-safe at the database
@@ -1101,7 +1489,14 @@ function RecordRedemptionModal({ member, schemeChitValue, schemeProductId, onClo
         ...(isSubstitution ? { substitution_reason: substitutionReason.trim(), customer_accepted: customerAccepted } : {}),
         ...(upgradeAmount > 0 ? { upgrade_payment_method: upgradePaymentMethod } : {}),
       })
-      if (res.success) { toast.success(`Redemption recorded — invoice ${res.data?.invoiceNumber || ''}`); onSave() }
+      if (res.success) {
+        toast.success(`Redemption recorded — invoice ${res.data?.invoiceNumber || ''}`)
+        if (res.data?.voucherCode) {
+          setVoucherResult({ code: String(res.data.voucherCode), balance: Number(res.data.voucherBalance || 0) })
+        } else {
+          onSave()
+        }
+      }
       else toast.error(String(res.error || 'Failed to record redemption'))
     } catch (err: any) {
       toast.error(err.message || 'Failed to record redemption')
@@ -1109,6 +1504,21 @@ function RecordRedemptionModal({ member, schemeChitValue, schemeProductId, onClo
       submittingRef.current = false
       setSaving(false)
     }
+  }
+
+  if (voucherResult) {
+    return (
+      <Modal title={`Record Redemption — ${(member.customer_name as string) || 'Member'}`} onClose={onSave} footer={<button onClick={onSave} className="btn-primary">Done</button>}>
+        <div className="space-y-3 text-sm">
+          <p style={{ color: 'var(--text-1)' }}>✓ Product Redeemed</p>
+          <div className="rounded-lg border p-3 text-xs space-y-1.5" style={{ borderColor: 'var(--brand-primary)', background: 'color-mix(in srgb, var(--brand-primary) 8%, transparent)' }}>
+            <p style={{ color: 'var(--text-1)' }}>✓ Rs.{money(voucherResult.balance)} SmartBuy Voucher Created</p>
+            <p style={{ color: 'var(--text-2)' }}>Voucher Number: <strong style={{ color: 'var(--text-1)' }}>{voucherResult.code}</strong></p>
+            <p style={{ color: 'var(--text-2)' }}>Voucher Balance: Rs.{money(voucherResult.balance)}</p>
+          </div>
+        </div>
+      </Modal>
+    )
   }
 
   if (alreadyRedeemed) {
@@ -1153,7 +1563,7 @@ function RecordRedemptionModal({ member, schemeChitValue, schemeProductId, onClo
         )}
         {walletCreditAmount > 0 && (
           <div className="rounded-lg border p-3 text-xs" style={{ borderColor: 'var(--brand-primary)', background: 'color-mix(in srgb, var(--brand-primary) 8%, transparent)' }}>
-            <p style={{ color: 'var(--text-1)' }}>This product is below the entitlement — the remaining <strong>Rs.{money(walletCreditAmount)}</strong> is carried to the customer's SmartBuy Wallet as credit (never cash) for a future purchase.</p>
+            <p style={{ color: 'var(--text-1)' }}>This product is below the entitlement — the remaining <strong>Rs.{money(walletCreditAmount)}</strong> is auto-issued to the customer as a SmartBuy Voucher (never cash) for a future purchase.</p>
           </div>
         )}
         {isSubstitution && (
@@ -1312,7 +1722,7 @@ function ReverseRedemptionModal({ member, onClose, onSave }: { member: Row; onCl
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Reversing...' : 'Reverse'}</button></>}>
       <div className="space-y-3">
         <p className="text-sm" style={{ color: 'var(--text-2)' }}>
-          This voids invoice <strong>{(member.redeemed_product_name as string) || '—'}</strong> × {member.redeemed_qty as number}, reverses the stock deduction, cancels any commission earned on it, and claws back any SmartBuy Wallet credit it created. The member stays a winner — just unclaimed again, so staff can redo the redemption.
+          This voids invoice <strong>{(member.redeemed_product_name as string) || '—'}</strong> × {member.redeemed_qty as number}, reverses the stock deduction, cancels any commission earned on it, and voids any SmartBuy Voucher it created. The member stays a winner — just unclaimed again, so staff can redo the redemption.
         </p>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Reversal reason *</label><textarea value={reason} onChange={e => setReason(e.target.value)} className="input h-20 resize-none" placeholder="Required for the audit trail" /></div>
       </div>

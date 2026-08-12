@@ -104,13 +104,30 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
       return { success: true, data: { id } }
   })
 
-  safeHandle(ipcMain, 'customers:update', async (_e, id: string, payload) => {
+  // Was a fully open `UPDATE customers SET <any renderer-supplied field> WHERE
+  // id=?` — no permission check, no branch check, and no field allowlist
+  // (a caller could set outstanding_due/branch_id directly, not just the
+  // editable profile fields the Customer form actually exposes).
+  const CUSTOMER_UPDATE_ALLOWED_FIELDS = ['name', 'phone', 'email', 'address', 'nic', 'notes', 'credit_limit'] as const
+  safeHandle(ipcMain, 'customers:update', async (_e, id: string, payload: Record<string, unknown>) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.customers) return { success: false, error: 'Customer management access required' }
     const db = getDb()
-      const fields = Object.keys(payload).map(k => `${k} = @${k}`).join(', ')
-      db.prepare(`UPDATE customers SET ${fields}, updated_at = datetime('now') WHERE id = @id`)
-        .run({ ...payload, id })
-      await enqueuSync('customers', id, 'UPDATE', { id, ...payload })
-      return { success: true }
+    const caller = authUser()
+    const existing = db.prepare('SELECT id, branch_id FROM customers WHERE id = ?').get(id) as { id: string; branch_id: unknown } | undefined
+    if (!existing) return { success: false, error: 'Customer not found' }
+    if (!perms.all && caller.branch_id && String(existing.branch_id || '') !== String(caller.branch_id || '')) {
+      return { success: false, error: 'Cannot edit a customer from another branch' }
+    }
+
+    const update: Record<string, unknown> = {}
+    for (const k of CUSTOMER_UPDATE_ALLOWED_FIELDS) if (payload[k] !== undefined) update[k] = payload[k]
+    if (update.credit_limit !== undefined) update.credit_limit = Number(update.credit_limit) || 0
+
+    const fields = Object.keys(update).map(k => `${k} = @${k}`).join(', ')
+    if (fields) db.prepare(`UPDATE customers SET ${fields}, updated_at = datetime('now') WHERE id = @id`).run({ ...update, id })
+    await enqueuSync('customers', id, 'UPDATE', { id, ...update })
+    return { success: true }
   })
 
   // Hard-delete only when nothing references this customer anywhere in the
@@ -274,17 +291,19 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const rows = db.prepare(`
       SELECT m.id, m.scheme_id, m.join_order, m.status, m.contributions_paid,
-        m.is_early_redemption, m.won_cycle_no,
+        m.is_early_redemption, m.won_cycle_no, m.voucher_id,
         cs.scheme_number, cs.name as scheme_name, cs.chit_value, cs.contribution_amount,
         b.name as branch_name,
         p.name as product_name,
-        COALESCE(ma.name, sa.name) as agent_name, COALESCE(ma.code, sa.code) as agent_code
+        COALESCE(ma.name, sa.name) as agent_name, COALESCE(ma.code, sa.code) as agent_code,
+        vc.code as voucher_code, vc.balance as voucher_balance, vc.status as voucher_status
       FROM chit_members m
       JOIN chit_schemes cs ON cs.id = m.scheme_id
       LEFT JOIN branches b ON b.id = cs.branch_id
       LEFT JOIN products p ON p.id = cs.product_id
       LEFT JOIN agents sa ON sa.id = cs.agent_id
       LEFT JOIN agents ma ON ma.id = m.agent_id
+      LEFT JOIN coupons vc ON vc.id = m.voucher_id
       WHERE m.customer_id = ?
       ORDER BY m.created_at DESC
     `).all(id)

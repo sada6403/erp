@@ -66,6 +66,17 @@ function resolveScopedAgentId(caller: Record<string, unknown>): string | null {
   const scope = caller.scope as { level?: string; agentId?: string | null } | undefined
   return scope?.level === 'agent' ? (scope.agentId || null) : null
 }
+// resolveScopedAgentId only blocks an Agent-portal session. A normally
+// logged-in staff user (Branch Manager, or even Super Admin) whose login
+// happens to ALSO be linked as agents.user_id could otherwise approve,
+// reject, or mark-paid a commission line where they themselves are the
+// registration/sales agent — self-dealing regardless of which staff role
+// approved it.
+function callerLinkedAgentId(db: ReturnType<typeof getDb>, caller: Record<string, unknown>): string | null {
+  if (!caller.id) return null
+  const row = db.prepare('SELECT id FROM agents WHERE user_id=?').get(caller.id) as { id: string } | undefined
+  return row?.id || null
+}
 function money(value: number): number {
   return Math.round((Number(value) || 0) * 100) / 100
 }
@@ -361,6 +372,9 @@ export function registerCommissionHandlers(ipcMain: IpcMain) {
     `).get(id) as { id: string; status: string; branch_id: unknown; registration_agent_id: string | null; sales_agent_id: string | null } | undefined
     if (!line) return { success: false, error: 'Commission ledger entry not found' }
     const agentId = line.registration_agent_id || line.sales_agent_id || null
+    if (agentId && callerLinkedAgentId(db, caller) === agentId) {
+      return { success: false, error: 'Cannot approve your own commission entry' }
+    }
 
     if (line.status === 'pending_manager_approval') {
       if (!canViewCommissions(perms)) return { success: false, error: 'Smart Buy management access required' }
@@ -422,6 +436,9 @@ export function registerCommissionHandlers(ipcMain: IpcMain) {
     `).get(id) as { id: string; status: string; branch_id: unknown; registration_agent_id: string | null; sales_agent_id: string | null } | undefined
     if (!line) return { success: false, error: 'Commission ledger entry not found' }
     const agentId = line.registration_agent_id || line.sales_agent_id || null
+    if (agentId && callerLinkedAgentId(db, caller) === agentId) {
+      return { success: false, error: 'Cannot reject your own commission entry' }
+    }
 
     let action: string
     if (line.status === 'pending_manager_approval') {
@@ -498,9 +515,10 @@ export function registerCommissionHandlers(ipcMain: IpcMain) {
         SELECT id, status, branch_id, registration_agent_id, sales_agent_id FROM commission_ledger WHERE id=?
       `).get(id) as { id: string; status: string; branch_id: unknown; registration_agent_id: string | null; sales_agent_id: string | null } | undefined
       if (!line || line.status !== 'approved_for_payment') continue
+      const paidAgentId = line.registration_agent_id || line.sales_agent_id || null
+      if (paidAgentId && callerLinkedAgentId(db, caller) === paidAgentId) continue
       db.prepare(`UPDATE commission_ledger SET status='paid', paid_at=datetime('now'), updated_at=datetime('now') WHERE id=?`).run(id)
       await enqueuSync('commission_ledger', id, 'UPDATE', { id, status: 'paid' })
-      const paidAgentId = line.registration_agent_id || line.sales_agent_id || null
       await writeApprovalLog(db, {
         commissionId: id, agentId: paidAgentId, branchId: line.branch_id,
         action: 'PAID', previousStatus: line.status, newStatus: 'paid', changedBy: (caller.id as string) || null,

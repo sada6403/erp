@@ -2,7 +2,21 @@ import { ipcMain } from 'electron'
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
+import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
+import Store from 'electron-store'
+
+const store = new Store()
+
+function authUser(): Record<string, unknown> {
+  return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+}
+
+function currentPerms(caller: Record<string, unknown> = authUser()): Record<string, unknown> {
+  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller.permissions as Record<string, unknown>)
+    || {}
+}
 
 interface LoyaltyConfig {
   enabled: number
@@ -53,11 +67,14 @@ export function registerLoyaltyHandlers() {
   })
 
   safeHandle(ipcMain, 'loyalty:config:save', async (_e, cfg: Partial<LoyaltyConfig>) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.settings) return { success: false, error: 'Settings access required' }
     const db = getDb()
     const sets = Object.entries(cfg).map(([k]) => `${k} = ?`).join(', ')
     db.prepare(`UPDATE loyalty_config SET ${sets}, updated_at = datetime('now') WHERE id = 'default'`).run(...Object.values(cfg))
     const updated = db.prepare(`SELECT * FROM loyalty_config WHERE id = 'default'`).get() as Record<string, unknown>
     await enqueuSync('loyalty_config', 'default', 'UPDATE', updated)
+    logAudit(db, { userId: (authUser().id as string) || null, action: 'LOYALTY_CONFIG_UPDATED', tableName: 'loyalty_config', recordId: 'default', newValues: cfg })
     return { success: true }
   })
 
@@ -106,16 +123,27 @@ export function registerLoyaltyHandlers() {
     return { success: true, discount, points_used: payload.points, new_balance: newBalance }
   })
 
-  safeHandle(ipcMain, 'loyalty:adjust', (_e, payload: { customer_id: string; points: number; note: string; created_by?: string }) => {
+  // Free-form points adjustment (not tied to an actual sale/redemption) —
+  // a manual override, so it needs the same access level as any other
+  // direct financial-balance override (customer management), a real reason,
+  // an audit trail, and the ACTING user rather than whatever `created_by`
+  // the renderer happens to send (that field is trivially spoofable).
+  safeHandle(ipcMain, 'loyalty:adjust', (_e, payload: { customer_id: string; points: number; note: string }) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.customers) return { success: false, error: 'Customer management access required' }
+    if (!Number.isFinite(payload.points) || payload.points === 0) return { success: false, error: 'Enter a non-zero point adjustment' }
+    if (!payload.note || !payload.note.trim()) return { success: false, error: 'A reason is required for a manual points adjustment' }
+    const caller = authUser()
     const db = getDb()
     const row = db.prepare(`SELECT loyalty_points FROM customers WHERE id = ?`).get(payload.customer_id) as { loyalty_points: number } | undefined
-    const current    = row?.loyalty_points ?? 0
+    if (!row) return { success: false, error: 'Customer not found' }
+    const current    = row.loyalty_points ?? 0
     const newBalance = Math.max(0, current + payload.points)
     db.prepare(`UPDATE customers SET loyalty_points = ? WHERE id = ?`).run(newBalance, payload.customer_id)
     const txId = randomUUID()
     const txRow = {
       id: txId, customer_id: payload.customer_id, type: 'adjust',
-      points: payload.points, balance: newBalance, note: payload.note, created_by: payload.created_by ?? null,
+      points: payload.points, balance: newBalance, note: payload.note, created_by: (caller.id as string) || null,
     }
     db.prepare(`
       INSERT INTO loyalty_transactions (id, customer_id, type, points, balance, note, created_by)
@@ -123,6 +151,10 @@ export function registerLoyaltyHandlers() {
     `).run(txRow)
     void enqueuSync('loyalty_transactions', txId, 'INSERT', txRow)
     void enqueuSync('customers', payload.customer_id, 'UPDATE', { id: payload.customer_id, loyalty_points: newBalance })
+    logAudit(db, {
+      userId: (caller.id as string) || null, action: 'LOYALTY_POINTS_ADJUSTED', tableName: 'customers', recordId: payload.customer_id,
+      newValues: { points: payload.points, newBalance, note: payload.note },
+    })
     return { success: true, new_balance: newBalance }
   })
 

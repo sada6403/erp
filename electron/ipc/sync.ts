@@ -4,6 +4,7 @@ import Store from 'electron-store'
 import { CloudApi } from '../services/cloudApi'
 import { decryptSecret } from './settings'
 import { safeHandle } from './ipcHandler'
+import { enqueuSync } from '../services/syncQueue'
 
 const store = new Store()
 
@@ -151,6 +152,76 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
       }
       return { success: true, data: items.length }
     }
+  })
+
+  // A record created directly in local SQLite (e.g. by a one-off seeding
+  // script, or any future code path that writes the table without going
+  // through enqueuSync) can end up with sync_queue entries for its later
+  // UPDATEs but no INSERT — the row was never actually created in the
+  // cloud database. An UPDATE against a nonexistent row is a silent no-op
+  // in MySQL (0 rows affected, no error), so those show as "synced" while
+  // the row still doesn't exist there. Every child row that references it
+  // by foreign key then fails permanently with a constraint error, no
+  // matter how many times it's retried, because the parent it points to
+  // was never really created.
+  //
+  // This detects that pattern from the failed items' own error text (MySQL
+  // names the exact FK column and referenced table) and repairs it by
+  // re-enqueuing a fresh INSERT for the missing parent from its current
+  // local row, then resetting the dependent children so they retry after
+  // the parent lands. Restricted to an explicit allow-list of tables (not
+  // a dynamic `SELECT * FROM ${table}`) so this can never be pointed at an
+  // arbitrary table name parsed out of a server-generated error string.
+  const ORPHAN_FIX_PARENT_TABLES: Record<string, string> = {
+    chit_schemes: 'SELECT * FROM chit_schemes WHERE id=?',
+    chit_members: 'SELECT * FROM chit_members WHERE id=?',
+    customers: 'SELECT * FROM customers WHERE id=?',
+    agents: 'SELECT * FROM agents WHERE id=?',
+  }
+  safeHandle(ipcMain, 'sync:fixOrphanedParents', async () => {
+    const db = getDb()
+    const failed = db.prepare(`
+      SELECT id, table_name, record_id, payload, last_error FROM sync_queue WHERE status='failed'
+    `).all() as { id: string; table_name: string; record_id: string; payload: string; last_error: string | null }[]
+
+    const fixedParents = new Set<string>()
+    let parentsRepaired = 0
+    let childrenRequeued = 0
+
+    for (const item of failed) {
+      const match = /FOREIGN KEY \(`(\w+)`\) REFERENCES `(\w+)`/.exec(item.last_error || '')
+      if (!match) continue
+      const [, fkColumn, parentTable] = match
+      const parentQuery = ORPHAN_FIX_PARENT_TABLES[parentTable]
+      if (!parentQuery) continue
+
+      let payload: Record<string, unknown>
+      try { payload = JSON.parse(item.payload) } catch { continue }
+      const parentId = payload[fkColumn] as string | undefined
+      if (!parentId) continue
+
+      const parentKey = `${parentTable}:${parentId}`
+      if (!fixedParents.has(parentKey)) {
+        fixedParents.add(parentKey)
+        const alreadyInsertedToCloud = db.prepare(`
+          SELECT 1 FROM sync_queue WHERE table_name=? AND record_id=? AND operation='INSERT' AND status='synced'
+        `).get(parentTable, parentId)
+        if (!alreadyInsertedToCloud) {
+          const parentRow = db.prepare(parentQuery).get(parentId) as Record<string, unknown> | undefined
+          if (parentRow) {
+            await enqueuSync(parentTable, parentId, 'INSERT', parentRow)
+            parentsRepaired++
+          }
+        }
+      }
+      // Fresh attempts, regardless of whether this specific parent needed
+      // repair — a child can fail on ITS OWN missing parent while sharing
+      // the queue with children of an already-fine parent.
+      db.prepare(`UPDATE sync_queue SET status='pending', attempts=0, last_error=NULL WHERE id=?`).run(item.id)
+      childrenRequeued++
+    }
+
+    return { success: true, data: { parentsRepaired, childrenRequeued, scanned: failed.length } }
   })
 
   safeHandle(ipcMain, 'sync:discardItem', (_event, id: string) => {

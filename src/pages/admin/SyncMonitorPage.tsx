@@ -79,6 +79,32 @@ export default function SyncMonitorPage() {
     }
   }
 
+  // A "Cannot add or update a child row: a foreign key constraint fails"
+  // error means the parent row this one points to was never actually
+  // created in the cloud — usually because it was written directly to
+  // local SQLite by something that skipped the sync queue. Retrying the
+  // child alone can never succeed; the parent has to be (re)created first.
+  const handleFixOrphans = async () => {
+    setSyncing(true)
+    try {
+      const res = await window.api.sync.fixOrphanedParents()
+      if (!res.success) {
+        toast.error(res.error || 'Failed to repair orphaned records')
+        return
+      }
+      const { parentsRepaired, childrenRequeued } = res.data as { parentsRepaired: number; childrenRequeued: number }
+      await triggerSync()
+      await loadQueue()
+      toast.success(childrenRequeued > 0
+        ? `Repaired ${parentsRepaired} missing record(s), requeued ${childrenRequeued} item(s) — syncing`
+        : 'No orphaned-parent errors found in the failed queue')
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to repair orphaned records')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const handleDiagnose = async () => {
     setDiagnosing(true)
     setDiagSteps([])
@@ -109,6 +135,11 @@ export default function SyncMonitorPage() {
             {canManageSync && (status.failed > 0 || status.pending > 0) && (
               <button onClick={handleFixAndSync} disabled={syncing} className="btn-secondary btn-sm gap-1.5 text-yellow-400">
                 <AlertCircle size={14} /> Fix & Retry
+              </button>
+            )}
+            {canManageSync && status.failed > 0 && (
+              <button onClick={handleFixOrphans} disabled={syncing} className="btn-secondary btn-sm gap-1.5 text-orange-400" title="Repairs 'foreign key constraint fails' errors by recreating the missing parent record in the cloud first">
+                <AlertCircle size={14} /> Fix Missing Records
               </button>
             )}
             {canManageSync && status.failed > 0 && (

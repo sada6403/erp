@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
-import { Coins, Users, Wallet, Shuffle, AlertCircle, GitBranch, Check, X, Package, Trophy, Clock, TrendingUp, Layers } from 'lucide-react'
+import { Coins, Users, Wallet, Shuffle, AlertCircle, GitBranch, Check, X, Package, Trophy, Clock, TrendingUp, Layers, Plus, UserPlus, Handshake, ChevronRight, Target } from 'lucide-react'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 
@@ -47,6 +47,7 @@ export default function SmartBuyDashboardPage() {
   const recentDraws = (data.recent_draws || []) as Row[]
   const agentsWithBalance = (data.agents_with_balance || []) as Row[]
   const pendingFinalClaims = (data.pending_final_claims || []) as Row[]
+  const activeCycleAlerts = (data.active_cycle_alerts || []) as Row[]
   const branchRanking = (data.branch_ranking || []) as Row[]
   const agentRanking = (data.agent_ranking || []) as Row[]
   const topSellingProducts = (data.top_selling_products || []) as Row[]
@@ -62,6 +63,56 @@ export default function SmartBuyDashboardPage() {
       <PageHeader title="Smart Buy Dashboard" subtitle="Schemes, collections, agents, and lottery activity overview" />
 
       <div className="flex-1 overflow-auto p-6 space-y-6">
+        {/* Quick Actions — day-to-day tasks in plain language, up front,
+            before the analytics/charts below. Someone who just needs to
+            enroll a member or pick a winner shouldn't have to read 8
+            stat cards and 8 charts to find the right button. */}
+        <div>
+          <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-1)' }}>What do you want to do?</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <button onClick={() => navigate('/admin/chits')}
+              className="flex items-center gap-3 rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(99,102,241,0.12)' }}><Layers size={18} className="text-indigo-400" /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>View Schemes</p>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Add members, collect payments, pick a winner</p>
+              </div>
+              <ChevronRight size={16} style={{ color: 'var(--text-3)' }} />
+            </button>
+            <button onClick={() => navigate('/admin/chits')}
+              className="flex items-center gap-3 rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(34,197,94,0.12)' }}><Plus size={18} className="text-green-400" /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Start a New Scheme</p>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Open a new savings/lucky-draw scheme</p>
+              </div>
+              <ChevronRight size={16} style={{ color: 'var(--text-3)' }} />
+            </button>
+            <button onClick={() => navigate('/admin/chit-customers')}
+              className="flex items-center gap-3 rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(14,165,233,0.12)' }}><UserPlus size={18} className="text-sky-400" /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Find a Customer</p>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>See everyone enrolled and their schemes</p>
+              </div>
+              <ChevronRight size={16} style={{ color: 'var(--text-3)' }} />
+            </button>
+            <button onClick={() => navigate('/admin/smart-buy-agents')}
+              className="flex items-center gap-3 rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]"
+              style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(249,115,22,0.12)' }}><Handshake size={18} className="text-orange-400" /></div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Manage Agents</p>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Agent list, cash collected, commission</p>
+              </div>
+              <ChevronRight size={16} style={{ color: 'var(--text-3)' }} />
+            </button>
+          </div>
+        </div>
+
         {invites.length > 0 && (
           <div className="rounded-xl border p-4" style={{ background: 'color-mix(in srgb, #f59e0b 8%, transparent)', borderColor: '#f59e0b' }}>
             <p className="flex items-center gap-1.5 text-sm font-semibold mb-2" style={{ color: '#a16207' }}><GitBranch size={14} /> Branch Collaboration Invites Awaiting Your Response</p>
@@ -94,6 +145,21 @@ export default function SmartBuyDashboardPage() {
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {activeCycleAlerts.length > 0 && (
+          <div className="rounded-xl border p-4 space-y-1.5" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            <p className="text-sm font-semibold mb-1" style={{ color: 'var(--text-1)' }}>Cycle Alerts</p>
+            {activeCycleAlerts.map((a, i) => (
+              <button key={i} onClick={() => navigate(`/admin/chits/${a.schemeId}`)}
+                className="w-full flex items-center gap-2 text-left text-sm rounded-lg px-2 py-1.5 hover:bg-[var(--bg-soft)]">
+                {a.type === 'waiting_for_payments' ? <AlertCircle size={14} className="text-yellow-500 flex-shrink-0" />
+                  : a.type === 'ready_for_manual_draw' ? <Target size={14} className="text-blue-500 flex-shrink-0" />
+                  : <Check size={14} className="text-green-500 flex-shrink-0" />}
+                <span style={{ color: 'var(--text-2)' }}>{a.message as string}</span>
+              </button>
+            ))}
           </div>
         )}
 
@@ -146,6 +212,11 @@ export default function SmartBuyDashboardPage() {
           <button onClick={() => navigate('/admin/commission-rules')} className="rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
             <p className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}><TrendingUp size={13} /> Total Commission</p>
             <p className="text-2xl font-bold mt-1 text-brand-400">Rs.{money(data.total_commission)}</p>
+          </button>
+          <button onClick={() => navigate('/admin/smart-buy-reports')} className="rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]"
+            style={{ background: Number(data.total_profit) < 0 ? 'color-mix(in srgb, #ef4444 10%, transparent)' : 'var(--bg-card)', borderColor: Number(data.total_profit) < 0 ? '#ef4444' : 'var(--border)' }}>
+            <p className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}><TrendingUp size={13} /> Total Profit / Loss</p>
+            <p className="text-2xl font-bold mt-1" style={{ color: Number(data.total_profit) < 0 ? '#ef4444' : '#22c55e' }}>Rs.{money(data.total_profit)}</p>
           </button>
           <button onClick={() => navigate('/admin/smart-buy-reports')} className="rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
             <p className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-3)' }}><Coins size={13} /> Full Reports</p>

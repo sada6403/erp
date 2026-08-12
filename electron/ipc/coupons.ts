@@ -1,4 +1,5 @@
-import { ipcMain } from 'electron'
+import { ipcMain as realIpcMain } from 'electron'
+import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import crypto, { randomUUID } from 'crypto'
 import Store from 'electron-store'
@@ -226,9 +227,105 @@ export function reverseCouponForInvoice(
   return results
 }
 
+// ─── SmartBuy voucher issuance (used inside chits:members:recordRedemption /
+// reverseRedemption) ──────────────────────────────────────────────────────────
+// A SmartBuy winner who picks a product cheaper than their frozen entitlement
+// must not lose the difference — it's auto-issued as a real coupon (the same
+// voucher/store-credit system used everywhere else in this app, not a
+// separate ledger) so it carries a real voucher number and is immediately
+// spendable at POS via the existing coupon payment method.
+
+export interface SmartBuyVoucherResult {
+  couponId: string
+  code: string
+  balance: number
+  couponRow: Record<string, unknown>
+}
+
+// Runs INSIDE the caller's own db.transaction() (chits:members:recordRedemption)
+// — throws to roll back the whole redemption rather than returning a
+// { success: false }, matching redeemCouponInTransaction's contract. Does NOT
+// call enqueuSync itself; the caller pushes couponRow into its own enqueue
+// array alongside every other write from that same transaction.
+export function issueSmartBuyVoucher(
+  db: ReturnType<typeof getDb>,
+  input: {
+    customerId: string
+    branchId: string | null
+    amount: number
+    schemeId: string
+    memberId: string
+    cycleNo: number | null
+    entitlementValue: number
+    productValue: number
+    issuedBy: string | null
+    notes?: string
+  }
+): SmartBuyVoucherResult {
+  const amount = Number(Number(input.amount || 0).toFixed(2))
+  if (!input.customerId) throw new Error('A customer is required to issue a SmartBuy voucher')
+  if (!(amount > 0)) throw new Error('Voucher amount must be greater than zero')
+
+  const id = randomUUID()
+  const code = generateCouponCode(db, input.branchId)
+  const validFrom = new Date().toISOString().slice(0, 10)
+  const row = {
+    id, code, name: 'SmartBuy Remaining Entitlement Voucher',
+    customer_id: input.customerId, branch_id: input.branchId,
+    initial_value: amount, balance: amount, status: 'active',
+    valid_from: validFrom, valid_until: null,
+    issued_by: input.issuedBy, notes: input.notes || null,
+    source_type: 'smartbuy_redemption', source_id: input.memberId,
+    smartbuy_scheme_id: input.schemeId, smartbuy_member_id: input.memberId,
+    smartbuy_cycle_no: input.cycleNo, smartbuy_entitlement_value: input.entitlementValue,
+    smartbuy_product_value: input.productValue,
+  }
+  db.prepare(`
+    INSERT INTO coupons (id, code, name, customer_id, branch_id, initial_value, balance,
+      status, valid_from, valid_until, issued_by, notes,
+      source_type, source_id, smartbuy_scheme_id, smartbuy_member_id, smartbuy_cycle_no,
+      smartbuy_entitlement_value, smartbuy_product_value)
+    VALUES (@id,@code,@name,@customer_id,@branch_id,@initial_value,@balance,
+      @status,@valid_from,@valid_until,@issued_by,@notes,
+      @source_type,@source_id,@smartbuy_scheme_id,@smartbuy_member_id,@smartbuy_cycle_no,
+      @smartbuy_entitlement_value,@smartbuy_product_value)
+  `).run(row)
+
+  audit(db, 'ISSUE_COUPON', id, {
+    code, amount, source: 'smartbuy_redemption',
+    schemeId: input.schemeId, memberId: input.memberId, cycleNo: input.cycleNo,
+  })
+
+  return { couponId: id, code, balance: amount, couponRow: row }
+}
+
+// In-transaction equivalent of coupons:void's body — used instead of calling
+// the coupons:void IPC handler because that handler gates on the CALLING
+// user's own coupon permissions (wrong check for a Super-Admin-only chit
+// redemption reversal) and isn't transactional with reverseRedemption's own
+// db.transaction(). Whatever balance remains (spent or not — a SmartBuy
+// voucher is a single dedicated instance, never shared) is forfeited, exactly
+// like a normal coupon void.
+export function voidSmartBuyVoucher(
+  db: ReturnType<typeof getDb>,
+  couponId: string,
+  input: { reason: string; userId: string | null }
+): void {
+  const coupon = db.prepare('SELECT id, code, balance, status FROM coupons WHERE id = ?').get(couponId) as
+    { id: string; code: string; balance: number; status: string } | undefined
+  if (!coupon || coupon.status === 'void') return
+  db.prepare(`UPDATE coupons SET status = 'void', updated_at = datetime('now') WHERE id = ?`).run(couponId)
+  audit(db, 'VOID_COUPON', couponId, { code: coupon.code, forfeited_balance: coupon.balance, reason: input.reason })
+}
+
 // ─── IPC handlers ────────────────────────────────────────────────────────────
 
-export function registerCouponHandlers() {
+// Optional injectable ipcMain (mirrors registerChitHandlers/etc.'s pattern)
+// so the QA integration harness can register these against its own fake
+// registry — defaults to the real electron ipcMain for the actual app
+// (electron/main.ts's call site is unaffected, same as calling it with no args).
+export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
+  const ipcMain = customIpcMain
 
   // Create/issue — Company Admin or roles with coupons_create (Branch Manager)
   safeHandle(ipcMain, 'coupons:create', async (_e, payload: Record<string, unknown>) => {
@@ -329,11 +426,13 @@ export function registerCouponHandlers() {
     const key = String(idOrCode || '').trim()
     const coupon = db.prepare(`
       SELECT cp.*, cu.name as customer_name, cu.phone as customer_phone,
-             b.name as branch_name, u.name as issued_by_name
+             b.name as branch_name, u.name as issued_by_name,
+             cs.name as smartbuy_scheme_name, cs.scheme_number as smartbuy_scheme_number
       FROM coupons cp
       LEFT JOIN customers cu ON cu.id = cp.customer_id
       LEFT JOIN branches b ON b.id = cp.branch_id
       LEFT JOIN users u ON u.id = cp.issued_by
+      LEFT JOIN chit_schemes cs ON cs.id = cp.smartbuy_scheme_id
       WHERE cp.id = ? OR UPPER(cp.code) = UPPER(?)
       LIMIT 1
     `).get(key, key) as Record<string, unknown> | undefined
@@ -453,6 +552,16 @@ export function registerCouponHandlers() {
       if (filters.dateFrom) { conditions.push(`date(${column}) >= date(?)`); params.push(filters.dateFrom) }
       if (filters.dateTo)   { conditions.push(`date(${column}) <= date(?)`); params.push(filters.dateTo) }
     }
+    // Voucher Source filter — All / POS / SmartBuy (§24). Every SmartBuy-
+    // issued coupon (full win-time voucher or a downgrade leftover) is
+    // written with source_type='smartbuy_redemption' by issueSmartBuyVoucher;
+    // everything else (source_type NULL or anything else) is a plain POS
+    // coupon. No separate SmartBuy report — same coupons table, one filter.
+    const sourceType = String(filters.sourceType || 'all')
+    const addSourceTypeFilter = (couponAlias: string) => {
+      if (sourceType === 'smartbuy') { conditions.push(`${couponAlias}.source_type = 'smartbuy_redemption'`) }
+      else if (sourceType === 'pos') { conditions.push(`(${couponAlias}.source_type IS NULL OR ${couponAlias}.source_type != 'smartbuy_redemption')`) }
+    }
 
     let rows: Record<string, unknown>[] = []
     let summary: Record<string, unknown> = {}
@@ -461,6 +570,7 @@ export function registerCouponHandlers() {
       if (scopeBranch) { conditions.push(`cr.branch_id = ?`); params.push(scopeBranch) }
       addDateRange('cr.created_at')
       if (search) { conditions.push(`(cp.code LIKE ? OR cp.name LIKE ? OR cu.name LIKE ? OR i.invoice_number LIKE ?)`); params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`) }
+      addSourceTypeFilter('cp')
       conditions.push(`cr.type = 'redeem'`)
       rows = db.prepare(`
         SELECT cr.created_at, cp.code, cp.name as coupon_name, cu.name as customer_name,
@@ -483,6 +593,7 @@ export function registerCouponHandlers() {
       if (scopeBranch) { conditions.push(`cp.branch_id = ?`); params.push(scopeBranch) }
       addDateRange('cp.created_at')
       if (search) { conditions.push(`(cu.name LIKE ? OR cu.phone LIKE ?)`); params.push(`%${search}%`, `%${search}%`) }
+      addSourceTypeFilter('cp')
       rows = db.prepare(`
         SELECT cu.name as customer_name, cu.phone as customer_phone,
                COUNT(cp.id) as coupons_issued,
@@ -508,14 +619,18 @@ export function registerCouponHandlers() {
       if (scopeBranch) { conditions.push(`cp.branch_id = ?`); params.push(scopeBranch) }
       addDateRange('cp.created_at')
       if (search) { conditions.push(`(cp.code LIKE ? OR cp.name LIKE ? OR cu.name LIKE ?)`); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
+      addSourceTypeFilter('cp')
       rows = db.prepare(`
         SELECT cp.created_at, cp.code, cp.name, cu.name as customer_name,
                cp.initial_value, cp.balance, (cp.initial_value - cp.balance) as used_amount,
-               cp.status, cp.valid_from, cp.valid_until, b.name as branch_name, u.name as issued_by_name
+               cp.status, cp.valid_from, cp.valid_until, b.name as branch_name, u.name as issued_by_name,
+               cp.source_type, cs2.name as smartbuy_scheme_name, cs2.scheme_number as smartbuy_scheme_number,
+               cp.smartbuy_cycle_no
         FROM coupons cp
         LEFT JOIN customers cu ON cu.id = cp.customer_id
         LEFT JOIN branches b ON b.id = cp.branch_id
         LEFT JOIN users u ON u.id = cp.issued_by
+        LEFT JOIN chit_schemes cs2 ON cs2.id = cp.smartbuy_scheme_id
         ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
         ORDER BY cp.created_at DESC
         LIMIT 1000

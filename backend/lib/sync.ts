@@ -43,6 +43,9 @@ export const ALLOWED_TABLES = new Set([
   // Multi-level commission approval workflow — audit trail, statement
   // downloads, and commission-rate version history.
   'commission_approval_logs', 'commission_statement_history', 'commission_rule_history',
+  // Cycle payment reminder history — member-keyed, pulled directly like
+  // agent_remittances/smartbuy_transfer_history.
+  'chit_payment_reminders',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
