@@ -397,9 +397,11 @@ function computeMemberCycleBalance(
 // as one query so the two can never disagree with each other.
 function activeCandidatesForCycle(db: ReturnType<typeof getDb>, schemeId: string, cycleNo: number): Record<string, unknown>[] {
   return db.prepare(`
-    SELECT m.*, c.name as customer_name, c.phone as customer_phone
+    SELECT m.*, c.name as customer_name, c.phone as customer_phone,
+      ag.code as member_agent_code, ag.name as member_agent_name
     FROM chit_members m
     LEFT JOIN customers c ON c.id = m.customer_id
+    LEFT JOIN agents ag ON ag.id = m.agent_id
     WHERE m.scheme_id = ? AND m.status = 'active' AND m.redemption_type IS NULL
       AND NOT EXISTS (
         SELECT 1 FROM chit_contributions cc
@@ -654,7 +656,20 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       ORDER BY csb.created_at
     `).all(id)
 
-    return { success: true, data: { scheme, members, draws, contributionSummary, collaborations } }
+    // SmartBuy Agent readiness (spec §5) — informational only. The hard stop
+    // that actually prevents a voucher being issued to an agent-less member
+    // lives in chits:draws:conduct; this is a non-blocking early-warning
+    // banner so an admin can fix it before a draw is even attempted, since
+    // this app has no separate manual "start scheme" action to gate.
+    const agentGapMembers = db.prepare(`
+      SELECT m.id, c.name as customer_name
+      FROM chit_members m
+      LEFT JOIN customers c ON c.id = m.customer_id
+      WHERE m.scheme_id = ? AND m.status = 'active' AND m.agent_id IS NULL
+      ORDER BY m.join_order
+    `).all(id)
+
+    return { success: true, data: { scheme, members, draws, contributionSummary, collaborations, agentGapMembers } }
   })
 
   // ── Centralized Scheme Master ──────────────────────────────────────────
@@ -2031,6 +2046,26 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const eligible = eligibleMembersForDraw(db, schemeId, cycleNo)
     if (eligible.length === 0) return { success: false, error: 'No eligible members remain for this scheme' }
 
+    // SmartBuy Agent linkage (spec §4/§5/§37): a winner's voucher is
+    // permanently snapshotted with their registered Agent at issuance, and
+    // the cashier must never be asked to type an Agent Code later — so a
+    // member with no registered Agent can never be drawn a voucher in the
+    // first place. Checked here (before ANY draw/voucher write) for both a
+    // single manual winner and every member in a final-cycle batch — this is
+    // the actual point a voucher would be created, so this is the correct
+    // place to stop it, not scheme activation (this app has no manual
+    // "start scheme" gate to hook — activation is purely a min_members
+    // threshold trigger, see maybeActivateScheme).
+    const candidateWinners = isFinalCycle ? eligible : eligible.filter(m => m.id === options.winnerMemberId)
+    const missingAgent = candidateWinners.filter(m => !m.agent_id)
+    if (missingAgent.length > 0) {
+      const names = missingAgent.map(m => String(m.customer_name || m.id)).join(', ')
+      return {
+        success: false,
+        error: `Cannot conduct draw — ${missingAgent.length} member(s) missing a valid Agent: ${names}`,
+      }
+    }
+
     const enqueue: Array<{ table: string; id: string; row: Record<string, unknown>; op: 'INSERT' | 'UPDATE' }> = []
     const drawId = crypto.randomUUID()
     let settledWinners: Record<string, unknown>[] = []
@@ -2068,6 +2103,18 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         if (!winner) throw new Error('Selected member is not eligible for this draw')
         winners = [winner]
         method = 'manual_pick'
+      }
+
+      // Re-verified inside the transaction for the same reason as
+      // stillUndrawn/recheckedProgress above — a legitimate Agent Change
+      // elsewhere or a race could theoretically clear agent_id between the
+      // outer read and this transaction acquiring the database.
+      const freshlyMissing = winners.filter(w => {
+        const row = db.prepare('SELECT agent_id FROM chit_members WHERE id=?').get(w.id) as { agent_id: string | null } | undefined
+        return !row?.agent_id
+      })
+      if (freshlyMissing.length > 0) {
+        throw new Error(`Cannot conduct draw — ${freshlyMissing.length} member(s) missing a valid Agent`)
       }
 
       const drawRow = {
@@ -2124,6 +2171,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           schemeId, memberId: String(winner.id), cycleNo,
           entitlementValue, productValue: entitlementValue, issuedBy: (caller.id as string) || null,
           notes: `Smart Buy ${isFinalCycle ? 'Final Settlement' : 'Draw'} Winner — ${scheme.name} (${scheme.scheme_number}), Cycle ${cycleNo}`,
+          // Agent auto-link (spec §4/§8) — sourced from the member's own
+          // registered Agent (checked non-null above), never typed by anyone.
+          agentId: (winner.agent_id as string | null) || null,
+          agentCode: (winner.member_agent_code as string | null) || null,
+          agentName: (winner.member_agent_name as string | null) || null,
         })
         enqueue.push({ table: 'coupons', id: voucher.couponId, row: voucher.couponRow, op: 'INSERT' })
         issuedVouchers.push({ memberId: String(winner.id), couponId: voucher.couponId, code: voucher.code, amount: entitlementValue })

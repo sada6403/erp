@@ -337,6 +337,7 @@ const api = {
     exportInvoicePdf: (payload: unknown) => ipcRenderer.invoke('printer:exportInvoicePdf', payload),
     printTransfer:(payload: unknown) => ipcRenderer.invoke('printer:printTransfer', payload),
     printCoupon:  (payload: unknown) => ipcRenderer.invoke('printer:printCoupon', payload),
+    printSmartBuyVouchers: (couponIds: string[]) => ipcRenderer.invoke('printer:printSmartBuyVouchers', couponIds),
     printDeliveryNote:     (payload: unknown) => ipcRenderer.invoke('printer:printDeliveryNote', payload),
     exportDeliveryNotePdf: (payload: unknown) => ipcRenderer.invoke('printer:exportDeliveryNotePdf', payload),
     printCalibrationSheet: () => ipcRenderer.invoke('printer:printCalibrationSheet'),
@@ -410,6 +411,8 @@ const api = {
     validate: (code: string)                  => ipcRenderer.invoke('coupons:validate', code),
     void:     (id: string, reason?: string)   => ipcRenderer.invoke('coupons:void', id, reason),
     reports:  (filters?: unknown)             => ipcRenderer.invoke('coupons:reports', filters),
+    smartbuyDashboard: (filters?: unknown)    => ipcRenderer.invoke('coupons:smartbuyDashboard', filters),
+    changeAgent: (couponId: string, newAgentId: string, reason?: string, confirmCrossBranch?: boolean) => ipcRenderer.invoke('coupons:changeAgent', couponId, newAgentId, reason, confirmCrossBranch),
   },
 
   // Discounts (admin-managed product/branch discount rules)

@@ -296,7 +296,8 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
         b.name as branch_name,
         p.name as product_name,
         COALESCE(ma.name, sa.name) as agent_name, COALESCE(ma.code, sa.code) as agent_code,
-        vc.code as voucher_code, vc.balance as voucher_balance, vc.status as voucher_status
+        vc.code as voucher_code, vc.balance as voucher_balance, vc.status as voucher_status,
+        vc.initial_value as voucher_value
       FROM chit_members m
       JOIN chit_schemes cs ON cs.id = m.scheme_id
       LEFT JOIN branches b ON b.id = cs.branch_id

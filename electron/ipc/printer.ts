@@ -22,7 +22,7 @@ import {
 } from '../templates/invoiceTemplates'
 import { buildDeliveryNoteHtml, buildTransferNoteHtml } from '../templates/deliveryNoteTemplates'
 import { buildInstallmentCardHtml } from '../templates/installmentTemplates'
-import { buildCouponHtml } from '../templates/couponTemplates'
+import { buildCouponHtml, buildSmartBuyVoucherGridHtml } from '../templates/couponTemplates'
 import { buildReceiptText } from '../templates/receiptTemplates'
 
 const store = new Store()
@@ -333,6 +333,52 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
     const settings = store.get('app_settings') as Record<string, unknown> || {}
     const html = await buildCouponHtml(payload, settings)
     await printHtml(html, 'a4', 'A4')
+    return { success: true }
+  })
+
+  // SmartBuy / Chit Fund voucher — 1-4 vouchers laid out 4-up on a single A4
+  // sheet (spec §31-33). Re-fetches the coupon rows fresh from the DB by id
+  // (never trusts client-supplied voucher data for what gets printed) and
+  // ALWAYS reprints the same existing coupons row — no id/code/balance is
+  // ever created or mutated here, so calling this again for the same
+  // voucher(s) is a safe, unlimited reprint. Every call is audited.
+  safeHandle(ipcMain, 'printer:printSmartBuyVouchers', async (_e, couponIds: string[]) => {
+    // Unlike printer:printCoupon (which just renders whatever payload the
+    // renderer already fetched through a permission-gated read), this reads
+    // full voucher rows straight from the DB by id — so it needs its own
+    // server-side gate, matching coupons:get/coupons:list's 'coupons'/'all'
+    // requirement, rather than relying on the menu being hidden client-side.
+    const user = store.get('auth_user') as Record<string, unknown> | undefined
+    const perms = ((user?.role as Record<string, unknown> | undefined)?.permissions
+      || user?.permissions || {}) as Record<string, unknown>
+    if (!perms.all && !perms.coupons && !perms.chits) {
+      return { success: false, error: 'You do not have permission to print SmartBuy vouchers' }
+    }
+
+    const ids = Array.from(new Set((couponIds || []).filter(Boolean))).slice(0, 4)
+    if (ids.length === 0) return { success: false, error: 'No voucher selected to print' }
+
+    const db = getDb()
+    const placeholders = ids.map(() => '?').join(',')
+    const coupons = db.prepare(`
+      SELECT cp.*, cu.name as customer_name
+      FROM coupons cp
+      LEFT JOIN customers cu ON cu.id = cp.customer_id
+      WHERE cp.id IN (${placeholders}) AND cp.source_type = 'smartbuy_redemption'
+    `).all(...ids) as Record<string, unknown>[]
+    if (coupons.length === 0) return { success: false, error: 'Voucher(s) not found' }
+
+    const settings = store.get('app_settings') as Record<string, unknown> || {}
+    const html = await buildSmartBuyVoucherGridHtml(coupons, settings)
+    await printHtml(html, 'a4', 'A4')
+
+    for (const c of coupons) {
+      logAudit(db, {
+        userId: (user?.id as string) || null, branchId: (user?.branch_id as string) || null,
+        action: 'REPRINT_SMARTBUY_VOUCHER', tableName: 'coupons', recordId: String(c.id),
+        newValues: { code: c.code },
+      })
+    }
     return { success: true }
   })
 

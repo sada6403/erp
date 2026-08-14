@@ -89,6 +89,26 @@ function lazyExpire(db: ReturnType<typeof getDb>, couponId?: string): string[] {
   return expired
 }
 
+// Shared filter builder for Voucher Management (coupons:list / coupons:reports
+// / coupons:smartbuyDashboard) — Voucher Type / Agent / Scheme / lifecycle
+// filters (spec §18, §21-26). `couponAlias` is the SQL alias for the coupons
+// table in the calling query (always 'cp' today, kept generic to match the
+// file's existing addSourceTypeFilter/addDateRange helper pattern).
+function addSmartBuyFilters(couponAlias: string, filters: Record<string, unknown>, conditions: string[], params: unknown[]): void {
+  const voucherType = String(filters.voucherType || 'all')
+  if (voucherType === 'smartbuy') conditions.push(`${couponAlias}.source_type = 'smartbuy_redemption'`)
+  else if (voucherType === 'normal') conditions.push(`(${couponAlias}.source_type IS NULL OR ${couponAlias}.source_type != 'smartbuy_redemption')`)
+
+  if (filters.agentId) { conditions.push(`${couponAlias}.agent_id = ?`); params.push(filters.agentId) }
+  if (filters.schemeId) { conditions.push(`${couponAlias}.smartbuy_scheme_id = ?`); params.push(filters.schemeId) }
+
+  const lifecycle = String(filters.lifecycle || '')
+  if (lifecycle === 'running') conditions.push(`${couponAlias}.status = 'active' AND ${couponAlias}.balance > 0`)
+  else if (lifecycle === 'unclaimed') conditions.push(`${couponAlias}.source_type = 'smartbuy_redemption' AND ${couponAlias}.balance = ${couponAlias}.initial_value AND ${couponAlias}.status = 'active'`)
+  else if (lifecycle === 'fully_claimed') conditions.push(`${couponAlias}.status = 'used_up'`)
+  else if (lifecycle === 'outstanding') conditions.push(`${couponAlias}.source_type = 'smartbuy_redemption' AND ${couponAlias}.balance > 0 AND ${couponAlias}.status != 'void'`)
+}
+
 function enqueueCoupon(db: ReturnType<typeof getDb>, couponId: string): void {
   const row = db.prepare('SELECT * FROM coupons WHERE id = ?').get(couponId) as Record<string, unknown> | undefined
   if (!row) return
@@ -260,6 +280,9 @@ export function issueSmartBuyVoucher(
     productValue: number
     issuedBy: string | null
     notes?: string
+    agentId?: string | null
+    agentCode?: string | null
+    agentName?: string | null
   }
 ): SmartBuyVoucherResult {
   const amount = Number(Number(input.amount || 0).toFixed(2))
@@ -279,21 +302,26 @@ export function issueSmartBuyVoucher(
     smartbuy_scheme_id: input.schemeId, smartbuy_member_id: input.memberId,
     smartbuy_cycle_no: input.cycleNo, smartbuy_entitlement_value: input.entitlementValue,
     smartbuy_product_value: input.productValue,
+    // Snapshot of the member's registered Agent at issuance time — see the
+    // migration comment in database.ts. Never re-derived from a live join
+    // after this; only coupons:changeAgent may update these 3 columns.
+    agent_id: input.agentId || null, agent_code: input.agentCode || null, agent_name: input.agentName || null,
   }
   db.prepare(`
     INSERT INTO coupons (id, code, name, customer_id, branch_id, initial_value, balance,
       status, valid_from, valid_until, issued_by, notes,
       source_type, source_id, smartbuy_scheme_id, smartbuy_member_id, smartbuy_cycle_no,
-      smartbuy_entitlement_value, smartbuy_product_value)
+      smartbuy_entitlement_value, smartbuy_product_value, agent_id, agent_code, agent_name)
     VALUES (@id,@code,@name,@customer_id,@branch_id,@initial_value,@balance,
       @status,@valid_from,@valid_until,@issued_by,@notes,
       @source_type,@source_id,@smartbuy_scheme_id,@smartbuy_member_id,@smartbuy_cycle_no,
-      @smartbuy_entitlement_value,@smartbuy_product_value)
+      @smartbuy_entitlement_value,@smartbuy_product_value,@agent_id,@agent_code,@agent_name)
   `).run(row)
 
   audit(db, 'ISSUE_COUPON', id, {
     code, amount, source: 'smartbuy_redemption',
     schemeId: input.schemeId, memberId: input.memberId, cycleNo: input.cycleNo,
+    agentId: input.agentId || null, agentCode: input.agentCode || null,
   })
 
   return { couponId: id, code, balance: amount, couponRow: row }
@@ -391,22 +419,28 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
     const params: unknown[] = []
     const search = String(filters.search || '').trim()
     if (search) {
-      conditions.push(`(cp.code LIKE ? OR cp.name LIKE ? OR cu.name LIKE ? OR cu.phone LIKE ?)`)
-      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`)
+      // Voucher Management search (spec §27) — Code / Name / Customer Name /
+      // Phone / NIC / SmartBuy Member ID, so staff can look a voucher up the
+      // same way they'd look up the member or customer directly.
+      conditions.push(`(cp.code LIKE ? OR cp.name LIKE ? OR cu.name LIKE ? OR cu.phone LIKE ? OR cu.nic LIKE ? OR cp.smartbuy_member_id LIKE ?)`)
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`)
     }
     if (filters.status)      { conditions.push(`cp.status = ?`); params.push(filters.status) }
     if (filters.customerId)  { conditions.push(`cp.customer_id = ?`); params.push(filters.customerId) }
     if (filters.dateFrom)    { conditions.push(`date(cp.created_at) >= date(?)`); params.push(filters.dateFrom) }
     if (filters.dateTo)      { conditions.push(`date(cp.created_at) <= date(?)`); params.push(filters.dateTo) }
+    addSmartBuyFilters('cp', filters, conditions, params)
 
     const rows = db.prepare(`
       SELECT cp.*, cu.name as customer_name, cu.phone as customer_phone,
              b.name as branch_name, u.name as issued_by_name,
+             cs.name as smartbuy_scheme_name, cs.scheme_number as smartbuy_scheme_number,
              (SELECT COUNT(*) FROM coupon_redemptions cr WHERE cr.coupon_id = cp.id AND cr.type = 'redeem') as redemption_count
       FROM coupons cp
       LEFT JOIN customers cu ON cu.id = cp.customer_id
       LEFT JOIN branches b ON b.id = cp.branch_id
       LEFT JOIN users u ON u.id = cp.issued_by
+      LEFT JOIN chit_schemes cs ON cs.id = cp.smartbuy_scheme_id
       ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
       ORDER BY cp.created_at DESC
       LIMIT 500
@@ -427,12 +461,14 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
     const coupon = db.prepare(`
       SELECT cp.*, cu.name as customer_name, cu.phone as customer_phone,
              b.name as branch_name, u.name as issued_by_name,
-             cs.name as smartbuy_scheme_name, cs.scheme_number as smartbuy_scheme_number
+             cs.name as smartbuy_scheme_name, cs.scheme_number as smartbuy_scheme_number,
+             cm.redemption_type as smartbuy_winner_type
       FROM coupons cp
       LEFT JOIN customers cu ON cu.id = cp.customer_id
       LEFT JOIN branches b ON b.id = cp.branch_id
       LEFT JOIN users u ON u.id = cp.issued_by
       LEFT JOIN chit_schemes cs ON cs.id = cp.smartbuy_scheme_id
+      LEFT JOIN chit_members cm ON cm.id = cp.smartbuy_member_id
       WHERE cp.id = ? OR UPPER(cp.code) = UPPER(?)
       LIMIT 1
     `).get(key, key) as Record<string, unknown> | undefined
@@ -476,9 +512,13 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
     if (!key) return { success: true, data: { valid: false, reason: 'Enter a coupon code' } }
 
     const coupon = db.prepare(`
-      SELECT cp.*, cu.name as customer_name, cu.phone as customer_phone
+      SELECT cp.*, cu.name as customer_name, cu.phone as customer_phone,
+             cs.name as smartbuy_scheme_name, cs.scheme_number as smartbuy_scheme_number,
+             cm.won_cycle_no as smartbuy_member_cycle, cm.redemption_type as smartbuy_winner_type
       FROM coupons cp
       LEFT JOIN customers cu ON cu.id = cp.customer_id
+      LEFT JOIN chit_schemes cs ON cs.id = cp.smartbuy_scheme_id
+      LEFT JOIN chit_members cm ON cm.id = cp.smartbuy_member_id
       WHERE UPPER(cp.code) = UPPER(?)
       LIMIT 1
     `).get(key) as Record<string, unknown> | undefined
@@ -497,6 +537,8 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
       reason = `Coupon is valid from ${String(coupon.valid_from).slice(0, 10)}`
     } else if (Number(fresh.balance) <= USED_UP_EPSILON) reason = 'Coupon has no remaining balance'
 
+    const isSmartBuy = coupon.source_type === 'smartbuy_redemption'
+
     return {
       success: true,
       data: {
@@ -508,6 +550,22 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
           customer_phone: coupon.customer_phone,
           balance: Number(fresh.balance || 0), initial_value: coupon.initial_value,
           status: fresh.status, valid_from: coupon.valid_from, valid_until: coupon.valid_until,
+          // SmartBuy / Chit Fund voucher metadata — present only when this
+          // coupon was issued via issueSmartBuyVoucher(). The POS payment
+          // screen uses this (not the unrelated free-text POS sales-agent
+          // field) to render a read-only "Agent: <name> (<code>)" panel —
+          // the cashier never types an Agent Code for these vouchers.
+          is_smartbuy: isSmartBuy,
+          smartbuy_scheme_id: isSmartBuy ? coupon.smartbuy_scheme_id : undefined,
+          smartbuy_scheme_name: isSmartBuy ? coupon.smartbuy_scheme_name : undefined,
+          smartbuy_scheme_number: isSmartBuy ? coupon.smartbuy_scheme_number : undefined,
+          smartbuy_member_id: isSmartBuy ? coupon.smartbuy_member_id : undefined,
+          smartbuy_cycle_no: isSmartBuy ? coupon.smartbuy_cycle_no : undefined,
+          smartbuy_winner_type: isSmartBuy ? coupon.smartbuy_winner_type : undefined,
+          smartbuy_entitlement_value: isSmartBuy ? coupon.smartbuy_entitlement_value : undefined,
+          agent_id: isSmartBuy ? coupon.agent_id : undefined,
+          agent_code: isSmartBuy ? coupon.agent_code : undefined,
+          agent_name: isSmartBuy ? coupon.agent_name : undefined,
         },
       },
     }
@@ -571,6 +629,7 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
       addDateRange('cr.created_at')
       if (search) { conditions.push(`(cp.code LIKE ? OR cp.name LIKE ? OR cu.name LIKE ? OR i.invoice_number LIKE ?)`); params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`) }
       addSourceTypeFilter('cp')
+      addSmartBuyFilters('cp', filters, conditions, params)
       conditions.push(`cr.type = 'redeem'`)
       rows = db.prepare(`
         SELECT cr.created_at, cp.code, cp.name as coupon_name, cu.name as customer_name,
@@ -594,6 +653,7 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
       addDateRange('cp.created_at')
       if (search) { conditions.push(`(cu.name LIKE ? OR cu.phone LIKE ?)`); params.push(`%${search}%`, `%${search}%`) }
       addSourceTypeFilter('cp')
+      addSmartBuyFilters('cp', filters, conditions, params)
       rows = db.prepare(`
         SELECT cu.name as customer_name, cu.phone as customer_phone,
                COUNT(cp.id) as coupons_issued,
@@ -620,12 +680,13 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
       addDateRange('cp.created_at')
       if (search) { conditions.push(`(cp.code LIKE ? OR cp.name LIKE ? OR cu.name LIKE ?)`); params.push(`%${search}%`, `%${search}%`, `%${search}%`) }
       addSourceTypeFilter('cp')
+      addSmartBuyFilters('cp', filters, conditions, params)
       rows = db.prepare(`
         SELECT cp.created_at, cp.code, cp.name, cu.name as customer_name,
                cp.initial_value, cp.balance, (cp.initial_value - cp.balance) as used_amount,
                cp.status, cp.valid_from, cp.valid_until, b.name as branch_name, u.name as issued_by_name,
                cp.source_type, cs2.name as smartbuy_scheme_name, cs2.scheme_number as smartbuy_scheme_number,
-               cp.smartbuy_cycle_no
+               cp.smartbuy_cycle_no, cp.agent_id, cp.agent_code, cp.agent_name
         FROM coupons cp
         LEFT JOIN customers cu ON cu.id = cp.customer_id
         LEFT JOIN branches b ON b.id = cp.branch_id
@@ -648,5 +709,134 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
 
     audit(getDb(), `REPORT_COUPONS_${type.toUpperCase()}`, 'report', { filters })
     return { success: true, data: { rows, summary } }
+  })
+
+  // SmartBuy Voucher Dashboard (spec §20/§26/§29) — totals across every
+  // voucher issued via issueSmartBuyVoucher(), optionally scoped to one
+  // scheme or agent. Same permission gate as coupons:reports (view-level,
+  // not the stricter coupons_agent_change).
+  safeHandle(ipcMain, 'coupons:smartbuyDashboard', (_e, filters: Record<string, unknown> = {}) => {
+    const perms = currentPermissions()
+    if (!perms.all && !perms.coupons_reports && !perms.coupons) {
+      return { success: false, error: 'You do not have permission to view coupon reports' }
+    }
+    const db = getDb()
+    lazyExpire(db)
+
+    const conditions: string[] = [`cp.source_type = 'smartbuy_redemption'`]
+    const params: unknown[] = []
+    if (filters.schemeId) { conditions.push(`cp.smartbuy_scheme_id = ?`); params.push(filters.schemeId) }
+    if (filters.agentId)  { conditions.push(`cp.agent_id = ?`); params.push(filters.agentId) }
+    const where = `WHERE ${conditions.join(' AND ')}`
+
+    const totals = db.prepare(`
+      SELECT
+        COUNT(*) as total_vouchers,
+        COALESCE(SUM(cp.initial_value), 0) as total_issued_value,
+        COALESCE(SUM(cp.initial_value - cp.balance), 0) as total_redeemed_value,
+        COALESCE(SUM(CASE WHEN cp.status != 'void' THEN cp.balance ELSE 0 END), 0) as outstanding_value,
+        COALESCE(SUM(CASE WHEN cp.status = 'active' AND cp.balance = cp.initial_value THEN 1 ELSE 0 END), 0) as available_count,
+        COALESCE(SUM(CASE WHEN cp.status = 'active' AND cp.balance > 0 AND cp.balance < cp.initial_value THEN 1 ELSE 0 END), 0) as partially_used_count,
+        COALESCE(SUM(CASE WHEN cp.status = 'used_up' THEN 1 ELSE 0 END), 0) as fully_claimed_count,
+        COALESCE(SUM(CASE WHEN cp.status = 'void' THEN 1 ELSE 0 END), 0) as cancelled_count,
+        COALESCE(SUM(CASE WHEN cp.status = 'expired' THEN 1 ELSE 0 END), 0) as expired_count
+      FROM coupons cp
+      ${where}
+    `).get(...params) as Record<string, unknown>
+
+    return { success: true, data: totals }
+  })
+
+  // Agent Change (spec §12) — the ONLY path allowed to mutate a SmartBuy
+  // voucher's agent_id/agent_code/agent_name after issuance. Requires a
+  // dedicated permission (deliberately NOT satisfied by plain 'coupons'
+  // view/manage access), re-validates the target agent independently against
+  // the agents table (never trusts a client-supplied code/name), and is
+  // always audited with the reason, old/new Agent, old/new branch, user,
+  // timestamp (the last two are first-class audit_logs columns, populated
+  // by logAudit() itself) — a malicious/compromised client cannot reassign
+  // a voucher's Agent by sending a different id, since this handler is the
+  // only writer.
+  //
+  // Business rule (confirmed):
+  //  - Branch-scoped caller (no perms.all): new Agent must be in the SAME
+  //    branch as the caller — cross-branch reassignment is a hard REJECT,
+  //    no override, matching chits:members:add's own branch guard.
+  //  - perms.all (Super Admin): MAY reassign cross-branch, but only as an
+  //    explicit, confirmed administrative override — the first call (no
+  //    confirmCrossBranch flag) for a genuinely cross-branch reassignment
+  //    returns requiresConfirmation:true and performs NO write; the caller
+  //    must re-submit with confirmCrossBranch:true to actually apply it.
+  //    A same-branch reassignment by perms.all never needs this extra step.
+  safeHandle(ipcMain, 'coupons:changeAgent', (_e, couponId: string, newAgentId: string, reason?: string, confirmCrossBranch?: boolean) => {
+    const perms = currentPermissions()
+    if (!perms.all && !perms.coupons_agent_change) {
+      return { success: false, error: 'You do not have permission to change a voucher\'s Agent' }
+    }
+    const reasonText = String(reason || '').trim()
+    if (!reasonText) return { success: false, error: 'A reason is required to change the Agent' }
+
+    const db = getDb()
+    const coupon = db.prepare('SELECT * FROM coupons WHERE id = ?').get(couponId) as Record<string, unknown> | undefined
+    if (!coupon) return { success: false, error: 'Voucher not found' }
+    if (coupon.source_type !== 'smartbuy_redemption') return { success: false, error: 'Only SmartBuy vouchers have an Agent to change' }
+
+    const newAgent = db.prepare(`SELECT id, code, name, status, branch_id FROM agents WHERE id = ?`).get(newAgentId) as
+      { id: string; code: string; name: string; status: string; branch_id: string | null } | undefined
+    if (!newAgent) return { success: false, error: 'Selected agent not found' }
+    if (newAgent.status !== 'active') return { success: false, error: 'Selected agent is not active' }
+
+    // The Agent currently on the voucher — comparing its branch against the
+    // new Agent's branch is what actually defines "cross-branch" here (not
+    // the caller's own branch), so the confirmation/audit trail reflects the
+    // real before/after of the voucher itself.
+    const oldAgentRow = coupon.agent_id
+      ? db.prepare(`SELECT id, code, name, branch_id FROM agents WHERE id = ?`).get(coupon.agent_id) as
+          { id: string; code: string; name: string; branch_id: string | null } | undefined
+      : undefined
+    const oldBranchId = oldAgentRow?.branch_id || null
+    const newBranchId = newAgent.branch_id || null
+    const isCrossBranch = Boolean(oldBranchId && newBranchId && String(oldBranchId) !== String(newBranchId))
+
+    // Same cross-branch guard chits:members:add already applies when linking
+    // an Agent to a member (chits.ts, "Selected agent does not belong to
+    // this branch") — a branch-scoped caller (no perms.all) must not be able
+    // to attribute a voucher's commission to another branch's Agent. No
+    // override for a branch-scoped caller, regardless of confirmCrossBranch.
+    if (!perms.all) {
+      const caller = currentUser()
+      if (newAgent.branch_id && String(newAgent.branch_id) !== String(caller?.branch_id || '')) {
+        return { success: false, error: 'Selected agent does not belong to your branch' }
+      }
+    } else if (isCrossBranch && !confirmCrossBranch) {
+      // perms.all crossing branches, but hasn't explicitly confirmed yet —
+      // report what's about to happen and stop; no row is touched.
+      const branchName = (id: string | null) => id
+        ? ((db.prepare('SELECT name FROM branches WHERE id = ?').get(id) as { name: string } | undefined)?.name || id)
+        : 'Unknown branch'
+      return {
+        success: false,
+        requiresConfirmation: true,
+        oldBranchId, newBranchId,
+        oldBranchName: branchName(oldBranchId), newBranchName: branchName(newBranchId),
+        error: `This reassigns the voucher's Agent from ${branchName(oldBranchId)} to ${branchName(newBranchId)} — a cross-branch administrative override. Confirm to proceed.`,
+      }
+    }
+
+    const oldAgentId = coupon.agent_id
+    const oldAgentCode = coupon.agent_code
+    const oldAgentName = coupon.agent_name
+
+    db.prepare(`
+      UPDATE coupons SET agent_id = ?, agent_code = ?, agent_name = ?, updated_at = datetime('now') WHERE id = ?
+    `).run(newAgent.id, newAgent.code, newAgent.name, couponId)
+
+    audit(db, 'VOUCHER_AGENT_CHANGED', couponId, {
+      code: coupon.code, reason: reasonText, crossBranchOverride: isCrossBranch,
+      oldAgentId, oldAgentCode, oldAgentName, oldBranchId,
+      newAgentId: newAgent.id, newAgentCode: newAgent.code, newAgentName: newAgent.name, newBranchId,
+    })
+    enqueueCoupon(db, couponId)
+    return { success: true }
   })
 }

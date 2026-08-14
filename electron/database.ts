@@ -1852,6 +1852,25 @@ function runMigrations(): void {
   }
   db.exec(`CREATE INDEX IF NOT EXISTS idx_coupons_source ON coupons(source_type, source_id)`)
 
+  // SmartBuy voucher Agent linkage — a SNAPSHOT of the member's registered
+  // Agent (chit_members.agent_id -> agents) taken at the moment the voucher
+  // is issued, not a live join. This is deliberate: it's what makes "the
+  // Agent on a voucher must not silently change" meaningful (the member's
+  // own agent_id can still be reassigned later without retroactively
+  // altering vouchers already issued), and it's what the POS scan/print flow
+  // reads directly without an extra join. NULL for ordinary POS-issued
+  // coupons. The only writer of these columns after issuance is the
+  // dedicated, audited coupons:changeAgent handler.
+  const couponAgentColumns: Array<[string, string]> = [
+    ['agent_id', 'TEXT REFERENCES agents(id)'],
+    ['agent_code', 'TEXT'],
+    ['agent_name', 'TEXT'],
+  ]
+  for (const [column, def] of couponAgentColumns) {
+    if (!hasColumn('coupons', column)) db.exec(`ALTER TABLE coupons ADD COLUMN ${column} ${def}`)
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_coupons_agent ON coupons(agent_id)`)
+
   // Points a redeemed member at the voucher (if any) issued for their
   // leftover entitlement — added here, after the coupons table exists,
   // rather than in the earlier redemptionPolicyColumns block.

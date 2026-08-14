@@ -74,6 +74,7 @@ const MODULES = [
       { key: 'coupons_create',  label: 'Issue Coupons' },
       { key: 'coupons_void',    label: 'Void Coupons' },
       { key: 'coupons_reports', label: 'Coupon Reports' },
+      { key: 'coupons_agent_change', label: 'Change SmartBuy Voucher Agent' },
     ]
   },
   {

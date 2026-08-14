@@ -6,7 +6,7 @@ import { useKeyboard } from '@/hooks/useKeyboard'
 import type { BillType } from '@/store/cartStore'
 import {
   X, CreditCard, Banknote, Building2, Calendar, Printer, CheckCircle2,
-  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Keyboard, Handshake, UserPlus, Ticket, ChefHat, Wallet
+  Mail, ClipboardList, BadgeDollarSign, AlertCircle, Keyboard, Handshake, UserPlus, Ticket, ChefHat, Wallet, Sparkles
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import type { PaymentMethod } from '@/types'
@@ -778,6 +778,25 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                   {couponCustomerMismatch && (
                     <div className="rounded-lg bg-amber-500/10 border border-amber-500/30 px-2.5 py-1.5 text-xs text-amber-300">
                       ⚠ This coupon was issued to {String(couponInfo.customer_name)} — different from the bill customer.
+                    </div>
+                  )}
+                  {Boolean(couponInfo.is_smartbuy) && (
+                    <div className="rounded-lg border px-2.5 py-2 space-y-1" style={{ borderColor: '#d97706', background: 'color-mix(in srgb, #d97706 10%, transparent)' }}>
+                      <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: '#b45309' }}>
+                        <Sparkles size={13} /> SMARTBUY / CHIT FUND VOUCHER
+                      </div>
+                      <div className="text-xs" style={{ color: 'var(--text-2)' }}>
+                        Scheme: <b>{String(couponInfo.smartbuy_scheme_name || '—')}</b>
+                        {couponInfo.smartbuy_cycle_no != null ? ` · Cycle ${String(couponInfo.smartbuy_cycle_no)}` : ''}
+                      </div>
+                      {/* Agent is read-only — sourced from the member's registered
+                          Agent at voucher issuance. Deliberately NOT the same
+                          field/state as the "Agent" input elsewhere in this modal
+                          (that one is the unrelated POS sales-commission agent). */}
+                      <div className="text-xs" style={{ color: 'var(--text-2)' }}>
+                        Agent: <b>{String(couponInfo.agent_name || '—')}</b>
+                        {couponInfo.agent_code ? <span className="font-mono ml-1" style={{ color: 'var(--text-3)' }}>({String(couponInfo.agent_code)})</span> : null}
+                      </div>
                     </div>
                   )}
                   <div className="flex items-center gap-2">

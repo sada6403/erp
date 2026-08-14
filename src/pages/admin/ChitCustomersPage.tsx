@@ -293,7 +293,7 @@ function ChitCustomerDetail({ customer, onClose }: { customer: Row; onClose: () 
                     <span className={`badge-${cm.status === 'redeemed' ? 'green' : cm.status === 'withdrawn' ? 'gray' : 'blue'} text-xs`}>{cm.status as string}</span>
                   </div>
                   <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
-                    {(cm.product_name as string) || 'No product set'} · {(cm.branch_name as string) || 'No branch'} · Agent: {(cm.agent_name as string) || '—'}
+                    {(cm.product_name as string) || 'No product set'} · {(cm.branch_name as string) || 'No branch'} · Agent: {(cm.agent_name as string) || '—'}{cm.agent_code ? ` (${cm.agent_code as string})` : ''}
                   </p>
                   <div className="flex items-center justify-between mt-1">
                     <p className="text-xs" style={{ color: 'var(--text-3)' }}>
@@ -303,6 +303,19 @@ function ChitCustomerDetail({ customer, onClose }: { customer: Row; onClose: () 
                       <Eye size={11} /> Payment History
                     </button>
                   </div>
+                  {Boolean(cm.voucher_code) && (
+                    <div className="flex items-center justify-between mt-1.5 pt-1.5" style={{ borderTop: '1px dashed var(--border)' }}>
+                      <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                        {cm.won_cycle_no != null ? `Winner · Cycle ${cm.won_cycle_no as number} · ` : ''}
+                        Voucher <span className="font-mono">{cm.voucher_code as string}</span> ·
+                        {' '}Value Rs.{Number(cm.voucher_value || 0).toLocaleString()} ·
+                        {' '}Balance Rs.{Number(cm.voucher_balance || 0).toLocaleString()}
+                      </p>
+                      <span className={`badge-${cm.voucher_status === 'active' ? 'green' : cm.voucher_status === 'used_up' ? 'blue' : cm.voucher_status === 'expired' ? 'yellow' : 'red'} text-xs`}>
+                        {cm.voucher_status as string}
+                      </span>
+                    </div>
+                  )}
                 </div>
               ))}
             </div>

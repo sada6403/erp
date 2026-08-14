@@ -4453,6 +4453,517 @@ describe('SmartBuy QA', () => {
     if (posRows.some(r => r.source_type === 'smartbuy_redemption')) note('CRITICAL: sourceType=pos incorrectly included a SmartBuy-issued voucher')
   })
 
+  // ── SmartBuy Voucher <-> Agent linkage (this pass) ────────────────────────
+  it('86. a draw-issued SmartBuy voucher snapshots the winning member\'s registered Agent (id/code/name) onto the coupons row', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Voucher Agent Snapshot', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const schemeId86 = schemeRes.data.id
+    const m1 = await call('chits:members:add', schemeId86, { customer_name: 'Agent Snapshot Winner', customer_phone: '0771186001', agent_id: AGENT_REG })
+    expect(m1.success).toBe(true)
+    const pay = await call('chits:contributions:record', m1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeId86, 1, { reason: 'QA agent snapshot regression' })
+    expect(draw.success).toBe(true)
+    const voucher = (draw.data.vouchers || [])[0]
+    expect(voucher).toBeTruthy()
+
+    const coupon = db.prepare('SELECT agent_id, agent_code, agent_name FROM coupons WHERE id=?').get(voucher.voucherId) as any
+    if (coupon.agent_id !== AGENT_REG) note(`CRITICAL: voucher.agent_id should be the member's registered Agent (${AGENT_REG}), got ${coupon.agent_id}`)
+    if (coupon.agent_code !== 'AG-REG') note(`CRITICAL: voucher.agent_code should be 'AG-REG', got ${coupon.agent_code}`)
+    expect(coupon.agent_id).toBe(AGENT_REG)
+    expect(coupon.agent_code).toBe('AG-REG')
+  })
+
+  it('87. chits:draws:conduct REJECTS a manual-pick draw when the selected winner has no registered Agent — no chit_draws or coupons row is created', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Draw Blocked No Agent', branch_id: BR_A, product_id: PROD1, member_count: 2, cycle_count: 2,
+      min_members: 2, chit_value: 60000, contribution_amount: 30000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const schemeId87 = schemeRes.data.id
+    const withAgent = await call('chits:members:add', schemeId87, { customer_name: 'Has Agent', customer_phone: '0771187001', agent_id: AGENT_REG })
+    const noAgent = await call('chits:members:add', schemeId87, { customer_name: 'Missing Agent', customer_phone: '0771187002' })
+    expect(withAgent.success).toBe(true); expect(noAgent.success).toBe(true)
+
+    for (const m of [withAgent, noAgent]) {
+      const pay = await call('chits:contributions:record', m.data.id, { amount: 30000, method: 'cash', cycle_no: 1 })
+      expect(pay.success).toBe(true)
+    }
+
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeId87, 1, { winnerMemberId: noAgent.data.id, reason: 'QA missing-agent draw regression' })
+    if (draw.success) note('CRITICAL: chits:draws:conduct issued a voucher to a member with no registered Agent — spec requires this to be blocked')
+    expect(draw.success).toBe(false)
+    expect(String(draw.error || '')).toContain('Agent')
+
+    const drawRow = db.prepare('SELECT id FROM chit_draws WHERE scheme_id=? AND cycle_no=1').get(schemeId87)
+    if (drawRow) note('CRITICAL: a chit_draws row was created despite the draw being rejected for a missing Agent')
+    expect(drawRow).toBeUndefined()
+    const couponRow = db.prepare('SELECT id FROM coupons WHERE smartbuy_member_id=?').get(noAgent.data.id)
+    if (couponRow) note('CRITICAL: a voucher (coupons row) was issued despite the draw being rejected for a missing Agent')
+    expect(couponRow).toBeUndefined()
+  })
+
+  it('88. final-batch settlement REJECTS and commits nothing when even one remaining member lacks a registered Agent', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Final Batch Blocked No Agent', branch_id: BR_A, product_id: PROD1, member_count: 2, cycle_count: 1,
+      min_members: 2, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const schemeId88 = schemeRes.data.id
+    const withAgent = await call('chits:members:add', schemeId88, { customer_name: 'Final Has Agent', customer_phone: '0771188001', agent_id: AGENT_REG })
+    const noAgent = await call('chits:members:add', schemeId88, { customer_name: 'Final Missing Agent', customer_phone: '0771188002' })
+    expect(withAgent.success).toBe(true); expect(noAgent.success).toBe(true)
+
+    for (const m of [withAgent, noAgent]) {
+      const pay = await call('chits:contributions:record', m.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+      expect(pay.success).toBe(true)
+    }
+
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeId88, 1, {})
+    if (draw.success) note('CRITICAL: final-batch settlement issued vouchers despite one member missing a registered Agent')
+    expect(draw.success).toBe(false)
+
+    const drawRow = db.prepare('SELECT id FROM chit_draws WHERE scheme_id=? AND cycle_no=1').get(schemeId88)
+    if (drawRow) note('CRITICAL: a chit_draws row was committed despite the final-batch draw being rejected')
+    expect(drawRow).toBeUndefined()
+    const withAgentRow = db.prepare('SELECT voucher_id, status FROM chit_members WHERE id=?').get(withAgent.data.id) as any
+    if (withAgentRow.voucher_id || withAgentRow.status === 'redeemed') note('CRITICAL: the member WITH an Agent was partially settled even though the whole final-batch draw was rejected — not atomic')
+    expect(withAgentRow.voucher_id).toBeNull()
+  })
+
+  it('89. coupons:validate returns SmartBuy scheme/agent/cycle/entitlement metadata for a voucher code, and omits SmartBuy fields for a plain POS coupon', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Validate SmartBuy Metadata', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const schemeId89 = schemeRes.data.id
+    const m1 = await call('chits:members:add', schemeId89, { customer_name: 'Validate Metadata Winner', customer_phone: '0771189001', agent_id: AGENT_REG })
+    expect(m1.success).toBe(true)
+    const pay = await call('chits:contributions:record', m1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeId89, 1, { reason: 'QA validate metadata regression' })
+    expect(draw.success).toBe(true)
+    const voucher = (draw.data.vouchers || [])[0]
+
+    const validated = await call('coupons:validate', voucher.voucherCode)
+    expect(validated.success).toBe(true)
+    const vc = validated.data.coupon
+    if (!vc.is_smartbuy) note('CRITICAL: coupons:validate did not flag a SmartBuy-issued voucher as is_smartbuy')
+    if (vc.agent_code !== 'AG-REG') note(`CRITICAL: coupons:validate did not return the voucher's Agent Code — expected 'AG-REG', got ${vc.agent_code}`)
+    if (!vc.smartbuy_scheme_name) note('CRITICAL: coupons:validate did not return the SmartBuy scheme name')
+    if (Number(vc.smartbuy_entitlement_value) !== 60000) note(`CRITICAL: coupons:validate returned wrong entitlement value, got ${vc.smartbuy_entitlement_value}`)
+    expect(vc.is_smartbuy).toBe(true)
+    expect(vc.agent_code).toBe('AG-REG')
+
+    const plainCoupon = await call('coupons:create', { name: 'QA Plain Coupon For Validate', initial_value: 1000, branch_id: BR_A })
+    expect(plainCoupon.success).toBe(true)
+    const plainValidated = await call('coupons:validate', plainCoupon.data.code)
+    expect(plainValidated.success).toBe(true)
+    if (plainValidated.data.coupon.is_smartbuy) note('CRITICAL: a plain POS coupon was incorrectly flagged is_smartbuy=true')
+    if (plainValidated.data.coupon.agent_code !== undefined) note('CRITICAL: a plain POS coupon leaked an agent_code field it should never have')
+    expect(plainValidated.data.coupon.is_smartbuy).toBe(false)
+  })
+
+  it('90. coupons:changeAgent requires the coupons_agent_change/all permission, independently re-validates the new agent, is rejected for non-SmartBuy coupons, and is audited', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Agent Change Permission', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const schemeId90 = schemeRes.data.id
+    const m1 = await call('chits:members:add', schemeId90, { customer_name: 'Agent Change Winner', customer_phone: '0771190001', agent_id: AGENT_REG })
+    expect(m1.success).toBe(true)
+    const pay = await call('chits:contributions:record', m1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeId90, 1, { reason: 'QA agent change permission regression' })
+    expect(draw.success).toBe(true)
+    const voucherId = (draw.data.vouchers || [])[0].voucherId
+
+    // mgrA has 'chits' (SmartBuy access) but neither 'all' nor
+    // 'coupons_agent_change' — plain SmartBuy/coupon view access must NOT be
+    // enough to reassign a voucher's Agent.
+    setSession(mgrA)
+    const deniedAttempt = await call('coupons:changeAgent', voucherId, AGENT_SALES, 'unauthorized attempt')
+    if (deniedAttempt.success) note('CRITICAL: coupons:changeAgent succeeded for a caller without coupons_agent_change/all — Agent reassignment is not actually locked down')
+    expect(deniedAttempt.success).toBe(false)
+    const unchanged = db.prepare('SELECT agent_id FROM coupons WHERE id=?').get(voucherId) as any
+    if (unchanged.agent_id !== AGENT_REG) note('CRITICAL: voucher agent_id was mutated despite the permission check failing')
+
+    setSession(SUPER_ADMIN)
+    const bogusAgent = await call('coupons:changeAgent', voucherId, 'agent-does-not-exist', 'reassigning to a bogus agent')
+    if (bogusAgent.success) note('CRITICAL: coupons:changeAgent accepted a non-existent agent id without independently validating it server-side')
+    expect(bogusAgent.success).toBe(false)
+
+    const changed = await call('coupons:changeAgent', voucherId, AGENT_SALES, 'Original agent left the company')
+    if (!changed.success) note(`CRITICAL: coupons:changeAgent was rejected for a legitimate Super Admin request: ${changed.error}`)
+    expect(changed.success).toBe(true)
+    const afterChange = db.prepare('SELECT agent_id, agent_code FROM coupons WHERE id=?').get(voucherId) as any
+    if (afterChange.agent_id !== AGENT_SALES || afterChange.agent_code !== 'AG-SALES') note('CRITICAL: coupons:changeAgent did not actually update agent_id/agent_code')
+    expect(afterChange.agent_id).toBe(AGENT_SALES)
+
+    const auditRow = db.prepare(`SELECT * FROM audit_logs WHERE action='VOUCHER_AGENT_CHANGED' AND record_id=? ORDER BY created_at DESC LIMIT 1`).get(voucherId) as any
+    if (!auditRow) note('CRITICAL: no audit_logs row was written for a voucher Agent Change')
+    else if (!String(auditRow.new_values || '').includes('Original agent left the company')) note('CRITICAL: the Agent Change audit entry does not include the reason that was given')
+
+    // A plain (non-SmartBuy) coupon has no Agent to change at all.
+    const plainCoupon = await call('coupons:create', { name: 'QA Plain Coupon For Agent Change', initial_value: 1000, branch_id: BR_A })
+    expect(plainCoupon.success).toBe(true)
+    const plainAttempt = await call('coupons:changeAgent', plainCoupon.data.id, AGENT_SALES, 'should not be allowed')
+    if (plainAttempt.success) note('CRITICAL: coupons:changeAgent succeeded on a plain POS coupon, which has no SmartBuy Agent concept')
+    expect(plainAttempt.success).toBe(false)
+  })
+
+  it('91. coupons:list supports voucherType / agentId / schemeId / lifecycle filters for Voucher Management', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Voucher Management Filters', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const schemeId91 = schemeRes.data.id
+    const m1 = await call('chits:members:add', schemeId91, { customer_name: 'Filters Winner', customer_phone: '0771191001', agent_id: AGENT_SALES })
+    expect(m1.success).toBe(true)
+    const pay = await call('chits:contributions:record', m1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeId91, 1, { reason: 'QA filters regression' })
+    expect(draw.success).toBe(true)
+    const voucherId91 = (draw.data.vouchers || [])[0].voucherId
+
+    const plainCoupon = await call('coupons:create', { name: 'QA Plain Coupon For Filters', initial_value: 500, branch_id: BR_A })
+    expect(plainCoupon.success).toBe(true)
+
+    const smartbuyOnly = await call('coupons:list', { voucherType: 'smartbuy' })
+    expect(smartbuyOnly.success).toBe(true)
+    if (!(smartbuyOnly.data as any[]).some(r => r.id === voucherId91)) note('CRITICAL: voucherType=smartbuy filter is missing a genuine SmartBuy voucher')
+    if ((smartbuyOnly.data as any[]).some(r => r.id === plainCoupon.data.id)) note('CRITICAL: voucherType=smartbuy filter incorrectly included a plain POS coupon')
+
+    const normalOnly = await call('coupons:list', { voucherType: 'normal' })
+    expect(normalOnly.success).toBe(true)
+    if ((normalOnly.data as any[]).some(r => r.id === voucherId91)) note('CRITICAL: voucherType=normal filter incorrectly included a SmartBuy voucher')
+    if (!(normalOnly.data as any[]).some(r => r.id === plainCoupon.data.id)) note('CRITICAL: voucherType=normal filter is missing a genuine plain POS coupon')
+
+    const byAgent = await call('coupons:list', { agentId: AGENT_SALES })
+    if (!(byAgent.data as any[]).some(r => r.id === voucherId91)) note('CRITICAL: agentId filter did not return the voucher belonging to that agent')
+
+    const byScheme = await call('coupons:list', { schemeId: schemeId91 })
+    if (!(byScheme.data as any[]).some(r => r.id === voucherId91)) note('CRITICAL: schemeId filter did not return this scheme\'s voucher')
+
+    const unclaimed = await call('coupons:list', { lifecycle: 'unclaimed' })
+    if (!(unclaimed.data as any[]).some(r => r.id === voucherId91)) note('CRITICAL: lifecycle=unclaimed did not include a freshly issued, untouched SmartBuy voucher')
+
+    const outstanding = await call('coupons:list', { lifecycle: 'outstanding' })
+    if (!(outstanding.data as any[]).some(r => r.id === voucherId91)) note('CRITICAL: lifecycle=outstanding did not include a SmartBuy voucher with remaining balance')
+  })
+
+  it('92. chits:get returns agentGapMembers listing only active members with no registered Agent', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Agent Gap Banner', branch_id: BR_A, product_id: PROD1, member_count: 2, cycle_count: 2,
+      min_members: 2, chit_value: 60000, contribution_amount: 30000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const schemeId92 = schemeRes.data.id
+    const withAgent = await call('chits:members:add', schemeId92, { customer_name: 'Gap Has Agent', customer_phone: '0771192001', agent_id: AGENT_REG })
+    const noAgent = await call('chits:members:add', schemeId92, { customer_name: 'Gap Missing Agent', customer_phone: '0771192002' })
+    expect(withAgent.success).toBe(true); expect(noAgent.success).toBe(true)
+
+    const got = await call('chits:get', schemeId92)
+    expect(got.success).toBe(true)
+    const gapIds = (got.data.agentGapMembers as any[]).map(m => m.id)
+    if (!gapIds.includes(noAgent.data.id)) note('CRITICAL: chits:get\'s agentGapMembers is missing a member with no registered Agent')
+    if (gapIds.includes(withAgent.data.id)) note('CRITICAL: chits:get\'s agentGapMembers incorrectly included a member who already has a registered Agent')
+    expect(gapIds).toContain(noAgent.data.id)
+    expect(gapIds).not.toContain(withAgent.data.id)
+  })
+
+  it('93. coupons:changeAgent blocks a branch-scoped caller (no perms.all) from reassigning a voucher to a cross-branch Agent, but allows same-branch reassignment', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Agent Change Branch Scope', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const schemeId93 = schemeRes.data.id
+    const m1 = await call('chits:members:add', schemeId93, { customer_name: 'Branch Scope Winner', customer_phone: '0771193001', agent_id: AGENT_REG })
+    expect(m1.success).toBe(true)
+    const pay = await call('chits:contributions:record', m1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeId93, 1, { reason: 'QA agent change branch scope regression' })
+    expect(draw.success).toBe(true)
+    const voucherId93 = (draw.data.vouchers || [])[0].voucherId
+
+    seedUser('u-branch-agent-changer', 'QA Branch Agent Changer', BR_A)
+    const branchAgentChanger = makeSession({
+      id: 'u-branch-agent-changer', branchId: BR_A, permissions: { chits: true, coupons: true, coupons_agent_change: true },
+    })
+
+    setSession(branchAgentChanger)
+    const crossBranchAttempt = await call('coupons:changeAgent', voucherId93, AGENT_OTHER, 'trying to reassign to a Branch B agent')
+    if (crossBranchAttempt.success) note('CRITICAL: a branch-scoped caller (no perms.all) reassigned a voucher to a different branch\'s Agent — commission could now be misattributed cross-branch')
+    expect(crossBranchAttempt.success).toBe(false)
+
+    const sameBranchAttempt = await call('coupons:changeAgent', voucherId93, AGENT_SALES, 'reassigning within the same branch')
+    if (!sameBranchAttempt.success) note(`CRITICAL: a branch-scoped caller with coupons_agent_change was wrongly blocked from a legitimate same-branch reassignment: ${sameBranchAttempt.error}`)
+    expect(sameBranchAttempt.success).toBe(true)
+  })
+
+  it('94. FINAL ACCEPTANCE (E) — Rs.60,000 voucher: Rs.20,000 spend leaves Rs.40,000, a further Rs.40,000 spend reaches exactly Rs.0/used_up, and a further redemption attempt is rejected (no negative balance possible)', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Final Acceptance E', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const e1 = await call('chits:members:add', schemeRes.data.id, { customer_name: 'Acceptance E Winner', customer_phone: '0771194001', agent_id: AGENT_REG })
+    expect(e1.success).toBe(true)
+    const pay = await call('chits:contributions:record', e1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeRes.data.id, 1, { reason: 'QA acceptance E regression' })
+    expect(draw.success).toBe(true)
+    const voucherId = (draw.data.vouchers || [])[0].voucherId
+    const code = (db.prepare('SELECT code, customer_id FROM coupons WHERE id=?').get(voucherId) as any)
+    const prodX = 'prod-acceptance-e-20k', prodY = 'prod-acceptance-e-40k'
+    db.prepare(`INSERT OR IGNORE INTO products (id, category_id, supplier_id, sku, name, unit, cost_price, selling_price, tax_rate) VALUES (?,NULL,NULL,?,?,?,?,?,?)`).run(prodX, prodX, 'Acceptance E 20k', 'pcs', 15000, 20000, 0)
+    db.prepare(`INSERT OR IGNORE INTO products (id, category_id, supplier_id, sku, name, unit, cost_price, selling_price, tax_rate) VALUES (?,NULL,NULL,?,?,?,?,?,?)`).run(prodY, prodY, 'Acceptance E 40k', 'pcs', 30000, 40000, 0)
+    db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,NULL,?)`).run(crypto.randomUUID(), prodX, BR_A, 5)
+    db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,NULL,?)`).run(crypto.randomUUID(), prodY, BR_A, 5)
+
+    setSession(mgrA)
+    const bill1 = await call('invoices:create', {
+      branch_id: BR_A, customer_id: code.customer_id, bill_type: 'RETAIL',
+      subtotal: 20000, discount_amount: 0, tax_amount: 0, total_amount: 20000, paid_amount: 20000, due_amount: 0,
+      items: [{ product_id: prodX, quantity: 1, unit_price: 20000, discount_pct: 0, discount_amount: 0, tax_rate: 0, tax_amount: 0, line_total: 20000 }],
+      coupon: { code: code.code, amount: 20000 },
+    })
+    expect(bill1.success).toBe(true)
+    const after1 = db.prepare('SELECT balance, status FROM coupons WHERE id=?').get(voucherId) as any
+    if (Number(after1.balance) !== 40000) note(`CRITICAL: expected Rs.40,000 remaining after a Rs.20,000 spend on a Rs.60,000 voucher, got ${after1.balance}`)
+    if (after1.status !== 'active') note(`CRITICAL: a partially-used voucher should still be status='active' (RUNNING/PARTIALLY_USED), got '${after1.status}'`)
+    expect(Number(after1.balance)).toBe(40000)
+
+    const bill2 = await call('invoices:create', {
+      branch_id: BR_A, customer_id: code.customer_id, bill_type: 'RETAIL',
+      subtotal: 40000, discount_amount: 0, tax_amount: 0, total_amount: 40000, paid_amount: 40000, due_amount: 0,
+      items: [{ product_id: prodY, quantity: 1, unit_price: 40000, discount_pct: 0, discount_amount: 0, tax_rate: 0, tax_amount: 0, line_total: 40000 }],
+      coupon: { code: code.code, amount: 40000 },
+    })
+    expect(bill2.success).toBe(true)
+    const after2 = db.prepare('SELECT balance, status FROM coupons WHERE id=?').get(voucherId) as any
+    if (Number(after2.balance) !== 0 || after2.status !== 'used_up') note(`CRITICAL: expected exactly Rs.0 / status='used_up' (FULLY_CLAIMED) after spending the full Rs.60,000, got balance=${after2.balance} status=${after2.status}`)
+    expect(Number(after2.balance)).toBe(0)
+    expect(after2.status).toBe('used_up')
+
+    // No negative balance possible — a further redemption attempt on an
+    // exhausted voucher must be rejected outright, not silently go negative.
+    const bill3 = await call('invoices:create', {
+      branch_id: BR_A, customer_id: code.customer_id, bill_type: 'RETAIL',
+      subtotal: 1000, discount_amount: 0, tax_amount: 0, total_amount: 1000, paid_amount: 1000, due_amount: 0,
+      items: [{ product_id: prodX, quantity: 1, unit_price: 20000, discount_pct: 95, discount_amount: 19000, tax_rate: 0, tax_amount: 0, line_total: 1000 }],
+      coupon: { code: code.code, amount: 1000 },
+    })
+    if (bill3.success) note('CRITICAL: a redemption succeeded against an already-fully-used voucher — negative balance is possible')
+    expect(bill3.success).toBe(false)
+    const finalBalance = db.prepare('SELECT balance FROM coupons WHERE id=?').get(voucherId) as any
+    if (Number(finalBalance.balance) < 0) note('CRITICAL: voucher balance went negative')
+    expect(Number(finalBalance.balance)).toBe(0)
+  })
+
+  it('95. FINAL ACCEPTANCE (G) — commission is attributed to the correct Agent/Code once at voucher issuance and is NEVER duplicated by one or more later POS redemptions of that same voucher', async () => {
+    setSession(SUPER_ADMIN)
+    const ruleRes = await call('commissions:rules:create', {
+      name: 'QA Acceptance G Commission', scope: 'scheme', scheme_id: undefined,
+      calculation_type: 'percentage', rate: 4, ownership_model: 'registration', status: 'active',
+    })
+    expect(ruleRes.success).toBe(true)
+
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Final Acceptance G', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    db.prepare(`UPDATE commission_rules SET scheme_id=? WHERE id=?`).run(schemeRes.data.id, ruleRes.data.id)
+    const g1 = await call('chits:members:add', schemeRes.data.id, { customer_name: 'Acceptance G Winner', customer_phone: '0771195001', agent_id: AGENT_REG })
+    expect(g1.success).toBe(true)
+    const pay = await call('chits:contributions:record', g1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeRes.data.id, 1, { reason: 'QA acceptance G regression' })
+    expect(draw.success).toBe(true)
+    const voucherId = (draw.data.vouchers || [])[0].voucherId
+    const code = (db.prepare('SELECT code, customer_id FROM coupons WHERE id=?').get(voucherId) as any)
+
+    const commissionRows = db.prepare(`SELECT * FROM commission_ledger WHERE source_id=?`).all(voucherId) as any[]
+    if (commissionRows.length !== 1) note(`CRITICAL: expected exactly 1 commission_ledger row for this voucher's issuance, got ${commissionRows.length}`)
+    if (commissionRows[0]?.registration_agent_id !== AGENT_REG) note('CRITICAL: commission was attributed to the wrong Agent')
+    if (Math.abs(Number(commissionRows[0]?.total_commission || 0) - 2400) > 0.01) note(`CRITICAL: expected 4% of Rs.60,000 = Rs.2,400 commission, got ${commissionRows[0]?.total_commission}`)
+
+    const prodG = 'prod-acceptance-g'
+    db.prepare(`INSERT OR IGNORE INTO products (id, category_id, supplier_id, sku, name, unit, cost_price, selling_price, tax_rate) VALUES (?,NULL,NULL,?,?,?,?,?,?)`).run(prodG, prodG, 'Acceptance G Product', 'pcs', 15000, 20000, 0)
+    db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,NULL,?)`).run(crypto.randomUUID(), prodG, BR_A, 5)
+
+    setSession(mgrA)
+    // Redeem the SAME voucher THREE separate times (simulating "scanning/
+    // retrying/reopening the payment") — none of these POS redemptions must
+    // ever touch commission_ledger, since commission for a SmartBuy voucher
+    // is booked once, in full, at issuance — not per redeeming invoice.
+    for (let i = 0; i < 3; i++) {
+      const bill = await call('invoices:create', {
+        branch_id: BR_A, customer_id: code.customer_id, bill_type: 'RETAIL',
+        subtotal: 20000, discount_amount: 0, tax_amount: 0, total_amount: 20000, paid_amount: 20000, due_amount: 0,
+        items: [{ product_id: prodG, quantity: 1, unit_price: 20000, discount_pct: 0, discount_amount: 0, tax_rate: 0, tax_amount: 0, line_total: 20000 }],
+        coupon: { code: code.code, amount: 20000 },
+      })
+      if (!bill.success) break // voucher exhausted after 3x20000=60000, expected on the 3rd iteration's follow-up call if attempted again
+    }
+    const commissionRowsAfter = db.prepare(`SELECT * FROM commission_ledger WHERE source_id=?`).all(voucherId) as any[]
+    if (commissionRowsAfter.length !== commissionRows.length) note(`CRITICAL: commission_ledger row count changed from ${commissionRows.length} to ${commissionRowsAfter.length} after POS redemptions — duplicate/extra commission was created by spending the voucher`)
+    expect(commissionRowsAfter.length).toBe(commissionRows.length)
+  })
+
+  it('96. FINAL ACCEPTANCE (K) — reprinting never creates a second voucher: repeated reads return the identical id/code/balance/Agent, and exactly one coupons row exists for the member', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Final Acceptance K', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+    const k1 = await call('chits:members:add', schemeRes.data.id, { customer_name: 'Acceptance K Winner', customer_phone: '0771196001', agent_id: AGENT_REG })
+    expect(k1.success).toBe(true)
+    const pay = await call('chits:contributions:record', k1.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    setSession(SUPER_ADMIN)
+    const draw = await call('chits:draws:conduct', schemeRes.data.id, 1, { reason: 'QA acceptance K regression' })
+    expect(draw.success).toBe(true)
+    const voucherId = (draw.data.vouchers || [])[0].voucherId
+
+    // The print handler (printer:printSmartBuyVouchers) does nothing but
+    // SELECT these same rows + write an audit log — it has zero INSERT/
+    // UPDATE against `coupons` (verified by code review of electron/ipc/
+    // printer.ts, not re-derivable purely from this data-layer test since
+    // printer handlers aren't registered in this harness). What IS testable
+    // here is the invariant that must hold before/after any number of reads:
+    // the exact same row, unchanged, and never a duplicate.
+    const read1 = await call('coupons:get', voucherId)
+    const read2 = await call('coupons:get', voucherId)
+    const read3 = await call('coupons:get', voucherId)
+    for (const r of [read1, read2, read3]) expect(r.success).toBe(true)
+    if (read1.data.code !== read2.data.code || read2.data.code !== read3.data.code) note('CRITICAL: repeated reads of the same voucher returned different codes')
+    if (Number(read1.data.balance) !== Number(read3.data.balance)) note('CRITICAL: voucher balance changed across repeated reads with no redemption in between')
+    if (read1.data.agent_id !== read3.data.agent_id || read1.data.agent_code !== read3.data.agent_code) note('CRITICAL: voucher Agent changed across repeated reads with no Agent Change call in between')
+
+    const allCouponsForMember = db.prepare(`SELECT COUNT(*) as c FROM coupons WHERE smartbuy_member_id=?`).get(k1.data.id) as { c: number }
+    if (allCouponsForMember.c !== 1) note(`CRITICAL: expected exactly 1 voucher (coupons row) for this member, found ${allCouponsForMember.c} — a duplicate voucher may have been created`)
+    expect(allCouponsForMember.c).toBe(1)
+  })
+
+  it('97. FINAL ACCEPTANCE (N) — cross-branch Agent assignment: chits:members:add rejects a Branch B Agent for a Branch A member even for Super Admin (existing, unmodified branch guard); coupons:changeAgent (new handler) blocks it for a branch-scoped caller but deliberately allows a perms.all override', async () => {
+    // chits:members:add's cross-branch guard (electron/ipc/chits.ts,
+    // "Selected agent does not belong to this branch") applies to ANY caller
+    // who isn't the target agent's own session — including Super Admin, since
+    // scopedAgentId only exists for an actual Agent-role session. This is
+    // pre-existing behavior, unmodified by this pass; asserting it here to
+    // give an accurate, tested answer instead of an assumed one.
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Final Acceptance N', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(schemeRes.success).toBe(true)
+
+    const crossBranchAsManager = await call('chits:members:add', schemeRes.data.id, { customer_name: 'Cross Branch N Manager', customer_phone: '0771197001', agent_id: AGENT_OTHER })
+    if (crossBranchAsManager.success) note('CRITICAL: a branch-scoped Manager enrolled a member with a different branch\'s Agent')
+    expect(crossBranchAsManager.success).toBe(false)
+
+    // A second, separate scheme for the Super-Admin cross-branch attempt —
+    // the first scheme's min_members=1 would otherwise already be "full"
+    // from a successful enrollment below, and this check must be provably
+    // independent of that later same-branch enrollment.
+    setSession(SUPER_ADMIN)
+    const adminSchemeRes = await createSchemeViaTemplate({
+      name: 'QA Final Acceptance N (Admin)', branch_id: BR_A, product_id: PROD1, member_count: 1, cycle_count: 1,
+      min_members: 1, chit_value: 60000, contribution_amount: 60000,
+    })
+    expect(adminSchemeRes.success).toBe(true)
+    const crossBranchAsAdmin = await call('chits:members:add', adminSchemeRes.data.id, { customer_name: 'Cross Branch N Admin', customer_phone: '0771197002', agent_id: AGENT_OTHER })
+    // Real, tested answer (not assumed): chits:members:add blocks this for
+    // EVERY caller, Super Admin included — there is no perms.all bypass in
+    // that handler's branch check.
+    if (crossBranchAsAdmin.success) note('NOTE: chits:members:add allowed a Super Admin to enroll a member with a cross-branch Agent — if this is intentional it should be documented; the code as written appears to block it for everyone')
+    expect(crossBranchAsAdmin.success).toBe(false)
+
+    // Same-branch Agent assignment must still work normally for everyone —
+    // this is what actually activates the (still-pending) first scheme.
+    const sameBranch = await call('chits:members:add', schemeRes.data.id, { customer_name: 'Same Branch N', customer_phone: '0771197003', agent_id: AGENT_REG })
+    if (!sameBranch.success) note(`CRITICAL: same-branch Agent assignment was wrongly rejected: ${sameBranch.error}`)
+    expect(sameBranch.success).toBe(true)
+
+    // coupons:changeAgent (this pass's new handler) DELIBERATELY differs:
+    // Super Admin may reassign a voucher to a cross-branch Agent (a genuine
+    // audited business override, e.g. "the original branch's agent left the
+    // company"), while a branch-scoped coupons_agent_change holder may not.
+    // This is the same distinction already covered by test #93 — restated
+    // here explicitly against the Final Acceptance checklist's own wording.
+    const pay = await call('chits:contributions:record', sameBranch.data.id, { amount: 60000, method: 'cash', cycle_no: 1 })
+    expect(pay.success).toBe(true)
+    const draw = await call('chits:draws:conduct', schemeRes.data.id, 1, { reason: 'QA acceptance N regression' })
+    expect(draw.success).toBe(true)
+    const voucherId = (draw.data.vouchers || [])[0].voucherId
+    // Step 1 — WITHOUT confirmCrossBranch: must report requiresConfirmation
+    // and touch nothing. This is the "require explicit confirmation" rule.
+    const beforeAgentId = (db.prepare('SELECT agent_id FROM coupons WHERE id=?').get(voucherId) as any).agent_id
+    const unconfirmed = await call('coupons:changeAgent', voucherId, AGENT_OTHER, 'Super Admin cross-branch override')
+    if (unconfirmed.success) note('CRITICAL: a cross-branch Agent Change by Super Admin was applied WITHOUT explicit confirmation — the confirm step is not actually enforced')
+    expect(unconfirmed.success).toBe(false)
+    if (!unconfirmed.requiresConfirmation) note('CRITICAL: coupons:changeAgent did not signal requiresConfirmation for a genuine cross-branch reassignment by Super Admin')
+    expect(unconfirmed.requiresConfirmation).toBe(true)
+    const untouched = db.prepare('SELECT agent_id FROM coupons WHERE id=?').get(voucherId) as any
+    if (untouched.agent_id !== beforeAgentId) note('CRITICAL: the voucher\'s Agent was mutated despite confirmation not yet being given')
+    expect(untouched.agent_id).toBe(beforeAgentId)
+
+    // Step 2 — WITH confirmCrossBranch:true: succeeds, and the audit trail
+    // carries old Agent, new Agent, old branch, new branch, reason (user +
+    // timestamp are first-class audit_logs columns, populated by logAudit()
+    // itself, not just JSON fields).
+    const confirmed = await call('coupons:changeAgent', voucherId, AGENT_OTHER, 'Super Admin cross-branch override', true)
+    if (!confirmed.success) note(`CRITICAL: Super Admin could not perform a legitimate, confirmed cross-branch Agent Change: ${confirmed.error}`)
+    expect(confirmed.success).toBe(true)
+    const afterConfirmed = db.prepare('SELECT agent_id, agent_code FROM coupons WHERE id=?').get(voucherId) as any
+    if (afterConfirmed.agent_id !== AGENT_OTHER) note('CRITICAL: confirmed cross-branch change did not actually update the voucher\'s Agent')
+    expect(afterConfirmed.agent_id).toBe(AGENT_OTHER)
+
+    const auditRow = db.prepare(`SELECT * FROM audit_logs WHERE action='VOUCHER_AGENT_CHANGED' AND record_id=? ORDER BY created_at DESC LIMIT 1`).get(voucherId) as any
+    if (!auditRow) note('CRITICAL: no audit_logs row was written for the confirmed cross-branch Agent Change')
+    else {
+      if (!auditRow.user_id) note('CRITICAL: audit record is missing the acting user (audit_logs.user_id)')
+      if (!auditRow.created_at) note('CRITICAL: audit record is missing a timestamp (audit_logs.created_at)')
+      const nv = JSON.parse(String(auditRow.new_values || '{}'))
+      if (nv.oldAgentId === undefined || nv.newAgentId !== AGENT_OTHER) note('CRITICAL: audit record does not contain both old and new Agent id')
+      if (nv.oldBranchId === undefined || nv.newBranchId === undefined) note('CRITICAL: audit record does not contain both old and new branch — required for a cross-branch override trail')
+      if (String(nv.oldBranchId) === String(nv.newBranchId)) note('CRITICAL: audit record\'s old/new branch are identical for what should be a genuine cross-branch change')
+      if (nv.reason !== 'Super Admin cross-branch override') note('CRITICAL: audit record is missing the mandatory reason text')
+      if (nv.crossBranchOverride !== true) note('CRITICAL: audit record does not flag this as a cross-branch override')
+    }
+  })
+
   it('SUMMARY: print all findings', () => {
     console.log('\n\n=== QA FINDINGS SUMMARY ===')
     if (findings.length === 0) console.log('No findings recorded by inline checks.')

@@ -31,8 +31,9 @@ export default function ChitSchemeDetailPage() {
   const [withdrawals, setWithdrawals] = useState<Row[]>([])
   const [branches, setBranches] = useState<Row[]>([])
   const [summary, setSummary] = useState<Row>({})
+  const [agentGapMembers, setAgentGapMembers] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
-  const [tab, setTab] = useState<'members' | 'draws' | 'branches' | 'withdrawals' | 'payments' | 'financials'>('members')
+  const [tab, setTab] = useState<'members' | 'draws' | 'branches' | 'withdrawals' | 'payments' | 'financials' | 'vouchers'>('members')
   const [importing, setImporting] = useState(false)
   const [showAddMember, setShowAddMember] = useState(false)
   const [showRegisterHistorical, setShowRegisterHistorical] = useState(false)
@@ -63,6 +64,7 @@ export default function ChitSchemeDetailPage() {
         setDraws(res.data.draws)
         setCollaborations((res.data.collaborations || []) as Row[])
         setSummary(res.data.contributionSummary)
+        setAgentGapMembers((res.data.agentGapMembers || []) as Row[])
       } else {
         toast.error(res.error || 'Failed to load Smart Buy scheme')
       }
@@ -171,6 +173,12 @@ export default function ChitSchemeDetailPage() {
         </div>
       )}
 
+      {agentGapMembers.length > 0 && (
+        <div className="mx-6 mt-4 rounded-lg border px-4 py-3 text-sm flex-shrink-0" style={{ background: 'color-mix(in srgb, #ef4444 8%, transparent)', borderColor: '#ef4444', color: '#b91c1c' }}>
+          <strong>⚠ {agentGapMembers.length} member(s) missing a valid Agent</strong> — a draw cannot issue a SmartBuy voucher to these members until they have a registered Agent: {agentGapMembers.map(m => String(m.customer_name || m.id)).join(', ')}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 px-6 py-4 flex-shrink-0">
         <StatCard label="Members" value={`${membersEnrolled} / ${scheme.member_count}`} icon={Users} color="brand" />
         <StatCard label="Cycles Drawn" value={`${draws.length} / ${scheme.cycle_count}`} icon={Shuffle} color="blue" />
@@ -196,6 +204,9 @@ export default function ChitSchemeDetailPage() {
           </button>
           <button onClick={() => setTab('financials')} className={tab === 'financials' ? 'btn-primary btn-sm gap-1.5' : 'btn-secondary btn-sm gap-1.5'}>
             <TrendingUp size={13} /> Financials
+          </button>
+          <button onClick={() => setTab('vouchers')} className={tab === 'vouchers' ? 'btn-primary btn-sm gap-1.5' : 'btn-secondary btn-sm gap-1.5'}>
+            <Gift size={13} /> Vouchers
           </button>
         </div>
         <div className="flex gap-2">
@@ -441,6 +452,8 @@ export default function ChitSchemeDetailPage() {
           </table>
         ) : tab === 'payments' ? (
           <CyclePaymentsTab schemeId={id!} nextCycle={nextCycle} />
+        ) : tab === 'vouchers' ? (
+          <VouchersTab schemeId={id!} />
         ) : (
           <FinancialsTab schemeId={id!} />
         )}
@@ -1085,6 +1098,74 @@ function CyclePaymentsTab({ schemeId, nextCycle }: { schemeId: string; nextCycle
       {historyMemberId && (
         <MemberPaymentHistoryModal memberId={historyMemberId} onClose={() => setHistoryMemberId(null)} />
       )}
+    </div>
+  )
+}
+
+// §29 — the scheme's own SmartBuy vouchers, reusing the same coupons:list /
+// coupons:smartbuyDashboard handlers Voucher Management (CouponsPage) uses —
+// scoped to this scheme via the schemeId filter, not a second data source.
+function VouchersTab({ schemeId }: { schemeId: string }) {
+  const [rows, setRows] = useState<Row[]>([])
+  const [dashboard, setDashboard] = useState<Row | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    setLoading(true)
+    Promise.all([
+      window.api.coupons.list({ voucherType: 'smartbuy', schemeId }),
+      window.api.coupons.smartbuyDashboard({ schemeId }),
+    ]).then(([listRes, dashRes]: [Row, Row]) => {
+      if (listRes.success) setRows(listRes.data as Row[])
+      if (dashRes.success) setDashboard(dashRes.data as Row)
+    }).catch((err: any) => toast.error(err.message || 'Failed to load vouchers')).finally(() => setLoading(false))
+  }, [schemeId])
+
+  if (loading) return <p className="text-center py-16" style={{ color: 'var(--text-3)' }}>Loading...</p>
+
+  return (
+    <div className="space-y-4">
+      {dashboard && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <StatCard label="Total Vouchers" value={String(dashboard.total_vouchers || 0)} icon={Gift} color="purple" />
+          <StatCard label="Issued Value" value={`Rs.${money(dashboard.total_issued_value)}`} icon={Coins} color="brand" />
+          <StatCard label="Redeemed Value" value={`Rs.${money(dashboard.total_redeemed_value)}`} icon={Coins} color="green" />
+          <StatCard label="Outstanding" value={`Rs.${money(dashboard.outstanding_value)}`} icon={Coins} color="red" />
+          <StatCard label="Available" value={String(dashboard.available_count || 0)} icon={Gift} color="blue" />
+          <StatCard label="Partially Used" value={String(dashboard.partially_used_count || 0)} icon={Gift} color="brand" />
+          <StatCard label="Fully Claimed" value={String(dashboard.fully_claimed_count || 0)} icon={Gift} color="green" />
+          <StatCard label="Cancelled / Expired" value={String(Number(dashboard.cancelled_count || 0) + Number(dashboard.expired_count || 0))} icon={Gift} color="yellow" />
+        </div>
+      )}
+      <table className="w-full">
+        <thead className="sticky top-0 bg-surface-900 z-10">
+          <tr>
+            {['Member', 'Agent', 'Cycle', 'Voucher', 'Value', 'Used', 'Balance', 'Status'].map(h => (
+              <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={8} className="text-center py-16 text-slate-500">No SmartBuy vouchers issued for this scheme yet</td></tr>
+          ) : rows.map(r => (
+            <tr key={String(r.id)} className="table-row">
+              <td className="table-cell">{String(r.customer_name || 'Bearer')}</td>
+              <td className="table-cell">{String(r.agent_name || '—')} {r.agent_code ? <span className="font-mono text-xs text-slate-500">({String(r.agent_code)})</span> : null}</td>
+              <td className="table-cell">{r.smartbuy_cycle_no != null ? String(r.smartbuy_cycle_no) : '—'}</td>
+              <td className="table-cell font-mono text-xs">{String(r.code)}</td>
+              <td className="table-cell">Rs.{money(r.initial_value)}</td>
+              <td className="table-cell">Rs.{money(Number(r.initial_value || 0) - Number(r.balance || 0))}</td>
+              <td className="table-cell font-semibold">Rs.{money(r.balance)}</td>
+              <td className="table-cell">
+                <span className={r.status === 'active' ? 'badge-green' : r.status === 'used_up' ? 'badge-blue' : r.status === 'expired' ? 'badge-yellow' : 'badge-red'}>
+                  {String(r.status)}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

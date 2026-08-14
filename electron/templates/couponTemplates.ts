@@ -125,3 +125,102 @@ export async function buildCouponHtml(c: Record<string, unknown>, settings: Reco
     </div>
   </body></html>`
 }
+
+// SmartBuy / Chit Fund voucher — physically A6 (105mm x 148mm), printed four
+// to an A4 sheet for cut-apart distribution (spec §31-33): no printer in this
+// app is configured for a raw A6 paper size, so instead of plumbing a new
+// physical page size through printerService.ts, this renders the whole A4
+// sheet itself with mm-based CSS and lets printHtml(html,'a4','A4') print it
+// as-is — the existing, already-supported A4 path. Deliberately visually
+// distinct from buildCouponHtml's normal gift-voucher card (spec §3/§18: a
+// SmartBuy voucher must never look like an ordinary POS coupon) — amber/gold
+// brand panel instead of green, explicit "SMARTBUY / CHIT FUND VOUCHER"
+// label, and the Scheme/Member/Agent fields a normal coupon doesn't have.
+// Accepts 1-4 coupons; unused cells render as a blank cut-guide only — never
+// fabricate a placeholder voucher. Reprinting simply calls this again with
+// the same coupon row(s): no new id/code/QR/balance is ever generated here.
+export async function buildSmartBuyVoucherGridHtml(coupons: Record<string, unknown>[], settings: Record<string, unknown>): Promise<string> {
+  const company = esc((settings.company_name as string) || 'Nature Plantation')
+  const cur = String(settings.currency_symbol || 'Rs.')
+  const money = (n: unknown) => `${cur}${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  const logoUrl = String(settings.company_logo_url || settings.brand_logo_url || '')
+  const cloudUrl = String(settings.cloud_api_url || '').trim().replace(/\/+$/, '')
+
+  const cells = await Promise.all(coupons.slice(0, 4).map(async c => {
+    const code = String(c.code || '')
+    const qrPayload = cloudUrl ? `${cloudUrl}/coupon/${encodeURIComponent(code)}` : code
+    let qrSvg = ''
+    // Higher error correction (Q, ~25% recoverable) than the normal coupon
+    // card's 'M' — this is a higher-stakes financial document and the A6 cut
+    // sheet is more likely to get folded/creased/handled roughly than a
+    // full-page gift card. margin:2 keeps a proper quiet zone around the
+    // code so a scanner/camera can actually lock onto it.
+    try { qrSvg = await QRCode.toString(qrPayload, { type: 'svg', margin: 2, errorCorrectionLevel: 'Q' }) } catch { /* ignore */ }
+    const issuedOn = c.created_at ? String(c.created_at).slice(0, 10) : new Date().toISOString().slice(0, 10)
+    const scheme = [c.smartbuy_scheme_name, c.smartbuy_scheme_number ? `(${c.smartbuy_scheme_number})` : ''].filter(Boolean).join(' ')
+    return `
+      <div class="voucher">
+        <div class="brand">
+          <div class="logo">${logoUrl
+            ? `<img src="${esc(logoUrl)}" onerror="this.parentNode.innerHTML='<div class=&quot;ph&quot;>${esc(company.charAt(0))}</div>'"/>`
+            : `<div class="ph">${esc(company.charAt(0))}</div>`}</div>
+          <div class="co">${company}</div>
+          <div class="kind">SmartBuy<br/>Chit Fund Voucher</div>
+        </div>
+        <div class="body">
+          <div class="fields">
+            <div><b>Customer</b> <span>${esc(String(c.customer_name || '—'))}</span></div>
+            <div><b>Scheme</b> <span>${esc(scheme || '—')}</span></div>
+            <div><b>Member ID</b> <span>${esc(String(c.smartbuy_member_id || '—'))}</span></div>
+            <div><b>Agent</b> <span>${esc(String(c.agent_name || '—'))} ${c.agent_code ? `(${esc(String(c.agent_code))})` : ''}</span></div>
+            <div><b>Voucher No</b> <span>${esc(code)}</span></div>
+            <div><b>Issue Date</b> <span>${esc(issuedOn)}</span></div>
+          </div>
+          <div class="valuerow">
+            <div class="value">
+              <div class="l">Value</div>
+              <div class="v">${money(c.initial_value)}</div>
+            </div>
+          </div>
+          ${qrSvg ? `<div class="qrbox"><div class="qr">${qrSvg}</div><span class="scanme">SCAN AT POS TO REDEEM</span></div>` : ''}
+          <div class="terms">Redeemable at any POS counter. Non-transferable. This voucher's Agent cannot be changed except by authorized Super Admin action. Subject to company SmartBuy terms &amp; conditions.</div>
+        </div>
+      </div>`
+  }))
+  while (cells.length < 4) cells.push('<div class="voucher blank"></div>')
+
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+    @page { size: A4; margin: 0 }
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0}
+    body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a}
+    .sheet{width:210mm;height:297mm;display:grid;grid-template-columns:105mm 105mm;grid-template-rows:148.5mm 148.5mm}
+    .voucher{width:105mm;height:148.5mm;padding:4mm;border:1px dashed #9ca3af;display:flex;flex-direction:column;overflow:hidden}
+    .voucher.blank{border-style:dashed;border-color:#d1d5db}
+    .brand{display:flex;align-items:center;gap:6px;border-radius:6px;padding:6px 8px;color:#fff;
+      background:linear-gradient(135deg,#b45309 0%,#92400e 55%,#78350f 100%)}
+    .logo{width:26px;height:26px;border-radius:6px;background:#fff;flex-shrink:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+    .logo img{width:100%;height:100%;object-fit:contain}
+    .logo .ph{font-size:13px;font-weight:900;color:#92400e}
+    .co{font-size:11px;font-weight:800;flex:1}
+    .kind{font-size:8px;font-weight:800;letter-spacing:.5px;text-align:right;line-height:1.2;text-transform:uppercase}
+    .body{flex:1;display:flex;flex-direction:column;margin-top:6px}
+    .fields{font-size:8.5px;line-height:1.7}
+    .fields b{display:inline-block;min-width:52px;color:#78350f;font-weight:700}
+    .valuerow{display:flex;justify-content:center;align-items:center;margin-top:5px;
+      background:#fffbeb;border:1px dashed #d97706;border-radius:6px;padding:6px 8px}
+    .value{text-align:center}
+    .value .l{font-size:7px;letter-spacing:1px;text-transform:uppercase;color:#92400e}
+    .value .v{font-size:19px;font-weight:900;color:#78350f}
+    /* mm units (not px) so the physical QR size is DPI-independent —
+       30mm is comfortably scannable by both a phone camera and a
+       handheld POS barcode/QR scanner from a printed A6 card. */
+    .qrbox{text-align:center;margin-top:6px}
+    .qr{width:30mm;height:30mm;margin:0 auto;background:#fff;border:1px solid #e5e7eb;border-radius:4px;padding:2mm}
+    .qr svg{width:100%;height:100%;display:block}
+    .scanme{display:block;font-size:7px;font-weight:800;letter-spacing:.5px;margin-top:3px;color:#78350f}
+    .terms{margin-top:auto;font-size:5.5px;color:#6b7280;line-height:1.4;padding-top:4px}
+  </style></head><body>
+    <div class="sheet">${cells.join('')}</div>
+  </body></html>`
+}

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Ticket, Search, Printer, Ban, Eye, CheckCircle2 } from 'lucide-react'
+import { Plus, Ticket, Search, Printer, Ban, Eye, CheckCircle2, Sparkles, UserCog } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -21,6 +21,14 @@ const STATUS_LABEL: Record<string, string> = {
   void:    'Voided',
 }
 
+const LIFECYCLE_CHIPS: Array<{ key: string; label: string }> = [
+  { key: '',               label: 'All' },
+  { key: 'running',        label: 'Running' },
+  { key: 'unclaimed',      label: 'Unclaimed' },
+  { key: 'fully_claimed',  label: 'Fully Claimed' },
+  { key: 'outstanding',    label: 'Outstanding' },
+]
+
 const money = (n: unknown) => `Rs.${Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 export default function CouponsPage() {
@@ -28,24 +36,58 @@ export default function CouponsPage() {
   const perms = (user?.role?.permissions || {}) as Record<string, unknown>
   const canCreate = Boolean(perms.all || perms.coupons_create)
   const canVoid   = Boolean(perms.all || perms.coupons_void || perms.coupons_create)
+  const canChangeAgent = Boolean(perms.all || perms.coupons_agent_change)
 
   const [coupons, setCoupons]       = useState<Coupon[]>([])
   const [search, setSearch]         = useState('')
   const [statusFilter, setStatusFilter] = useState('')
+  const [voucherType, setVoucherType] = useState('')   // '' | 'normal' | 'smartbuy'
+  const [agentFilter, setAgentFilter] = useState('')
+  const [schemeFilter, setSchemeFilter] = useState('')
+  const [lifecycle, setLifecycle]   = useState('')
+  const [agents, setAgents]         = useState<Record<string, unknown>[]>([])
+  const [schemes, setSchemes]       = useState<Record<string, unknown>[]>([])
+  const [dashboard, setDashboard]   = useState<Record<string, unknown> | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [detail, setDetail]         = useState<Coupon | null>(null)
   const [loading, setLoading]       = useState(false)
 
+  const isSmartBuyView = voucherType === 'smartbuy' || voucherType === ''
+
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await window.api.coupons.list({ search, status: statusFilter || undefined })
+      const res = await window.api.coupons.list({
+        search, status: statusFilter || undefined,
+        voucherType: voucherType || undefined,
+        agentId: agentFilter || undefined,
+        schemeId: schemeFilter || undefined,
+        lifecycle: lifecycle || undefined,
+      })
       if (res.success) setCoupons(res.data as Coupon[])
       else toast.error(String(res.error || 'Failed to load coupons'))
     } finally { setLoading(false) }
-  }, [search, statusFilter])
+  }, [search, statusFilter, voucherType, agentFilter, schemeFilter, lifecycle])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    window.api.agents?.list?.({ status: 'active' }).then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+      if (r.success) setAgents(r.data || [])
+    }).catch(() => {})
+    window.api.chits?.list?.({}).then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+      if (r.success) setSchemes(r.data || [])
+    }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    if (!isSmartBuyView) { setDashboard(null); return }
+    window.api.coupons.smartbuyDashboard({
+      schemeId: schemeFilter || undefined, agentId: agentFilter || undefined,
+    }).then((r: { success: boolean; data?: Record<string, unknown> }) => {
+      if (r.success) setDashboard(r.data || null)
+    }).catch(() => {})
+  }, [isSmartBuyView, schemeFilter, agentFilter, coupons.length])
 
   const openDetail = async (idOrCode: string) => {
     try {
@@ -59,8 +101,10 @@ export default function CouponsPage() {
 
   const printCard = async (coupon: Coupon) => {
     try {
-      const res = await window.api.printer.printCoupon(coupon)
-      if ((res as { success: boolean }).success) toast.success('Coupon card printed')
+      const res = coupon.source_type === 'smartbuy_redemption'
+        ? await window.api.printer.printSmartBuyVouchers([String(coupon.id)])
+        : await window.api.printer.printCoupon(coupon)
+      if ((res as { success: boolean }).success) toast.success('Voucher printed')
       else toast.error('Print failed')
     } catch {
       toast.error('Print failed')
@@ -91,38 +135,104 @@ export default function CouponsPage() {
         ) : null}
       />
 
-      <div className="flex items-center gap-3 px-6 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
-        <div className="relative w-72">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            className="input pl-8"
-            placeholder="Search code / name / customer…"
-          />
+      <div className="flex flex-col gap-3 px-6 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="relative w-72">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="input pl-8"
+              placeholder="Search code / name / customer / NIC / member ID…"
+            />
+          </div>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input w-40">
+            <option value="">All statuses</option>
+            <option value="active">Active</option>
+            <option value="used_up">Fully Used</option>
+            <option value="expired">Expired</option>
+            <option value="void">Voided</option>
+          </select>
+          <select value={voucherType} onChange={e => { setVoucherType(e.target.value); setLifecycle('') }} className="input w-40">
+            <option value="">All Voucher Types</option>
+            <option value="normal">Normal</option>
+            <option value="smartbuy">SmartBuy / Chit Fund</option>
+          </select>
+          {isSmartBuyView && (
+            <>
+              <select value={agentFilter} onChange={e => setAgentFilter(e.target.value)} className="input w-44">
+                <option value="">All Agents</option>
+                {agents.map(a => (
+                  <option key={String(a.id)} value={String(a.id)}>{String(a.code)} — {String(a.name)}</option>
+                ))}
+              </select>
+              <select value={schemeFilter} onChange={e => setSchemeFilter(e.target.value)} className="input w-52">
+                <option value="">All Schemes</option>
+                {schemes.map(s => (
+                  <option key={String(s.id)} value={String(s.id)}>{String(s.name)} ({String(s.scheme_number)})</option>
+                ))}
+              </select>
+            </>
+          )}
         </div>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input w-40">
-          <option value="">All statuses</option>
-          <option value="active">Active</option>
-          <option value="used_up">Fully Used</option>
-          <option value="expired">Expired</option>
-          <option value="void">Voided</option>
-        </select>
+        {isSmartBuyView && (
+          <div className="flex items-center gap-1.5">
+            {LIFECYCLE_CHIPS.map(chip => (
+              <button key={chip.key} onClick={() => setLifecycle(chip.key)}
+                className={`btn-sm px-3 py-1 rounded-full text-xs font-medium ${lifecycle === chip.key ? 'bg-brand-500 text-white' : 'btn-ghost'}`}>
+                {chip.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {isSmartBuyView && dashboard && (
+        <div className="px-6 py-3 border-b flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-2 mb-2">
+            <Sparkles size={14} className="text-amber-400" />
+            <h3 className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>SmartBuy Voucher Dashboard</h3>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+            {[
+              ['Total Vouchers', dashboard.total_vouchers, false],
+              ['Issued Value', money(dashboard.total_issued_value), false],
+              ['Redeemed Value', money(dashboard.total_redeemed_value), false],
+              ['Outstanding', money(dashboard.outstanding_value), false],
+              ['Available', dashboard.available_count, false],
+              ['Partially Used', dashboard.partially_used_count, false],
+              ['Fully Claimed', dashboard.fully_claimed_count, false],
+              ['Cancelled / Expired', Number(dashboard.cancelled_count || 0) + Number(dashboard.expired_count || 0), false],
+            ].map(([label, value]) => (
+              <div key={String(label)} className="rounded-lg p-2.5" style={{ background: 'var(--bg-soft)' }}>
+                <p className="text-[10px] uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>{String(label)}</p>
+                <p className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{String(value)}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto">
         <table className="w-full">
           <thead className="sticky top-0 bg-surface-900 z-10">
             <tr>
-              {['Code', 'Name', 'Customer', 'Value', 'Balance', 'Status', 'Valid Until', 'Uses', 'Actions'].map(h =>
+              {['Code', 'Type', 'Name', 'Customer', 'Value', 'Balance', 'Status', 'Valid Until', 'Uses', 'Actions'].map(h =>
                 <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
               )}
             </tr>
           </thead>
           <tbody>
-            {coupons.map(c => (
+            {coupons.map(c => {
+              const isSmartBuy = c.source_type === 'smartbuy_redemption'
+              return (
               <tr key={String(c.id)} className="table-row">
                 <td className="table-cell font-mono text-xs">{String(c.code)}</td>
+                <td className="table-cell">
+                  <span className={isSmartBuy ? 'badge-orange' : 'badge-gray'}>
+                    {isSmartBuy ? 'SmartBuy' : 'Normal'}
+                  </span>
+                </td>
                 <td className="table-cell">{String(c.name)}</td>
                 <td className="table-cell text-slate-400">{String(c.customer_name || 'Bearer')}</td>
                 <td className="table-cell">{money(c.initial_value)}</td>
@@ -152,9 +262,10 @@ export default function CouponsPage() {
                   </div>
                 </td>
               </tr>
-            ))}
+              )
+            })}
             {coupons.length === 0 && !loading && (
-              <tr><td colSpan={9} className="text-center py-16 text-slate-500">
+              <tr><td colSpan={10} className="text-center py-16 text-slate-500">
                 <Ticket size={28} className="mx-auto mb-2 opacity-40" />
                 No coupons yet{canCreate ? ' — issue the first one' : ''}
               </td></tr>
@@ -174,8 +285,10 @@ export default function CouponsPage() {
         <CouponDetailModal
           coupon={detail}
           canVoid={canVoid}
+          canChangeAgent={canChangeAgent}
           onPrint={() => printCard(detail)}
           onVoid={() => voidCoupon(detail)}
+          onChanged={async () => { await openDetail(String(detail.id)); load() }}
           onClose={() => setDetail(null)}
         />
       )}
@@ -328,17 +441,21 @@ function CreateCouponModal({ onClose, onDone }: { onClose: () => void; onDone: (
 }
 
 // ── Detail / lookup modal with full redemption history ────────────────────────
-function CouponDetailModal({ coupon, canVoid, onPrint, onVoid, onClose }: {
+function CouponDetailModal({ coupon, canVoid, canChangeAgent, onPrint, onVoid, onChanged, onClose }: {
   coupon: Record<string, unknown>
   canVoid: boolean
+  canChangeAgent: boolean
   onPrint: () => void
   onVoid: () => void
+  onChanged: () => void
   onClose: () => void
 }) {
   const redemptions = (coupon.redemptions as Record<string, unknown>[]) || []
+  const isSmartBuy = coupon.source_type === 'smartbuy_redemption'
+  const [showAgentChange, setShowAgentChange] = useState(false)
 
   return (
-    <Modal title={`Coupon ${coupon.code}`} onClose={onClose} size="lg" footer={
+    <Modal title={`Voucher ${coupon.code}`} onClose={onClose} size="lg" footer={
       <>
         <button onClick={onPrint} className="btn-secondary gap-1.5"><Printer size={14} /> Reprint Card</button>
         {canVoid && coupon.status === 'active' && (
@@ -372,12 +489,44 @@ function CouponDetailModal({ coupon, canVoid, onPrint, onVoid, onClose }: {
           </div>
         </div>
 
-        {coupon.source_type === 'smartbuy_redemption' && (
-          <p className="text-xs" style={{ color: 'var(--text-3)' }}>
-            Issued via: {String(coupon.smartbuy_scheme_name || 'SmartBuy Scheme')}
-            {coupon.smartbuy_scheme_number ? ` (${String(coupon.smartbuy_scheme_number)})` : ''}
-            {coupon.smartbuy_cycle_no ? `, Cycle ${String(coupon.smartbuy_cycle_no)}` : ''}
-          </p>
+        {isSmartBuy && (
+          <div className="rounded-lg border p-3 space-y-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
+            <div className="flex items-center gap-2">
+              <Sparkles size={14} className="text-amber-400" />
+              <span className="badge-orange">SmartBuy / Chit Fund Voucher</span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+              <div>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Scheme</p>
+                <p style={{ color: 'var(--text-1)' }}>{String(coupon.smartbuy_scheme_name || '—')}{coupon.smartbuy_scheme_number ? ` (${String(coupon.smartbuy_scheme_number)})` : ''}</p>
+              </div>
+              <div>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Member ID</p>
+                <p className="font-mono text-xs" style={{ color: 'var(--text-1)' }}>{String(coupon.smartbuy_member_id || '—')}</p>
+              </div>
+              <div>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Cycle</p>
+                <p style={{ color: 'var(--text-1)' }}>{coupon.smartbuy_cycle_no != null ? String(coupon.smartbuy_cycle_no) : '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Winner Type</p>
+                <p style={{ color: 'var(--text-1)' }}>{coupon.smartbuy_winner_type === 'final_batch' ? 'Final Batch' : coupon.smartbuy_winner_type === 'draw' ? 'Draw Winner' : '—'}</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
+              <div>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>Agent</p>
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>
+                  {String(coupon.agent_name || '—')} {coupon.agent_code ? <span className="font-mono text-xs" style={{ color: 'var(--text-3)' }}>({String(coupon.agent_code)})</span> : null}
+                </p>
+              </div>
+              {canChangeAgent && (
+                <button onClick={() => setShowAgentChange(true)} className="btn-secondary btn-sm gap-1.5">
+                  <UserCog size={13} /> Change Agent
+                </button>
+              )}
+            </div>
+          </div>
         )}
 
         <div>
@@ -416,6 +565,109 @@ function CouponDetailModal({ coupon, canVoid, onPrint, onVoid, onClose }: {
             </div>
           )}
         </div>
+      </div>
+
+      {showAgentChange && (
+        <AgentChangeModal
+          coupon={coupon}
+          onClose={() => setShowAgentChange(false)}
+          onDone={() => { setShowAgentChange(false); onChanged() }}
+        />
+      )}
+    </Modal>
+  )
+}
+
+// ── Agent Change (spec §12) — permission-gated, requires a reason, always
+// audited server-side. The agent dropdown is just a convenience; the backend
+// independently re-validates the chosen agent exists and is active. ─────────
+function AgentChangeModal({ coupon, onClose, onDone }: {
+  coupon: Record<string, unknown>
+  onClose: () => void
+  onDone: () => void
+}) {
+  const [agents, setAgents] = useState<Record<string, unknown>[]>([])
+  const [agentId, setAgentId] = useState('')
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  // Set only when the backend reports this specific reassignment crosses
+  // branches AND the caller is Super Admin (a branch-scoped caller is
+  // rejected outright server-side, never reaches this confirmation step).
+  // Nothing is written until the user explicitly re-submits with this
+  // acknowledged — see coupons:changeAgent's confirmCrossBranch contract.
+  const [crossBranchConfirm, setCrossBranchConfirm] = useState<{ oldBranchName: string; newBranchName: string } | null>(null)
+  const [confirmChecked, setConfirmChecked] = useState(false)
+
+  useEffect(() => {
+    window.api.agents?.list?.({ status: 'active' }).then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+      if (r.success) setAgents((r.data || []).filter(a => String(a.id) !== String(coupon.agent_id)))
+    }).catch(() => {})
+  }, [coupon.agent_id])
+
+  // Changing the selected agent invalidates any pending cross-branch
+  // confirmation from a previous attempt — must be re-evaluated fresh.
+  const selectAgent = (id: string) => { setAgentId(id); setCrossBranchConfirm(null); setConfirmChecked(false) }
+
+  const save = async () => {
+    if (!agentId) { toast.error('Select the new Agent'); return }
+    if (!reason.trim()) { toast.error('A reason is required'); return }
+    if (crossBranchConfirm && !confirmChecked) { toast.error('Please confirm the cross-branch reassignment'); return }
+    setSaving(true)
+    try {
+      const res = await window.api.coupons.changeAgent(String(coupon.id), agentId, reason.trim(), crossBranchConfirm ? true : undefined)
+      if (res.success) { toast.success('Agent changed'); onDone(); return }
+      if (res.requiresConfirmation) {
+        setCrossBranchConfirm({ oldBranchName: String(res.oldBranchName || 'Unknown branch'), newBranchName: String(res.newBranchName || 'Unknown branch') })
+        toast.error('This is a cross-branch reassignment — please confirm below')
+        return
+      }
+      toast.error(String(res.error || 'Failed to change Agent'))
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <Modal title="Change Voucher Agent" onClose={onClose} footer={
+      <>
+        <button onClick={onClose} className="btn-secondary">Cancel</button>
+        <button onClick={save} disabled={saving || (Boolean(crossBranchConfirm) && !confirmChecked)} className="btn-primary">
+          {saving ? 'Saving…' : crossBranchConfirm ? 'Confirm Cross-Branch Change' : 'Change Agent'}
+        </button>
+      </>
+    }>
+      <div className="space-y-4">
+        <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+          Current Agent: <b style={{ color: 'var(--text-2)' }}>{String(coupon.agent_name || '—')}</b>
+          {coupon.agent_code ? ` (${String(coupon.agent_code)})` : ''}. This action is audited with your user, the old and new Agent, and the reason below.
+        </p>
+        <div>
+          <label className="label">New Agent *</label>
+          <select value={agentId} onChange={e => selectAgent(e.target.value)} className="input" autoFocus>
+            <option value="">Select agent…</option>
+            {agents.map(a => (
+              <option key={String(a.id)} value={String(a.id)}>{String(a.code)} — {String(a.name)}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="label">Reason *</label>
+          <textarea value={reason} onChange={e => { setReason(e.target.value); setCrossBranchConfirm(null); setConfirmChecked(false) }}
+            className="input h-20 resize-none" placeholder="Why is the Agent being changed?" />
+        </div>
+        {crossBranchConfirm && (
+          <div className="rounded-lg border px-3 py-2.5 space-y-2" style={{ borderColor: '#dc2626', background: 'color-mix(in srgb, #dc2626 8%, transparent)' }}>
+            <p className="text-xs font-semibold" style={{ color: '#b91c1c' }}>
+              ⚠ Administrative Override — Cross-Branch Reassignment
+            </p>
+            <p className="text-xs" style={{ color: 'var(--text-2)' }}>
+              This moves the voucher's Agent from <b>{crossBranchConfirm.oldBranchName}</b> to <b>{crossBranchConfirm.newBranchName}</b>.
+              Only Super Admin may do this. It will be recorded in the audit log with the old/new Agent, old/new branch, your user, and the reason above.
+            </p>
+            <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-1)' }}>
+              <input type="checkbox" checked={confirmChecked} onChange={e => setConfirmChecked(e.target.checked)} />
+              I confirm this cross-branch reassignment
+            </label>
+          </div>
+        )}
       </div>
     </Modal>
   )
