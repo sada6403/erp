@@ -120,7 +120,7 @@ function SessionLanding() {
 }
 
 export default function App() {
-  const { init } = useAuthStore()
+  const { init, refreshSilently } = useAuthStore()
   const navigate   = useNavigate()
   const [activated, setActivated] = useState<boolean | null>(null)
 
@@ -171,7 +171,7 @@ export default function App() {
   // just returns data:null again).
   useEffect(() => {
     if (!activated) return
-    const interval = setInterval(() => { init() }, 60_000)
+    const interval = setInterval(() => { refreshSilently() }, 60_000)
     return () => clearInterval(interval)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activated])

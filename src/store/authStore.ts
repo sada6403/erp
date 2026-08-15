@@ -9,6 +9,7 @@ interface AuthState {
   pinLogin: (pin: string, branchId?: string) => Promise<{ success: boolean; error?: string }>
   logout: () => Promise<void>
   init: () => Promise<void>
+  refreshSilently: () => Promise<void>
   setEnabledModules: (modules: string[]) => void
 }
 
@@ -45,6 +46,21 @@ export const useAuthStore = create<AuthState>()(
         } finally {
           set({ isLoading: false })
         }
+      },
+
+      // Same whoami() re-check as init(), used by App.tsx's periodic
+      // role/branch/permission-change poll — but must NEVER touch
+      // `isLoading`. RequireAuth/RequireSuperAdmin/RequireSmartBuyAccess all
+      // swap in <LoadingScreen/> whenever isLoading is true, so flipping it
+      // true->false on a timer (as calling init() here did) unmounted and
+      // remounted the entire AppLayout — sidebar, current page, all its
+      // local state — every 60s. This updates `user` in place with no
+      // visible loading state, exactly like setEnabledModules above.
+      refreshSilently: async () => {
+        try {
+          const res = await window.api.auth.whoami()
+          set({ user: (res.data as AuthUser | null) ?? null })
+        } catch { /* offline or transient failure — keep current session */ }
       },
 
       login: async (email, password) => {

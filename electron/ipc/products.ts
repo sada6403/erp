@@ -78,6 +78,29 @@ function isWooCommerceExport(rows: Record<string, unknown>[]): boolean {
   )
 }
 
+// The daily supplier stock sheet this company actually uses: exactly two
+// columns, no header row at all — column A is their own item code, column B
+// the item name (e.g. "DWJ01" / "Water Jug -01"). `sheet_to_json`'s default
+// first-row-as-header behaviour treats the first real product as the
+// "header" and produces column keys that don't match any known field name —
+// that mismatch (2 columns, neither recognizable as name/sku/price/etc.) is
+// exactly the signal used here to detect this format and re-read the sheet
+// with header:1 so the first row isn't silently dropped as data.
+const KNOWN_COLUMN_ALIASES = new Set([
+  'name', 'productname', 'itemname', 'sku', 'code', 'itemcode', 'productcode',
+  'category', 'categoryname', 'supplier', 'suppliername', 'vendor',
+  'price', 'sellingprice', 'saleprice', 'mrp', 'cost', 'costprice', 'purchaseprice',
+  'barcode', 'ean', 'upc', 'unit', 'uom', 'measure',
+  'stock', 'quantity', 'qty', 'openingstock', 'tax', 'taxrate', 'vat',
+  'minstock', 'reorder', 'reorderlevel', 'description', 'desc', 'notes',
+])
+function isHeaderlessCodeNameFile(rows: Record<string, unknown>[]): boolean {
+  if (!rows.length) return false
+  const headers = Object.keys(rows[0])
+  if (headers.length !== 2) return false
+  return !headers.some(h => KNOWN_COLUMN_ALIASES.has(normHeader(h)))
+}
+
 function splitCategoryPaths(value: string): string[][] {
   return value
     .split(',')
@@ -388,6 +411,11 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         db.prepare(`DELETE FROM products WHERE id = ?`).run(id)
       })()
 
+      // Was missing entirely — a permanent delete never reached the cloud or
+      // any other branch, leaving them with a product that no longer exists
+      // here (same class of bug as admin:users:hardDelete before its fix).
+      await enqueuSync('products', id, 'DELETE', { id })
+
       return { success: true }
   })
 
@@ -661,6 +689,48 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           success: true,
           data: { imported, created, updated, skipped, deactivatedDuplicates, errors, mode: 'woocommerce' }
         }
+      }
+
+      if (isHeaderlessCodeNameFile(rows)) {
+        const importUser = getAuthUser()
+        const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
+        const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as unknown[][]
+
+        let imported = 0, created = 0, updated = 0, skipped = 0
+        const errors: string[] = []
+
+        for (let i = 0; i < raw.length; i++) {
+          try {
+            const code = String(raw[i][0] ?? '').trim()
+            const name = String(raw[i][1] ?? '').trim()
+            if (!name) { skipped++; continue }
+
+            const sku = code || buildSku(db, '', name, '')
+            const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(sku) as { id: string } | undefined
+
+            if (existing) {
+              db.prepare(`UPDATE products SET name=?, is_active=1, updated_at=datetime('now') WHERE id=?`)
+                .run(name, existing.id)
+              await enqueuSync('products', existing.id, 'UPDATE', { id: existing.id, name, is_active: 1 })
+              updated++
+            } else {
+              const productId = crypto.randomUUID()
+              db.prepare(`INSERT INTO products (id, branch_id, name, sku, unit, cost_price, selling_price, tax_rate, min_stock_level)
+                VALUES (?,?,?,?,?,?,?,?,?)`).run(productId, importBranchId, name, sku, 'pcs', 0, 0, 0, 5)
+              await enqueuSync('products', productId, 'INSERT', {
+                id: productId, branch_id: importBranchId, name, sku, unit: 'pcs',
+                cost_price: 0, selling_price: 0, tax_rate: 0, min_stock_level: 5, is_active: true,
+              })
+              created++
+            }
+            imported++
+          } catch (rowErr) {
+            errors.push(`Row ${i + 1}: ${(rowErr as Error).message}`)
+            skipped++
+          }
+        }
+
+        return { success: true, data: { imported, created, updated, skipped, errors, mode: 'code_name_list' } }
       }
 
       // Flexible column mapping (case-insensitive, trim)
