@@ -36,6 +36,10 @@ export default function ProductsPage() {
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting]     = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showBulkDelete, setShowBulkDelete] = useState(false)
+  const [bulkDeleteReason, setBulkDeleteReason] = useState('')
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const [showNormalizeConfirm, setShowNormalizeConfirm] = useState(false)
   const [normalizing, setNormalizing] = useState(false)
   const [audit, setAudit] = useState<CatalogAudit | null>(null)
@@ -210,11 +214,75 @@ export default function ProductsPage() {
     }
   }
 
+  const toggleSelected = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+  const allVisibleSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id))
+  const toggleSelectAllVisible = () => {
+    setSelectedIds(prev => {
+      if (allVisibleSelected) {
+        const next = new Set(prev)
+        filtered.forEach(p => next.delete(p.id))
+        return next
+      }
+      const next = new Set(prev)
+      filtered.forEach(p => next.add(p.id))
+      return next
+    })
+  }
+
+  // Same per-record IPC (products:permanentDelete) the single-row delete
+  // uses — it already correctly enqueues a sync DELETE event (fixed
+  // earlier), so each product removed here propagates to the cloud and
+  // every other branch exactly like a one-at-a-time delete would. Run
+  // sequentially, not Promise.all, so referential-integrity errors on one
+  // product don't race with the others and stay attributable per row.
+  const handleBulkDelete = async () => {
+    if (!bulkDeleteReason.trim()) {
+      toast.error('Please provide a reason for deletion')
+      return
+    }
+    setBulkDeleting(true)
+    const ids = Array.from(selectedIds)
+    let deleted = 0
+    const failures: string[] = []
+    try {
+      for (const id of ids) {
+        const p = products.find(x => x.id === id)
+        try {
+          const res = await window.api.products.permanentDelete(id, bulkDeleteReason.trim()) as { success: boolean; error?: string }
+          if (res.success) deleted++
+          else failures.push(`${p?.name || id}: ${res.error || 'failed'}`)
+        } catch (err) {
+          failures.push(`${p?.name || id}: ${String(err)}`)
+        }
+      }
+      if (deleted > 0) toast.success(`${deleted} product(s) permanently deleted`)
+      if (failures.length) toast.error(`${failures.length} failed — ${failures.slice(0, 3).join('; ')}${failures.length > 3 ? '…' : ''}`, { duration: 8000 })
+      setSelectedIds(new Set())
+      setShowBulkDelete(false)
+      setBulkDeleteReason('')
+      load()
+    } finally {
+      setBulkDeleting(false)
+    }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader title="List Products" subtitle={`${filtered.length} of ${products.length} products`}
         actions={
           <div className="flex gap-2">
+            {isCompanyAdmin && selectedIds.size > 0 && (
+              <button onClick={() => setShowBulkDelete(true)} className="btn-sm px-3 py-1.5 rounded-lg text-white text-xs font-semibold gap-1.5 flex items-center"
+                style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)' }}>
+                <Trash2 size={14} /> Delete Selected ({selectedIds.size})
+              </button>
+            )}
             <button onClick={handleImportExcel} className="btn-secondary btn-sm gap-1.5">
               <FileSpreadsheet size={14} /> Import CSV / Excel
             </button>
@@ -284,6 +352,12 @@ export default function ProductsPage() {
         <table className="w-full">
           <thead className="sticky top-0 bg-surface-900 z-10">
             <tr>
+              {isCompanyAdmin && (
+                <th className="table-header px-3 py-3 text-left text-xs w-8">
+                  <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible}
+                    className="cursor-pointer" title="Select all visible" />
+                </th>
+              )}
               {['Image', 'SKU', 'Product', 'Location', 'Unit Cost(Rs.)', 'Unit Price(Rs.)', 'Wholesale(Rs.)', 'Quantity', 'Action'].map(h => (
                 <th key={h} className="table-header px-3 py-3 text-left text-xs">{h}</th>
               ))}
@@ -291,11 +365,17 @@ export default function ProductsPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="text-center py-16 text-slate-500">Loading...</td></tr>
+              <tr><td colSpan={10} className="text-center py-16 text-slate-500">Loading...</td></tr>
             ) : filtered.map(p => {
               const pr = p as unknown as Record<string, unknown>
               return (
                 <tr key={p.id} className="table-row">
+                  {isCompanyAdmin && (
+                    <td className="table-cell px-3 py-2">
+                      <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelected(p.id)}
+                        className="cursor-pointer" />
+                    </td>
+                  )}
                   <td className="table-cell px-3 py-2">
                     <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0 overflow-hidden" style={{ background: 'var(--bg-page)', border: '1px solid var(--border)' }}>
                       {p.image_url
@@ -352,7 +432,7 @@ export default function ProductsPage() {
               )
             })}
             {!loading && filtered.length === 0 && (
-              <tr><td colSpan={9} className="text-center py-16 text-slate-500">No products found</td></tr>
+              <tr><td colSpan={10} className="text-center py-16 text-slate-500">No products found</td></tr>
             )}
           </tbody>
         </table>
@@ -431,6 +511,54 @@ export default function ProductsPage() {
                 className="btn-sm px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-50"
                 style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)' }}>
                 {deleting ? 'Deleting...' : 'Permanently Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Permanent Delete Confirmation Modal */}
+      {showBulkDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
+          <div className="card w-full max-w-md" style={{ border: '1px solid #ef4444' }}>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle size={20} className="text-red-400" />
+              </div>
+              <div>
+                <h3 className="font-bold text-base" style={{ color: 'var(--text-1)' }}>Permanently Delete {selectedIds.size} Product(s)</h3>
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>This action cannot be undone — applies to local and cloud/other branches</p>
+              </div>
+            </div>
+
+            <div className="rounded-lg p-3 mb-4 text-sm max-h-32 overflow-y-auto" style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--text-2)' }}>
+              {Array.from(selectedIds).map(id => {
+                const p = products.find(x => x.id === id)
+                return <p key={id} className="text-xs">{p?.name || id} {p?.sku ? `(${p.sku})` : ''}</p>
+              })}
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-semibold mb-1.5 uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>
+                Reason for Deletion <span className="text-red-400">*</span>
+              </label>
+              <textarea
+                value={bulkDeleteReason}
+                onChange={e => setBulkDeleteReason(e.target.value)}
+                className="input resize-none"
+                rows={3}
+                placeholder="Enter reason (e.g. test import cleanup, duplicate entries...)"
+                maxLength={500}
+              />
+            </div>
+
+            <div className="flex gap-2 justify-end">
+              <button onClick={() => { setShowBulkDelete(false); setBulkDeleteReason('') }}
+                className="btn-secondary btn-sm">Cancel</button>
+              <button onClick={handleBulkDelete} disabled={bulkDeleting || !bulkDeleteReason.trim()}
+                className="btn-sm px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-50"
+                style={{ background: 'linear-gradient(135deg,#dc2626,#b91c1c)' }}>
+                {bulkDeleting ? 'Deleting...' : `Permanently Delete ${selectedIds.size}`}
               </button>
             </div>
           </div>
