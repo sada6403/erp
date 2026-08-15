@@ -172,7 +172,21 @@ export default function LoginPage() {
     const loadBranding = async () => {
       await window.api.settings.refreshBranding?.().catch(() => undefined)
       const res = await window.api.settings.get() as { success: boolean; data?: unknown }
-      if (res.success && res.data) setBranding(res.data as Record<string, unknown>)
+      if (res.success && res.data) {
+        const d = res.data as Record<string, unknown>
+        // This poll runs every 30s forever — re-setting a brand-new object
+        // here even when nothing changed forced every consumer of `branding`
+        // (logo, company name, etc.) to re-render on a timer, which showed up
+        // as the whole login screen visibly flickering/resetting every 30s.
+        // Same fix as AppLayout.tsx's loadBranding.
+        setBranding(prev =>
+          prev.company_logo_url === d.company_logo_url
+            && prev.login_logo_url === d.login_logo_url
+            && prev.company_name === d.company_name
+            ? prev
+            : d
+        )
+      }
     }
     loadBranding().catch(() => undefined)
     window.api.license?.status?.().then((r: { active?: boolean }) => {
