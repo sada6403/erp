@@ -346,6 +346,11 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     }
 
     await enqueuSync('branches', id, 'DELETE', { id })
+    logAudit(db, {
+      userId: (caller.id as string) || null, branchId: null,
+      action: 'BRANCH_DELETED', tableName: 'branches', recordId: id,
+      oldValues: { name: branch.name, code: branch.code },
+    })
     return { success: true }
   })
 
@@ -359,30 +364,53 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     // Super Admin / Company Admin → all users
     // Branch Manager (or anyone without global access) → own branch only
     // PINs are hashed — expose only whether one is set, never the value
+    // LEFT JOIN agents (via agents.user_id = u.id, the existing link
+    // direction) + regions/zones — read LIVE every call, never cached/
+    // copied staff data, so an Agent Management edit (position/region/
+    // branch/etc.) shows up here immediately without touching the user row
+    // (spec §19). Blank for any user not linked to an Agent record — every
+    // existing Cashier/Warehouse/Branch Manager/Company Admin account is
+    // completely unaffected.
+    const selectCols = `
+      SELECT u.id, u.name, u.email, u.is_active, u.last_login_at,
+             u.role_id, u.branch_id,
+             CASE WHEN u.pin_hash IS NOT NULL OR u.pin IS NOT NULL THEN 1 ELSE 0 END as has_pin,
+             r.name as role_name, r.session_scope, b.name as branch_name,
+             ag.id as agent_id, ag.code as agent_code, ag.position as agent_position,
+             ab.name as agent_branch_name, rg.name as region_name, z.name as zone_name
+      FROM users u
+      LEFT JOIN roles r ON r.id = u.role_id
+      LEFT JOIN branches b ON b.id = u.branch_id
+      LEFT JOIN agents ag ON ag.user_id = u.id
+      LEFT JOIN branches ab ON ab.id = ag.branch_id
+      LEFT JOIN regions rg ON rg.id = ag.region_id
+      LEFT JOIN zones z ON z.id = rg.zone_id
+    `
     const rows = isGlobal
-      ? getDb().prepare(`
-          SELECT u.id, u.name, u.email, u.is_active, u.last_login_at,
-                 u.role_id, u.branch_id,
-                 CASE WHEN u.pin_hash IS NOT NULL OR u.pin IS NOT NULL THEN 1 ELSE 0 END as has_pin,
-                 r.name as role_name, r.session_scope, b.name as branch_name
-          FROM users u
-          LEFT JOIN roles r ON r.id = u.role_id
-          LEFT JOIN branches b ON b.id = u.branch_id
-          ORDER BY u.name
-        `).all()
-      : getDb().prepare(`
-          SELECT u.id, u.name, u.email, u.is_active, u.last_login_at,
-                 u.role_id, u.branch_id,
-                 CASE WHEN u.pin_hash IS NOT NULL OR u.pin IS NOT NULL THEN 1 ELSE 0 END as has_pin,
-                 r.name as role_name, r.session_scope, b.name as branch_name
-          FROM users u
-          LEFT JOIN roles r ON r.id = u.role_id
-          LEFT JOIN branches b ON b.id = u.branch_id
-          WHERE u.branch_id = ?
-          ORDER BY u.name
-        `).all(branchId || '')
+      ? getDb().prepare(`${selectCols} ORDER BY u.name`).all()
+      : getDb().prepare(`${selectCols} WHERE u.branch_id = ? ORDER BY u.name`).all(branchId || '')
 
     return { success: true, data: rows }
+  })
+
+  // Fresh Agent Management snapshot for a single user's Profile page (spec
+  // §16's "Agent Information" section) — same live-join principle as
+  // admin:users:list above, isolated into its own call so the profile page
+  // doesn't need to re-fetch the entire user list just to open one profile.
+  safeHandle(ipcMain, 'admin:users:getAgentInfo', (_e, userId: string) => {
+    const row = getDb().prepare(`
+      SELECT ag.id as agent_id, ag.code as agent_code, ag.name as agent_name, ag.nic, ag.phone, ag.email,
+             ag.etf_number, ag.epf_number, ag.date_of_birth, ag.position, ag.appointment_date,
+             ag.missing_documents, ag.notes, ag.status as agent_status,
+             ag.branch_id as agent_branch_id, b.name as agent_branch_name,
+             ag.region_id, rg.name as region_name, rg.zone_id, z.name as zone_name
+      FROM agents ag
+      LEFT JOIN branches b ON b.id = ag.branch_id
+      LEFT JOIN regions rg ON rg.id = ag.region_id
+      LEFT JOIN zones z ON z.id = rg.zone_id
+      WHERE ag.user_id = ?
+    `).get(userId)
+    return { success: true, data: row || null }
   })
   safeHandle(ipcMain, 'admin:users:create', async (_e, p) => {
     const { getMaxUsers } = await import('../services/licenseService')
@@ -789,6 +817,10 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     if (used.count > 0) return { success: false, error: 'Cannot delete role assigned to users' }
     db.prepare('DELETE FROM roles WHERE id=?').run(id)
     await enqueuSync('roles', id, 'DELETE', { id })
+    logAudit(db, {
+      userId: (authUser().id as string) || null, branchId: null,
+      action: 'ROLE_DELETED', tableName: 'roles', recordId: id, oldValues: { name: role.name },
+    })
     return { success: true }
   })
 
@@ -813,6 +845,26 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
     getDb().prepare(`UPDATE suppliers SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
     await enqueuSync('suppliers', id, 'UPDATE', { id, ...p })
+    return { success: true }
+  })
+  // Soft delete (deactivate) — mirrors categories:delete. Suppliers are
+  // referenced by products/purchase_orders/expenses, so a hard delete would
+  // either orphan those rows or require the same kind of blocking checks
+  // branches:delete uses; deactivating is the safe, reversible action and
+  // matches this table's existing is_active column/convention.
+  safeHandle(ipcMain, 'admin:suppliers:delete', async (_e, id: string) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
+    const db = getDb()
+    const supplier = db.prepare('SELECT id, name, is_active FROM suppliers WHERE id=?').get(id) as { id: string; name: string; is_active: number } | undefined
+    if (!supplier) return { success: false, error: 'Supplier not found' }
+    if (!supplier.is_active) return { success: false, error: 'This supplier is already deleted' }
+    db.prepare(`UPDATE suppliers SET is_active=0, updated_at=datetime('now') WHERE id=?`).run(id)
+    await enqueuSync('suppliers', id, 'UPDATE', { id, is_active: 0 })
+    logAudit(db, {
+      userId: (authUser().id as string) || null, branchId: null,
+      action: 'SUPPLIER_DELETED', tableName: 'suppliers', recordId: id, oldValues: { name: supplier.name },
+    })
     return { success: true }
   })
 
@@ -899,8 +951,16 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'admin:categories:delete', async (_e, id: string) => {
     const perms = currentPerms()
     if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
-    getDb().prepare(`UPDATE categories SET is_active=0, updated_at=datetime('now') WHERE id=?`).run(id)
+    const db = getDb()
+    const category = db.prepare('SELECT id, name, is_active FROM categories WHERE id=?').get(id) as { id: string; name: string; is_active: number } | undefined
+    if (!category) return { success: false, error: 'Category not found' }
+    if (!category.is_active) return { success: false, error: 'This category is already deleted' }
+    db.prepare(`UPDATE categories SET is_active=0, updated_at=datetime('now') WHERE id=?`).run(id)
     await enqueuSync('categories', id, 'UPDATE', { id, is_active: 0 })
+    logAudit(db, {
+      userId: (authUser().id as string) || null, branchId: null,
+      action: 'CATEGORY_DELETED', tableName: 'categories', recordId: id, oldValues: { name: category.name },
+    })
     return { success: true }
   })
 
@@ -1488,6 +1548,24 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     await enqueuSync('expense_categories', id, 'INSERT', { id, name: p.name })
     return { success: true, data: { id } }
   })
+  // Soft delete — mirrors categories/suppliers. expense_categories has its
+  // own is_active column and expenses.category_id keeps pointing at a real
+  // (just hidden-from-new-use) row, so existing expense records never dangle.
+  safeHandleModule(ipcMain, 'admin:expenseCategories:delete', 'expenses', async (_e, id: string) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.expenses) return { success: false, error: 'Expense management access required' }
+    const db = getDb()
+    const category = db.prepare('SELECT id, name, is_active FROM expense_categories WHERE id=?').get(id) as { id: string; name: string; is_active: number } | undefined
+    if (!category) return { success: false, error: 'Expense category not found' }
+    if (!category.is_active) return { success: false, error: 'This category is already deleted' }
+    db.prepare(`UPDATE expense_categories SET is_active=0, updated_at=datetime('now') WHERE id=?`).run(id)
+    await enqueuSync('expense_categories', id, 'UPDATE', { id, is_active: 0 })
+    logAudit(db, {
+      userId: (authUser().id as string) || null, branchId: null,
+      action: 'EXPENSE_CATEGORY_DELETED', tableName: 'expense_categories', recordId: id, oldValues: { name: category.name },
+    })
+    return { success: true }
+  })
 
   // Expenses
   safeHandleModule(ipcMain, 'admin:expenses:list', 'expenses', (_e, filters: Record<string,unknown> = {}) => {
@@ -1529,6 +1607,37 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
     getDb().prepare(`UPDATE expenses SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
     await enqueuSync('expenses', id, 'UPDATE', { id, ...p })
+    return { success: true }
+  })
+  // Hard delete — expenses is a real financial transaction record (has its
+  // own payment history/paid_amount), not master data, so this is only
+  // permitted for an entry that has zero recorded payments (a pure
+  // data-entry mistake with no financial impact yet). Anything with money
+  // already recorded against it must stay for audit purposes — matches the
+  // same "block on real activity" principle products:permanentDelete and
+  // chits:delete already use, just keyed on payment activity instead of FK
+  // references since this table has none pointing at it.
+  safeHandleModule(ipcMain, 'admin:expenses:delete', 'expenses', async (_e, id: string) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.expenses) return { success: false, error: 'Expense management access required' }
+    const db = getDb()
+    const caller = authUser()
+    const expense = db.prepare('SELECT id, branch_id, category_id, amount, paid_amount, description FROM expenses WHERE id=?').get(id) as
+      { id: string; branch_id: string | null; category_id: string | null; amount: number; paid_amount: number; description: string | null } | undefined
+    if (!expense) return { success: false, error: 'Expense not found' }
+    if (!perms.all && String(expense.branch_id || '') !== String(caller.branch_id || '')) {
+      return { success: false, error: 'You do not have access to this expense' }
+    }
+    if (Number(expense.paid_amount) > 0) {
+      return { success: false, error: 'This expense has recorded payments and cannot be deleted. Adjust or void the payment first.' }
+    }
+    db.prepare('DELETE FROM expenses WHERE id=?').run(id)
+    await enqueuSync('expenses', id, 'DELETE', { id })
+    logAudit(db, {
+      userId: (caller.id as string) || null, branchId: (expense.branch_id as string) || null,
+      action: 'EXPENSE_DELETED', tableName: 'expenses', recordId: id,
+      oldValues: { amount: expense.amount, description: expense.description },
+    })
     return { success: true }
   })
 

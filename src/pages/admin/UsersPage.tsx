@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, Trash2, Users, ShieldCheck, Search, Lock, UserX, UserCheck, KeyRound, AlertTriangle, Upload, FileDown } from 'lucide-react'
+import { Plus, Edit2, Trash2, Users, ShieldCheck, Search, Lock, UserX, UserCheck, KeyRound, AlertTriangle, Upload, FileDown, Eye, UserSearch, X } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -37,6 +37,8 @@ export default function UsersPage() {
   const [actionUser,   setActionUser]   = useState<Record<string,unknown>|null>(null)
   const [pinUser,      setPinUser]      = useState<Record<string,unknown>|null>(null)
   const [hardDeleteUser, setHardDeleteUser] = useState<Record<string,unknown>|null>(null)
+  const [profileUser, setProfileUser] = useState<Record<string,unknown>|null>(null)
+  const [showAuditReport, setShowAuditReport] = useState(false)
   const [tab,          setTab]          = useState<'users' | 'roles'>('users')
   const [search,       setSearch]       = useState('')
   const [importing,    setImporting]    = useState(false)
@@ -167,6 +169,9 @@ export default function UsersPage() {
               <button onClick={bulkImportUsers} disabled={importing} className="btn-secondary btn-sm gap-1.5">
                 <Upload size={14} /> {importing ? 'Importing...' : 'Bulk Import'}
               </button>
+              <button onClick={() => setShowAuditReport(true)} className="btn-secondary btn-sm gap-1.5">
+                <UserSearch size={14} /> Migration Audit
+              </button>
               <button
                 onClick={() => { setEditingUser(null); setShowUserForm(true) }}
                 className="btn-primary btn-sm gap-1.5"
@@ -225,6 +230,7 @@ export default function UsersPage() {
           onToggleActive={toggleActive}
           onManage={u => setActionUser(u)}
           onChangePin={u => setPinUser(u)}
+          onViewProfile={u => setProfileUser(u)}
         />
       ) : (
         <RolesSection
@@ -263,6 +269,16 @@ export default function UsersPage() {
           onDone={() => { setHardDeleteUser(null); load() }}
         />
       )}
+
+      {profileUser && (
+        <UserProfileModal
+          user={profileUser}
+          onClose={() => setProfileUser(null)}
+          onEdit={() => { setProfileUser(null); setEditingUser(profileUser); setShowUserForm(true) }}
+        />
+      )}
+
+      {showAuditReport && <MigrationAuditModal onClose={() => setShowAuditReport(false)} />}
 
       {showUserForm && (
         <UserForm
@@ -313,7 +329,7 @@ function TabButton({
 
 // ── Users Table ───────────────────────────────────────────────────────────────
 function UsersTable({
-  users, branches, currentUserId, isGlobalUser, onEdit, onDelete, onHardDelete, onToggleActive, onManage, onChangePin,
+  users, branches, currentUserId, isGlobalUser, onEdit, onDelete, onHardDelete, onToggleActive, onManage, onChangePin, onViewProfile,
 }: {
   users: Record<string, unknown>[]
   branches: Record<string, unknown>[]
@@ -325,6 +341,7 @@ function UsersTable({
   onToggleActive: (u: Record<string, unknown>, active: boolean) => void
   onManage: (u: Record<string, unknown>) => void
   onChangePin: (u: Record<string, unknown>) => void
+  onViewProfile: (u: Record<string, unknown>) => void
 }) {
   const roleColor: Record<string, string> = {
     'Company Admin':   'badge-purple',
@@ -339,7 +356,7 @@ function UsersTable({
       <table className="w-full">
         <thead className="sticky top-0 bg-surface-900 z-10">
           <tr>
-            {['Name', 'Email', 'Role', 'Branch', 'PIN', 'Status', 'Last Login', 'Actions'].map(h =>
+            {['Name', 'Email', 'Agent ID', 'Position', 'Role', 'Branch', 'Region', 'PIN', 'Status', 'Last Login', 'Actions'].map(h =>
               <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
             )}
           </tr>
@@ -372,6 +389,8 @@ function UsersTable({
                   </div>
                 </td>
                 <td className="table-cell text-slate-400 text-xs">{u.email as string}</td>
+                <td className="table-cell font-mono text-xs text-slate-400">{(u.agent_code as string) || '—'}</td>
+                <td className="table-cell text-slate-400">{(u.agent_position as string) || '—'}</td>
                 <td className="table-cell">
                   <span className={`${roleColor[u.role_name as string] || 'badge-gray'}`}>
                     {u.role_name as string}
@@ -387,6 +406,7 @@ function UsersTable({
                     )}
                   </div>
                 </td>
+                <td className="table-cell text-slate-400">{(u.region_name as string) || '—'}</td>
                 <td className="table-cell font-mono text-slate-400">{u.has_pin ? '••••' : '-'}</td>
                 <td className="table-cell">
                   <span className={isActive ? 'badge-green' : 'badge-red'}>
@@ -401,6 +421,9 @@ function UsersTable({
                 </td>
                 <td className="table-cell">
                   <div className="flex items-center gap-1">
+                    <button onClick={() => onViewProfile(u)} className="btn-ghost btn-sm p-1.5" title="View Profile">
+                      <Eye size={13} />
+                    </button>
                     {canModify && (
                       <button onClick={() => onEdit(u)} className="btn-ghost btn-sm p-1.5" title="Edit user">
                         <Edit2 size={13} />
@@ -472,7 +495,7 @@ function UsersTable({
             )
           })}
           {users.length === 0 && (
-          <tr><td colSpan={8} className="text-center py-16 text-slate-500">No users found</td></tr>
+          <tr><td colSpan={11} className="text-center py-16 text-slate-500">No users found</td></tr>
           )}
         </tbody>
       </table>
@@ -621,13 +644,85 @@ function UserForm({
     rolePerms.all || rolePerms.reports || rolePerms.employees ||
     rolePerms.settings || rolePerms.branches
   )
+  // Agent Management as staff master: a role with the "Agent" restricted
+  // portal scope never gets a hand-typed identity — its login is always
+  // created FOR an existing Agent record (spec §5-§9). Takes priority over
+  // the plain isPinOnly staff branch below.
+  const isAgentRole = Boolean(selectedRole?.session_scope === 'agent')
   // Staff roles (Cashier, Warehouse Staff, Delivery Staff) use PIN only
-  const isPinOnly = !!selectedRole && !isAdminRole
+  const isPinOnly = !!selectedRole && !isAdminRole && !isAgentRole
+
+  // ── Agent search (only relevant while creating a NEW agent-role user) ──
+  const [agentOptions, setAgentOptions] = useState<Record<string, unknown>[]>([])
+  const [agentQuery, setAgentQuery] = useState('')
+  const [selectedAgent, setSelectedAgent] = useState<Record<string, unknown> | null>(null)
+  // ── Linked agent info (only relevant while EDITING an existing agent-role user) ──
+  const [linkedAgent, setLinkedAgent] = useState<Record<string, unknown> | null>(null)
+
+  useEffect(() => {
+    if (!isAgentRole) return
+    if (user) {
+      // Editing an existing agent-linked login — pull the full Agent record
+      // fresh so this read-only card can never drift from Agent Management.
+      if (user.agent_id) {
+        window.api.agents.get(user.agent_id as string).then((r: { success: boolean; data?: Record<string, unknown> }) => {
+          if (r.success) setLinkedAgent(r.data || null)
+        }).catch(() => {})
+      }
+    } else if (agentOptions.length === 0) {
+      window.api.agents.list({ status: 'active' }).then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+        if (r.success) setAgentOptions(r.data || [])
+      }).catch(() => {})
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAgentRole])
+
+  const agentMatches = agentQuery.trim()
+    ? agentOptions.filter(a => {
+        const q = agentQuery.trim().toLowerCase()
+        return [a.code, a.name, a.nic, a.phone].some(v => String(v || '').toLowerCase().includes(q))
+      }).slice(0, 10)
+    : []
+  const branchNameOf = (branchId: unknown) =>
+    (branches.find(b => b.id === branchId)?.name as string | undefined) || '—'
 
   const save = async () => {
-    if (!form.name || !form.role_id) {
-      toast.error('Name and role are required'); return
+    if (!form.role_id) { toast.error('Role is required'); return }
+
+    // ── Agent-role account: staff identity always comes from an existing
+    // Agent record, never typed here (spec §5-§9, §21) ──
+    if (isAgentRole) {
+      if (!/^\d{4,6}$/.test(form.pin) && !(user && user.has_pin && !form.pin)) {
+        toast.error('PIN must be 4-6 digits'); return
+      }
+      setSaving(true)
+      try {
+        if (!user) {
+          if (!selectedAgent) { toast.error('Search and select an existing Agent'); return }
+          const res = await window.api.agents.createUserForAgent(selectedAgent.id as string, {
+            role_id: form.role_id, pin: form.pin, is_active: form.is_active,
+          })
+          if (res.success) { toast.success('Login created for this Agent'); onSave() }
+          else toast.error(String(res.error || 'Failed to create login'), { duration: 6000 })
+        } else {
+          // Editing: only role/PIN/active status are ever sent — name/
+          // branch/position/etc. are never re-typed here, they live in
+          // Agent Management (spec §7/§18).
+          const payload: Record<string, unknown> = { role_id: form.role_id, is_active: form.is_active }
+          if (form.pin) payload.pin = form.pin
+          const res = await window.api.admin.users.update(user.id as string, payload)
+          if (res.success) { toast.success('User updated'); onSave() }
+          else toast.error(String(res.error || 'Save failed'))
+        }
+      } catch (e: any) {
+        toast.error(e?.message || 'Save failed')
+      } finally {
+        setSaving(false)
+      }
+      return
     }
+
+    if (!form.name) { toast.error('Name is required'); return }
     if (isAdminRole) {
       if (!form.email) { toast.error('Email is required for admin accounts'); return }
       if (!user && !form.password) { toast.error('Password is required for admin accounts'); return }
@@ -677,16 +772,19 @@ function UserForm({
     >
       <div className="grid grid-cols-2 gap-4">
 
-        {/* Name — always shown */}
-        <div className="col-span-2">
-          <label className="label">Full Name *</label>
-          <input value={form.name} onChange={f('name')} className="input" autoFocus />
-        </div>
+        {/* Name — hidden for agent-role accounts, whose identity always comes
+            from the selected/linked Agent record, never typed here */}
+        {!isAgentRole && (
+          <div className="col-span-2">
+            <label className="label">Full Name *</label>
+            <input value={form.name} onChange={f('name')} className="input" autoFocus />
+          </div>
+        )}
 
         {/* Role first — drives which fields appear */}
-        <div>
+        <div className={isAgentRole ? 'col-span-2' : ''}>
           <label className="label">Role *</label>
-          <select value={form.role_id} onChange={f('role_id')} className="input">
+          <select value={form.role_id} onChange={f('role_id')} className="input" autoFocus={isAgentRole}>
             <option value="">Select role...</option>
             {assignableRoles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
           </select>
@@ -697,27 +795,129 @@ function UserForm({
           )}
         </div>
 
-        {/* Branch */}
-        <div>
-          <label className="label">
-            Branch {!isGlobalUser && <span className="text-xs text-amber-400 ml-1">(your branch)</span>}
-          </label>
-          {isGlobalUser ? (
-            <select value={form.branch_id} onChange={f('branch_id')} className="input">
-              <option value="">All Branches</option>
-              {branches.map(b => (
-                <option key={b.id as string} value={b.id as string}>{b.name as string}</option>
-              ))}
-            </select>
-          ) : (
+        {/* Branch — hidden for agent-role accounts: branch is owned by
+            Agent Management (spec §18) and shown read-only inside the
+            Agent Information card below instead */}
+        {!isAgentRole && (
+          <div>
+            <label className="label">
+              Branch {!isGlobalUser && <span className="text-xs text-amber-400 ml-1">(your branch)</span>}
+            </label>
+            {isGlobalUser ? (
+              <select value={form.branch_id} onChange={f('branch_id')} className="input">
+                <option value="">All Branches</option>
+                {branches.map(b => (
+                  <option key={b.id as string} value={b.id as string}>{b.name as string}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={branches.find(b => b.id === form.branch_id)?.name as string || form.branch_id}
+                readOnly
+                className="input opacity-60 cursor-not-allowed"
+                title="Branch is locked to your branch"
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── Agent-role account: staff identity always comes from Agent
+            Management, this form only creates/edits the login (§5-§9, §21) ── */}
+        {isAgentRole && !user && (
+          <>
+            <div className="col-span-2 rounded-lg px-3 py-2.5 flex items-center gap-2 text-sm"
+              style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#818cf8' }}>
+              <UserSearch size={13} />
+              This role logs in as an Agent — search and select an existing Agent Management record.
+            </div>
+            {!selectedAgent ? (
+              <div className="col-span-2">
+                <label className="label">Search Agent (ID / Name / NIC / Mobile) *</label>
+                <input
+                  value={agentQuery}
+                  onChange={e => setAgentQuery(e.target.value)}
+                  className="input"
+                  placeholder="Type to search..."
+                />
+                {agentQuery.trim() && (
+                  <div className="mt-2 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                    {agentMatches.length === 0 ? (
+                      <div className="px-3 py-2.5 text-sm" style={{ color: 'var(--text-3)' }}>No matching agents found.</div>
+                    ) : agentMatches.map(a => (
+                      <button
+                        key={a.id as string}
+                        type="button"
+                        onClick={() => { setSelectedAgent(a); setAgentQuery('') }}
+                        className="w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-white/5"
+                        style={{ borderTop: '1px solid var(--border)' }}
+                      >
+                        <span>
+                          <span className="font-mono">{String(a.code || '')}</span>{' — '}
+                          <span className="font-medium">{String(a.name || '')}</span>{' '}
+                          <span style={{ color: 'var(--text-3)' }}>{String(a.position || '')} · {branchNameOf(a.branch_id)}</span>
+                        </span>
+                        {Boolean(a.user_id) && <span className="badge-gray text-xs">Has Login</span>}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="col-span-2 rounded-lg p-3 space-y-1 text-sm" style={{ border: '1px solid var(--border)' }}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className="font-medium">Selected Agent</span>
+                  <button type="button" onClick={() => setSelectedAgent(null)} className="btn-secondary text-xs px-2 py-1">
+                    <X size={12} className="inline" /> Change
+                  </button>
+                </div>
+                <div><span style={{ color: 'var(--text-3)' }}>Agent ID:</span> <span className="font-mono">{String(selectedAgent.code || '')}</span></div>
+                <div><span style={{ color: 'var(--text-3)' }}>Name:</span> {String(selectedAgent.name || '')}</div>
+                <div><span style={{ color: 'var(--text-3)' }}>Position:</span> {String(selectedAgent.position || '—')}</div>
+                <div><span style={{ color: 'var(--text-3)' }}>Branch:</span> {branchNameOf(selectedAgent.branch_id)}</div>
+                <div><span style={{ color: 'var(--text-3)' }}>Status:</span> {String(selectedAgent.status || '')}</div>
+                {Boolean(selectedAgent.user_id) && (
+                  <p className="text-xs mt-1" style={{ color: '#f59e0b' }}>
+                    This agent already has a user account — choose a different agent.
+                  </p>
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {isAgentRole && user && (
+          <div className="col-span-2 rounded-lg p-3 space-y-1 text-sm" style={{ border: '1px solid var(--border)' }}>
+            <div className="font-medium mb-1">Agent Information</div>
+            {linkedAgent ? (
+              <>
+                <div><span style={{ color: 'var(--text-3)' }}>Agent ID:</span> <span className="font-mono">{String(linkedAgent.code || '')}</span></div>
+                <div><span style={{ color: 'var(--text-3)' }}>Name:</span> {String(linkedAgent.name || '')}</div>
+                <div><span style={{ color: 'var(--text-3)' }}>Position:</span> {String(linkedAgent.position || '—')}</div>
+                <div><span style={{ color: 'var(--text-3)' }}>Branch:</span> {String(user.agent_branch_name || '—')}</div>
+              </>
+            ) : (
+              <div style={{ color: 'var(--text-3)' }}>Loading agent details...</div>
+            )}
+            <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+              Name, branch, position and other staff details are edited in Agent Management.
+            </p>
+          </div>
+        )}
+
+        {isAgentRole && (
+          <div className="col-span-2">
+            <label className="label">PIN {user?.has_pin ? '(leave blank to keep current)' : '* (4-6 digits)'}</label>
             <input
-              value={branches.find(b => b.id === form.branch_id)?.name as string || form.branch_id}
-              readOnly
-              className="input opacity-60 cursor-not-allowed"
-              title="Branch is locked to your branch"
+              value={form.pin}
+              onChange={f('pin')}
+              className="input font-mono text-xl tracking-widest"
+              placeholder={user?.has_pin ? '••••' : 'e.g. 1234'}
+              maxLength={6}
+              inputMode="numeric"
+              pattern="[0-9]*"
             />
-          )}
-        </div>
+          </div>
+        )}
 
         {/* ── PIN-only staff (Cashier / Warehouse / Delivery) ── */}
         {isPinOnly && (
@@ -792,6 +992,169 @@ function UserForm({
               />
               <span className="text-sm" style={{ color: 'var(--text-2)' }}>Active</span>
             </label>
+          </div>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
+// ── User Profile Modal ───────────────────────────────────────────────────────
+// Split per spec §16: Agent Information (read-only, sourced fresh from Agent
+// Management) vs Login/Access Information — only agent-linked users get the
+// Agent Information section; plain admin/PIN-only accounts show login info only.
+function ProfileField({ label, value }: { label: string; value: unknown }) {
+  return (
+    <div>
+      <div className="text-xs" style={{ color: 'var(--text-3)' }}>{label}</div>
+      <div className="text-sm">{value === null || value === undefined || value === '' ? '—' : String(value)}</div>
+    </div>
+  )
+}
+
+function UserProfileModal({
+  user, onClose, onEdit,
+}: {
+  user: Record<string, unknown>
+  onClose: () => void
+  onEdit: () => void
+}) {
+  const [agentInfo, setAgentInfo] = useState<Record<string, unknown> | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!user.agent_id) return
+    setLoading(true)
+    window.api.admin.users.getAgentInfo(user.id as string)
+      .then((r: { success: boolean; data?: Record<string, unknown> }) => { if (r.success) setAgentInfo(r.data || null) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user.id])
+
+  const isAgentLinked = Boolean(user.agent_id)
+
+  return (
+    <Modal title="User Profile" onClose={onClose} footer={
+      <>
+        <button onClick={onClose} className="btn-secondary">Close</button>
+        <button onClick={onEdit} className="btn-primary">Edit</button>
+      </>
+    }>
+      <div className="space-y-5">
+        {isAgentLinked && (
+          <div>
+            <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-2)' }}>Agent Information</h3>
+            {loading && !agentInfo ? (
+              <div className="text-sm" style={{ color: 'var(--text-3)' }}>Loading...</div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3 rounded-lg p-3" style={{ border: '1px solid var(--border)' }}>
+                <ProfileField label="Agent / Employee ID" value={agentInfo?.agent_code ?? user.agent_code} />
+                <ProfileField label="Name" value={agentInfo?.agent_name ?? user.name} />
+                <ProfileField label="NIC" value={agentInfo?.nic} />
+                <ProfileField label="Position" value={agentInfo?.position ?? user.agent_position} />
+                <ProfileField label="Branch" value={agentInfo?.agent_branch_name ?? user.agent_branch_name} />
+                <ProfileField label="Region" value={agentInfo?.region_name ?? user.region_name} />
+                <ProfileField label="Zone" value={agentInfo?.zone_name ?? user.zone_name} />
+                <ProfileField label="Mobile" value={agentInfo?.phone} />
+                <ProfileField label="Email" value={agentInfo?.email} />
+                <ProfileField label="Date of Birth" value={agentInfo?.date_of_birth} />
+                <ProfileField label="ETF Number" value={agentInfo?.etf_number} />
+                <ProfileField label="EPF Number" value={agentInfo?.epf_number} />
+                <ProfileField label="Appointment Date" value={agentInfo?.appointment_date} />
+                <ProfileField label="Agent Status" value={agentInfo?.agent_status} />
+                <div className="col-span-2">
+                  <ProfileField label="Missing Documents" value={agentInfo?.missing_documents} />
+                </div>
+              </div>
+            )}
+            <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+              Staff details are managed in Agent Management — editing this user only changes login/role/PIN.
+            </p>
+          </div>
+        )}
+
+        <div>
+          <h3 className="text-sm font-semibold mb-2" style={{ color: 'var(--text-2)' }}>Login / Access Information</h3>
+          <div className="grid grid-cols-2 gap-3 rounded-lg p-3" style={{ border: '1px solid var(--border)' }}>
+            {!isAgentLinked && <ProfileField label="Name" value={user.name} />}
+            {!isAgentLinked && <ProfileField label="Email" value={user.email} />}
+            <ProfileField label="Role" value={user.role_name} />
+            <ProfileField label="Branch" value={user.branch_name ?? 'All Branches'} />
+            <ProfileField label="PIN" value={user.has_pin ? 'Set' : 'Not set'} />
+            <ProfileField label="Status" value={user.is_active ? 'Active' : 'Inactive'} />
+            <ProfileField
+              label="Last Login"
+              value={user.last_login_at ? new Date(user.last_login_at as string).toLocaleString() : 'Never'}
+            />
+          </div>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+// ── Migration Audit Modal ────────────────────────────────────────────────────
+// Read-only report (spec §23): lists existing User List accounts that were
+// never linked to an Agent Management record (the old, disconnected way of
+// creating staff), plus any Agent that might be the same person by name/
+// email match. Purely informational — nothing here writes to the database;
+// an admin who agrees with a suggestion links the two via the existing
+// agents:linkUser path (Agent Management → Staff Details → Create Login is
+// for brand-new logins; a pre-existing user is linked from there too).
+type AuditRow = Record<string, unknown> & {
+  possibleAgentMatches: Record<string, unknown>[]
+}
+
+function MigrationAuditModal({ onClose }: { onClose: () => void }) {
+  const [loading, setLoading] = useState(true)
+  const [rows, setRows] = useState<AuditRow[]>([])
+  const [agentCount, setAgentCount] = useState(0)
+
+  useEffect(() => {
+    window.api.admin.users.auditUnlinkedUsers()
+      .then((r: { success: boolean; data?: { users: AuditRow[]; unlinkedAgentCount: number }; error?: string }) => {
+        if (r.success && r.data) { setRows(r.data.users); setAgentCount(r.data.unlinkedAgentCount) }
+        else toast.error(r.error || 'Failed to load audit report')
+      })
+      .catch((e: any) => toast.error(e?.message || 'Failed to load audit report'))
+      .finally(() => setLoading(false))
+  }, [])
+
+  return (
+    <Modal title="Migration Audit — Unlinked Users" onClose={onClose} footer={
+      <button onClick={onClose} className="btn-secondary">Close</button>
+    }>
+      <div className="space-y-3">
+        <p className="text-sm" style={{ color: 'var(--text-3)' }}>
+          Users below have no linked Agent Management record — they were created before Agent Management
+          became the staff master, or manually. This is informational only; nothing is changed automatically.
+          {agentCount > 0 && ` There are also ${agentCount} Agent record(s) with no login yet.`}
+        </p>
+        {loading ? (
+          <div className="text-sm py-6 text-center" style={{ color: 'var(--text-3)' }}>Loading...</div>
+        ) : rows.length === 0 ? (
+          <div className="text-sm py-6 text-center" style={{ color: 'var(--text-3)' }}>
+            Every user is linked to an Agent record. Nothing to review.
+          </div>
+        ) : (
+          <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+            {rows.map(u => (
+              <div key={u.id as string} className="px-3 py-2.5 text-sm" style={{ borderTop: '1px solid var(--border)' }}>
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{String(u.name || '')}</span>
+                  <span style={{ color: 'var(--text-3)' }}>{String(u.role_name || '')} · {String(u.branch_name || 'All Branches')}</span>
+                </div>
+                <div className="text-xs" style={{ color: 'var(--text-3)' }}>{String(u.email || '')}</div>
+                {u.possibleAgentMatches.length > 0 ? (
+                  <div className="mt-1 text-xs" style={{ color: '#f59e0b' }}>
+                    Possible match: {u.possibleAgentMatches.map(a => `${String(a.name)} (${String(a.code)})`).join(', ')}
+                  </div>
+                ) : (
+                  <div className="mt-1 text-xs" style={{ color: 'var(--text-3)' }}>No matching Agent record found.</div>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>

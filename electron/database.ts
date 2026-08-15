@@ -596,6 +596,65 @@ function runMigrations(): void {
     db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_user ON agents(user_id) WHERE user_id IS NOT NULL`)
   }
 
+  // Agent Management as staff master (spec: "Agent Management creates and
+  // owns the staff identity; User List only creates the login identity").
+  // Zone is the broader geographic grouping, Region the narrower one within
+  // it (e.g. Zone "Jaffna" contains Region "Vaddukoddai") — mirrors the
+  // shape of `branches`, deliberately simple (no delete, only is_active,
+  // same as branches) so existing agent.region_id references never dangle.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS zones (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      code       TEXT,
+      is_active  INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at  TEXT
+    );
+    CREATE TABLE IF NOT EXISTS regions (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      code       TEXT,
+      zone_id    TEXT REFERENCES zones(id),
+      is_active  INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at  TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_regions_zone ON regions(zone_id);
+  `)
+
+  // Staff-detail columns on `agents` — Personal Information and Role &
+  // Location sections of the Staff Details UI. `code` (already unique,
+  // case/whitespace-insensitive) already serves as the Agent/Employee ID;
+  // `nic`/`notes`/`branch_id`/`status`/`phone`/`email` already existed.
+  const agentStaffColumns: Array<[string, string]> = [
+    ['etf_number', 'TEXT'],
+    ['epf_number', 'TEXT'],
+    ['date_of_birth', 'TEXT'],
+    ['position', 'TEXT'],
+    ['region_id', 'TEXT REFERENCES regions(id)'],
+    ['appointment_date', 'TEXT'],
+    ['missing_documents', 'TEXT'],
+  ]
+  for (const [column, def] of agentStaffColumns) {
+    if (!hasColumn('agents', column)) db.exec(`ALTER TABLE agents ADD COLUMN ${column} ${def}`)
+  }
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_region ON agents(region_id)`)
+  // NIC uniqueness — same case/whitespace-insensitive, partial-index pattern
+  // as idx_agents_code_ci, so agents with no NIC on file don't collide on
+  // empty string. Wrapped in try/catch: a pre-existing install could already
+  // have duplicate NICs on file (this feature didn't exist before), and a
+  // failed index creation must not block the app from starting — matches
+  // the defensive pattern already used for commission_ledger's unique index
+  // elsewhere in this file.
+  try {
+    db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_nic_ci ON agents(UPPER(TRIM(nic))) WHERE nic IS NOT NULL AND TRIM(nic) != ''`)
+  } catch (err) {
+    console.error('[DB] Could not create idx_agents_nic_ci (likely duplicate NICs already on file):', err)
+  }
+
   // Formal "this user is THE SmartBuy Manager of this branch" pointer — a
   // soft assignment (no uniqueness enforced; a user could in principle be
   // pointed at from more than one branch, or a branch left unassigned).

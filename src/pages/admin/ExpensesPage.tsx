@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Search, RefreshCw, Printer } from 'lucide-react'
+import DeleteConfirmModal from '@/components/shared/DeleteConfirmModal'
+import { Plus, Search, RefreshCw, Printer, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { useDeleteAction } from '@/hooks/useDeleteAction'
 
-type Expense = Record<string, unknown>
+type Expense = Record<string, unknown> & { id: string }
 type ExpCat  = Record<string, unknown>
 
 function payStatusBadge(status: string) {
@@ -47,6 +49,8 @@ export default function ExpensesPage() {
 
   const totalAmount = expenses.reduce((s, e) => s + Number(e.amount || 0), 0)
   const totalPaid   = expenses.reduce((s, e) => s + Number(e.paid_amount || 0), 0)
+
+  const del = useDeleteAction<Expense>(id => window.api.admin.expenses.delete(id), load)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -123,7 +127,14 @@ export default function ExpensesPage() {
                 <td className="table-cell text-sm text-slate-400">{String(e.paid_by_name || '—')}</td>
                 <td className="table-cell">{payStatusBadge(String(e.payment_status || 'unpaid'))}</td>
                 <td className="table-cell">
-                  <button className="btn-ghost btn-sm p-1.5" title="Print"><Printer size={13}/></button>
+                  <div className="flex items-center gap-1">
+                    <button className="btn-ghost btn-sm p-1.5" title="Print"><Printer size={13}/></button>
+                    {Number(e.paid_amount || 0) === 0 && (
+                      <button onClick={() => del.requestDelete(e)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Delete">
+                        <Trash2 size={13}/>
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -141,6 +152,17 @@ export default function ExpensesPage() {
           onClose={() => setShowForm(false)}
           onSave={() => { setShowForm(false); load() }}
           onCategoryCreated={(id, name) => setCategories(cats => [...cats, { id, name }])}
+        />
+      )}
+
+      {del.target && (
+        <DeleteConfirmModal
+          title="Delete Expense"
+          itemLabel={String(del.target.description || del.target.category_name || '')}
+          message="This expense record will be removed from this device and the cloud database."
+          busy={del.busy}
+          onCancel={del.cancel}
+          onConfirm={del.confirm}
         />
       )}
     </div>

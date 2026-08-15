@@ -83,11 +83,23 @@ const api = {
     update:           (id: string, payload: unknown) => ipcRenderer.invoke('agents:update', id, payload),
     delete:           (id: string)        => ipcRenderer.invoke('agents:delete', id),
     linkUser:         (agentId: string, userId: string | null) => ipcRenderer.invoke('agents:linkUser', agentId, userId),
+    createUserForAgent: (agentId: string, payload: unknown) => ipcRenderer.invoke('agents:createUserForAgent', agentId, payload),
     approve:          (id: string)        => ipcRenderer.invoke('agents:approve', id),
     report:           (filters: unknown)  => ipcRenderer.invoke('agents:report', filters),
     reportAllSummary: (filters?: unknown) => ipcRenderer.invoke('agents:reportAllSummary', filters),
     importExcel:      ()                  => ipcRenderer.invoke('agents:importExcel'),
     downloadTemplate: ()                  => ipcRenderer.invoke('agents:downloadTemplate'),
+  },
+
+  regions: {
+    list:   (filters?: unknown)               => ipcRenderer.invoke('regions:list', filters),
+    create: (payload: unknown)                => ipcRenderer.invoke('regions:create', payload),
+    update: (id: string, payload: unknown)    => ipcRenderer.invoke('regions:update', id, payload),
+  },
+  zones: {
+    list:   (filters?: unknown)               => ipcRenderer.invoke('zones:list', filters),
+    create: (payload: unknown)                => ipcRenderer.invoke('zones:create', payload),
+    update: (id: string, payload: unknown)    => ipcRenderer.invoke('zones:update', id, payload),
   },
 
   // Chit Fund
@@ -288,9 +300,9 @@ const api = {
   // Admin
   admin: {
     branches:    { list: () => ipcRenderer.invoke('admin:branches:list'), findByCode: (code: string) => ipcRenderer.invoke('admin:branches:findByCode', code), create: (p: unknown) => ipcRenderer.invoke('admin:branches:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:branches:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:branches:delete', id) },
-    users:       { list: () => ipcRenderer.invoke('admin:users:list'), create: (p: unknown) => ipcRenderer.invoke('admin:users:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:users:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:users:delete', id), hardDelete: (id: string) => ipcRenderer.invoke('admin:users:hardDelete', id), toggleActive: (id: string, active: boolean) => ipcRenderer.invoke('admin:users:toggleActive', id, active), resetPassword: (id: string, newPassword: string) => ipcRenderer.invoke('admin:users:resetPassword', id, newPassword), forcePasswordChange: (id: string, force: boolean) => ipcRenderer.invoke('admin:users:forcePasswordChange', id, force), importExcel: () => ipcRenderer.invoke('admin:users:importExcel'), downloadTemplate: () => ipcRenderer.invoke('admin:users:downloadTemplate') },
+    users:       { list: () => ipcRenderer.invoke('admin:users:list'), create: (p: unknown) => ipcRenderer.invoke('admin:users:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:users:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:users:delete', id), hardDelete: (id: string) => ipcRenderer.invoke('admin:users:hardDelete', id), toggleActive: (id: string, active: boolean) => ipcRenderer.invoke('admin:users:toggleActive', id, active), resetPassword: (id: string, newPassword: string) => ipcRenderer.invoke('admin:users:resetPassword', id, newPassword), forcePasswordChange: (id: string, force: boolean) => ipcRenderer.invoke('admin:users:forcePasswordChange', id, force), importExcel: () => ipcRenderer.invoke('admin:users:importExcel'), downloadTemplate: () => ipcRenderer.invoke('admin:users:downloadTemplate'), getAgentInfo: (userId: string) => ipcRenderer.invoke('admin:users:getAgentInfo', userId), auditUnlinkedUsers: () => ipcRenderer.invoke('agents:auditUnlinkedUsers') },
     roles:       { list: () => ipcRenderer.invoke('admin:roles:list'), create: (p: unknown) => ipcRenderer.invoke('admin:roles:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:roles:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:roles:delete', id) },
-    suppliers:   { list: () => ipcRenderer.invoke('admin:suppliers:list'), create: (p: unknown) => ipcRenderer.invoke('admin:suppliers:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:suppliers:update', id, p) },
+    suppliers:   { list: () => ipcRenderer.invoke('admin:suppliers:list'), create: (p: unknown) => ipcRenderer.invoke('admin:suppliers:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:suppliers:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:suppliers:delete', id) },
     categories:  { list: () => ipcRenderer.invoke('admin:categories:list'), create: (p: unknown) => ipcRenderer.invoke('admin:categories:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:categories:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:categories:delete', id) },
     auditLogs:   { list: (filters?: unknown) => ipcRenderer.invoke('admin:auditLogs:list', filters) },
     deliveries:  { list: (filters?: unknown) => ipcRenderer.invoke('admin:deliveries:list', filters), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:deliveries:update', id, p) },
@@ -308,8 +320,8 @@ const api = {
       applyPenalties:   ()                                             => ipcRenderer.invoke('admin:installments:applyPenalties'),
     },
     productUom:  { list: (productId: string) => ipcRenderer.invoke('admin:productUom:list', productId), save: (productId: string, uoms: unknown) => ipcRenderer.invoke('admin:productUom:save', productId, uoms) },
-    expenseCategories: { list: () => ipcRenderer.invoke('admin:expenseCategories:list'), create: (p: unknown) => ipcRenderer.invoke('admin:expenseCategories:create', p) },
-    expenses:    { list: (filters?: unknown) => ipcRenderer.invoke('admin:expenses:list', filters), create: (p: unknown) => ipcRenderer.invoke('admin:expenses:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:expenses:update', id, p) },
+    expenseCategories: { list: () => ipcRenderer.invoke('admin:expenseCategories:list'), create: (p: unknown) => ipcRenderer.invoke('admin:expenseCategories:create', p), delete: (id: string) => ipcRenderer.invoke('admin:expenseCategories:delete', id) },
+    expenses:    { list: (filters?: unknown) => ipcRenderer.invoke('admin:expenses:list', filters), create: (p: unknown) => ipcRenderer.invoke('admin:expenses:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:expenses:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:expenses:delete', id) },
     clearAllData:      () => ipcRenderer.invoke('admin:clearAllData'),
     forceReset:        () => ipcRenderer.invoke('admin:forceReset'),
     isSetupRequired:   () => ipcRenderer.invoke('admin:isSetupRequired'),

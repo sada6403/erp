@@ -94,12 +94,20 @@ beforeAll(async () => {
   const { registerOrderHandlers } = await import('../ipc/orders')
   const { registerChitHandlers } = await import('../ipc/chits')
   const { registerCommissionHandlers } = await import('../ipc/commissions')
+  const { registerAgentHandlers } = await import('../ipc/agents')
+  const { registerAdminHandlers } = await import('../ipc/admin')
+  const { registerRegionHandlers } = await import('../ipc/regions')
+  const { registerAuthHandlers } = await import('../ipc/auth')
   registerBatchHandlers()
   registerProductHandlers(fakeIpcMain)
   registerPurchaseHandlers(fakeIpcMain)
   registerOrderHandlers(fakeIpcMain)
   registerChitHandlers(fakeIpcMain)
   registerCommissionHandlers(fakeIpcMain)
+  registerAgentHandlers(fakeIpcMain)
+  registerAdminHandlers(fakeIpcMain)
+  registerRegionHandlers(fakeIpcMain)
+  registerAuthHandlers(fakeIpcMain)
 })
 
 function seedBranch(id: string, name: string, code: string) {
@@ -375,5 +383,189 @@ describe('Security audit regression — SmartBuy Commission Rules / Scheme Maste
       scheme_name: 'Sec4 Admin Scheme', monthly_contribution_amount: 1000, duration_months: 5, minimum_members: 3, product_value: 5000,
     })
     expect(res.success).toBe(true)
+  })
+})
+
+// Acceptance tests for "Agent Management as Staff Master" (spec §26, 12
+// scenarios): Agent Management owns the staff identity; User List only ever
+// creates a LOGIN for an existing Agent via agents:createUserForAgent, never
+// a second, disconnected staff record. makeFullSession below mirrors what
+// auth.ts's buildAuthUserPayload actually puts on a real session (both
+// `role.permissions` AND a top-level `permissions` — admin:users:list reads
+// the top-level field directly), unlike the shared makeSession() above which
+// only ever needed `role.permissions` for the handlers exercised earlier in
+// this file.
+describe('Agent Management as Staff Master — createUserForAgent, live sync, security', () => {
+  const BR_A = 'sec5-branch-a', BR_B = 'sec5-branch-b'
+
+  function makeFullSession(opts: { id: string; branchId?: string | null; permissions: Record<string, unknown> }) {
+    return {
+      id: opts.id, name: opts.id, branch_id: opts.branchId ?? null,
+      role: { permissions: opts.permissions },
+      permissions: opts.permissions,
+      scope: { level: opts.permissions.all ? 'owner' : 'branch', branchId: opts.branchId ?? null, agentId: null },
+    }
+  }
+
+  beforeAll(() => {
+    seedBranch(BR_A, 'Security5 Branch A', 'S5A')
+    seedBranch(BR_B, 'Security5 Branch B', 'S5B')
+    seedUser('u-sec5-admin', null)
+    seedUser('u-sec5-mgr-a', BR_A)
+    seedUser('u-sec5-noperm', BR_A)
+    db.prepare(`INSERT OR IGNORE INTO roles (id, name, session_scope, permissions) VALUES (?,?,?,?)`)
+      .run('sec5-agent-role', 'Sec5 Agent Portal Role', 'agent', '{}')
+  })
+
+  const admin      = makeFullSession({ id: 'u-sec5-admin', permissions: { all: true } })
+  const mgrA       = makeFullSession({ id: 'u-sec5-mgr-a', branchId: BR_A, permissions: { employees: true } })
+  const noPermUser = makeFullSession({ id: 'u-sec5-noperm', branchId: BR_A, permissions: { pos: true } })
+
+  let agentId: string
+
+  it('1: agents:create creates a new Agent record that appears in agents:list with the fields the User List / search UI needs', async () => {
+    setSession(admin)
+    const res = await call('agents:create', {
+      code: 'SEC5-AG-1', name: 'Staff One', nic: 'SEC5-NIC-1', phone: '0771000001', email: 'staff1@sec5.test',
+      position: 'Field Agent', branch_id: BR_A,
+    })
+    expect(res.success).toBe(true)
+    agentId = res.data.id
+
+    const list = await call('agents:list', { branch_id: BR_A })
+    expect(list.success).toBe(true)
+    const row = (list.data as Record<string, unknown>[]).find(a => a.id === agentId)
+    expect(row).toBeTruthy()
+    expect(row!.code).toBe('SEC5-AG-1')
+    expect(row!.name).toBe('Staff One')
+    expect(row!.nic).toBe('SEC5-NIC-1')
+    expect(row!.position).toBe('Field Agent')
+  })
+
+  it('2: agents:create rejects a duplicate NIC and returns the existing agent\'s id instead of a generic error', async () => {
+    setSession(admin)
+    const res = await call('agents:create', {
+      code: 'SEC5-AG-1B', name: 'Staff One Duplicate', nic: 'SEC5-NIC-1', branch_id: BR_A,
+    })
+    expect(res.success).toBe(false)
+    expect(res.existingId).toBe(agentId)
+  })
+
+  let firstUserId: string
+
+  it('3: agents:createUserForAgent creates a login linked via agents.user_id — never a second staff record', async () => {
+    setSession(admin)
+    const res = await call('agents:createUserForAgent', agentId, { role_id: 'sec5-agent-role', pin: '2468', is_active: 1 })
+    expect(res.success).toBe(true)
+    firstUserId = res.data.userId
+
+    const agentRow = db.prepare('SELECT user_id FROM agents WHERE id = ?').get(agentId) as { user_id: string }
+    expect(agentRow.user_id).toBe(firstUserId)
+    const userRow = db.prepare('SELECT name, branch_id FROM users WHERE id = ?').get(firstUserId) as { name: string; branch_id: string }
+    // Identity came FROM the Agent record — never typed separately.
+    expect(userRow.name).toBe('Staff One')
+    expect(userRow.branch_id).toBe(BR_A)
+  })
+
+  it('4: admin:users:getAgentInfo mirrors the live Agent Management record — Profile is never a second source of truth', async () => {
+    setSession(admin)
+    const res = await call('admin:users:getAgentInfo', firstUserId)
+    expect(res.success).toBe(true)
+    expect(res.data.agent_code).toBe('SEC5-AG-1')
+    expect(res.data.nic).toBe('SEC5-NIC-1')
+    expect(res.data.position).toBe('Field Agent')
+  })
+
+  it('5: agents:createUserForAgent blocks creating a second login for an already-linked agent, returning the existing user id', async () => {
+    setSession(admin)
+    const res = await call('agents:createUserForAgent', agentId, { role_id: 'sec5-agent-role', pin: '1111', is_active: 1 })
+    expect(res.success).toBe(false)
+    expect(res.existingUserId).toBe(firstUserId)
+  })
+
+  it('6: agents:update changing branch_id automatically syncs the linked user\'s branch_id (and admin:users:list) without a separate User edit', async () => {
+    setSession(admin)
+    const upd = await call('agents:update', agentId, { branch_id: BR_B })
+    expect(upd.success).toBe(true)
+
+    const userRow = db.prepare('SELECT branch_id FROM users WHERE id = ?').get(firstUserId) as { branch_id: string }
+    expect(userRow.branch_id).toBe(BR_B)
+
+    const list = await call('admin:users:list')
+    const row = (list.data as Record<string, unknown>[]).find(u => u.id === firstUserId)
+    expect(row!.branch_name).toBe('Security5 Branch B')
+
+    // restore for subsequent tests that assume branch A
+    await call('agents:update', agentId, { branch_id: BR_A })
+  })
+
+  it('7: agents:update changing position is reflected immediately in admin:users:list\'s live join — no copy is stored on the user row', async () => {
+    setSession(admin)
+    const upd = await call('agents:update', agentId, { position: 'Senior Field Agent' })
+    expect(upd.success).toBe(true)
+
+    const list = await call('admin:users:list')
+    const row = (list.data as Record<string, unknown>[]).find(u => u.id === firstUserId)
+    expect(row!.agent_position).toBe('Senior Field Agent')
+  })
+
+  it('8: auth:pinLogin rejects login once the linked Agent is set Inactive, even though the user row itself is still active', async () => {
+    setSession(admin)
+    const deactivate = await call('agents:update', agentId, { status: 'inactive' })
+    expect(deactivate.success).toBe(true)
+
+    const login = await call('auth:pinLogin', { pin: '2468', branch_id: BR_A })
+    expect(login.success).toBe(false)
+    expect(String(login.error)).toMatch(/inactive/i)
+
+    // restore for any later test relying on this agent being active
+    await call('agents:update', agentId, { status: 'active' })
+  })
+
+  it('9: agents:createUserForAgent rejects a non-existent agentId', async () => {
+    setSession(admin)
+    const res = await call('agents:createUserForAgent', 'sec5-not-a-real-agent-id', { role_id: 'sec5-agent-role', pin: '3333', is_active: 1 })
+    expect(res.success).toBe(false)
+    expect(String(res.error)).toMatch(/not found/i)
+  })
+
+  it('10: commission_ledger stays keyed to the Agent id — creating a login neither duplicates nor re-keys the commission row', async () => {
+    db.prepare(`
+      INSERT INTO commission_ledger (id, source_table, source_id, registration_agent_id, base_amount, registration_commission, total_commission, status, branch_id)
+      VALUES ('sec5-ledger-1', 'chit_members', 'sec5-source-1', ?, 1000, 50, 50, 'pending_manager_approval', ?)
+    `).run(agentId, BR_A)
+
+    setSession(admin)
+    const create2 = await call('agents:create', { code: 'SEC5-AG-2', name: 'Staff Two', branch_id: BR_A })
+    expect(create2.success).toBe(true)
+    await call('agents:createUserForAgent', create2.data.id, { role_id: 'sec5-agent-role', pin: '4444', is_active: 1 })
+
+    const count = db.prepare('SELECT COUNT(*) as cnt FROM commission_ledger WHERE registration_agent_id = ?').get(agentId) as { cnt: number }
+    expect(count.cnt).toBe(1)
+    const ledgerRow = db.prepare('SELECT registration_agent_id FROM commission_ledger WHERE id = ?').get('sec5-ledger-1') as { registration_agent_id: string }
+    expect(ledgerRow.registration_agent_id).toBe(agentId)
+  })
+
+  it('11: a caller without employees/all permission is rejected from every Agent/User write path', async () => {
+    setSession(noPermUser)
+    const create = await call('agents:create', { code: 'SEC5-AG-NOPERM', name: 'Blocked', branch_id: BR_A })
+    expect(create.success).toBe(false)
+    const update = await call('agents:update', agentId, { position: 'Should Not Apply' })
+    expect(update.success).toBe(false)
+    const createLogin = await call('agents:createUserForAgent', agentId, { role_id: 'sec5-agent-role', pin: '5555', is_active: 1 })
+    expect(createLogin.success).toBe(false)
+    const createUser = await call('admin:users:create', { name: 'Blocked User', email: 'blocked@sec5.test', role_id: 'sec5-agent-role', branch_id: BR_A, password: 'x' })
+    expect(createUser.success).toBe(false)
+  })
+
+  it('12: agents:createUserForAgent rejects a branch-scoped caller acting on an agent from a different branch', async () => {
+    setSession(admin)
+    const otherBranchAgent = await call('agents:create', { code: 'SEC5-AG-OTHER', name: 'Other Branch Staff', branch_id: BR_B })
+    expect(otherBranchAgent.success).toBe(true)
+
+    setSession(mgrA) // scoped to BR_A
+    const res = await call('agents:createUserForAgent', otherBranchAgent.data.id, { role_id: 'sec5-agent-role', pin: '6666', is_active: 1 })
+    expect(res.success).toBe(false)
+    expect(String(res.error)).toMatch(/do not have access/i)
   })
 })

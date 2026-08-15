@@ -173,6 +173,8 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/admin/users', label: 'User List', perm: 'employees' },
       { to: '/admin/roles', label: 'Roles & Permissions', perm: 'employees' },
       { to: '/admin/agents', label: 'Agent Management', perm: 'employees' },
+      { to: '/admin/regions', label: 'Region Management', perm: 'employees' },
+      { to: '/admin/zones', label: 'Zone Management', perm: 'employees' },
     ]
   },
   {

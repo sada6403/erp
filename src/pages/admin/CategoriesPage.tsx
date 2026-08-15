@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, ToggleLeft, ToggleRight, ChevronRight, Lock, Clock } from 'lucide-react'
+import DeleteConfirmModal from '@/components/shared/DeleteConfirmModal'
+import { Plus, Edit2, Trash2, ToggleLeft, ToggleRight, ChevronRight, Lock, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 import { resolveImageSrc } from '@/lib/imageUrl'
+import { useDeleteAction } from '@/hooks/useDeleteAction'
 
 type Category = {
   id: string
@@ -69,6 +71,8 @@ export default function CategoriesPage() {
 
   const active = categories.filter(c => c.is_active).length
 
+  const del = useDeleteAction<Category>(id => window.api.admin.categories.delete(id), load)
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
@@ -127,6 +131,11 @@ export default function CategoriesPage() {
                         }
                       </button>
                     )}
+                    {isCompanyAdmin && Boolean(cat.is_active) && (
+                      <button onClick={() => del.requestDelete(cat)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Delete">
+                        <Trash2 size={13} />
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -148,6 +157,17 @@ export default function CategoriesPage() {
           editRequestId={editRequestId}
           onClose={() => { setShowForm(false); setEditRequestId(undefined) }}
           onSave={() => { setShowForm(false); setEditRequestId(undefined); load() }}
+        />
+      )}
+
+      {del.target && (
+        <DeleteConfirmModal
+          title="Delete Category"
+          itemLabel={del.target.name}
+          message="This category will be deactivated on this device and the cloud database. Products already assigned to it are preserved."
+          busy={del.busy}
+          onCancel={del.cancel}
+          onConfirm={del.confirm}
         />
       )}
     </div>

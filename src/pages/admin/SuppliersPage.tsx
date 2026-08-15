@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, Search } from 'lucide-react'
+import DeleteConfirmModal from '@/components/shared/DeleteConfirmModal'
+import { Plus, Edit2, Trash2, Search } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useDeleteAction } from '@/hooks/useDeleteAction'
+import { useAuthStore } from '@/store/authStore'
 
-type Supplier = Record<string, unknown>
+type Supplier = Record<string, unknown> & { id: string }
 
 export default function SuppliersPage() {
+  const { user: currentUser } = useAuthStore()
+  const canDelete = Boolean((currentUser?.role?.permissions as Record<string, boolean>)?.all
+    || (currentUser?.role?.permissions as Record<string, boolean>)?.inventory)
+
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [showForm, setShowForm]   = useState(false)
   const [editing, setEditing]     = useState<Supplier | null>(null)
@@ -32,6 +39,8 @@ export default function SuppliersPage() {
   )
 
   const totalDue = suppliers.reduce((s, sup) => s + Number(sup.due_balance || 0), 0)
+
+  const del = useDeleteAction<Supplier>(id => window.api.admin.suppliers.delete(id), load)
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -96,9 +105,16 @@ export default function SuppliersPage() {
                   <span className={s.is_active ? 'badge-green' : 'badge-gray'}>{s.is_active ? 'Active' : 'Inactive'}</span>
                 </td>
                 <td className="table-cell px-3">
-                  <button onClick={() => { setEditing(s); setShowForm(true) }} className="btn-ghost btn-sm p-1.5" title="Edit">
-                    <Edit2 size={13}/>
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => { setEditing(s); setShowForm(true) }} className="btn-ghost btn-sm p-1.5" title="Edit">
+                      <Edit2 size={13}/>
+                    </button>
+                    {canDelete && Boolean(s.is_active) && (
+                      <button onClick={() => del.requestDelete(s)} className="btn-ghost btn-sm p-1.5 text-red-400" title="Delete">
+                        <Trash2 size={13}/>
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -111,6 +127,17 @@ export default function SuppliersPage() {
 
       {showForm && (
         <SupplierForm supplier={editing} onClose={() => setShowForm(false)} onSave={() => { setShowForm(false); load() }} />
+      )}
+
+      {del.target && (
+        <DeleteConfirmModal
+          title="Delete Supplier"
+          itemLabel={String(del.target.name || '')}
+          message="This supplier will be deactivated on this device and the cloud database. Existing purchase/expense history referencing it is preserved."
+          busy={del.busy}
+          onCancel={del.cancel}
+          onConfirm={del.confirm}
+        />
       )}
     </div>
   )

@@ -14,6 +14,8 @@ import BranchInspectPage from '@/pages/admin/BranchInspectPage'
 import BranchInspectDetailPage from '@/pages/admin/BranchInspectDetailPage'
 import UsersPage from '@/pages/admin/UsersPage'
 import AgentsPage from '@/pages/admin/AgentsPage'
+import RegionsPage from '@/pages/admin/RegionsPage'
+import ZonesPage from '@/pages/admin/ZonesPage'
 import SuppliersPage from '@/pages/admin/SuppliersPage'
 import AnalyticsPage from '@/pages/admin/AnalyticsPage'
 import DeliveriesPage from '@/pages/admin/DeliveriesPage'
@@ -204,6 +206,8 @@ export default function App() {
         <Route path="/admin/branch-inspect/:branchId" element={<RequireSuperAdmin><BranchInspectDetailPage /></RequireSuperAdmin>} />
         <Route path="/admin/users" element={<UsersPage />} />
         <Route path="/admin/agents" element={<AgentsPage />} />
+        <Route path="/admin/regions" element={<RegionsPage />} />
+        <Route path="/admin/zones" element={<ZonesPage />} />
         <Route path="/admin/categories" element={<CategoriesPage />} />
         <Route path="/admin/suppliers" element={<SuppliersPage />} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />

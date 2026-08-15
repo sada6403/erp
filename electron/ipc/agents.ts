@@ -2,7 +2,8 @@ import type { IpcMain } from 'electron'
 import { dialog } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
-import { enqueuSync } from '../services/syncQueue'
+import bcrypt from 'bcryptjs'
+import { enqueuSync, enqueueUserRow } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import * as XLSX from 'xlsx'
@@ -40,11 +41,27 @@ function resolveScopedAgentId(caller: Record<string, unknown>): string | null {
   return scope?.level === 'agent' ? (scope.agentId || null) : null
 }
 
-function codeTaken(db: ReturnType<typeof getDb>, code: string, excludeId?: string): boolean {
-  const row = excludeId
+function findByCode(db: ReturnType<typeof getDb>, code: string, excludeId?: string): { id: string } | undefined {
+  return (excludeId
     ? db.prepare('SELECT id FROM agents WHERE UPPER(TRIM(code)) = UPPER(TRIM(?)) AND id <> ?').get(code, excludeId)
-    : db.prepare('SELECT id FROM agents WHERE UPPER(TRIM(code)) = UPPER(TRIM(?))').get(code)
-  return Boolean(row)
+    : db.prepare('SELECT id FROM agents WHERE UPPER(TRIM(code)) = UPPER(TRIM(?))').get(code)) as { id: string } | undefined
+}
+function codeTaken(db: ReturnType<typeof getDb>, code: string, excludeId?: string): boolean {
+  return Boolean(findByCode(db, code, excludeId))
+}
+
+// Mirrors codeTaken/findByCode — NIC uniqueness is case/whitespace-
+// insensitive like the Agent Code, and blank NIC never collides (many
+// agents legitimately have no NIC on file yet).
+function findByNic(db: ReturnType<typeof getDb>, nic: string, excludeId?: string): { id: string } | undefined {
+  const trimmed = nic.trim()
+  if (!trimmed) return undefined
+  return (excludeId
+    ? db.prepare('SELECT id FROM agents WHERE UPPER(TRIM(nic)) = UPPER(TRIM(?)) AND id <> ?').get(trimmed, excludeId)
+    : db.prepare('SELECT id FROM agents WHERE UPPER(TRIM(nic)) = UPPER(TRIM(?))').get(trimmed)) as { id: string } | undefined
+}
+function nicTaken(db: ReturnType<typeof getDb>, nic: string, excludeId?: string): boolean {
+  return Boolean(findByNic(db, nic, excludeId))
 }
 
 export function registerAgentHandlers(ipcMain: IpcMain) {
@@ -111,9 +128,23 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const code = String(payload.code || '').trim().toUpperCase()
       const name = String(payload.name || '').trim()
+      const nic = String(payload.nic || '').trim()
       if (!code) return { success: false, error: 'Agent code is required' }
       if (!name) return { success: false, error: 'Agent name is required' }
-      if (codeTaken(db, code)) return { success: false, error: `Agent code "${code}" is already in use` }
+      const codeMatch = findByCode(db, code)
+      if (codeMatch) {
+        return { success: false, error: `Agent / Employee ID "${code}" is already in use`, existingId: codeMatch.id }
+      }
+      if (nic) {
+        const nicMatch = findByNic(db, nic)
+        if (nicMatch) {
+          return { success: false, error: `NIC "${nic}" is already registered to another agent`, existingId: nicMatch.id }
+        }
+      }
+      if (payload.region_id) {
+        const region = db.prepare('SELECT id FROM regions WHERE id = ?').get(payload.region_id)
+        if (!region) return { success: false, error: 'Selected region not found' }
+      }
 
       const caller = authUser()
       const id = crypto.randomUUID()
@@ -123,7 +154,7 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
         name,
         phone: payload.phone || null,
         email: payload.email || null,
-        nic: payload.nic || null,
+        nic: nic || null,
         // A caller without 'all' is branch-scoped (this includes an
         // 'employees'-only Branch Manager, see the isGlobal comment above) —
         // never let them plant an agent in a different branch via payload.
@@ -133,10 +164,23 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
         status: payload.status || 'active',
         notes: payload.notes || null,
         created_by: caller.id || null,
+        etf_number: payload.etf_number || null,
+        epf_number: payload.epf_number || null,
+        date_of_birth: payload.date_of_birth || null,
+        position: payload.position || null,
+        region_id: payload.region_id || null,
+        appointment_date: payload.appointment_date || null,
+        missing_documents: payload.missing_documents || null,
       }
       db.prepare(`
-        INSERT INTO agents (id, code, name, phone, email, nic, branch_id, default_commission_pct, monthly_target, status, notes, created_by)
-        VALUES (@id, @code, @name, @phone, @email, @nic, @branch_id, @default_commission_pct, @monthly_target, @status, @notes, @created_by)
+        INSERT INTO agents (
+          id, code, name, phone, email, nic, branch_id, default_commission_pct, monthly_target, status, notes, created_by,
+          etf_number, epf_number, date_of_birth, position, region_id, appointment_date, missing_documents
+        )
+        VALUES (
+          @id, @code, @name, @phone, @email, @nic, @branch_id, @default_commission_pct, @monthly_target, @status, @notes, @created_by,
+          @etf_number, @epf_number, @date_of_birth, @position, @region_id, @appointment_date, @missing_documents
+        )
       `).run(safe)
       await enqueuSync('agents', id, 'INSERT', safe)
       logAudit(db, {
@@ -166,7 +210,7 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       if (resolveScopedAgentId(caller)) {
         return { success: false, error: 'Agents cannot edit agent profiles' }
       }
-      const existing = db.prepare('SELECT id, branch_id FROM agents WHERE id = ?').get(id) as { id: string; branch_id: unknown } | undefined
+      const existing = db.prepare('SELECT id, branch_id, user_id FROM agents WHERE id = ?').get(id) as { id: string; branch_id: unknown; user_id: string | null } | undefined
       if (!existing) return { success: false, error: 'Agent not found' }
       const isGlobalManage = Boolean(perms.all)
       if (!isGlobalManage && String(existing.branch_id || '') !== String(caller.branch_id || '')) {
@@ -179,8 +223,21 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       if (update.code !== undefined) {
         const code = String(update.code || '').trim().toUpperCase()
         if (!code) return { success: false, error: 'Agent code is required' }
-        if (codeTaken(db, code, id)) return { success: false, error: `Agent code "${code}" is already in use` }
+        const codeMatch = findByCode(db, code, id)
+        if (codeMatch) return { success: false, error: `Agent / Employee ID "${code}" is already in use`, existingId: codeMatch.id }
         update.code = code
+      }
+      if (update.nic !== undefined) {
+        const nic = String(update.nic || '').trim()
+        if (nic) {
+          const nicMatch = findByNic(db, nic, id)
+          if (nicMatch) return { success: false, error: `NIC "${nic}" is already registered to another agent`, existingId: nicMatch.id }
+        }
+        update.nic = nic || null
+      }
+      if (update.region_id !== undefined && update.region_id) {
+        const region = db.prepare('SELECT id FROM regions WHERE id = ?').get(update.region_id)
+        if (!region) return { success: false, error: 'Selected region not found' }
       }
       if (update.name !== undefined) update.name = String(update.name || '').trim()
       if (update.default_commission_pct !== undefined) update.default_commission_pct = Number(update.default_commission_pct) || 0
@@ -189,6 +246,19 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       const fields = Object.keys(update).map(k => `${k} = @${k}`).join(', ')
       if (fields) db.prepare(`UPDATE agents SET ${fields}, updated_at = datetime('now') WHERE id = @id`).run({ ...update, id })
       await enqueuSync('agents', id, 'UPDATE', { id, ...update })
+
+      // Branch sync (spec §18/§19): branch is the one Agent field the rest
+      // of the app's branch-scoping security actually reads from
+      // users.branch_id (every `caller.branch_id` check across the IPC
+      // layer), not from agents — so a linked login's own branch_id is kept
+      // in lockstep here rather than requiring the admin to edit the User
+      // separately, which would otherwise let Agent Management and the
+      // User's actual access scope silently disagree.
+      if (isGlobalManage && update.branch_id !== undefined && existing.user_id) {
+        db.prepare(`UPDATE users SET branch_id = ?, updated_at = datetime('now') WHERE id = ?`).run(update.branch_id, existing.user_id)
+        await enqueueUserRow(existing.user_id)
+      }
+
       if (fields) {
         logAudit(db, {
           userId: (caller.id as string) || null, branchId: (existing.branch_id as string) || null,
@@ -196,6 +266,140 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
         })
       }
       return { success: true }
+    }
+  })
+
+  // Creates a login for an EXISTING Agent record — the only way a login can
+  // be created for an Agent-scoped account (spec: "Agent Management creates
+  // and owns the staff identity; User List only creates the login identity
+  // for an existing Agent"). Every staff field (name/branch/position/etc.)
+  // is read fresh from the Agent row inside this handler — the caller only
+  // ever supplies agentId + the handful of login-specific fields (role,
+  // PIN, active status), never trusted for identity data (spec §21).
+  safeHandle(ipcMain, 'agents:createUserForAgent', async (_e, agentId: string, payload: { role_id?: string; pin?: string; is_active?: number | boolean }) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+    const caller = authUser()
+    if (resolveScopedAgentId(caller)) {
+      return { success: false, error: 'Agents cannot create user accounts' }
+    }
+
+    const db = getDb()
+    const agent = db.prepare('SELECT * FROM agents WHERE id = ?').get(agentId) as Record<string, unknown> | undefined
+    if (!agent) return { success: false, error: 'Agent not found' }
+    const isGlobalManage = Boolean(perms.all)
+    if (!isGlobalManage && String(agent.branch_id || '') !== String(caller.branch_id || '')) {
+      return { success: false, error: 'You do not have access to this agent' }
+    }
+    if (agent.status !== 'active') return { success: false, error: 'Agent must be Active before a login can be created' }
+    if (agent.user_id) {
+      const existingUser = db.prepare('SELECT id, name, created_at FROM users WHERE id = ?').get(agent.user_id) as
+        { id: string; name: string; created_at: string } | undefined
+      return {
+        success: false,
+        error: existingUser
+          ? `This agent already has a user account — ${existingUser.name}, created ${String(existingUser.created_at).slice(0, 10)}`
+          : 'This agent already has a linked user account',
+        existingUserId: agent.user_id,
+      }
+    }
+    if (!agent.branch_id) return { success: false, error: 'Agent must be assigned to a branch before a login can be created' }
+
+    const roleId = String(payload.role_id || '').trim()
+    if (!roleId) return { success: false, error: 'Role is required' }
+    const role = db.prepare('SELECT id, permissions FROM roles WHERE id = ?').get(roleId) as { id: string; permissions: string } | undefined
+    if (!role) return { success: false, error: 'Selected role not found' }
+    if (!isGlobalManage) {
+      const rolePerms = JSON.parse(role.permissions || '{}')
+      if (rolePerms.all) return { success: false, error: 'Cannot assign Company Admin role' }
+    }
+
+    const pin = String(payload.pin || '').trim()
+    if (!/^\d{4,6}$/.test(pin)) return { success: false, error: 'PIN must be 4-6 digits' }
+
+    const { getMaxUsers } = await import('../services/licenseService')
+    const maxUsers = getMaxUsers()
+    const { cnt } = db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number }
+    if (cnt >= maxUsers) {
+      return { success: false, error: `User limit reached (${cnt}/${maxUsers}). Please upgrade your plan.` }
+    }
+
+    const userId = crypto.randomUUID()
+    const agentCode = String(agent.code || '')
+    const placeholderEmail = `${agentCode.toLowerCase().replace(/[^a-z0-9]+/g, '.')}.${Date.now()}@agent.local`
+    const email = String(agent.email || '').trim() || placeholderEmail
+    const passwordHash = await bcrypt.hash(crypto.randomUUID(), 10) // unused for login — Agent accounts are PIN-only
+    const pinHash = await bcrypt.hash(pin, 10)
+    const isActive = payload.is_active === undefined ? 1 : (payload.is_active ? 1 : 0)
+
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(userId, agent.branch_id, roleId, agent.name, email, passwordHash, pinHash, isActive)
+      db.prepare(`UPDATE agents SET user_id = ?, updated_at = datetime('now') WHERE id = ?`).run(userId, agentId)
+    })()
+
+    await enqueueUserRow(userId, 'INSERT')
+    await enqueuSync('agents', agentId, 'UPDATE', { id: agentId, user_id: userId })
+    logAudit(db, {
+      userId: (caller.id as string) || null, branchId: (agent.branch_id as string) || null,
+      action: 'AGENT_USER_CREATED', tableName: 'agents', recordId: agentId, newValues: { userId, agentCode },
+    })
+    return { success: true, data: { userId } }
+  })
+
+  // Read-only migration audit (spec §23): surfaces pre-existing `users` rows
+  // that were created the old, disconnected way (typed directly into User
+  // List, never linked to an Agent record) alongside any Agent that looks
+  // like it MIGHT be the same person by name/phone/email. Informational
+  // only — nothing here writes to the database or auto-links anything;
+  // an admin reviews the suggestions and links via the existing
+  // agents:linkUser / Create Login flow if they agree it's a match.
+  safeHandle(ipcMain, 'agents:auditUnlinkedUsers', () => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+    const caller = authUser()
+    if (resolveScopedAgentId(caller)) return { success: false, error: 'Agents cannot run this report' }
+
+    const db = getDb()
+    const isGlobalManage = Boolean(perms.all)
+    const branchFilter = isGlobalManage ? '' : 'WHERE u.branch_id = ?'
+    const branchParams = isGlobalManage ? [] : [caller.branch_id]
+
+    const unlinkedUsers = db.prepare(`
+      SELECT u.id, u.name, u.email, u.branch_id, b.name as branch_name, r.name as role_name, u.created_at
+      FROM users u
+      LEFT JOIN branches b ON b.id = u.branch_id
+      LEFT JOIN roles r ON r.id = u.role_id
+      WHERE u.id NOT IN (SELECT user_id FROM agents WHERE user_id IS NOT NULL)
+        ${branchFilter ? 'AND u.branch_id = ?' : ''}
+      ORDER BY u.name
+    `).all(...(branchFilter ? branchParams : [])) as Record<string, unknown>[]
+
+    const unlinkedAgents = db.prepare(`
+      SELECT id, code, name, phone, email, branch_id, status FROM agents
+      WHERE user_id IS NULL ${isGlobalManage ? '' : 'AND branch_id = ?'}
+    `).all(...(isGlobalManage ? [] : [caller.branch_id])) as Record<string, unknown>[]
+
+    const norm = (v: unknown) => String(v || '').trim().toLowerCase()
+    const results = unlinkedUsers.map(u => {
+      const suggestions = unlinkedAgents.filter(a => {
+        if (String(a.branch_id || '') !== String(u.branch_id || '')) return false
+        const nameMatch  = norm(a.name) && norm(a.name) === norm(u.name)
+        const emailMatch = norm(a.email) && norm(a.email) === norm(u.email)
+        return nameMatch || emailMatch
+      }).map(a => ({ id: a.id, code: a.code, name: a.name, phone: a.phone, email: a.email, status: a.status }))
+      return { ...u, possibleAgentMatches: suggestions }
+    })
+
+    return {
+      success: true,
+      data: {
+        unlinkedUserCount: results.length,
+        unlinkedAgentCount: unlinkedAgents.length,
+        users: results,
+      },
     }
   })
 
@@ -555,11 +759,17 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
 
       const rows = db.prepare(`
         SELECT a.id, a.code, a.name, a.branch_id, a.monthly_target, a.status,
+          a.phone, a.email, a.nic, a.etf_number, a.epf_number, a.date_of_birth,
+          a.position, a.region_id, a.appointment_date, a.missing_documents, a.notes,
+          a.user_id, b.name as branch_name, rg.name as region_name, z.name as zone_name,
           COALESCE(SUM(i.total_amount), 0) as sales_total,
           COALESCE(SUM(i.agent_commission_amount), 0) as commission_total,
           COUNT(i.id) as invoice_count
         FROM agents a
         LEFT JOIN invoices i ON ${invoiceConditions.join(' AND ')}
+        LEFT JOIN branches b ON b.id = a.branch_id
+        LEFT JOIN regions rg ON rg.id = a.region_id
+        LEFT JOIN zones z ON z.id = rg.zone_id
         ${agentWhere}
         GROUP BY a.id
         ORDER BY sales_total DESC

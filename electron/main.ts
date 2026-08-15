@@ -7,6 +7,7 @@ import { registerProductHandlers } from './ipc/products'
 import { registerInvoiceHandlers } from './ipc/invoices'
 import { registerCustomerHandlers } from './ipc/customers'
 import { registerAgentHandlers } from './ipc/agents'
+import { registerRegionHandlers } from './ipc/regions'
 import { registerStockHandlers } from './ipc/stocks'
 import { registerAuthHandlers } from './ipc/auth'
 import { registerSyncHandlers } from './ipc/sync'
@@ -174,6 +175,7 @@ async function bootstrap() {
   registerInvoiceHandlers(ipcMain)
   registerCustomerHandlers(ipcMain)
   registerAgentHandlers(ipcMain)
+  registerRegionHandlers(ipcMain)
   registerStockHandlers(ipcMain)
   registerSyncHandlers(ipcMain)
   registerPrinterHandlers(ipcMain)

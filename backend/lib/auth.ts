@@ -540,6 +540,46 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     // "this user is THE SmartBuy Manager of this branch" pointer, display/
     // report metadata only (does not drive session scoping).
     `ALTER TABLE branches ADD COLUMN smartbuy_manager_id CHAR(36) NULL`,
+    // Agent Management as staff master — Zone is the broader grouping
+    // (e.g. "Jaffna"), Region the narrower one within it (e.g.
+    // "Vaddukoddai"), mirrors the local SQLite migration in
+    // electron/database.ts. No FOREIGN KEY constraints, matching this
+    // file's existing style (app-level relationships only).
+    `CREATE TABLE IF NOT EXISTS zones (
+       id         CHAR(36)     NOT NULL PRIMARY KEY,
+       name       VARCHAR(255) NOT NULL,
+       code       VARCHAR(64)  NULL,
+       is_active  BOOLEAN      NOT NULL DEFAULT 1,
+       created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at  DATETIME     NULL
+     )`,
+    `CREATE TABLE IF NOT EXISTS regions (
+       id         CHAR(36)     NOT NULL PRIMARY KEY,
+       name       VARCHAR(255) NOT NULL,
+       code       VARCHAR(64)  NULL,
+       zone_id    CHAR(36)     NULL,
+       is_active  BOOLEAN      NOT NULL DEFAULT 1,
+       created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at  DATETIME     NULL,
+       INDEX idx_regions_zone (zone_id)
+     )`,
+    // Staff-detail columns — Personal Information / Role & Location sections
+    // of the Staff Details UI. `code`/`nic`/`notes`/`branch_id`/`status`/
+    // `phone`/`email` already existed above.
+    `ALTER TABLE agents ADD COLUMN etf_number VARCHAR(64) NULL`,
+    `ALTER TABLE agents ADD COLUMN epf_number VARCHAR(64) NULL`,
+    `ALTER TABLE agents ADD COLUMN date_of_birth DATE NULL`,
+    `ALTER TABLE agents ADD COLUMN position VARCHAR(255) NULL`,
+    `ALTER TABLE agents ADD COLUMN region_id CHAR(36) NULL`,
+    `ALTER TABLE agents ADD COLUMN appointment_date DATE NULL`,
+    `ALTER TABLE agents ADD COLUMN missing_documents TEXT NULL`,
+    `ALTER TABLE agents ADD INDEX idx_agents_region (region_id)`,
+    // NIC uniqueness — MySQL unique indexes already treat multiple NULLs as
+    // distinct (no collision for agents with no NIC on file, mirroring the
+    // partial-index behavior on the SQLite side).
+    `ALTER TABLE agents ADD UNIQUE INDEX idx_agents_nic (nic)`,
     `CREATE TABLE IF NOT EXISTS expense_categories (
        id          CHAR(36)     NOT NULL PRIMARY KEY,
        name        VARCHAR(255) NOT NULL UNIQUE,
