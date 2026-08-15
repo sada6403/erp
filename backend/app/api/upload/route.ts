@@ -2,7 +2,7 @@ import { randomUUID } from 'crypto'
 import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import { NextRequest, NextResponse } from 'next/server'
-import { isAuthorized } from '@/lib/auth'
+import { resolveCompany, AccountStatusError } from '@/lib/auth'
 
 export const runtime = 'nodejs'
 
@@ -15,7 +15,26 @@ const EXTENSIONS: Record<string, string> = {
 }
 
 export async function POST(request: NextRequest) {
-  if (!isAuthorized(request)) {
+  // Was gated by `isAuthorized()`, which only accepts a single global
+  // `CLOUD_API_KEY` env var — but electron/services/cloudApi.ts (used by
+  // SyncService's uploadOfflineImage) always sends the calling company's own
+  // per-tenant key, the same one sync/push and sync/changes validate via
+  // resolveCompany(). Those two never match for a real customer, so every
+  // product-image upload was permanently rejected with 401 — the sync queue
+  // item retried up to MAX_ATTEMPTS and got stuck failed ("Image upload
+  // failed; retrying before pushing product record") for a reason no amount
+  // of retrying could ever fix. Matches the pattern already used correctly
+  // by /api/health and every /api/sync/* route.
+  let company
+  try {
+    company = await resolveCompany(request)
+  } catch (err) {
+    if (err instanceof AccountStatusError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 403 })
+    }
+    throw err
+  }
+  if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
