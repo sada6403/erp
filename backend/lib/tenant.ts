@@ -641,7 +641,7 @@ export async function createTenant(params: {
   // 5. Default HQ branch
   const branchId = randomUUID()
   await tp.query(
-    `INSERT INTO branches (id, name, code, is_active) VALUES (?, 'Head Office', 'HQ-001', 1)`,
+    `INSERT INTO branches (id, name, code, is_active) VALUES (?, 'Main Branch', 'MAIN-001', 1)`,
     [branchId]
   )
 
