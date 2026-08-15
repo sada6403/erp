@@ -38,7 +38,11 @@ export default function SyncMonitorPage() {
     }
   }, [])
 
-  useEffect(() => { loadQueue() }, [loadQueue])
+  useEffect(() => {
+    loadQueue()
+    const interval = setInterval(loadQueue, 10_000)
+    return () => clearInterval(interval)
+  }, [loadQueue])
 
   const handleSync = async () => {
     setSyncing(true)
