@@ -308,3 +308,72 @@ describe('Security audit regression — commission self-approval block', () => {
     expect(res.success).toBe(false)
   })
 })
+
+// Regression tests for the SmartBuy menu/route fix: Commission Rules and
+// Scheme Master were previously hidden behind adminOnly:true in the sidebar
+// (AppLayout.tsx) even though the backend handlers underneath (chits.ts,
+// commissions.ts) were already written to let a plain `chits` user VIEW
+// them — only mutating requires Super Admin. These tests pin down that
+// exact backend contract so a future change can't silently make the menu
+// fix (chits can now reach these pages) meaningless, or accidentally let a
+// chits-only user mutate what should stay admin-only.
+describe('Security audit regression — SmartBuy Commission Rules / Scheme Master view-vs-mutate boundary', () => {
+  const BR_A = 'sec4-branch-a'
+
+  beforeAll(() => {
+    seedBranch(BR_A, 'Security4 Branch A', 'S4A')
+    seedUser('u-sec4-admin', null)
+    seedUser('u-sec4-chits', BR_A)
+  })
+
+  const admin = makeSession({ id: 'u-sec4-admin', permissions: { all: true } })
+  const chitsOnly = makeSession({ id: 'u-sec4-chits', branchId: BR_A, permissions: { chits: true } })
+
+  it('commissions:rules:list — a chits-only (non-admin) caller can view rules', async () => {
+    setSession(chitsOnly)
+    const res = await call('commissions:rules:list')
+    if (!res.success) throw new Error(`REGRESSION: commissions:rules:list now rejects a chits-only caller — the "Commission Rules" menu item (AppLayout.tsx, perm:['chits']) would show a page that immediately fails to load. Error: ${res.error}`)
+    expect(res.success).toBe(true)
+  })
+
+  it('commissions:rules:create — a chits-only (non-admin) caller is still rejected (Super Admin only)', async () => {
+    setSession(chitsOnly)
+    const res = await call('commissions:rules:create', {
+      name: 'Sec4 Rule', scope: 'global', calculation_type: 'percentage', rate: 5, ownership_model: 'registration', status: 'active',
+    })
+    if (res.success) throw new Error('REGRESSION: a chits-only caller was able to create a commission rule — mutation must stay Super Admin-only even though viewing was intentionally opened up')
+    expect(res.success).toBe(false)
+  })
+
+  it('commissions:rules:create — Super Admin can still create a rule (mutation path unaffected)', async () => {
+    setSession(admin)
+    const res = await call('commissions:rules:create', {
+      name: 'Sec4 Admin Rule', scope: 'global', calculation_type: 'percentage', rate: 5, ownership_model: 'registration', status: 'active',
+    })
+    expect(res.success).toBe(true)
+  })
+
+  it('chits:templates:list — a chits-only (non-admin) caller can view the Scheme Master catalog', async () => {
+    setSession(chitsOnly)
+    const res = await call('chits:templates:list', { status: 'all' })
+    if (!res.success) throw new Error(`REGRESSION: chits:templates:list now rejects a chits-only caller — the "Scheme Master" menu item and its route (now RequireSmartBuyAccess in App.tsx) would show a page that immediately fails to load. Error: ${res.error}`)
+    expect(res.success).toBe(true)
+  })
+
+  it('chits:templates:create — a chits-only (non-admin) caller is still rejected (Super Admin only)', async () => {
+    setSession(chitsOnly)
+    const res = await call('chits:templates:create', {
+      scheme_name: 'Sec4 Scheme', monthly_contribution_amount: 1000, duration_months: 5, minimum_members: 3, product_value: 5000,
+    })
+    if (res.success) throw new Error('REGRESSION: a chits-only caller was able to create a Scheme Master template — mutation must stay Super Admin-only even though viewing was intentionally opened up')
+    expect(res.success).toBe(false)
+  })
+
+  it('chits:templates:create — Super Admin can still create a template (mutation path unaffected)', async () => {
+    setSession(admin)
+    const res = await call('chits:templates:create', {
+      scheme_name: 'Sec4 Admin Scheme', monthly_contribution_amount: 1000, duration_months: 5, minimum_members: 3, product_value: 5000,
+    })
+    expect(res.success).toBe(true)
+  })
+})

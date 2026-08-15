@@ -463,8 +463,15 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
       }
 
-      // 3. Fall back to local app-img:// URL
-      return { success: true, data: localUrl }
+      // 3. Fall back to local app-img:// URL — genuinely saved (the file is
+      // safely in this device's userData/uploads folder and will preview
+      // fine here), but NOT yet reachable from any other PC: `local_only`
+      // tells the caller so it can be honest about that instead of implying
+      // full "upload successful" (§C2 — this reference still gets synced to
+      // other devices as row data via the normal `products` sync, but the
+      // file itself only exists on this machine until cloud storage is
+      // configured and syncService's retry succeeds).
+      return { success: true, data: localUrl, local_only: true }
   })
 
   safeHandle(ipcMain, 'products:importExcel', async () => {

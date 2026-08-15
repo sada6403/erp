@@ -153,6 +153,27 @@ export async function applySyncOperation(
       .map(([key, value]) => [key, normalizeValue(value)])
   )
 
+  if (input.table === 'users' && operation === 'UPDATE') {
+    // Every local user-CRUD write pushes operation='UPDATE' regardless of
+    // whether the row exists in the cloud yet (electron/services/syncQueue.ts'
+    // enqueueUserRow always labels it 'UPDATE'), and the locally-seeded
+    // default admin is never pushed at all on install. A plain `UPDATE ...
+    // WHERE id = ?` against a row that isn't there yet silently affects 0
+    // rows and reports success — the record then never exists in the cloud,
+    // so newly created users never appear on other branches and edits to a
+    // still-local-only account (e.g. that seeded default admin) never
+    // propagate either. Same existence-check-then-INSERT-fallback pattern as
+    // the 'stocks' case below; falling through to the INSERT branch's
+    // `ON DUPLICATE KEY UPDATE` makes this self-healing and idempotent no
+    // matter how many times the same event replays.
+    const targetId = String(record.id || input.recordId)
+    const existing = await client.query<{ id: string }>(
+      `SELECT id FROM users WHERE id = ? LIMIT 1`,
+      [targetId]
+    )
+    if (!existing.rows[0]) operation = 'INSERT'
+  }
+
   if (input.table === 'users') {
     // Never blank stored credentials: a partial UPDATE (e.g. a PIN or name change)
     // must not overwrite password_hash/pin_hash with an empty value.
@@ -177,6 +198,14 @@ export async function applySyncOperation(
   }
 
   if (operation === 'DELETE') {
+    // Record a tombstone BEFORE deleting so every other device's next pull
+    // (GET /api/sync/deletions) learns this row is gone — the changes-based
+    // pull alone can never see a delete, since a deleted row simply isn't in
+    // `WHERE updated_at > since` results anymore.
+    await client.query(
+      `INSERT INTO sync_deletions (id, table_name, record_id) VALUES (UUID(), ?, ?)`,
+      [input.table, input.recordId]
+    )
     await client.query(
       `DELETE FROM ${quoteIdentifier(input.table)} WHERE id = ?`,
       [input.recordId]

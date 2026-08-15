@@ -96,7 +96,15 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'invoices:create', async (_e, payload) => {
       const db = getDb()
       const user = getAuthUser()
-      const branchId = payload.branch_id || (user?.branch_id as string) || defaultBranchId()
+      const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+      // A non-global caller's session branch always wins — `payload.branch_id`
+      // used to be trusted outright, so a cashier could attribute a sale
+      // (and its stock decrement / credit-ledger posting) to another branch
+      // just by sending a different id. Only a global (perms.all) caller may
+      // set an explicit branch via payload (e.g. Company Admin backfilling).
+      const branchId = perms.all
+        ? (payload.branch_id || (user?.branch_id as string) || defaultBranchId())
+        : ((user?.branch_id as string) || defaultBranchId())
       const billType: BillType = payload.bill_type || 'RETAIL'
       const id = crypto.randomUUID()
       const invoiceNumber = getNextBillNumber(branchId, billType)
@@ -706,10 +714,14 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         WHERE 1=1
       `
       const params: unknown[] = []
-      if (!isSuperAdmin && !filters.all_branches) {
+      // `all_branches` must only bypass branch scoping for an actually global
+      // caller — it was previously honored for any renderer-supplied filter,
+      // so a non-admin session could read every branch's invoices by passing
+      // { all_branches: true } to a direct IPC call.
+      if (!isSuperAdmin) {
         sql += ' AND i.branch_id = ?'; params.push((user?.branch_id as string) || defaultBranchId())
       }
-      if (filters.branch_id)  { sql += ' AND i.branch_id = ?';  params.push(filters.branch_id) }
+      if (isSuperAdmin && filters.branch_id) { sql += ' AND i.branch_id = ?'; params.push(filters.branch_id) }
       if (filters.bill_type)  { sql += ' AND i.bill_type = ?';  params.push(filters.bill_type) }
       if (filters.status)     { sql += ' AND i.status = ?';     params.push(filters.status) }
       if (filters.customer_id){ sql += ' AND i.customer_id = ?';params.push(filters.customer_id) }
@@ -733,7 +745,14 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         LEFT JOIN users u ON u.id = i.cashier_id
         LEFT JOIN users a ON a.id = i.approved_by
         WHERE i.id = ?
-      `).get(id)
+      `).get(id) as { branch_id?: unknown } | undefined
+      if (!invoice) return { success: true, data: undefined }
+
+      const user = getAuthUser()
+      const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+      if (!perms.all && user?.branch_id && invoice.branch_id !== user.branch_id) {
+        return { success: false, error: 'Cannot access a bill from another branch' }
+      }
 
       const items = db.prepare(`
         SELECT ii.*, p.name as product_name, p.sku

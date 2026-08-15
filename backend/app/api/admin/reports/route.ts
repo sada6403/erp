@@ -11,11 +11,17 @@ export async function GET(req: NextRequest) {
   const type     = sp.get('type') ?? 'sales'
   const from     = sp.get('from') ?? new Date(Date.now() - 30*86400000).toISOString().split('T')[0]
   const to       = sp.get('to')   ?? new Date().toISOString().split('T')[0]
-  const branchId = sp.get('branch_id')
+  // A branch-scoped admin's own JWT branch always wins over the query
+  // param — it was previously trusted outright, so any 'reports'-permitted
+  // caller could read another branch's (or the whole company's, by omitting
+  // it) sales/staff figures just by editing the URL.
+  const branchId = auth.payload.branch_id || sp.get('branch_id')
 
   const data = await withTenant(companyId, async (client) => {
     const bf = branchId ? `AND i.branch_id = ?` : ''
     const bargs: unknown[] = branchId ? [branchId] : []
+    const ibf = branchId ? `AND branch_id = ?` : ''
+    const ibargs: unknown[] = branchId ? [branchId] : []
 
     if (type === 'sales') {
       const { rows } = await client.query(
@@ -35,10 +41,13 @@ export async function GET(req: NextRequest) {
            SUM(status='active') as active, SUM(status='overdue') as overdue,
            SUM(status='completed') as completed,
            COALESCE(SUM(due_amount),0) as total_outstanding,
-           COALESCE((SELECT SUM(amount) FROM installment_payments ip
-                     WHERE ip.status='approved' AND DATE(ip.created_at) BETWEEN ? AND ?),0) as collections
-         FROM installments`,
-        [from, to]
+           COALESCE((SELECT SUM(ip.amount) FROM installment_payments ip
+                     JOIN installments inst2 ON inst2.id = ip.installment_id
+                     WHERE ip.status='approved' AND DATE(ip.created_at) BETWEEN ? AND ?
+                     ${branchId ? 'AND inst2.branch_id = ?' : ''}),0) as collections
+         FROM installments
+         WHERE 1=1 ${ibf}`,
+        branchId ? [from, to, branchId, ...ibargs] : [from, to]
       )
       return rows[0]
     }

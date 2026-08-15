@@ -94,6 +94,39 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_coupon_redemptions_branch (branch_id),
        INDEX idx_coupon_redemptions_updated (updated_at)
      )`,
+    // SmartBuy <-> Coupon linkage — mirrors the local SQLite migration in
+    // electron/database.ts (couponSourceColumns / couponAgentColumns). These
+    // were previously only ever added to the local per-device database, so a
+    // SmartBuy-issued voucher's scheme/member/cycle/Agent traceability never
+    // reached the cloud copy of `coupons` on other devices/branches.
+    `ALTER TABLE coupons ADD COLUMN source_type VARCHAR(32) NULL`,
+    `ALTER TABLE coupons ADD COLUMN source_id VARCHAR(64) NULL`,
+    `ALTER TABLE coupons ADD COLUMN smartbuy_scheme_id CHAR(36) NULL`,
+    `ALTER TABLE coupons ADD COLUMN smartbuy_member_id CHAR(36) NULL`,
+    `ALTER TABLE coupons ADD COLUMN smartbuy_cycle_no INT NULL`,
+    `ALTER TABLE coupons ADD COLUMN smartbuy_entitlement_value DECIMAL(14,2) NULL`,
+    `ALTER TABLE coupons ADD COLUMN smartbuy_product_value DECIMAL(14,2) NULL`,
+    `ALTER TABLE coupons ADD COLUMN agent_id CHAR(36) NULL`,
+    `ALTER TABLE coupons ADD COLUMN agent_code VARCHAR(64) NULL`,
+    `ALTER TABLE coupons ADD COLUMN agent_name VARCHAR(255) NULL`,
+    `ALTER TABLE coupons ADD INDEX idx_coupons_smartbuy_scheme (smartbuy_scheme_id)`,
+    `ALTER TABLE coupons ADD INDEX idx_coupons_agent (agent_id)`,
+    // Generic deletion tombstone — the pull side (`GET /api/sync/changes`)
+    // only ever returns rows still present (`WHERE updated_at > since`), so
+    // a hard-deleted row (e.g. a deleted branch) simply vanishes from that
+    // result set with no signal that anything was removed. This table is
+    // written by applySyncOperation's DELETE branch (lib/sync.ts) and read
+    // by GET /api/sync/deletions, so every other device's pullChanges() can
+    // apply the same delete locally instead of the deleted row lingering
+    // forever on devices that already had it.
+    `CREATE TABLE IF NOT EXISTS sync_deletions (
+       id         CHAR(36)     NOT NULL PRIMARY KEY,
+       table_name VARCHAR(64)  NOT NULL,
+       record_id  VARCHAR(128) NOT NULL,
+       deleted_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_sync_deletions_table_time (table_name, deleted_at),
+       INDEX idx_sync_deletions_record (table_name, record_id)
+     )`,
     `CREATE TABLE IF NOT EXISTS discounts (
        id                  CHAR(36)      NOT NULL PRIMARY KEY,
        name                VARCHAR(255)  NOT NULL,

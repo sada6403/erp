@@ -3,19 +3,29 @@ import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import { Plus, Pencil, Power, PowerOff, Layers, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/store/authStore'
 
 type Row = Record<string, unknown>
 
 const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-// Super Admin-only management of the SmartBuy Scheme Master — the reusable
-// named catalog ("SmartBuy 500", "SmartBuy Premium", ...) that a Smart Buy
-// Manager picks from by dropdown wherever they start a new scheme, instead
-// of typing the contribution amount / duration / member count by hand.
-// Route is gated by RequireSuperAdmin in App.tsx, but the IPC handlers
-// (chits:templates:create/update) enforce the same restriction server-side
-// regardless of what the UI shows.
+// The SmartBuy Scheme Master — the reusable named catalog ("SmartBuy 500",
+// "SmartBuy Premium", ...) that a Smart Buy Manager picks from by dropdown
+// wherever they start a new scheme, instead of typing the contribution
+// amount / duration / member count by hand.
+// Route is gated by RequireSmartBuyAccess (chits∨all) in App.tsx — any
+// chits user may view this catalog, matching what the backend already
+// allowed (chits:templates:list -> canManage = chits∨all). Only
+// create/update require Super Admin (chits:templates:create/update ->
+// isGlobalChitAccess = all-only), enforced server-side regardless of what
+// the UI shows, and mirrored here client-side (isSuperAdmin) so a chits-only
+// viewer sees a real read-only catalog instead of buttons that would just
+// fail on click.
 export default function SchemeMasterPage() {
+  const { user } = useAuthStore()
+  const permissions = ((user?.role as unknown as Row)?.permissions as Row) || {}
+  const isSuperAdmin = Boolean(permissions.all)
+
   const [templates, setTemplates] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -50,11 +60,11 @@ export default function SchemeMasterPage() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader title="SmartBuy Scheme Master" subtitle={`${templates.length} scheme(s) — the catalog Smart Buy Managers select from, they never type these details`}
-        actions={
+        actions={isSuperAdmin ? (
           <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn-primary btn-sm gap-1.5">
             <Plus size={14} /> New Scheme
           </button>
-        }
+        ) : null}
       />
 
       <div className="flex-1 overflow-auto px-6 pb-6">
@@ -84,16 +94,20 @@ export default function SchemeMasterPage() {
                   </td>
                   <td className="table-cell text-slate-400 text-xs">{t.created_at ? new Date(String(t.created_at)).toLocaleDateString() : '—'}</td>
                   <td className="table-cell">
-                    <div className="flex gap-1">
-                      <button onClick={() => { setEditing(t); setShowForm(true) }} className="btn-ghost btn-sm p-1.5" title="Edit"><Pencil size={13} /></button>
-                      <button
-                        onClick={() => toggleStatus(t)}
-                        className="btn-ghost btn-sm p-1.5"
-                        title={t.status === 'active' ? 'Mark Inactive' : 'Mark Active'}
-                      >
-                        {t.status === 'active' ? <PowerOff size={13} /> : <Power size={13} />}
-                      </button>
-                    </div>
+                    {isSuperAdmin ? (
+                      <div className="flex gap-1">
+                        <button onClick={() => { setEditing(t); setShowForm(true) }} className="btn-ghost btn-sm p-1.5" title="Edit"><Pencil size={13} /></button>
+                        <button
+                          onClick={() => toggleStatus(t)}
+                          className="btn-ghost btn-sm p-1.5"
+                          title={t.status === 'active' ? 'Mark Inactive' : 'Mark Active'}
+                        >
+                          {t.status === 'active' ? <PowerOff size={13} /> : <Power size={13} />}
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-xs" style={{ color: 'var(--text-3)' }}>View only</span>
+                    )}
                   </td>
                 </tr>
               ))}

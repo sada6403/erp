@@ -36,30 +36,63 @@ function importCell(row: Record<string, unknown>, ...names: string[]): string {
   return ''
 }
 
+// Branch scoping shared by every customer read below — a non-global caller
+// (branch_id set, no `all` permission) is restricted to their own branch's
+// customers plus any legacy/shared customer with a NULL branch_id. This was
+// previously entirely absent on the read side (only `customers:update` had
+// it), so any authenticated branch user could read another branch's full
+// customer PII (phone, NIC, address, outstanding credit) by ID, search, or
+// listing — a real cross-branch data leak, not just a UI gap.
+function branchScope(caller: Record<string, unknown>, perms: Record<string, unknown>): { clause: string; param?: string } {
+  const isGlobal = Boolean(perms.all)
+  const branchId = caller.branch_id as string | undefined
+  if (isGlobal || !branchId) return { clause: '' }
+  return { clause: ' AND (branch_id = ? OR branch_id IS NULL)', param: branchId }
+}
+
 export function registerCustomerHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'customers:list', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
+    const caller = authUser()
+    const perms = currentPerms(caller)
+    const isGlobal = Boolean(perms.all)
     let sql = 'SELECT * FROM customers WHERE 1=1'
     const params: unknown[] = []
-    if (filters.branch_id) { sql += ' AND branch_id = ?'; params.push(filters.branch_id) }
+    if (isGlobal) {
+      // Only a global caller may request another branch's customers explicitly.
+      if (filters.branch_id) { sql += ' AND branch_id = ?'; params.push(filters.branch_id) }
+    } else if (caller.branch_id) {
+      sql += ' AND (branch_id = ? OR branch_id IS NULL)'
+      params.push(caller.branch_id)
+    }
     sql += ' ORDER BY name LIMIT 500'
     return { success: true, data: db.prepare(sql).all(...params) }
   })
 
   safeHandle(ipcMain, 'customers:search', (_e, query: string) => {
     const db = getDb()
+    const { clause, param } = branchScope(authUser(), currentPerms())
     const q = `%${query}%`
+    const params: unknown[] = [q, q, q, q]
+    if (param) params.push(param)
     const rows = db.prepare(`
       SELECT * FROM customers
-      WHERE name LIKE ? OR phone LIKE ? OR email LIKE ? OR nic LIKE ?
+      WHERE (name LIKE ? OR phone LIKE ? OR email LIKE ? OR nic LIKE ?)${clause}
       ORDER BY name LIMIT 30
-    `).all(q, q, q, q)
+    `).all(...params)
     return { success: true, data: rows }
   })
 
   safeHandle(ipcMain, 'customers:get', (_e, id: string) => {
     const db = getDb()
-    return { success: true, data: db.prepare('SELECT * FROM customers WHERE id = ?').get(id) }
+    const row = db.prepare('SELECT * FROM customers WHERE id = ?').get(id) as { branch_id: unknown } | undefined
+    if (!row) return { success: true, data: undefined }
+    const caller = authUser()
+    const perms = currentPerms(caller)
+    if (!perms.all && caller.branch_id && row.branch_id && String(row.branch_id) !== String(caller.branch_id)) {
+      return { success: false, error: 'Cannot access a customer from another branch' }
+    }
+    return { success: true, data: row }
   })
 
   // Match an existing customer by phone OR NIC — used to avoid creating
@@ -143,6 +176,9 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
     const caller = authUser()
     const existing = db.prepare('SELECT id, branch_id, name FROM customers WHERE id = ?').get(id) as { id: string; branch_id: unknown; name: string } | undefined
     if (!existing) return { success: false, error: 'Customer not found' }
+    if (!perms.all && caller.branch_id && existing.branch_id && String(existing.branch_id) !== String(caller.branch_id)) {
+      return { success: false, error: 'Cannot delete a customer from another branch' }
+    }
 
     const refs: Array<{ label: string; cnt: number }> = [
       { label: 'invoice(s)', cnt: (db.prepare('SELECT COUNT(*) as c FROM invoices WHERE customer_id=?').get(id) as { c: number }).c },
@@ -272,8 +308,24 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
       return { success: true, imported, skipped, errors: errors.slice(0, 50) }
   })
 
+  // Shared guard for the three by-customer-id detail reads below: resolve
+  // the customer's branch and reject cross-branch access the same way
+  // `customers:get` does, before running the detail query.
+  function assertCustomerAccess(db: ReturnType<typeof getDb>, id: string): { error?: string } {
+    const row = db.prepare('SELECT branch_id FROM customers WHERE id = ?').get(id) as { branch_id: unknown } | undefined
+    if (!row) return {}
+    const caller = authUser()
+    const perms = currentPerms(caller)
+    if (!perms.all && caller.branch_id && row.branch_id && String(row.branch_id) !== String(caller.branch_id)) {
+      return { error: 'Cannot access a customer from another branch' }
+    }
+    return {}
+  }
+
   safeHandle(ipcMain, 'customers:history', (_e, id: string) => {
     const db = getDb()
+    const access = assertCustomerAccess(db, id)
+    if (access.error) return { success: false, error: access.error }
     const invoices = db.prepare(`
       SELECT i.*, COUNT(ii.id) as item_count
       FROM invoices i
@@ -289,6 +341,8 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
   // and through which agent" without leaving the customer's own record.
   safeHandle(ipcMain, 'customers:chitMemberships', (_e, id: string) => {
     const db = getDb()
+    const access = assertCustomerAccess(db, id)
+    if (access.error) return { success: false, error: access.error }
     const rows = db.prepare(`
       SELECT m.id, m.scheme_id, m.join_order, m.status, m.contributions_paid,
         m.is_early_redemption, m.won_cycle_no, m.voucher_id,
@@ -313,6 +367,8 @@ export function registerCustomerHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'customers:installments', (_e, id: string) => {
     const db = getDb()
+    const access = assertCustomerAccess(db, id)
+    if (access.error) return { success: false, error: access.error }
     const rows = db.prepare(`
       SELECT inst.*, i.invoice_number
       FROM installments inst

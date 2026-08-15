@@ -14,6 +14,7 @@ import NotificationPanel from './NotificationPanel'
 import { setSystemTheme } from '@/lib/systemTheme'
 import ThemeToggle from '@/components/shared/ThemeToggle'
 import { getHomeLabel, getLandingRoute, getSessionProfile, type SessionRoleKind } from '@/lib/sessionRouting'
+import { resolveImageSrc } from '@/lib/imageUrl'
 
 const MASKED_SECRET = '********'
 
@@ -98,14 +99,29 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/smart-buy', label: 'Dashboard', perm: ['chits'] },
       { to: '/admin/smart-buy-award', label: 'Award Winners', perm: ['chits'] },
-      { to: '/admin/scheme-master', label: 'Scheme Master', adminOnly: true },
+      // Was adminOnly:true, hiding this from every chits-only user even
+      // though both the route (RequireSmartBuyAccess) and the backend
+      // (chits:templates:list -> canManage = chits∨all) already allow a
+      // chits user to VIEW the catalog — only create/update require all
+      // (isGlobalChitAccess), which SchemeMasterPage now gates client-side
+      // too (see its own isSuperAdmin check). Not a security relaxation:
+      // the route/backend were already this permissive, the menu just
+      // hadn't caught up.
+      { to: '/admin/scheme-master', label: 'Scheme Master', perm: ['chits'] },
       { to: '/admin/chits', label: 'Schemes', perm: ['chits'] },
       { to: '/admin/smart-buy-calculator', label: 'Viability Calculator', perm: ['chits'] },
       { to: '/admin/chit-customers', label: 'Customers', perm: ['chits'] },
       { to: '/admin/smart-buy-agents', label: 'Agents', perm: ['chits'] },
       { to: '/admin/smart-buy-reminders', label: 'Payment Reminders', perm: ['chits'] },
       { to: '/admin/smart-buy-reports', label: 'Reports', perm: ['chits'] },
-      { to: '/admin/commission-rules', label: 'Commission Rules', adminOnly: true },
+      // Was adminOnly:true — same story as Scheme Master above: the route
+      // (RequireSmartBuyAccess) and backend (canViewCommissions = chits∨all)
+      // already permit a chits user to view rules/ledger; only mutating
+      // rules requires all (isCommissionAdmin), which CommissionRulesPage
+      // already gates client-side (isSuperAdmin around Create/Edit/Delete).
+      { to: '/admin/commission-rules', label: 'Commission Rules', perm: ['chits'] },
+      // Stays admin-only on purpose — settings:update requires all∨settings
+      // and never accepts chits, unlike the two items above.
       { to: '/admin/smart-buy-settings', label: 'Admin Configuration', adminOnly: true },
     ]
   },
@@ -192,7 +208,11 @@ function canSeeGroup(group: NavGroup, kind: SessionRoleKind) {
   if (kind === 'smartBuyManager' || kind === 'agent') return label === 'Smart Buy'
   if (kind === 'cashier') return ['Sell', 'Customers', 'Customer Management', 'Smart Buy', 'Coupons', 'Deliveries'].includes(label)
   if (kind === 'accountant') return ['Customer Management', 'Smart Buy', 'Expenses', 'Reports', 'Branches'].includes(label)
-  if (kind === 'storeKeeper') return ['Products', 'Purchase Orders', 'Supplier Management', 'Stock Transfers', 'Branches'].includes(label)
+  // 'Smart Buy' added — this list only ever REMOVES visibility (each item
+  // inside is still individually gated by its own perm:['chits']), so a
+  // storeKeeper-shaped role without 'chits' granted sees nothing new; one
+  // that was explicitly also granted 'chits' can now actually see the group.
+  if (kind === 'storeKeeper') return ['Products', 'Purchase Orders', 'Supplier Management', 'Stock Transfers', 'Branches', 'Smart Buy'].includes(label)
   if (kind === 'branchManager' || kind === 'subBranchManager') {
     return ['Products', 'Purchase Orders', 'Supplier Management', 'Customer Management', 'Smart Buy', 'Stock Transfers', 'Sell', 'Coupons', 'Deliveries', 'Expenses', 'Reports', 'Employee Management', 'Branches'].includes(label)
   }
@@ -591,7 +611,7 @@ export default function AppLayout() {
         <button onClick={() => setSidebarOpen(o => !o)} className="flex items-center gap-2 flex-shrink-0">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center overflow-hidden">
             {branding.company_logo_url && !logoFailed
-              ? <img src={String(branding.company_logo_url)} alt="" className="w-full h-full object-cover" onError={() => setLogoFailed(true)} />
+              ? <img src={resolveImageSrc(String(branding.company_logo_url))} alt="" className="w-full h-full object-cover" onError={() => setLogoFailed(true)} />
               : <ShoppingBag size={16} className="text-white" />}
           </div>
           <span className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>{String(branding.company_name || 'MyPOS')}</span>

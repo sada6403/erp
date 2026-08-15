@@ -67,7 +67,13 @@ export class SyncService {
         await this.pullChanges(cloud)
       }
       await this.processBatch(cloud)
-      if (this.hasPendingPushes()) return
+      // Previously gated the ENTIRE pull (every table) on the local outbox
+      // being fully drained — but pullChanges() already has its own correct,
+      // per-record protection against clobbering a genuinely in-flight local
+      // push (the `pendingIds` skip-list below), so this outer gate was only
+      // ever redundant with that, and actively harmful: one slow-draining or
+      // repeatedly-failing item (any table) delayed every OTHER table's pull
+      // too, sometimes for the full ~2-minute resetFailedForAutoRetry cycle.
       await this.pullChanges(cloud)
       await this.syncBranding(cloud)
     } catch (err) {
@@ -237,10 +243,17 @@ export class SyncService {
           payload.image_url = publicUrl
           db.prepare("UPDATE products SET image_url = ?, updated_at = datetime('now') WHERE id = ?")
             .run(publicUrl, item.record_id)
-        } else {
+        } else if (item.attempts < MAX_ATTEMPTS - 1) {
           // Don't push a locally-only-resolvable app-img:// URL into the cloud
           // and mark it synced — retry like any other transient failure instead.
           throw new Error('Image upload failed; retrying before pushing product record')
+        } else {
+          // Out of retries for the image specifically — this must NOT keep
+          // blocking the rest of the row (name/price/stock) from ever
+          // reaching other devices. Push it as-is: image_url stays
+          // app-img://... (won't render elsewhere until cloud storage is
+          // fixed and the image is re-uploaded), but everything else syncs.
+          console.warn(`[SyncService] Giving up on cloud image upload for product ${item.record_id} after ${item.attempts + 1} attempts — syncing the rest of the row with the local-only image reference.`)
         }
       }
 
@@ -508,6 +521,54 @@ export class SyncService {
     }
 
     store.set('last_pull_timestamp', newPullTime)
+
+    await this.pullDeletions(cloud, db)
+  }
+
+  // Applies deletion tombstones (see backend/app/api/sync/deletions/route.ts)
+  // — the changes-based pull above can only ever see rows that still exist,
+  // so a hard-deleted row (e.g. a deleted branch) simply isn't in a
+  // `WHERE updated_at > since` result set anymore and would otherwise linger
+  // forever on any device that already had it. Tracks its OWN cursor
+  // (`last_deletion_pull_timestamp`), separate from `last_pull_timestamp`,
+  // and only advances past deletions that were actually applied — a
+  // deletion that fails locally (e.g. a referencing row hasn't synced down
+  // yet) is retried on the next cycle instead of silently skipped forever.
+  // DELETE is naturally idempotent, so re-applying an already-gone row is a
+  // harmless no-op.
+  private async pullDeletions(cloud: CloudApi, db: ReturnType<typeof getDb>): Promise<void> {
+    const lastPull = store.get('last_deletion_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
+    let deletions: Array<{ table_name: string; record_id: string; deleted_at: string }> = []
+    try {
+      deletions = await cloud.deletions(lastPull)
+    } catch (err) {
+      if (err instanceof CloudRateLimitError) throw err
+      console.error('[SyncService] Failed to pull deletions:', err)
+      return
+    }
+    if (deletions.length === 0) return
+
+    // Defense in depth: table_name in this response can only ever be one of
+    // ALLOWED_TABLES (assertTable() gates every write to sync_deletions on
+    // the server), but this is a raw-identifier DELETE, so re-validate the
+    // shape locally before ever interpolating it into SQL.
+    const SAFE_TABLE_NAME = /^[a-z][a-z0-9_]*$/
+
+    let advanceTo = lastPull
+    for (const d of deletions) {
+      if (!SAFE_TABLE_NAME.test(d.table_name) || !d.record_id) {
+        console.error('[SyncService] Skipping malformed deletion entry:', d)
+        continue
+      }
+      try {
+        db.prepare(`DELETE FROM ${d.table_name} WHERE id = ?`).run(d.record_id)
+        advanceTo = d.deleted_at
+      } catch (err) {
+        console.error(`[SyncService] Failed to apply deletion for ${d.table_name}(${d.record_id}) — will retry next cycle:`, err)
+        break
+      }
+    }
+    store.set('last_deletion_pull_timestamp', advanceTo)
   }
 
   // Company branding: retry a pending local push first, otherwise pull the

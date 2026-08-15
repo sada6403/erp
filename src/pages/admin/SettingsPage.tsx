@@ -10,6 +10,7 @@ import {
 import toast from 'react-hot-toast'
 import { applySystemTheme } from '@/lib/systemTheme'
 import { useAuthStore } from '@/store/authStore'
+import { resolveImageSrc } from '@/lib/imageUrl'
 
 type Tab = 'general' | 'branding' | 'security' | 'sync' | 'barcode' | 'invoice' | 'communications' | 'loyalty' | 'printer' | 'notifications' | 'license' | 's3' | 'danger'
 type InvoiceDesignId = 'dot' | 'thermal' | 'a4'
@@ -578,10 +579,18 @@ function LogoUploadField({
   const handleUpload = async () => {
     setUploading(true)
     try {
-      const res = await window.api.products.selectAndUploadImage() as { success: boolean; data?: string; error?: string }
+      const res = await window.api.products.selectAndUploadImage() as { success: boolean; data?: string; local_only?: boolean; error?: string }
       if (res.success && res.data) {
         onChange(res.data)
-        toast.success('Logo uploaded')
+        // A pending local-only logo is automatically retried to cloud
+        // storage on the next sync cycle (pushBrandingToCloud) — still worth
+        // telling the user up front rather than implying it's already
+        // shared everywhere.
+        if (res.local_only) {
+          toast('Logo saved on this device — it will sync to other devices once Cloud Sync/S3 is configured (or on its next automatic retry).', { icon: '⚠️', duration: 6000 })
+        } else {
+          toast.success('Logo uploaded')
+        }
       } else if (res.error && res.error !== 'Cancelled') {
         toast.error(res.error)
       }
@@ -598,7 +607,7 @@ function LogoUploadField({
         <div className="w-12 h-12 rounded-xl flex-shrink-0 flex items-center justify-center overflow-hidden"
           style={{ background: 'var(--bg-soft)', border: '1px solid var(--border)' }}>
           {value
-            ? <img src={value} alt="logo" className="w-full h-full object-contain" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
+            ? <img src={resolveImageSrc(value)} alt="logo" className="w-full h-full object-contain" onError={e => { console.warn('[SettingsPage] Failed to load logo:', value); (e.target as HTMLImageElement).style.display = 'none' }} />
             : <ImageIcon size={18} style={{ color: 'var(--text-3)' }} />}
         </div>
         {/* URL input */}
@@ -1068,7 +1077,7 @@ function InvoicePreview({ form, design }: { form: Record<string, any>; design: I
         <div className={`text-center border-b border-slate-300 pb-3 ${dot ? 'border-dashed' : ''}`}>
           {show('show_logo') && (
             <div className="mx-auto mb-2 w-12 h-12 rounded border border-slate-300 flex items-center justify-center overflow-hidden">
-              {designValue(form, design, 'logo_url') ? <img src={String(designValue(form, design, 'logo_url'))} className="w-full h-full object-cover" alt="" /> : <ImageIcon size={18} />}
+              {designValue(form, design, 'logo_url') ? <img src={resolveImageSrc(String(designValue(form, design, 'logo_url')))} className="w-full h-full object-cover" alt="" /> : <ImageIcon size={18} />}
             </div>
           )}
           {show('show_company') && <h2 className="font-bold text-lg">{form.company_name || 'Company Name'}</h2>}

@@ -53,5 +53,11 @@ export function useSyncStatus() {
     await refresh()
   }
 
-  return { status, triggerSync }
+  // Exposed so a page showing the full queue (SyncMonitorPage) can refresh
+  // this status card at the exact same moment it reloads its own queue table
+  // — previously each ran its own independent 10s setInterval, so the two
+  // could transiently disagree (e.g. status card shows 0 while the table
+  // still shows 1) for up to ~10s whenever a queue-changing event landed
+  // between their two ticks.
+  return { status, triggerSync, refresh }
 }

@@ -18,7 +18,7 @@ type QueueItem = {
 type DiagStep = { step: string; ok: boolean; detail: string }
 
 export default function SyncMonitorPage() {
-  const { status, triggerSync } = useSyncStatus()
+  const { status, triggerSync, refresh: refreshStatus } = useSyncStatus()
   const { user } = useAuthStore()
   const permissions = (user?.role?.permissions ||
     (user as unknown as Record<string, unknown>)?.permissions) as Record<string, unknown> || {}
@@ -38,16 +38,29 @@ export default function SyncMonitorPage() {
     }
   }, [])
 
+  // Reload the queue table and the status card together, on the same tick —
+  // previously this page ran its own independent 10s setInterval calling
+  // only loadQueue(), while useSyncStatus() polled the summary counts on a
+  // second, unsynchronized 10s timer. A queue-changing event landing between
+  // the two ticks made the status card and the table transiently disagree
+  // (e.g. "0 pending" card next to a table still showing 1 row) for up to
+  // ~10s. useSyncStatus's own internal timer keeps running too (other
+  // consumers like AppLayout's indicator depend on it), so this is
+  // deliberately an extra, page-local refresh, not a replacement for it.
+  const refreshAll = useCallback(async () => {
+    await Promise.all([loadQueue(), refreshStatus()])
+  }, [loadQueue, refreshStatus])
+
   useEffect(() => {
-    loadQueue()
-    const interval = setInterval(loadQueue, 10_000)
+    refreshAll()
+    const interval = setInterval(refreshAll, 10_000)
     return () => clearInterval(interval)
-  }, [loadQueue])
+  }, [refreshAll])
 
   const handleSync = async () => {
     setSyncing(true)
     await triggerSync()
-    await loadQueue()
+    await refreshAll()
     setSyncing(false)
   }
 
@@ -56,7 +69,7 @@ export default function SyncMonitorPage() {
       const res = await window.api.sync.resetFailed()
       if (res.success) {
         toast.success(`Reset ${res.data as number} failed item(s) - click Sync Now`)
-        await loadQueue()
+        await refreshAll()
       } else {
         toast.error(res.error || 'Failed to reset failed items')
       }
@@ -74,7 +87,7 @@ export default function SyncMonitorPage() {
         return
       }
       await triggerSync()
-      await loadQueue()
+      await refreshAll()
       toast.success('Fixed and synced')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to fix and sync')
@@ -98,7 +111,7 @@ export default function SyncMonitorPage() {
       }
       const { parentsRepaired, childrenRequeued } = res.data as { parentsRepaired: number; childrenRequeued: number }
       await triggerSync()
-      await loadQueue()
+      await refreshAll()
       toast.success(childrenRequeued > 0
         ? `Repaired ${parentsRepaired} missing record(s), requeued ${childrenRequeued} item(s) — syncing`
         : 'No orphaned-parent errors found in the failed queue')
@@ -259,7 +272,7 @@ export default function SyncMonitorPage() {
                                 const res = await window.api.sync.discardItem(item.id)
                                 if (res.success) {
                                   toast.success('Item discarded')
-                                  await loadQueue()
+                                  await refreshAll()
                                 } else {
                                   toast.error(res.error || 'Failed to discard item')
                                 }

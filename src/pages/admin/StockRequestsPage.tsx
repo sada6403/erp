@@ -8,6 +8,7 @@ import {
   RefreshCw, ChevronRight, MapPin, Layers, AlertCircle
 } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { resolveImageSrc } from '@/lib/imageUrl'
 
 type Transfer = Record<string, unknown>
 type StockItem = Record<string, unknown>
@@ -250,7 +251,7 @@ export default function StockRequestsPage() {
                       <td className="table-cell">
                         <div className="flex items-center gap-2">
                           {(s.image_url as string) ? (
-                            <img src={s.image_url as string} alt="" className="w-8 h-8 rounded object-cover border" style={{ borderColor: 'var(--border)' }} />
+                            <img src={resolveImageSrc(s.image_url as string)} alt="" className="w-8 h-8 rounded object-cover border" style={{ borderColor: 'var(--border)' }} />
                           ) : (
                             <div className="w-8 h-8 rounded flex items-center justify-center border" style={{ background: 'var(--bg-soft)', borderColor: 'var(--border)' }}>
                               <Package size={14} style={{ color: 'var(--text-3)' }} />
@@ -481,7 +482,7 @@ export default function StockRequestsPage() {
                     <td className="table-cell">
                       <div className="flex items-center gap-2">
                         {(s.image_url as string) ? (
-                          <img src={s.image_url as string} alt="" className="w-7 h-7 rounded object-cover border" style={{ borderColor: 'var(--border)' }} />
+                          <img src={resolveImageSrc(s.image_url as string)} alt="" className="w-7 h-7 rounded object-cover border" style={{ borderColor: 'var(--border)' }} />
                         ) : <Package size={14} style={{ color: 'var(--text-3)' }} />}
                         <span className="font-medium text-sm" style={{ color: 'var(--text-1)' }}>{s.product_name as string}</span>
                       </div>
@@ -651,7 +652,7 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
         {item && (
           <div className="card flex items-center gap-3">
             {(item.image_url as string) ? (
-              <img src={item.image_url as string} alt="" className="w-12 h-12 rounded object-cover" />
+              <img src={resolveImageSrc(item.image_url as string)} alt="" className="w-12 h-12 rounded object-cover" />
             ) : <Package size={20} style={{ color: 'var(--text-3)' }} />}
             <div>
               <p className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>{item.product_name as string}</p>

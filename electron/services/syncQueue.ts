@@ -9,8 +9,12 @@ function wakeSyncService(): void {
 
 // Enqueue the full users row (cloud-safe columns only) so credential changes
 // (password_hash / pin_hash) always reach the cloud without clobbering other
-// pending fields of the same record.
-export async function enqueueUserRow(userId: string): Promise<void> {
+// pending fields of the same record. `operation` must be 'INSERT' at the
+// call site that just created the row — the backend's UPDATE path also
+// self-heals a mislabeled 'UPDATE' into an INSERT when the row doesn't exist
+// yet (backend/lib/sync.ts), but labeling it correctly here keeps the queued
+// operation truthful and avoids relying on that fallback alone.
+export async function enqueueUserRow(userId: string, operation: 'INSERT' | 'UPDATE' = 'UPDATE'): Promise<void> {
   try {
     const db = getDb()
     const row = db.prepare(`
@@ -19,7 +23,7 @@ export async function enqueueUserRow(userId: string): Promise<void> {
       FROM users WHERE id = ?
     `).get(userId) as Record<string, unknown> | undefined
     if (!row) return
-    await enqueuSync('users', userId, 'UPDATE', row)
+    await enqueuSync('users', userId, operation, row)
   } catch {
     // Non-blocking: sync queue failure shouldn't interrupt main flow
   }

@@ -159,6 +159,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // auth:whoami (electron/ipc/auth.ts) already re-reads the user fresh from
+  // local SQLite on every call — role/permissions/branch/is_active, and logs
+  // out (data:null) if the account was disabled/deleted — but until now
+  // nothing ever called it again after boot/login. That meant a role,
+  // branch, or permission change (or a disable/delete) made on another PC
+  // only took effect for an already-open session after a manual re-login,
+  // even once local sync had caught up. Re-running init() periodically
+  // closes that gap using the existing, already-correct backend logic — no
+  // new IPC handler needed. Harmless to call while logged out too (whoami
+  // just returns data:null again).
+  useEffect(() => {
+    if (!activated) return
+    const interval = setInterval(() => { init() }, 60_000)
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activated])
+
   if (activated === null) return <LoadingScreen />
   if (!activated) return <ActivationPage onActivated={() => { finishActivation().catch(() => navigate('/login', { replace: true })) }} />
 
@@ -203,7 +220,11 @@ export default function App() {
         <Route path="/admin/smart-buy-reports" element={<RequireSmartBuyAccess><SmartBuyReportsPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-reminders" element={<RequireSmartBuyAccess><PaymentRemindersPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-settings" element={<RequireSuperAdmin><SmartBuySettingsPage /></RequireSuperAdmin>} />
-        <Route path="/admin/scheme-master" element={<RequireSuperAdmin><SchemeMasterPage /></RequireSuperAdmin>} />
+        {/* Was RequireSuperAdmin — the menu link now shows for chits users too
+            (AppLayout.tsx), and the backend (chits:templates:list) already
+            allows chits∨all to view the catalog; only create/update require
+            all, which SchemeMasterPage now gates client-side. */}
+        <Route path="/admin/scheme-master" element={<RequireSmartBuyAccess><SchemeMasterPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
         <Route path="/admin/edit-requests" element={<EditRequestsPage />} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />

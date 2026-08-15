@@ -4,6 +4,7 @@ import Modal from '@/components/shared/Modal'
 import { Plus, Edit2, ToggleLeft, ToggleRight, ChevronRight, Lock, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { resolveImageSrc } from '@/lib/imageUrl'
 
 type Category = {
   id: string
@@ -439,7 +440,8 @@ function CategoryForm({
           <input value={form.image_url} onChange={f('image_url')} className="input text-sm" placeholder="https://... or leave blank" />
           {form.image_url && (
             <div className="mt-2 w-20 h-20 rounded-lg overflow-hidden" style={{ background: 'var(--bg-page)', border: '1px solid var(--border)' }}>
-              <img src={form.image_url} className="w-full h-full object-cover" alt="" />
+              <img src={resolveImageSrc(form.image_url)} className="w-full h-full object-cover" alt=""
+                onError={e => { console.warn('[CategoriesPage] Failed to load category image:', form.image_url); e.currentTarget.style.visibility = 'hidden' }} />
             </div>
           )}
         </div>

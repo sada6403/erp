@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { resolveImageSrc } from '@/lib/imageUrl'
 
 type UOMRow = { id?: string; uom_name: string; conversion_factor: number; is_base: boolean; wastage: number }
 type CatalogAudit = {
@@ -298,7 +299,8 @@ export default function ProductsPage() {
                   <td className="table-cell px-3 py-2">
                     <div className="w-8 h-8 rounded flex items-center justify-center flex-shrink-0 overflow-hidden" style={{ background: 'var(--bg-page)', border: '1px solid var(--border)' }}>
                       {p.image_url
-                        ? <img src={p.image_url} className="w-full h-full object-cover" alt="" />
+                        ? <img src={resolveImageSrc(p.image_url)} className="w-full h-full object-cover" alt=""
+                            onError={e => { console.warn('[ProductsPage] Failed to load product image:', p.image_url); e.currentTarget.style.visibility = 'hidden' }} />
                         : <Package size={14} style={{ color: 'var(--text-3)' }} />}
                     </div>
                   </td>
@@ -767,8 +769,13 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
   const uploadImage = async () => {
     setUploading(true)
     try {
-      const res = await window.api.products.selectAndUploadImage()
-      if (res.success && res.data) setForm(p => ({ ...p, image_url: res.data as string }))
+      const res = await window.api.products.selectAndUploadImage() as { success: boolean; data?: string; local_only?: boolean; error?: string }
+      if (res.success && res.data) {
+        setForm(p => ({ ...p, image_url: res.data as string }))
+        if (res.local_only) {
+          toast('Image saved on this device only — configure Cloud Sync/S3 in Settings for it to appear on other devices.', { icon: '⚠️', duration: 6000 })
+        }
+      }
       else if (res.error && res.error !== 'Cancelled') toast.error(res.error)
     } catch (err) {
       toast.error('Image upload failed: ' + String(err))
@@ -955,7 +962,8 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
                     className="w-16 h-16 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 transition-colors flex-shrink-0 overflow-hidden"
                     style={{ background: 'var(--bg-page)', border: '2px dashed var(--border-2)' }}>
                     {form.image_url
-                      ? <img src={form.image_url} className="w-full h-full object-cover" alt="" />
+                      ? <img src={resolveImageSrc(form.image_url)} className="w-full h-full object-cover" alt=""
+                          onError={e => { console.warn('[ProductsPage] Failed to load product image:', form.image_url); e.currentTarget.style.visibility = 'hidden' }} />
                       : <><Package size={16} style={{ color: 'var(--text-3)' }} /><span className="text-[9px] mt-0.5" style={{ color: 'var(--text-3)' }}>NO IMAGE</span></>
                     }
                   </div>

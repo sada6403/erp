@@ -128,10 +128,19 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Branches
   safeHandle(ipcMain, 'admin:branches:list', () => {
+    // This list is read before login (branch-selection screen on
+    // LoginPage.tsx), so it intentionally has no permission gate — but the
+    // bcrypt hash of a branch's login PIN doesn't need to leave the main
+    // process at all (a 4-6 digit PIN is weak against offline brute force
+    // of a leaked hash). Callers only ever need to know whether a PIN is
+    // set (BranchesPage.tsx's `hasExistingPin`), not the hash itself.
     return {
       success: true,
       data: getDb().prepare(`
-        SELECT b.*, sm.name as smartbuy_manager_name
+        SELECT b.id, b.name, b.address, b.phone, b.email, b.code, b.is_active,
+               b.smartbuy_manager_id, b.created_at, b.updated_at,
+               (b.branch_pin IS NOT NULL) as has_branch_pin,
+               sm.name as smartbuy_manager_name
         FROM branches b
         LEFT JOIN users sm ON sm.id = b.smartbuy_manager_id
         ORDER BY b.name
@@ -179,7 +188,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
           INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
           VALUES (?, ?, ?, ?, ?, ?, ?, 1)
         `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${p.name} Manager`, managerEmail, passwordHash, managerPinHash)
-        await enqueueUserRow(userId)
+        await enqueueUserRow(userId, 'INSERT')
       }
     }
 
@@ -243,7 +252,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
             INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
             VALUES (?, ?, ?, ?, ?, ?, ?, 1)
           `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${branch.name} Manager`, safeEmail, passwordHash, managerPinHash)
-          await enqueueUserRow(userId)
+          await enqueueUserRow(userId, 'INSERT')
         } else {
           // Manager exists — update their PIN to match the new branch PIN
           const managerPinHash = await bcrypt.hash(rawPin, 10)
@@ -407,7 +416,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash)
       VALUES (?,?,?,?,?,?,?)`)
       .run(id, p.branch_id||null, p.role_id, p.name, p.email, hash, pinHash)
-    await enqueueUserRow(id)
+    await enqueueUserRow(id, 'INSERT')
     return { success: true, data: { id } }
   })
   safeHandle(ipcMain, 'admin:users:update', async (_e, id: string, p) => {
@@ -477,7 +486,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true }
   })
 
-  safeHandle(ipcMain, 'admin:users:hardDelete', (_e, id: string) => {
+  safeHandle(ipcMain, 'admin:users:hardDelete', async (_e, id: string) => {
     const SUPER_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
     if (id === SUPER_ADMIN_ID) return { success: false, error: 'Cannot permanently delete super admin account' }
     const db = getDb()
@@ -522,6 +531,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       db.pragma('foreign_keys = ON')
     }
 
+    logAudit(db, { userId: caller.id as string, branchId: caller.branch_id as string, action: 'USER_HARD_DELETED', tableName: 'users', recordId: id })
+    await enqueuSync('users', id, 'DELETE', { id })
     return { success: true }
   })
 
@@ -725,7 +736,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash)
           VALUES (?,?,?,?,?,?,?)`)
           .run(id, branchId, role.id, name, email, hash, pinHash)
-        await enqueueUserRow(id)
+        await enqueueUserRow(id, 'INSERT')
         imported++
       } catch (err: unknown) {
         errors.push(`Row ${rowNum}: ${(err as Error).message}`)
@@ -738,6 +749,13 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Roles
   safeHandle(ipcMain, 'admin:roles:list', () => {
+    // Every known caller (RolesPage, UsersPage, DiscountsPage) already
+    // requires 'employees' (or is adminOnly) to reach the screen that calls
+    // this — this only closes the gap where a lower-privilege session could
+    // read every role's raw permission JSON via a direct IPC call instead
+    // of through the gated UI.
+    const perms = currentPerms()
+    if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
     return { success: true, data: getDb().prepare('SELECT * FROM roles ORDER BY name').all() }
   })
   // Restricted-portal identifier: null (ordinary role) | 'smartBuy' | 'agent'.

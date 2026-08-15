@@ -67,6 +67,30 @@ export class CloudApi {
     return all
   }
 
+  // Deletion tombstones (see backend/app/api/sync/deletions/route.ts) — the
+  // `changes` endpoint can only ever report rows that still exist, so a
+  // device that already pulled a since-deleted row (e.g. a deleted branch)
+  // would keep it forever without this. Same paging shape as `changes`,
+  // keyed on `deleted_at` instead of `updated_at`.
+  async deletions(since: string): Promise<Array<{ table_name: string; record_id: string; deleted_at: string }>> {
+    const all: Array<{ table_name: string; record_id: string; deleted_at: string }> = []
+    let cursor = since
+    for (let page = 0; page < CloudApi.CHANGES_MAX_PAGES; page++) {
+      const query = new URLSearchParams({ since: cursor })
+      const result = await this.request<{ data: Array<{ table_name: string; record_id: string; deleted_at: string }> }>(
+        `/api/sync/deletions?${query.toString()}`
+      )
+      const data = result.data
+      all.push(...data)
+      if (data.length < CloudApi.CHANGES_PAGE_SIZE) break
+      const lastDeletedAt = data[data.length - 1]?.deleted_at
+      if (!lastDeletedAt) break
+      cursor = lastDeletedAt
+      await new Promise(resolve => setTimeout(resolve, 300))
+    }
+    return all
+  }
+
   async related(table: string, foreignKey: string, ids: string[]): Promise<Record<string, unknown>[]> {
     const result = await this.request<{ data: Record<string, unknown>[] }>('/api/sync/related', {
       method: 'POST',

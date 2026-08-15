@@ -211,7 +211,7 @@ function BranchForm({
 }) {
   const isMain = String(branch?.id || '') === 'b1111111-1111-4111-8111-111111111111'
 
-  const hasExistingPin = Boolean(branch?.branch_pin)
+  const hasExistingPin = Boolean(branch?.has_branch_pin)
   const [form, setForm] = useState({
     name:       String(branch?.name       || ''),
     code:       String(branch?.code       || ''),
