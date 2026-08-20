@@ -94,6 +94,16 @@ export const settings = {
   update: (body: unknown) => request<{ok:boolean}>('/api/superadmin/settings', { method: 'PATCH', body: JSON.stringify(body) }),
 }
 
+// ─── Company Notification Credentials (Issue 24b) ──────────────────────────────
+// SMTP/SMS itself is saved via companies.update({ smtp, sms }) — same PATCH as
+// every other company field. These are just the two test-send buttons.
+export const companyNotifications = {
+  testEmail: (companyId: string, to: string) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/email-test`, { method: 'POST', body: JSON.stringify({ to }) }),
+  testSms:   (companyId: string, to: string) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/sms-test`, { method: 'POST', body: JSON.stringify({ to }) }),
+}
+
 // ─── Company Devices ──────────────────────────────────────────────────────────
 export const devices = {
   list:       (companyId: string) => request<unknown[]>(`/api/superadmin/companies/${companyId}/devices`),

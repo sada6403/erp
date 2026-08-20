@@ -3,8 +3,29 @@ import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { setCompanyStatus, deleteTenant } from '@/lib/tenant'
 import { pool } from '@/lib/db'
 import { randomUUID } from 'crypto'
+import { encryptSecret } from '@/lib/secretCrypto'
 
 type Params = { params: Promise<{ id: string }> }
+
+// Never send decrypted secrets back to the browser — same masking
+// convention as the local app's electron/ipc/settings.ts (MASKED_SECRET).
+// On save, a field left as this exact sentinel means "unchanged", so its
+// stored (encrypted) value is preserved rather than being overwritten.
+const MASKED_SECRET = '********'
+
+function maskBrandingSecrets(brandingJson: unknown): string | null {
+  if (!brandingJson) return brandingJson as null
+  try {
+    const branding = JSON.parse(String(brandingJson)) as Record<string, unknown>
+    const smtp = branding.smtp as Record<string, unknown> | undefined
+    if (smtp?.pass) smtp.pass = MASKED_SECRET
+    const sms = branding.sms as Record<string, unknown> | undefined
+    if (sms?.api_key) sms.api_key = MASKED_SECRET
+    return JSON.stringify(branding)
+  } catch {
+    return brandingJson as string
+  }
+}
 
 export async function GET(req: NextRequest, { params }: Params) {
   const { id: companyId } = await params
@@ -21,7 +42,8 @@ export async function GET(req: NextRequest, { params }: Params) {
     [companyId]
   )
   if (!rows.length) return NextResponse.json({ error: 'Not found' }, { status: 404 })
-  return NextResponse.json(rows[0])
+  const row = rows[0] as Record<string, unknown>
+  return NextResponse.json({ ...row, branding_json: maskBrandingSecrets(row.branding_json) })
 }
 
 export async function PATCH(req: NextRequest, { params }: Params) {
@@ -33,7 +55,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const { status, suspensionReason, name, email, phone, address, notes, regenerate_api_key,
           regenerate_company_key, revoke_previous_api_key, revoke_previous_company_key,
           maxBranches, maxUsers, maxPosDevices, maxStorageGb,
-          brandColor, brandLogoUrl, loginLogoUrl,
+          brandColor, brandLogoUrl, loginLogoUrl, smtp, sms,
           subscriptionEndsAt, newPackageId, extendTrialDays,
           lock, lockReason } = body
 
@@ -67,13 +89,47 @@ export async function PATCH(req: NextRequest, { params }: Params) {
       resource: 'companies', resourceId: companyId, companyId })
   }
 
-  if (loginLogoUrl !== undefined) {
+  // Every branding_json-touching field (logo, SMTP, SMS) is merged into ONE
+  // read-merge-write here — doing separate independent read-merge-writes per
+  // field would let a later one silently clobber an earlier one's change,
+  // since each would parse the same pre-patch `old` snapshot.
+  if (loginLogoUrl !== undefined || smtp !== undefined || sms !== undefined) {
     let branding: Record<string, unknown> = {}
     const existing = (old as Record<string, unknown>).branding_json
     if (existing) {
       try { branding = JSON.parse(String(existing)) as Record<string, unknown> } catch { /* ignore */ }
     }
-    branding.login_logo_url = loginLogoUrl || null
+    if (loginLogoUrl !== undefined) {
+      branding.login_logo_url = loginLogoUrl || null
+    }
+    if (smtp !== undefined) {
+      const prevSmtp = (branding.smtp as Record<string, unknown>) || {}
+      const passIn = String(smtp.pass ?? '')
+      branding.smtp = {
+        host:       smtp.host ?? prevSmtp.host ?? '',
+        port:       smtp.port ?? prevSmtp.port ?? 587,
+        secure:     smtp.secure ?? prevSmtp.secure ?? false,
+        user:       smtp.user ?? prevSmtp.user ?? '',
+        // Blank means "clear it"; the masked sentinel means "leave it as-is";
+        // anything else is a real new password, encrypted before storage.
+        pass:       passIn === MASKED_SECRET ? (prevSmtp.pass ?? '') : (passIn ? encryptSecret(passIn) : ''),
+        from_name:  smtp.from_name ?? prevSmtp.from_name ?? '',
+        from_email: smtp.from_email ?? prevSmtp.from_email ?? '',
+      }
+    }
+    if (sms !== undefined) {
+      const prevSms = (branding.sms as Record<string, unknown>) || {}
+      const keyIn = String(sms.api_key ?? '')
+      branding.sms = {
+        base_url:      sms.base_url ?? prevSms.base_url ?? '',
+        method:        sms.method ?? prevSms.method ?? 'POST',
+        content_type:  sms.content_type ?? prevSms.content_type ?? 'application/json',
+        headers:       sms.headers ?? prevSms.headers ?? '',
+        body_template: sms.body_template ?? prevSms.body_template ?? '{"mobile":"{phone}","message":"{message}"}',
+        api_key:       keyIn === MASKED_SECRET ? (prevSms.api_key ?? '') : (keyIn ? encryptSecret(keyIn) : ''),
+        sender_id:     sms.sender_id ?? prevSms.sender_id ?? '',
+      }
+    }
     await pool.query(`UPDATE companies SET branding_json = ? WHERE id = ?`, [JSON.stringify(branding), companyId])
   }
 
@@ -153,7 +209,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   // Return updated row (including new api_key if regenerated)
   const { rows: [updated] } = await pool.query(`SELECT * FROM companies WHERE id = ?`, [companyId])
-  return NextResponse.json(updated)
+  const updatedRow = updated as Record<string, unknown>
+  return NextResponse.json({ ...updatedRow, branding_json: maskBrandingSecrets(updatedRow.branding_json) })
 }
 
 export async function DELETE(req: NextRequest, { params }: Params) {

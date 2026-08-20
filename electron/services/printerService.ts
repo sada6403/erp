@@ -136,7 +136,7 @@ export function resolvePrinterForModule(
 // existing 3-arg call site behaves byte-identically (silent defaults to
 // false, no deviceName means "OS default printer", copies defaults to 1). ───
 
-export type PrintDesign = 'dot' | 'thermal' | 'a4' | 'label'
+export type PrintDesign = 'dot' | 'thermal' | 'a4' | 'b5' | 'label'
 
 export async function printHtml(
   html: string,

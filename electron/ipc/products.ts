@@ -151,6 +151,23 @@ function firstImage(value: string): string | null {
 }
 
 export function registerProductHandlers(ipcMain: IpcMain) {
+  // One product's own configured pack/box unit (product_uom, is_base=0) per
+  // row — a small, cheap dataset (one row per product that has a pack unit
+  // configured, most don't). Lets POS/reports show "N box + M pcs" without
+  // adding a per-product join to the much hotter products:list query below.
+  safeHandle(ipcMain, 'products:uom:listAll', () => {
+    const rows = getDb().prepare(`
+      SELECT pu.product_id, pu.uom_name, pu.conversion_factor
+      FROM product_uom pu
+      WHERE pu.id = (
+        SELECT id FROM product_uom
+        WHERE product_id = pu.product_id AND is_base = 0 AND conversion_factor > 1
+        ORDER BY sort_order LIMIT 1
+      )
+    `).all()
+    return { success: true, data: rows }
+  })
+
   safeHandle(ipcMain, 'products:list', (_e, filters: { category_id?: string; is_active?: boolean } = {}) => {
       const db = getDb()
       const authUser = getAuthUser()

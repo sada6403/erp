@@ -11,15 +11,19 @@ export interface WhatsAppPayload {
 }
 
 function getConfig() {
+  // Settings are persisted as one nested blob under 'app_settings' (see
+  // electron/ipc/settings.ts's settings:update) — a flat store.get('whatsapp_enabled')
+  // reads a key that's never written and always falls back to its default.
+  const s = (store.get('app_settings') as Record<string, unknown>) || {}
   return {
-    enabled:     Boolean(store.get('whatsapp_enabled', false)),
-    provider:    String(store.get('whatsapp_provider', 'meta')), // 'meta' | 'twilio'
-    phoneNumberId: String(store.get('whatsapp_phone_number_id', '')),
-    accessToken: String(store.get('whatsapp_access_token', '')),
+    enabled:     Boolean(s.whatsapp_enabled ?? false),
+    provider:    String(s.whatsapp_provider ?? 'meta'), // 'meta' | 'twilio'
+    phoneNumberId: String(s.whatsapp_phone_number_id ?? ''),
+    accessToken: String(s.whatsapp_access_token ?? ''),
     // Twilio
-    accountSid:  String(store.get('whatsapp_twilio_sid', '')),
-    authToken:   String(store.get('whatsapp_twilio_token', '')),
-    fromNumber:  String(store.get('whatsapp_from_number', '')),
+    accountSid:  String(s.whatsapp_twilio_sid ?? ''),
+    authToken:   String(s.whatsapp_twilio_token ?? ''),
+    fromNumber:  String(s.whatsapp_from_number ?? ''),
   }
 }
 

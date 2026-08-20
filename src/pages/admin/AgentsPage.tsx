@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import PageHeader from '@/components/shared/PageHeader'
+import NumberInput from '@/components/shared/NumberInput'
+import CreatableSearchSelect from '@/components/shared/CreatableSearchSelect'
 import Modal from '@/components/shared/Modal'
 import DeleteConfirmModal from '@/components/shared/DeleteConfirmModal'
 import StatCard from '@/components/shared/StatCard'
@@ -12,7 +13,14 @@ type Row = Record<string, unknown>
 
 const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-export default function AgentsPage() {
+// Rendered as the "Agents" tab inside Employee Management (UsersPage.tsx) —
+// not a standalone page/route anymore (Issue 17: Agent is a staff position/
+// type within one unified module, not a separate module). The underlying
+// data model is untouched: agents still live in their own table, linked to
+// users via agents.user_id, exactly as before — only the navigation/UI is
+// unified, since the agents table's id is referenced extensively by the
+// Smart Buy module and a real schema merge was explicitly out of scope.
+export function AgentsSection() {
   const [agents, setAgents] = useState<Row[]>([])
   const [branches, setBranches] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
@@ -96,21 +104,20 @@ export default function AgentsPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <PageHeader title="Agent Management" subtitle={`${filteredAgents.length} agents`}
-        actions={
-          <div className="flex gap-2">
-            <button onClick={downloadTemplate} className="btn-secondary btn-sm gap-1.5">
-              <FileDown size={14} /> Template
-            </button>
-            <button onClick={bulkImport} disabled={importing} className="btn-secondary btn-sm gap-1.5">
-              <Upload size={14} /> {importing ? 'Importing...' : 'Bulk Import'}
-            </button>
-            <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn-primary btn-sm gap-1.5">
-              <Plus size={14} /> Add Agent
-            </button>
-          </div>
-        }
-      />
+      <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-slate-800 flex-shrink-0">
+        <p className="text-sm text-slate-400">{filteredAgents.length} agent(s)</p>
+        <div className="flex gap-2">
+          <button onClick={downloadTemplate} className="btn-secondary btn-sm gap-1.5">
+            <FileDown size={14} /> Template
+          </button>
+          <button onClick={bulkImport} disabled={importing} className="btn-secondary btn-sm gap-1.5">
+            <Upload size={14} /> {importing ? 'Importing...' : 'Bulk Import'}
+          </button>
+          <button onClick={() => { setEditing(null); setShowForm(true) }} className="btn-primary btn-sm gap-1.5">
+            <Plus size={14} /> Add Agent
+          </button>
+        </div>
+      </div>
 
       <div className="flex gap-3 px-6 py-3 border-b border-slate-800 flex-shrink-0">
         <div className="relative flex-1 max-w-sm">
@@ -206,6 +213,7 @@ export default function AgentsPage() {
 
 function AgentForm({ agent, branches, onClose, onSave }: { agent: Agent | null; branches: Row[]; onClose: () => void; onSave: () => void }) {
   const [regions, setRegions] = useState<Row[]>([])
+  const [positions, setPositions] = useState<Row[]>([])
   const [form, setForm] = useState({
     code: String(agent?.code || ''),
     name: String(agent?.name || ''),
@@ -230,6 +238,7 @@ function AgentForm({ agent, branches, onClose, onSave }: { agent: Agent | null; 
 
   useEffect(() => {
     window.api.regions.list({}).then((r: { success: boolean; data?: Row[] }) => { if (r.success) setRegions(r.data || []) }).catch(() => {})
+    window.api.positions.list().then((r: { success: boolean; data?: Row[] }) => { if (r.success) setPositions(r.data || []) }).catch(() => {})
   }, [])
 
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
@@ -290,7 +299,23 @@ function AgentForm({ agent, branches, onClose, onSave }: { agent: Agent | null; 
           <h3 className="text-xs font-semibold uppercase tracking-wide mb-2" style={{ color: 'var(--text-3)' }}>Role &amp; Location</h3>
           <div className="grid grid-cols-2 gap-3">
             <div><label className="block text-xs font-medium text-slate-400 mb-1">Agent / Employee ID *</label><input value={form.code} onChange={f('code')} className="input" placeholder="NF/NA/258" /></div>
-            <div><label className="block text-xs font-medium text-slate-400 mb-1">Position / Designation</label><input value={form.position} onChange={f('position')} className="input" placeholder="e.g. Financial Junior Executive" /></div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Position / Designation</label>
+              <CreatableSearchSelect
+                items={positions.map(p => ({ id: String(p.name), label: String(p.name) }))}
+                value={form.position}
+                onChange={name => setForm(p => ({ ...p, position: name }))}
+                placeholder="Select or add a position..."
+                createLabel="Add position"
+                onCreate={async (name) => {
+                  const res = await window.api.positions.create({ name })
+                  if (!res.success) { toast.error(res.error || 'Failed to create position'); return null }
+                  setPositions(prev => [...prev, { id: res.data.id, name }])
+                  toast.success(`Position "${name}" added`)
+                  return { id: name, label: name }
+                }}
+              />
+            </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Branch</label>
               <select value={form.branch_id} onChange={f('branch_id')} className="input">
@@ -313,8 +338,8 @@ function AgentForm({ agent, branches, onClose, onSave }: { agent: Agent | null; 
                 <option value="inactive">Inactive</option>
               </select>
             </div>
-            <div><label className="block text-xs font-medium text-slate-400 mb-1">Default Commission %</label><input type="number" value={form.default_commission_pct} onChange={f('default_commission_pct')} className="input" min={0} max={100} step="0.01" /></div>
-            <div><label className="block text-xs font-medium text-slate-400 mb-1">Monthly Target (Rs.)</label><input type="number" value={form.monthly_target} onChange={f('monthly_target')} className="input" min={0} /></div>
+            <div><label className="block text-xs font-medium text-slate-400 mb-1">Default Commission %</label><NumberInput value={form.default_commission_pct} onChange={f('default_commission_pct')} className="input" min={0} max={100} step="0.01" /></div>
+            <div><label className="block text-xs font-medium text-slate-400 mb-1">Monthly Target (Rs.)</label><NumberInput value={form.monthly_target} onChange={f('monthly_target')} className="input" min={0} /></div>
           </div>
         </div>
       </div>

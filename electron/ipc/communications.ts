@@ -4,11 +4,18 @@ import { sendSms, testSms, installmentDueMessage, installmentOverdueMessage, low
 import { sendWhatsApp, testWhatsApp } from '../services/whatsappService'
 import { getDb } from '../database'
 import { createNotification } from './notifications'
-import { runChitPaymentDueSweep, runChitSchemeClosingSweep } from '../services/chitNotifications'
+import { runChitPaymentDueSweep, runChitSchemeClosingSweep, notificationAllowed } from '../services/chitNotifications'
 import Store from 'electron-store'
 import { safeHandle } from './ipcHandler'
 
 const store = new Store<Record<string, unknown>>()
+
+// Settings are persisted as one nested blob under 'app_settings' (see
+// electron/ipc/settings.ts's settings:update) — a flat store.get('email_enabled')
+// reads a key that's never written and always falls back to its default.
+function appSettings(): Record<string, unknown> {
+  return (store.get('app_settings') as Record<string, unknown>) || {}
+}
 
 export function registerCommunicationHandlers() {
 
@@ -24,7 +31,7 @@ export function registerCommunicationHandlers() {
     currency: string
     items: { name: string; qty: number; price: string; total: string }[]
   }) => {
-    const companyName = String(store.get('company_name', 'POS System'))
+    const companyName = String(appSettings().company_name ?? 'POS System')
     return sendEmail({
       to: payload.to,
       subject: `Invoice #${payload.invoiceNumber} from ${companyName}`,
@@ -58,9 +65,10 @@ export function registerCommunicationHandlers() {
 
     if (!inst) return { success: false, error: 'Installment not found' }
 
+    const settings = appSettings()
     const cfg = {
-      companyName: String(store.get('company_name', 'POS System')),
-      currency:    String(store.get('currency_symbol', 'Rs.')),
+      companyName: String(settings.company_name ?? 'POS System'),
+      currency:    String(settings.currency_symbol ?? 'Rs.'),
     }
     const isOverdue = new Date(String(inst.next_due_date)) < new Date()
     const dueDate   = String(inst.next_due_date)
@@ -110,9 +118,10 @@ export function registerCommunicationHandlers() {
 
     if (!items.length) return { success: true, message: 'No low stock items' }
 
-    const companyName = String(store.get('company_name', 'POS System'))
-    const toEmail = adminEmail || String(store.get('company_email', ''))
-    const adminPhone = String(store.get('company_phone', ''))
+    const settings = appSettings()
+    const companyName = String(settings.company_name ?? 'POS System')
+    const toEmail = adminEmail || String(settings.company_email ?? '')
+    const adminPhone = String(settings.company_phone ?? '')
     const results: Record<string, unknown> = {}
 
     if (toEmail) {
@@ -138,10 +147,18 @@ export function startReminderScheduler() {
   const runReminders = async () => {
     try {
       const db = getDb()
-      const companyName = String(store.get('company_name', 'POS System'))
-      const currency    = String(store.get('currency_symbol', 'Rs.'))
-      const emailEnabled = Boolean(store.get('email_enabled', false))
-      const smsEnabled   = Boolean(store.get('sms_enabled', false))
+      const settings = appSettings()
+      const companyName = String(settings.company_name ?? 'POS System')
+      const currency    = String(settings.currency_symbol ?? 'Rs.')
+      // Automatic (scheduler-driven) sends — gated per-event by the
+      // Notification Triggers settings (Issue 24a). Manual sends
+      // (comm:sendInstallmentReminder / comm:sendLowStockAlert, an admin
+      // explicitly clicking "send now") are intentionally NOT gated by these
+      // toggles, same as the "Send Test Email" button.
+      const installmentEmailAllowed = notificationAllowed(settings, 'installment', 'email')
+      const installmentSmsAllowed   = notificationAllowed(settings, 'installment', 'sms')
+      const lowStockEmailAllowed    = notificationAllowed(settings, 'low_stock', 'email')
+      const lowStockSmsAllowed      = notificationAllowed(settings, 'low_stock', 'sms')
 
       const pick = (cond: string) => db.prepare(`
         SELECT i.id, i.next_due_date, i.due_amount, i.paid_amount,
@@ -223,58 +240,61 @@ export function startReminderScheduler() {
       } catch { /* Branch alert sweep must never break the rest of the scheduler */ }
 
       // Customer email / SMS reminders — only if configured.
-      if (!emailEnabled && !smsEnabled) return
-      for (const inst of overdue) {
-        const amount = Number(Number(inst.due_amount) - Number(inst.paid_amount)).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })
-        const dueDate = String(inst.next_due_date)
-        if (inst.email && emailEnabled) {
-          await sendEmail({
-            to: String(inst.email),
-            subject: `⚠ Overdue Payment — ${companyName}`,
-            html: installmentReminderHtml({ companyName, customerName: String(inst.customer_name), dueDate, dueAmount: amount, currency, overdue: true }),
-          }).catch(() => {})
+      if (installmentEmailAllowed || installmentSmsAllowed) {
+        for (const inst of overdue) {
+          const amount = Number(Number(inst.due_amount) - Number(inst.paid_amount)).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })
+          const dueDate = String(inst.next_due_date)
+          if (inst.email && installmentEmailAllowed) {
+            await sendEmail({
+              to: String(inst.email),
+              subject: `⚠ Overdue Payment — ${companyName}`,
+              html: installmentReminderHtml({ companyName, customerName: String(inst.customer_name), dueDate, dueAmount: amount, currency, overdue: true }),
+            }).catch(() => {})
+          }
+          if (inst.phone && installmentSmsAllowed) {
+            await sendSms({ to: String(inst.phone), message: installmentOverdueMessage(String(inst.customer_name), amount, currency, dueDate, companyName) }).catch(() => {})
+          }
         }
-        if (inst.phone && smsEnabled) {
-          await sendSms({ to: String(inst.phone), message: installmentOverdueMessage(String(inst.customer_name), amount, currency, dueDate, companyName) }).catch(() => {})
-        }
-      }
 
-      for (const inst of [...dueToday, ...due1Day, ...dueSoon]) {
-        const amount = Number(Number(inst.due_amount) - Number(inst.paid_amount)).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })
-        const dueDate = String(inst.next_due_date)
-        if (inst.email && emailEnabled) {
-          await sendEmail({
-            to: String(inst.email),
-            subject: `Installment Reminder — ${companyName}`,
-            html: installmentReminderHtml({ companyName, customerName: String(inst.customer_name), dueDate, dueAmount: amount, currency }),
-          }).catch(() => {})
-        }
-        if (inst.phone && smsEnabled) {
-          await sendSms({ to: String(inst.phone), message: installmentDueMessage(String(inst.customer_name), amount, currency, dueDate, companyName) }).catch(() => {})
+        for (const inst of [...dueToday, ...due1Day, ...dueSoon]) {
+          const amount = Number(Number(inst.due_amount) - Number(inst.paid_amount)).toLocaleString(undefined, { maximumFractionDigits: 2, minimumFractionDigits: 2 })
+          const dueDate = String(inst.next_due_date)
+          if (inst.email && installmentEmailAllowed) {
+            await sendEmail({
+              to: String(inst.email),
+              subject: `Installment Reminder — ${companyName}`,
+              html: installmentReminderHtml({ companyName, customerName: String(inst.customer_name), dueDate, dueAmount: amount, currency }),
+            }).catch(() => {})
+          }
+          if (inst.phone && installmentSmsAllowed) {
+            await sendSms({ to: String(inst.phone), message: installmentDueMessage(String(inst.customer_name), amount, currency, dueDate, companyName) }).catch(() => {})
+          }
         }
       }
 
       // Low stock email/SMS once a day
-      const lowItems = db.prepare(`
-        SELECT p.name, p.sku, pi.quantity as current, p.min_stock_level as min
-        FROM product_inventory pi
-        JOIN products p ON p.id = pi.product_id
-        WHERE pi.quantity <= p.min_stock_level AND pi.quantity >= 0
-        LIMIT 30
-      `).all() as { name: string; sku: string; current: number; min: number }[]
+      if (lowStockEmailAllowed || lowStockSmsAllowed) {
+        const lowItems = db.prepare(`
+          SELECT p.name, p.sku, pi.quantity as current, p.min_stock_level as min
+          FROM product_inventory pi
+          JOIN products p ON p.id = pi.product_id
+          WHERE pi.quantity <= p.min_stock_level AND pi.quantity >= 0
+          LIMIT 30
+        `).all() as { name: string; sku: string; current: number; min: number }[]
 
-      if (lowItems.length > 0) {
-        const adminEmail = String(store.get('company_email', ''))
-        const adminPhone = String(store.get('company_phone', ''))
-        if (adminEmail && emailEnabled) {
-          await sendEmail({
-            to: adminEmail,
-            subject: `⚠ Low Stock Alert — ${lowItems.length} items`,
-            html: lowStockAlertHtml({ companyName, items: lowItems }),
-          }).catch(() => {})
-        }
-        if (adminPhone && smsEnabled) {
-          await sendSms({ to: adminPhone, message: lowStockMessage(lowItems.length, companyName) }).catch(() => {})
+        if (lowItems.length > 0) {
+          const adminEmail = String(settings.company_email ?? '')
+          const adminPhone = String(settings.company_phone ?? '')
+          if (adminEmail && lowStockEmailAllowed) {
+            await sendEmail({
+              to: adminEmail,
+              subject: `⚠ Low Stock Alert — ${lowItems.length} items`,
+              html: lowStockAlertHtml({ companyName, items: lowItems }),
+            }).catch(() => {})
+          }
+          if (adminPhone && lowStockSmsAllowed) {
+            await sendSms({ to: adminPhone, message: lowStockMessage(lowItems.length, companyName) }).catch(() => {})
+          }
         }
       }
 

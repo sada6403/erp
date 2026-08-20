@@ -10,6 +10,7 @@
 // that; every "verification" step below is a fresh read of the same data
 // recordRedemption itself re-checks at confirm time.
 import { useEffect, useMemo, useRef, useState } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -490,7 +491,7 @@ export default function SmartBuyAwardWizardPage() {
                 <div className="flex justify-between text-sm py-1"><span style={{ color: 'var(--text-2)' }}>Product Value ({qty}x)</span><span style={{ color: 'var(--text-1)' }}>Rs.{money(productTotal)}</span></div>
                 <div className="flex justify-between text-sm py-1 font-semibold"><span style={{ color: 'var(--text-2)' }}>Difference</span><span style={{ color: 'var(--text-1)' }}>Rs.{money(Math.abs(productTotal - entitlementValue))}</span></div>
               </div>
-              <div><label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-3)' }}>Quantity</label><input type="number" min={1} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="input w-24" /></div>
+              <div><label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-3)' }}>Quantity</label><NumberInput min={1} value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="input w-24" /></div>
               {upgradeAmount > 0 && (
                 <div className="rounded-lg border p-3 text-xs space-y-2" style={{ borderColor: '#f59e0b', background: 'color-mix(in srgb, #f59e0b 10%, transparent)' }}>
                   <p style={{ color: 'var(--text-1)' }}>⚠ Additional Rs.{money(upgradeAmount)} required — collected now as part of this same award (not a loan/installment).</p>

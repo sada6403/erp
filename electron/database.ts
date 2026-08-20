@@ -571,6 +571,23 @@ function runMigrations(): void {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_code_ci ON agents(UPPER(TRIM(code)));
     CREATE INDEX IF NOT EXISTS idx_agents_branch ON agents(branch_id);
   `)
+
+  // Staff/Agent positions — was a bare free-text column on agents.position;
+  // this is the lookup list behind the dropdown (Issue 19). agents.position
+  // itself stays a plain TEXT column (matches the existing denormalized-
+  // snapshot convention used throughout this module) — this table only
+  // exists to drive the dropdown + prevent duplicate/inconsistent naming.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS positions (
+      id         TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      created_by TEXT REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at  TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_positions_name_ci ON positions(UPPER(TRIM(name)));
+  `)
   if (!hasColumn('invoices', 'agent_id')) {
     db.exec(`ALTER TABLE invoices ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
   }
@@ -910,6 +927,36 @@ function runMigrations(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_agent_remittances_agent  ON agent_remittances(agent_id);
     CREATE INDEX IF NOT EXISTS idx_agent_remittances_branch ON agent_remittances(branch_id);
+  `)
+
+  // POS "Hold" — pauses a cart-in-progress (not yet a real sale) so a
+  // cashier can serve another customer and come back to it later. Kept
+  // entirely separate from `invoices` on purpose: a held cart must never
+  // decrement stock, run coupon/wallet/commission logic, or show up in
+  // sales reports — none of which apply until it's actually recalled and
+  // completed through the normal invoices:create path. items_json is the
+  // full CartItem[] array (product, qty, price, discount) verbatim, so
+  // recall can restore the cart exactly as it was.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS held_carts (
+      id               TEXT PRIMARY KEY,
+      branch_id        TEXT NOT NULL REFERENCES branches(id),
+      cashier_id       TEXT REFERENCES users(id),
+      bill_type        TEXT NOT NULL DEFAULT 'RETAIL',
+      customer_id      TEXT REFERENCES customers(id),
+      customer_name    TEXT,
+      items_json       TEXT NOT NULL,
+      global_discount  REAL NOT NULL DEFAULT 0,
+      notes            TEXT,
+      valid_until      TEXT,
+      due_date         TEXT,
+      item_count       INTEGER NOT NULL DEFAULT 0,
+      total_amount     REAL NOT NULL DEFAULT 0,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at        TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_held_carts_branch ON held_carts(branch_id);
   `)
 
   // Branch Collaboration — when a scheme's home branch (chit_schemes.branch_id)
@@ -2204,6 +2251,50 @@ function runMigrations(): void {
       console.error('[DB] Chit draw winner balance waiver migration failed:', err)
     }
   }
+
+  // "Head Office" was never a separate branch — it was just the seeded
+  // placeholder address text on the Main Branch row. Clears it on installs
+  // that seeded before this fix, but only where it still holds the exact
+  // untouched default, so a company that genuinely typed their own real
+  // "Head Office" address is never overwritten.
+  const headOfficeLabelName = 'clear_head_office_placeholder_address_v1'
+  const headOfficeLabelDone = db.prepare(`SELECT 1 FROM app_migrations WHERE name = ?`).get(headOfficeLabelName)
+  if (!headOfficeLabelDone) {
+    try {
+      db.prepare(`
+        UPDATE branches SET address = '', updated_at = datetime('now')
+        WHERE id = 'b1111111-1111-4111-8111-111111111111' AND address = 'Head Office'
+      `).run()
+      db.prepare(`INSERT OR IGNORE INTO app_migrations (name) VALUES (?)`).run(headOfficeLabelName)
+    } catch (err) {
+      console.error('[DB] Head Office placeholder-address migration failed:', err)
+    }
+  }
+
+  // Backfill the new positions lookup table (Issue 19) from whatever's
+  // already been hand-typed into agents.position, so existing values are
+  // immediately selectable in the new dropdown instead of appearing lost.
+  const positionsBackfillName = 'backfill_positions_from_agents_v1'
+  const positionsBackfillDone = db.prepare(`SELECT 1 FROM app_migrations WHERE name = ?`).get(positionsBackfillName)
+  if (!positionsBackfillDone) {
+    try {
+      const distinctPositions = db.prepare(`
+        SELECT DISTINCT TRIM(position) as name FROM agents
+        WHERE position IS NOT NULL AND TRIM(position) != ''
+      `).all() as { name: string }[]
+      const insert = db.prepare(`INSERT OR IGNORE INTO positions (id, name) VALUES (?, ?)`)
+      const { randomUUID } = require('crypto')
+      for (const row of distinctPositions) {
+        // Case-insensitive unique index means a differently-cased duplicate
+        // (e.g. "Sales Agent" vs "sales agent") is silently skipped by
+        // INSERT OR IGNORE rather than erroring the whole backfill.
+        try { insert.run(randomUUID(), row.name) } catch { /* duplicate name, skip */ }
+      }
+      db.prepare(`INSERT OR IGNORE INTO app_migrations (name) VALUES (?)`).run(positionsBackfillName)
+    } catch (err) {
+      console.error('[DB] Positions backfill migration failed:', err)
+    }
+  }
 }
 
 function seedDefaultData() {
@@ -2213,7 +2304,7 @@ function seedDefaultData() {
   const branchId = 'b1111111-1111-4111-8111-111111111111'
   db.prepare(`
     INSERT OR IGNORE INTO branches (id, name, address, phone)
-    VALUES (?, 'Main Branch', 'Head Office', '+94 11 000 0000')
+    VALUES (?, 'Main Branch', '', '+94 11 000 0000')
   `).run(branchId)
 
   // Seed a default warehouse (using standard UUID format)
@@ -2223,12 +2314,13 @@ function seedDefaultData() {
   `).run('w2222222-2222-4222-8222-222222222222', branchId)
 
   // Seed default company admin user (using standard UUID format and company admin role UUID)
+  // No default PIN — admin roles log in via email+password only (see Issue 1/2:
+  // PIN login is reserved for cashier/staff accounts, set explicitly per user).
   const hash = bcrypt.hashSync('admin123', 10)
-  const pinHash = bcrypt.hashSync('1234', 10)
   db.prepare(`
-    INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash)
-    VALUES (?, ?, '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'System Admin', 'admin@pos.local', ?, ?)
-  `).run('u9999999-9999-4999-8999-999999999999', branchId, hash, pinHash)
+    INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash)
+    VALUES (?, ?, '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'System Admin', 'admin@pos.local', ?)
+  `).run('u9999999-9999-4999-8999-999999999999', branchId, hash)
 
   console.log('[DB] Default data seeded')
 }

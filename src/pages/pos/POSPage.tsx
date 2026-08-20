@@ -162,12 +162,28 @@ export default function POSPage() {
     toast.success('New invoice started')
   }, [cart])
 
-  const holdInvoice = useCallback(() => {
+  const holdInvoice = useCallback(async () => {
     if (cart.items.length === 0) { toast.error('Cart is empty'); return }
-    toast.success('Invoice held')
-    cart.clear()
-    setCartFocusedIdx(-1)
-    loadInvoiceNumber(cart.billType)
+    try {
+      const res = await window.api.holds.create({
+        bill_type: cart.billType,
+        customer_id: cart.customer?.id || null,
+        customer_name: cart.customer?.name || null,
+        items: cart.items,
+        global_discount: cart.globalDiscount,
+        notes: cart.notes,
+        valid_until: cart.validUntil,
+        due_date: cart.dueDate,
+        total_amount: cart.total,
+      })
+      if (!res.success) { toast.error(res.error || 'Failed to hold invoice'); return }
+      toast.success('Invoice held')
+      cart.clear()
+      setCartFocusedIdx(-1)
+      loadInvoiceNumber(cart.billType)
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Failed to hold invoice')
+    }
   }, [cart])
 
   const focusSearch = useCallback(() => {
@@ -246,15 +262,21 @@ export default function POSPage() {
   }, [])
 
   const handleBillTypeChange = useCallback((type: BillType) => {
-    if (cart.items.length > 0) {
-      toast.error('Clear cart before changing bill type')
-      return
-    }
+    if (type === cart.billType) return
+    // The cart carries over as-is — same items/qty/discounts/customer, only
+    // the document type (and its numbering/prefix, handled by the
+    // loadInvoiceNumber effect below reacting to cart.billType) changes.
+    // Pricing itself doesn't differ between Retail/Quotation/Credit in this
+    // app, so there's nothing to recalculate.
     if (type === 'CREDIT' && !cart.customer) {
       toast('Please select a customer first for credit bills', { icon: '!' })
     }
     cart.setBillType(type)
-    toast.success(`Switched to ${type.toLowerCase()} mode`)
+    toast.success(
+      cart.items.length > 0
+        ? `Switched to ${type.toLowerCase()} mode — ${cart.items.length} item(s) carried over`
+        : `Switched to ${type.toLowerCase()} mode`
+    )
   }, [cart])
 
   useKeyboard([

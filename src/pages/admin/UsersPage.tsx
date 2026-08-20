@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, Trash2, Users, ShieldCheck, Search, Lock, UserX, UserCheck, KeyRound, AlertTriangle, Upload, FileDown, Eye, UserSearch, X } from 'lucide-react'
+import { Plus, Edit2, Trash2, Users, ShieldCheck, Search, Lock, UserX, UserCheck, KeyRound, AlertTriangle, Upload, FileDown, Eye, UserSearch, X, Contact } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { AgentsSection } from './AgentsPage'
 
 const SUPER_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
 
@@ -39,7 +40,7 @@ export default function UsersPage() {
   const [hardDeleteUser, setHardDeleteUser] = useState<Record<string,unknown>|null>(null)
   const [profileUser, setProfileUser] = useState<Record<string,unknown>|null>(null)
   const [showAuditReport, setShowAuditReport] = useState(false)
-  const [tab,          setTab]          = useState<'users' | 'roles'>('users')
+  const [tab,          setTab]          = useState<'users' | 'agents' | 'roles'>('users')
   const [search,       setSearch]       = useState('')
   const [importing,    setImporting]    = useState(false)
   const currentUser = useAuthStore(s => s.user)
@@ -158,7 +159,7 @@ export default function UsersPage() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
-        title="Users & Role Access"
+        title="Employee Management"
         subtitle={`${filteredUsers.length} users, ${roles.length} roles`}
         actions={
           tab === 'users' ? (
@@ -179,7 +180,8 @@ export default function UsersPage() {
                 <Plus size={14} /> Add User
               </button>
             </div>
-          ) : isGlobalUser ? (
+          ) : tab === 'agents' ? null /* AgentsSection renders its own Template/Import/Add Agent toolbar */
+          : isGlobalUser ? (
             // Only Company Admin can create roles
             <button
               onClick={() => { setEditingRole(null); setShowRoleForm(true) }}
@@ -197,6 +199,9 @@ export default function UsersPage() {
       >
         <div className="flex gap-2">
           <TabButton active={tab === 'users'} onClick={() => setTab('users')} icon={Users} label="Users" />
+          {/* Agent is a staff position/type, not a separate module (Issue 17) —
+              this tab replaces the old standalone Agent Management page/route. */}
+          <TabButton active={tab === 'agents'} onClick={() => setTab('agents')} icon={Contact} label="Agents" />
           {/* Role-Based Access tab — visible to all but edit-locked for non-global */}
           <TabButton
             active={tab === 'roles'}
@@ -232,6 +237,8 @@ export default function UsersPage() {
           onChangePin={u => setPinUser(u)}
           onViewProfile={u => setProfileUser(u)}
         />
+      ) : tab === 'agents' ? (
+        <AgentsSection />
       ) : (
         <RolesSection
           roles={roles}
@@ -628,6 +635,7 @@ function UserForm({
     name:      String(user?.name     || ''),
     email:     String(user?.email    || ''),
     password:  '',
+    current_password: '',
     role_id:   String(user?.role_id  || ''),
     branch_id: String(user?.branch_id || (!isGlobalUser && callerBranchId ? callerBranchId : '')),
     pin:       '', // PINs are stored hashed — blank means "keep current PIN"
@@ -636,6 +644,10 @@ function UserForm({
   const [saving, setSaving] = useState(false)
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement|HTMLSelectElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }))
+  // Changing your OWN password requires proving the current one — an admin
+  // resetting someone ELSE's password is the "Super Admin override" case and
+  // skips this (see electron/ipc/admin.ts admin:users:update).
+  const isEditingSelf = Boolean(user && currentUser && user.id === currentUser.id)
 
   // Detect if the selected role needs email+password (admin) or PIN only (staff)
   const selectedRole = roles.find(r => r.id === form.role_id)
@@ -656,26 +668,34 @@ function UserForm({
   const [agentOptions, setAgentOptions] = useState<Record<string, unknown>[]>([])
   const [agentQuery, setAgentQuery] = useState('')
   const [selectedAgent, setSelectedAgent] = useState<Record<string, unknown> | null>(null)
+  // ── Staff ID autofill (Issue 18) — same lookup, but for every OTHER role:
+  // an optional convenience, not a mandatory selection like isAgentRole's own
+  // search above. Matched by exact code first (a real "Staff ID" lookup),
+  // falling back to a short list of close matches to pick from.
+  const [staffIdQuery, setStaffIdQuery] = useState('')
+  const [staffIdNotFound, setStaffIdNotFound] = useState(false)
   // ── Linked agent info (only relevant while EDITING an existing agent-role user) ──
   const [linkedAgent, setLinkedAgent] = useState<Record<string, unknown> | null>(null)
 
   useEffect(() => {
-    if (!isAgentRole) return
     if (user) {
       // Editing an existing agent-linked login — pull the full Agent record
       // fresh so this read-only card can never drift from Agent Management.
-      if (user.agent_id) {
+      if (isAgentRole && user.agent_id) {
         window.api.agents.get(user.agent_id as string).then((r: { success: boolean; data?: Record<string, unknown> }) => {
           if (r.success) setLinkedAgent(r.data || null)
         }).catch(() => {})
       }
     } else if (agentOptions.length === 0) {
+      // Loaded for every NEW account, not just agent-role ones — Issue 18:
+      // typing a Staff ID should auto-fill from an existing staff/Agent
+      // record regardless of which role is being assigned.
       window.api.agents.list({ status: 'active' }).then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
         if (r.success) setAgentOptions(r.data || [])
       }).catch(() => {})
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAgentRole])
+  }, [isAgentRole, user])
 
   const agentMatches = agentQuery.trim()
     ? agentOptions.filter(a => {
@@ -683,6 +703,32 @@ function UserForm({
         return [a.code, a.name, a.nic, a.phone].some(v => String(v || '').toLowerCase().includes(q))
       }).slice(0, 10)
     : []
+
+  const staffIdMatches = staffIdQuery.trim()
+    ? agentOptions.filter(a => {
+        const q = staffIdQuery.trim().toLowerCase()
+        return [a.code, a.name, a.nic, a.phone].some(v => String(v || '').toLowerCase().includes(q))
+      }).slice(0, 8)
+    : []
+
+  const applyStaffRecord = (a: Record<string, unknown>) => {
+    setForm(p => ({
+      ...p,
+      name: String(a.name || p.name),
+      email: a.email ? String(a.email) : p.email,
+      branch_id: a.branch_id ? String(a.branch_id) : p.branch_id,
+    }))
+    setStaffIdQuery(String(a.code || ''))
+    setStaffIdNotFound(false)
+  }
+
+  const lookupStaffId = () => {
+    const q = staffIdQuery.trim().toLowerCase()
+    if (!q) { setStaffIdNotFound(false); return }
+    const exact = agentOptions.find(a => String(a.code || '').toLowerCase() === q)
+    if (exact) { applyStaffRecord(exact); return }
+    setStaffIdNotFound(true)
+  }
   const branchNameOf = (branchId: unknown) =>
     (branches.find(b => b.id === branchId)?.name as string | undefined) || '—'
 
@@ -726,6 +772,9 @@ function UserForm({
     if (isAdminRole) {
       if (!form.email) { toast.error('Email is required for admin accounts'); return }
       if (!user && !form.password) { toast.error('Password is required for admin accounts'); return }
+      if (form.password && isEditingSelf && !form.current_password) {
+        toast.error('Enter your current password to set a new one'); return
+      }
     }
     if (isPinOnly && !form.pin && !(user && user.has_pin)) {
       toast.error('PIN is required for staff accounts'); return
@@ -734,6 +783,7 @@ function UserForm({
     setSaving(true)
     const payload: Record<string,unknown> = { ...form }
     if (!payload.password) delete payload.password
+    if (!payload.password || !isEditingSelf) delete payload.current_password
 
     // Staff roles: auto-generate placeholder email & password (DB requires NOT NULL)
     if (isPinOnly && !user) {
@@ -748,6 +798,10 @@ function UserForm({
         : await window.api.admin.users.create(payload)
       if (res.success) {
         toast.success(user ? 'User updated' : 'User created')
+        // Editing your own name/email/password shouldn't wait for the
+        // periodic 60s session poll (authStore's refreshSilently) to show up
+        // elsewhere in the app (sidebar, header) — refresh right away.
+        if (isEditingSelf) useAuthStore.getState().refreshSilently()
         onSave()
       } else {
         toast.error(String(res.error || 'Save failed'))
@@ -771,6 +825,48 @@ function UserForm({
       </>}
     >
       <div className="grid grid-cols-2 gap-4">
+
+        {/* Staff ID autofill (Issue 18) — optional convenience for every
+            non-agent-role new account: enter an existing staff/Agent code and
+            the name/email/branch below pre-fill from that record. Not shown
+            for agent-role accounts (which already have their own mandatory
+            search above) or when editing (nothing to look up). */}
+        {!isAgentRole && !user && (
+          <div className="col-span-2">
+            <label className="label">Staff ID (optional — autofills from an existing staff record)</label>
+            <div className="flex gap-2">
+              <input
+                value={staffIdQuery}
+                onChange={e => { setStaffIdQuery(e.target.value); setStaffIdNotFound(false) }}
+                onBlur={lookupStaffId}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); lookupStaffId() } }}
+                className="input flex-1"
+                placeholder="e.g. NF/NA/258"
+              />
+            </div>
+            {staffIdNotFound && (
+              <p className="text-xs mt-1 text-amber-400">No staff record found with that ID — enter details manually below.</p>
+            )}
+            {!staffIdNotFound && staffIdMatches.length > 0 && staffIdQuery.trim() && (
+              <div className="mt-1 rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+                {staffIdMatches.map(a => (
+                  <button
+                    key={a.id as string}
+                    type="button"
+                    onClick={() => applyStaffRecord(a)}
+                    className="w-full text-left px-3 py-2 text-sm flex items-center justify-between hover:bg-white/5"
+                  >
+                    <span>
+                      <span className="font-mono">{String(a.code || '')}</span>{' — '}
+                      <span className="font-medium">{String(a.name || '')}</span>
+                    </span>
+                    <span style={{ color: 'var(--text-3)' }}>{String(a.position || '')}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Name — hidden for agent-role accounts, whose identity always comes
             from the selected/linked Agent record, never typed here */}
@@ -956,6 +1052,12 @@ function UserForm({
               <label className="label">Password {user ? '(leave blank to keep)' : '*'}</label>
               <input type="password" value={form.password} onChange={f('password')} className="input" />
             </div>
+            {isEditingSelf && form.password && (
+              <div>
+                <label className="label">Current Password *</label>
+                <input type="password" value={form.current_password} onChange={f('current_password')} className="input" placeholder="Required to set a new password" />
+              </div>
+            )}
             <div>
               <label className="label">PIN {user?.has_pin ? '(leave blank to keep)' : '(optional)'}</label>
               <input

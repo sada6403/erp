@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import { Search, Filter, Download, FileText, Eye, RefreshCw, X, ChevronLeft, ChevronRight, Printer, Lock, Clock, Pencil } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import { useAuthStore } from '@/store/authStore'
@@ -987,8 +988,8 @@ function InvoiceItemEditCell({ invoiceId, item, isAdmin, onDone }: {
 
   return (
     <div className="flex items-center gap-1">
-      <input type="number" value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} className="input py-1 text-xs w-14" />
-      <input type="number" value={price} onChange={e => setPrice(parseFloat(e.target.value) || 0)} className="input py-1 text-xs w-16" />
+      <NumberInput value={qty} onChange={e => setQty(parseFloat(e.target.value) || 0)} className="input py-1 text-xs w-14" />
+      <NumberInput value={price} onChange={e => setPrice(parseFloat(e.target.value) || 0)} className="input py-1 text-xs w-16" />
       <button onClick={save} disabled={saving} className="btn-success btn-sm px-2">OK</button>
       <button onClick={() => setOpen(false)} className="btn-ghost btn-sm p-1"><X size={12} /></button>
     </div>

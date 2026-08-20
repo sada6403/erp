@@ -1260,6 +1260,40 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        INDEX idx_chit_payment_reminders_scheme (scheme_id)
      )`,
 
+    // ── POS cart "Hold" — see held_carts table comment in
+    // electron/database.ts for why this is separate from invoices ────────
+    `CREATE TABLE IF NOT EXISTS held_carts (
+       id              CHAR(36)     NOT NULL PRIMARY KEY,
+       branch_id       CHAR(36)     NOT NULL,
+       cashier_id      CHAR(36)     NULL,
+       bill_type       VARCHAR(20)  NOT NULL DEFAULT 'RETAIL',
+       customer_id     CHAR(36)     NULL,
+       customer_name   VARCHAR(255) NULL,
+       items_json      LONGTEXT     NOT NULL,
+       global_discount DECIMAL(6,2) NOT NULL DEFAULT 0,
+       notes           TEXT         NULL,
+       valid_until     DATE         NULL,
+       due_date        DATE         NULL,
+       item_count      INT          NOT NULL DEFAULT 0,
+       total_amount    DECIMAL(14,2) NOT NULL DEFAULT 0,
+       created_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at       DATETIME     NULL,
+       INDEX idx_held_carts_branch (branch_id)
+     )`,
+
+    // ── Staff/Agent positions lookup — see positions table comment in
+    // electron/database.ts ────────────────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS positions (
+       id         CHAR(36)     NOT NULL PRIMARY KEY,
+       name       VARCHAR(255) NOT NULL,
+       created_by CHAR(36)     NULL,
+       created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       synced_at  DATETIME     NULL,
+       UNIQUE KEY idx_positions_name (name)
+     )`,
+
     // ── Edit requests — manager-requested, admin-approved corrections to
     // already-completed invoices/stock ──────────────────────────────────
     `CREATE TABLE IF NOT EXISTS edit_requests (

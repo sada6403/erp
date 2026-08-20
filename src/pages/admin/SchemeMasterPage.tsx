@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import { Plus, Pencil, Power, PowerOff, Layers, AlertTriangle } from 'lucide-react'
@@ -173,12 +174,12 @@ function TemplateFormModal({ template, onClose, onSave }: { template: Row | null
           <input value={form.scheme_name} onChange={f('scheme_name')} className="input" placeholder="e.g. SmartBuy 500" />
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Monthly Contribution (Rs.) *</label><input type="number" value={form.monthly_contribution_amount} onChange={f('monthly_contribution_amount')} className="input" min={0} /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Duration (months) *</label><input type="number" value={form.duration_months} onChange={f('duration_months')} className="input" min={1} /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Monthly Contribution (Rs.) *</label><NumberInput value={form.monthly_contribution_amount} onChange={f('monthly_contribution_amount')} className="input" min={0} /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Duration (months) *</label><NumberInput value={form.duration_months} onChange={f('duration_months')} className="input" min={1} /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Minimum Members *</label><input type="number" value={form.minimum_members} onChange={f('minimum_members')} className="input" min={1} /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Product Value (Rs.) *</label><input type="number" value={form.product_value} onChange={f('product_value')} className="input" min={0} /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Minimum Members *</label><NumberInput value={form.minimum_members} onChange={f('minimum_members')} className="input" min={1} /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Product Value (Rs.) *</label><NumberInput value={form.product_value} onChange={f('product_value')} className="input" min={0} /></div>
         </div>
         {form.monthly_contribution_amount * form.duration_months !== form.product_value && form.monthly_contribution_amount > 0 && form.duration_months > 0 && form.product_value > 0 && (
           <div className="rounded-lg p-3 flex items-start gap-2 text-xs" style={{ background: 'color-mix(in srgb, #f59e0b 10%, transparent)', border: '1px solid #f59e0b' }}>

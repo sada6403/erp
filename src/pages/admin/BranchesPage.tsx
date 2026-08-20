@@ -135,9 +135,6 @@ export default function BranchesPage() {
                       <Copy size={10} />
                     </button>
                   : null}
-                {isMain(b) && (
-                  <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 text-xs rounded">Head Office</span>
-                )}
               </div>
               <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                 Manager: {String(b.manager_name || 'Unassigned')}
@@ -260,7 +257,7 @@ function BranchForm({
 
   return (
     <Modal
-      title={branch ? (isMain ? 'Edit Head Office' : `Edit Branch — ${branch.name as string}`) : 'Add Branch'}
+      title={branch ? (isMain ? 'Edit Main Branch' : `Edit Branch — ${branch.name as string}`) : 'Add Branch'}
       onClose={onClose}
       footer={
         <>
@@ -280,7 +277,6 @@ function BranchForm({
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">
               Branch Code
-              {isMain && <span className="text-amber-400 ml-1">(Head Office)</span>}
             </label>
             <input
               value={form.code}
@@ -381,7 +377,7 @@ function BranchForm({
           <div>
             <p className="text-sm font-medium text-slate-200">Branch Active</p>
             <p className="text-xs text-slate-500 mt-0.5">
-              {isMain ? 'Head Office must always remain active' : 'Inactive branches cannot process sales'}
+              {isMain ? 'Main Branch must always remain active' : 'Inactive branches cannot process sales'}
             </p>
           </div>
           <button

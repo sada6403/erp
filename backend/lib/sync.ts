@@ -46,6 +46,11 @@ export const ALLOWED_TABLES = new Set([
   // Cycle payment reminder history — member-keyed, pulled directly like
   // agent_remittances/smartbuy_transfer_history.
   'chit_payment_reminders',
+  // POS cart "Hold" — see held_carts table comment in electron/database.ts.
+  'held_carts',
+  // Staff/Agent positions lookup — see positions table comment in
+  // electron/database.ts.
+  'positions',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {

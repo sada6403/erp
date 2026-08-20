@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
 import { useKeyboard } from '@/hooks/useKeyboard'
+import NumberInput from '@/components/shared/NumberInput'
 import type { BillType } from '@/store/cartStore'
 import {
   X, CreditCard, Banknote, Building2, Calendar, Printer, CheckCircle2,
@@ -702,8 +703,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               </div>
               {usePoints && (
                 <div className="flex items-center gap-2 mt-1">
-                  <input
-                    type="number"
+                  <NumberInput
                     min={Number(loyaltyCfg?.min_redeem ?? 100)}
                     max={maxRedeemablePoints}
                     step={Number(loyaltyCfg?.redeem_points ?? 100)}
@@ -780,8 +780,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                     </div>
                   )}
                   <div className="flex items-center gap-2">
-                    <input
-                      type="number"
+                    <NumberInput
                       value={couponAmount}
                       onChange={e => setCouponAmount(e.target.value)}
                       className="input py-1 text-sm w-32"
@@ -826,8 +825,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                 <p className="text-xs" style={{ color: 'var(--text-3)' }}>This customer has no SmartBuy Wallet credit available.</p>
               ) : useWallet ? (
                 <div className="flex items-center gap-2">
-                  <input
-                    type="number"
+                  <NumberInput
                     value={walletAmount}
                     onChange={e => setWalletAmount(e.target.value)}
                     className="input py-1 text-sm w-32"
@@ -914,9 +912,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                     Amount Received
                     <span className="text-[10px] font-normal ml-1" style={{ color: 'var(--text-3)' }}>— press Enter to confirm</span>
                   </label>
-                  <input
+                  <NumberInput
                     ref={receivedRef}
-                    type="number"
                     value={received}
                     onChange={e => setReceived(e.target.value)}
                     onKeyDown={e => {
@@ -972,7 +969,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                     </div>
                     <div>
                       <label className="label">Down Payment</label>
-                      <input type="number" className="input" value={downPayment} onChange={e => setDownPayment(e.target.value)} placeholder="0" min={0} max={cart.total} />
+                      <NumberInput className="input" value={downPayment} onChange={e => setDownPayment(e.target.value)} placeholder="0" min={0} max={cart.total} />
                     </div>
                   </div>
                   {selectedPlan && planMonths > 0 && (

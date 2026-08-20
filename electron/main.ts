@@ -5,6 +5,7 @@ import { pathToFileURL } from 'url'
 import { initDatabase } from './database'
 import { registerProductHandlers } from './ipc/products'
 import { registerInvoiceHandlers } from './ipc/invoices'
+import { registerHoldHandlers } from './ipc/holds'
 import { registerCustomerHandlers } from './ipc/customers'
 import { registerAgentHandlers } from './ipc/agents'
 import { registerRegionHandlers } from './ipc/regions'
@@ -173,6 +174,7 @@ async function bootstrap() {
   registerAuthHandlers(ipcMain)
   registerProductHandlers(ipcMain)
   registerInvoiceHandlers(ipcMain)
+  registerHoldHandlers(ipcMain)
   registerCustomerHandlers(ipcMain)
   registerAgentHandlers(ipcMain)
   registerRegionHandlers(ipcMain)

@@ -11,17 +11,26 @@ export interface EmailPayload {
   attachments?: { filename: string; content: Buffer | string; contentType?: string }[]
 }
 
+// Env vars override the Settings-UI-configured values when present (e.g. for
+// advanced/scripted deployments) — SMTP_PASSWORD in particular should never
+// need to be typed into Settings at all on a machine provisioned this way.
+// Mirrors the same `env || stored-setting || default` precedence already
+// used for the cloud API URL in electron/ipc/activation.ts.
 function getConfig() {
+  // Settings are persisted as one nested blob under 'app_settings' (see
+  // electron/ipc/settings.ts's settings:update) — a flat store.get('smtp_host')
+  // reads a key that's never written and always falls back to its default.
+  const s = (store.get('app_settings') as Record<string, unknown>) || {}
   return {
-    enabled:   Boolean(store.get('email_enabled', false)),
-    host:      String(store.get('smtp_host', '')),
-    port:      Number(store.get('smtp_port', 587)),
-    encryption:String(store.get('smtp_encryption', 'TLS')),
-    user:      String(store.get('smtp_username', '')),
-    pass:      String(store.get('smtp_password', '')),
-    fromEmail: String(store.get('smtp_from_email', '')),
-    fromName:  String(store.get('smtp_from_name', 'POS System')),
-    replyTo:   String(store.get('smtp_reply_to', '')),
+    enabled:    process.env.SMTP_ENABLED !== undefined ? process.env.SMTP_ENABLED === 'true' : Boolean(s.email_enabled ?? false),
+    host:       process.env.SMTP_HOST       || String(s.smtp_host ?? ''),
+    port:       Number(process.env.SMTP_PORT || s.smtp_port || 587),
+    encryption: process.env.SMTP_ENCRYPTION || String(s.smtp_encryption ?? 'TLS'),
+    user:       process.env.SMTP_USERNAME   || String(s.smtp_username ?? ''),
+    pass:       process.env.SMTP_PASSWORD   || String(s.smtp_password ?? ''),
+    fromEmail:  process.env.SMTP_FROM_EMAIL || String(s.smtp_from_email ?? ''),
+    fromName:   process.env.SMTP_FROM_NAME  || String(s.smtp_from_name ?? 'POS System'),
+    replyTo:    process.env.SMTP_REPLY_TO   || String(s.smtp_reply_to ?? ''),
   }
 }
 

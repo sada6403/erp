@@ -3,21 +3,15 @@ import { useAuthStore } from '@/store/authStore'
 import { ShoppingCart, Trash2, Plus, Minus, Tag, ChevronDown, AlertTriangle } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import toast from 'react-hot-toast'
+import NumberInput from '@/components/shared/NumberInput'
 
-// Legacy fallback for roles nobody has explicitly configured yet via
-// Admin → Discounts → Max Discount Limits (role.permissions.max_discount_pct).
-function legacyMaxDiscount(roleName: string): number {
-  const lower = roleName.toLowerCase()
-  if (lower.includes('cashier')) return 5
-  if (lower.includes('manager')) return 15
-  return 100
-}
-
-function getMaxDiscount(user: { role?: { name?: string; permissions?: Record<string, unknown> } } | null): number {
-  const roleName = user?.role?.name || 'Cashier'
+// Same admin-type heuristic already used elsewhere (UsersPage.tsx's
+// isAdminRole, electron/services/pinPolicy.ts's isAdminTypeRole) — a plain
+// Cashier can't override a product's price at checkout, an admin-tier role
+// (Company Admin, Branch Manager, ...) can.
+function canEditPrice(user: { role?: { permissions?: Record<string, unknown> } } | null): boolean {
   const perms = user?.role?.permissions || {}
-  if (perms.all) return 100
-  return typeof perms.max_discount_pct === 'number' ? perms.max_discount_pct : legacyMaxDiscount(roleName)
+  return Boolean(perms.all || perms.reports || perms.employees || perms.settings || perms.branches)
 }
 
 interface DiscountPlan {
@@ -41,8 +35,16 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
 
   const plans = discountPlans as unknown as DiscountPlan[]
 
-  const roleName = (user?.role as { name?: string } | null)?.name || 'Cashier'
-  const maxDiscount = getMaxDiscount(user as { role?: { name?: string; permissions?: Record<string, unknown> } } | null)
+  const priceEditable = canEditPrice(user as { role?: { permissions?: Record<string, unknown> } } | null)
+  // No more role-tier discount allowance (Admin → Discounts → Max Discount
+  // Limits no longer applies here) — a product's own configured discount is
+  // the only ceiling, for every role including Company Admin. The whole-bill
+  // "Global Discount" isn't tied to one product, so its ceiling is the most
+  // restrictive product currently in the cart (mirrors the server-side
+  // minAllowedPct logic in electron/ipc/invoices.ts).
+  const cartMaxDiscount = cart.items.length
+    ? Math.min(...cart.items.map(i => i.auto_discount_pct ?? 0))
+    : 0
 
   // Clamp focusedIdx to valid range
   const activeFocusedIdx = focusedIdx >= 0 && focusedIdx < cart.items.length ? focusedIdx : cart.items.length - 1
@@ -55,9 +57,13 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
 
   const handleItemDiscount = (productId: string, pct: number) => {
     const item = cart.items.find(i => i.product.id === productId)
-    const allowed = Math.max(maxDiscount, item?.auto_discount_pct ?? 0)
+    const allowed = item?.auto_discount_pct ?? 0
     if (pct > allowed) {
-      toast.error(`Max ${allowed}% discount allowed for ${roleName}. Ask a manager to override.`)
+      toast.error(
+        allowed > 0
+          ? `Max ${allowed}% discount allowed for this product.`
+          : 'No discount is configured for this product.'
+      )
       cart.setItemDiscount(productId, allowed)
       return
     }
@@ -65,9 +71,13 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
   }
 
   const handleGlobalDiscount = (pct: number) => {
-    if (pct > maxDiscount) {
-      toast.error(`Max ${maxDiscount}% discount allowed for ${roleName}.`)
-      cart.setGlobalDiscount(maxDiscount)
+    if (pct > cartMaxDiscount) {
+      toast.error(
+        cartMaxDiscount > 0
+          ? `Max ${cartMaxDiscount}% discount allowed (most restrictive product in this cart).`
+          : 'No discount is configured for one or more products in this cart.'
+      )
+      cart.setGlobalDiscount(cartMaxDiscount)
       return
     }
     cart.setGlobalDiscount(pct)
@@ -107,7 +117,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
 
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-2">
         {cart.items.map((item, idx) => {
-          const discountExceedsLimit = item.discount_pct > maxDiscount
+          const discountExceedsLimit = item.discount_pct > (item.auto_discount_pct ?? 0)
           const isFocused = idx === activeFocusedIdx
 
           return (
@@ -153,8 +163,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   >
                     <Minus size={12} />
                   </button>
-                  <input
-                    type="number"
+                  <NumberInput
                     value={item.quantity}
                     onChange={e => cart.updateQty(item.product.id, parseInt(e.target.value) || 0)}
                     onClick={e => e.stopPropagation()}
@@ -173,8 +182,20 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   </button>
                 </div>
 
-                <div className="flex-1">
-                  <p className="text-xs" style={{ color: 'var(--text-3)' }}>× Rs.{item.unit_price.toLocaleString()}</p>
+                <div className="flex-1 flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                  <span className="text-xs" style={{ color: 'var(--text-3)' }}>× Rs.</span>
+                  {priceEditable ? (
+                    <NumberInput
+                      value={item.unit_price}
+                      onChange={e => cart.updatePrice(item.product.id, parseFloat(e.target.value) || 0)}
+                      className="w-20 bg-transparent text-xs border-0 outline-none"
+                      style={{ color: 'var(--text-3)' }}
+                      title="Edit price"
+                      tabIndex={-1}
+                    />
+                  ) : (
+                    <p className="text-xs" style={{ color: 'var(--text-3)' }}>{item.unit_price.toLocaleString()}</p>
+                  )}
                 </div>
 
                 <div className="text-right">
@@ -190,8 +211,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   ? <AlertTriangle size={11} className="text-amber-500" />
                   : <Tag size={11} style={{ color: 'var(--text-3)' }} />
                 }
-                <input
-                  type="number"
+                <NumberInput
                   value={item.discount_pct}
                   onChange={e => handleItemDiscount(item.product.id, parseFloat(e.target.value) || 0)}
                   className={`w-16 bg-transparent text-xs border-0 outline-none ${
@@ -207,7 +227,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                     -Rs.{item.discount_amount.toFixed(2)}
                   </span>
                 )}
-                {discountExceedsLimit && <span className="text-xs text-amber-500 ml-auto">Needs approval</span>}
+                {discountExceedsLimit && <span className="text-xs text-amber-500 ml-auto">Exceeds product limit</span>}
               </div>
 
               {/* Keyboard hint when focused */}
@@ -223,47 +243,53 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
         })}
       </div>
 
-      {/* Totals + notes */}
-      <div className="pos-cart-total px-4 py-3 space-y-2">
-        <button
-          onClick={() => setShowDiscount(d => !d)}
-          className="flex items-center gap-1 text-xs text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors w-full"
-          tabIndex={0}
-        >
-          <Tag size={12} /> Global Discount <kbd className="kbd text-xs ml-1">F9</kbd>
-          <ChevronDown size={12} className={`ml-auto transition-transform ${showDiscount ? 'rotate-180' : ''}`} />
-        </button>
-        {showDiscount && (
-          <div className="space-y-1.5">
-            {plans.length > 0 && (
-              <select
-                value={selectedPlanId}
-                onChange={e => handlePlanSelect(e.target.value)}
-                className="input py-1.5 text-sm w-full"
-              >
-                <option value="">Custom %...</option>
-                {plans.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} — {p.type === 'percentage' ? `${p.value}%` : `Rs.${p.value}`}
-                  </option>
-                ))}
-              </select>
-            )}
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                value={cart.globalDiscount}
-                onChange={e => { setSelectedPlanId(''); handleGlobalDiscount(parseFloat(e.target.value) || 0) }}
-                className="input py-1.5 text-sm w-24"
-                placeholder="%"
-                min="0" max={maxDiscount}
-              />
-              <span className="text-xs" style={{ color: 'var(--text-3)' }}>% (max {maxDiscount}% for {roleName})</span>
+      {/* Discounts — its own clearly-separated panel, distinct from the bill
+          summary below, so discount entry can never be mistaken for a total. */}
+      <div className="px-4 pt-3">
+        <div className="rounded-lg border" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
+          <button
+            onClick={() => setShowDiscount(d => !d)}
+            className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 w-full text-[var(--text-1)]"
+            tabIndex={0}
+          >
+            <Tag size={12} /> Discounts <kbd className="kbd text-xs ml-1">F9</kbd>
+            <ChevronDown size={12} className={`ml-auto transition-transform ${showDiscount ? 'rotate-180' : ''}`} />
+          </button>
+          {showDiscount && (
+            <div className="px-3 pb-3 space-y-1.5 border-t" style={{ borderColor: 'var(--border)' }}>
+              <p className="text-xs pt-2" style={{ color: 'var(--text-3)' }}>Global Discount (applies to the whole bill)</p>
+              {plans.length > 0 && (
+                <select
+                  value={selectedPlanId}
+                  onChange={e => handlePlanSelect(e.target.value)}
+                  className="input py-1.5 text-sm w-full"
+                >
+                  <option value="">Custom %...</option>
+                  {plans.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} — {p.type === 'percentage' ? `${p.value}%` : `Rs.${p.value}`}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <div className="flex items-center gap-2">
+                <NumberInput
+                  value={cart.globalDiscount}
+                  onChange={e => { setSelectedPlanId(''); handleGlobalDiscount(parseFloat(e.target.value) || 0) }}
+                  className="input py-1.5 text-sm w-24"
+                  placeholder="%"
+                  min="0" max={cartMaxDiscount}
+                />
+                <span className="text-xs" style={{ color: 'var(--text-3)' }}>% (max {cartMaxDiscount}% — most restrictive product in cart)</span>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+      </div>
 
-        <div className="space-y-1 pt-1">
+      {/* Bill Summary — totals only, nothing about discount entry */}
+      <div className="pos-cart-total px-4 py-3 space-y-2">
+        <div className="space-y-1">
           <div className="flex justify-between text-sm" style={{ color: 'var(--text-3)' }}>
             <span>Subtotal</span>
             <span>Rs.{cart.subtotal.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>

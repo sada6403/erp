@@ -1108,10 +1108,21 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         WHERE scs.id = ?
       `).get(id) as Record<string, unknown> | undefined
       if (!session) return { success: false, error: 'Stock count not found' }
+      // pack_uom_name/pack_conversion_factor: the product's own configured
+      // box/pack unit (product_uom, is_base=0), if any — lets the count
+      // screen accept "N boxes + M pcs" instead of forcing everything into
+      // one raw piece count. The scalar subquery caps it at one pack tier
+      // per product even if more than one non-base UOM row exists.
       const items = db.prepare(`
-        SELECT sci.*, p.name as product_name, p.sku, p.unit
+        SELECT sci.*, p.name as product_name, p.sku, p.unit,
+          pu.uom_name as pack_uom_name, pu.conversion_factor as pack_conversion_factor
         FROM stock_count_items sci
         LEFT JOIN products p ON p.id = sci.product_id
+        LEFT JOIN product_uom pu ON pu.id = (
+          SELECT id FROM product_uom
+          WHERE product_id = sci.product_id AND is_base = 0 AND conversion_factor > 1
+          ORDER BY sort_order LIMIT 1
+        )
         WHERE sci.session_id = ?
         ORDER BY p.name
       `).all(id)

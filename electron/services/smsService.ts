@@ -8,18 +8,24 @@ export interface SmsPayload {
   message: string
 }
 
+// Env vars override the Settings-UI-configured values when present — same
+// precedence and rationale as emailService.ts's getConfig().
 function getConfig() {
+  // Settings are persisted as one nested blob under 'app_settings' (see
+  // electron/ipc/settings.ts's settings:update) — a flat store.get('sms_api_key')
+  // reads a key that's never written and always falls back to its default.
+  const s = (store.get('app_settings') as Record<string, unknown>) || {}
   return {
-    enabled:     Boolean(store.get('sms_enabled', false)),
-    provider:    String(store.get('sms_provider_name', '')),
-    baseUrl:     String(store.get('sms_api_base_url', '')),
-    apiKey:      String(store.get('sms_api_key', '')),
-    apiSecret:   String(store.get('sms_api_secret', '')),
-    senderId:    String(store.get('sms_sender_id', '')),
-    method:      String(store.get('sms_http_method', 'POST')),
-    contentType: String(store.get('sms_content_type', 'application/json')),
-    headers:     String(store.get('sms_custom_headers', '')),
-    bodyTemplate:String(store.get('sms_body_template', '{"mobile":"{phone}","message":"{message}"}')),
+    enabled:     process.env.SMS_ENABLED !== undefined ? process.env.SMS_ENABLED === 'true' : Boolean(s.sms_enabled ?? false),
+    provider:    process.env.SMS_PROVIDER_NAME || String(s.sms_provider_name ?? ''),
+    baseUrl:     process.env.SMS_API_BASE_URL  || String(s.sms_api_base_url ?? ''),
+    apiKey:      process.env.SMS_API_KEY       || String(s.sms_api_key ?? ''),
+    apiSecret:   process.env.SMS_API_SECRET    || String(s.sms_api_secret ?? ''),
+    senderId:    process.env.SMS_SENDER_ID     || String(s.sms_sender_id ?? ''),
+    method:      process.env.SMS_HTTP_METHOD   || String(s.sms_http_method ?? 'POST'),
+    contentType: process.env.SMS_CONTENT_TYPE  || String(s.sms_content_type ?? 'application/json'),
+    headers:     process.env.SMS_CUSTOM_HEADERS|| String(s.sms_custom_headers ?? ''),
+    bodyTemplate:process.env.SMS_BODY_TEMPLATE || String(s.sms_body_template ?? '{"mobile":"{phone}","message":"{message}"}'),
   }
 }
 

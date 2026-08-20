@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import { Calculator, AlertTriangle, TrendingUp, TrendingDown, Minus } from 'lucide-react'
 import toast from 'react-hot-toast'
 
@@ -199,7 +200,7 @@ function Field({ label, value, onChange, min, max, step }: {
   return (
     <div>
       <label className="block text-xs font-medium text-slate-400 mb-1">{label}</label>
-      <input type="number" value={value} onChange={onChange} className="input" min={min} max={max} step={step} />
+      <NumberInput value={value} onChange={onChange} className="input" min={min} max={max} step={step} />
     </div>
   )
 }

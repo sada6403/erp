@@ -10,6 +10,7 @@ import { decryptSecret } from './settings'
 import { enqueueUserRow } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
+import { isAdminTypeRole } from '../services/pinPolicy'
 import { safeHandle } from './ipcHandler'
 
 const store = new Store()
@@ -253,6 +254,18 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       // Reset failed attempts on success
       db.prepare(`UPDATE users SET login_attempts=0, locked_until=NULL WHERE id=?`).run(user.id)
 
+      // Email+password is reserved for admin-type roles — staff/cashier
+      // accounts must sign in with a PIN instead, even if a password_hash
+      // happens to exist on the row (e.g. an older account from before this
+      // rule existed).
+      if (!isAdminTypeRole(readPermissions(user))) {
+        logAudit(db, {
+          userId: user.id as string, branchId: user.branch_id as string,
+          action: 'LOGIN_FAILED', newValues: { reason: 'Non-admin role attempted email+password login' },
+        })
+        return { success: false, error: 'This account signs in with a PIN, not email and password. Use the PIN login screen.' }
+      }
+
       // Check 2FA
       if (user.two_factor_enabled && user.two_factor_secret) {
         const tempToken = jwt.sign(
@@ -290,28 +303,28 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'auth:pinLogin', async (_e, { pin, branch_id }) => {
       const db = getDb()
-      let users: Record<string, unknown>[] = []
 
-      if (branch_id) {
-        // Strict branch isolation — only active users assigned to this branch can login
-        users = db.prepare(`
-          SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
-                 b.name as branch_name
-          FROM users u
-          LEFT JOIN roles r ON r.id = u.role_id
-          LEFT JOIN branches b ON b.id = u.branch_id
-          WHERE u.is_active = 1 AND u.branch_id = ?
-        `).all(branch_id) as Record<string, unknown>[]
-      } else {
-        users = db.prepare(`
-          SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
-                 b.name as branch_name
-          FROM users u
-          LEFT JOIN roles r ON r.id = u.role_id
-          LEFT JOIN branches b ON b.id = u.branch_id
-          WHERE u.is_active = 1
-        `).all() as Record<string, unknown>[]
+      // A PIN is only meaningful scoped to one branch — matching it against
+      // every branch's users system-wide would let the same PIN value log in
+      // as a different user on a different branch. The terminal branch is
+      // always selected before PIN entry in the UI (LoginPage.tsx), so this
+      // is never a legitimate empty case.
+      if (!branch_id) {
+        return { success: false, error: 'Select a branch before entering a PIN' }
       }
+
+      // PIN login is for staff/cashier roles only — admin-type accounts are
+      // excluded from the candidate set entirely (not just rejected after a
+      // match), so an admin's PIN — if one somehow exists on an old row —
+      // can never be used to sign in here.
+      const users = (db.prepare(`
+        SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
+               b.name as branch_name
+        FROM users u
+        LEFT JOIN roles r ON r.id = u.role_id
+        LEFT JOIN branches b ON b.id = u.branch_id
+        WHERE u.is_active = 1 AND u.branch_id = ?
+      `).all(branch_id) as Record<string, unknown>[]).filter(u => !isAdminTypeRole(readPermissions(u)))
 
       let matchedUser: Record<string, unknown> | undefined
       for (const u of users) {
@@ -335,6 +348,11 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       }
 
       if (!matchedUser) {
+        // PIN lookup doesn't identify a single target user in advance (unlike
+        // email/password login), so per-user lockout doesn't apply the same
+        // way — log the failed attempt against the branch instead, never the
+        // PIN value itself.
+        logAudit(db, { branchId: String(branch_id), action: 'PIN_LOGIN_FAILED' })
         return { success: false, error: 'Invalid PIN' }
       }
 

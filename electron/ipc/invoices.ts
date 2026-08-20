@@ -1,4 +1,5 @@
 import type { IpcMain } from 'electron'
+import type Database from 'better-sqlite3'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
@@ -11,8 +12,80 @@ import { debitWalletForInvoice, reverseWalletForInvoice, type WalletDebitResult,
 import { resolveApplicableDiscount } from './discounts'
 import { safeHandle } from './ipcHandler'
 import { computeAndRecordCommission } from '../services/commissionEngine'
+import { isAdminTypeRole } from '../services/pinPolicy'
+import { sendEmail, invoiceEmailHtml } from '../services/emailService'
+import { sendSms } from '../services/smsService'
+import { sendWhatsApp } from '../services/whatsappService'
+import { notificationAllowed } from '../services/chitNotifications'
 
 const store = new Store()
+
+// Best-effort bill/quotation notifications — fired after the sale is already
+// committed and never awaited by the caller, so a slow/failed send can't
+// delay or block the cashier's response. Each channel is gated by BOTH the
+// global channel toggle (email/sms/whatsapp_enabled) and the per-event
+// "Notification Triggers" toggle (Settings → Communications) via
+// notificationAllowed() — see electron/services/chitNotifications.ts. A
+// failed or skipped channel never blocks the others.
+async function sendInvoiceNotifications(
+  db: Database.Database, event: 'bill' | 'quotation', docWord: string,
+  invoiceNumber: string, customerId: string,
+  itemRecords: Record<string, unknown>[], totalAmount: number
+): Promise<void> {
+  try {
+    // Settings are persisted as one nested blob under 'app_settings' (see
+    // electron/ipc/settings.ts's settings:update) — a flat store.get('email_enabled')
+    // reads a key that's never written and always falls back to its default.
+    const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const wantEmail = notificationAllowed(settings, event, 'email')
+    const wantSms = notificationAllowed(settings, event, 'sms')
+    const wantWhatsapp = notificationAllowed(settings, event, 'whatsapp')
+    if (!wantEmail && !wantSms && !wantWhatsapp) return
+    if (!itemRecords.length) return
+
+    const customer = db.prepare('SELECT name, email, phone FROM customers WHERE id=?')
+      .get(customerId) as { name?: string; email?: string; phone?: string } | undefined
+    if (!customer) return
+
+    const companyName = String(settings.company_name ?? 'POS System')
+    const currency = String(settings.currency_symbol ?? 'Rs.')
+    const fmt = (n: number) => n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+    if (wantEmail && customer.email) {
+      const productIds = itemRecords.map(r => String(r.product_id))
+      const products = db.prepare(
+        `SELECT id, name FROM products WHERE id IN (${productIds.map(() => '?').join(',')})`
+      ).all(...productIds) as { id: string; name: string }[]
+      const nameById = new Map(products.map(p => [p.id, p.name]))
+      await sendEmail({
+        to: customer.email,
+        subject: `${docWord} #${invoiceNumber} from ${companyName}`,
+        html: invoiceEmailHtml({
+          companyName,
+          customerName: customer.name || 'Customer',
+          invoiceNumber,
+          invoiceDate: new Date().toLocaleDateString(),
+          totalAmount: fmt(totalAmount),
+          currency,
+          items: itemRecords.map(r => ({
+            name: nameById.get(String(r.product_id)) || 'Item',
+            qty: Number(r.quantity),
+            price: fmt(Number(r.unit_price)),
+            total: fmt(Number(r.line_total)),
+          })),
+        }),
+      }).catch(() => {})
+    }
+
+    if ((wantSms || wantWhatsapp) && customer.phone) {
+      const shortMessage = `${companyName}: Your ${docWord.toLowerCase()} #${invoiceNumber} total is ${currency}${fmt(totalAmount)}. Thank you!`
+      if (wantSms) await sendSms({ to: customer.phone, message: shortMessage }).catch(() => {})
+      if (wantWhatsapp) await sendWhatsApp({ to: customer.phone, message: shortMessage }).catch(() => {})
+    }
+  } catch (err) {
+    console.error(`[invoices:create] ${event} notification failed`, err)
+  }
+}
 
 export type BillType = 'RETAIL' | 'QUOTATION' | 'CREDIT'
 
@@ -57,24 +130,6 @@ export function getNextBillNumber(branchId: string, billType: BillType): string 
 
 function getAuthUser() {
   return store.get('auth_user') as Record<string, unknown>
-}
-
-// Legacy fallback for roles nobody has explicitly configured yet via
-// Admin → Discounts → Max Discount Limits (mirrors src/components/pos/Cart.tsx).
-function legacyMaxDiscount(roleName: string): number {
-  const lower = roleName.toLowerCase()
-  if (lower.includes('cashier')) return 5
-  if (lower.includes('manager')) return 15
-  return 100
-}
-
-// Returns null when the caller is unrestricted (Company Admin — perms.all).
-function resolveMaxDiscountPct(user: Record<string, unknown>): number | null {
-  const role = user?.role as Record<string, unknown> | undefined
-  const perms = (role?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
-  if (perms.all) return null
-  if (typeof perms.max_discount_pct === 'number') return perms.max_discount_pct
-  return legacyMaxDiscount(String(role?.name || 'Cashier'))
 }
 
 function defaultBranchId() {
@@ -126,10 +181,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       // --- Server-side price integrity (renderer is untrusted) ---
       // unit_price/tax_rate/line_total used to be taken as-is from the
       // payload — a modified client (or a direct IPC call) could set ANY
-      // price. There's no "custom price" feature anywhere in this app, so
-      // every line's unit_price must match the product's real, current
-      // selling_price; quantity must be a positive whole number. This is
-      // the actual amount downstream discount/credit/total logic trusts.
+      // price. Admin-type roles now have a legitimate price-override feature
+      // in the cart (Cart.tsx's canEditPrice) — everyone else's line's
+      // unit_price must still match the product's real, current
+      // selling_price exactly; quantity must be a positive whole number.
+      const priceOverrideAllowed = isAdminTypeRole(perms)
       const priceByProduct = new Map<string, { selling_price: number; tax_rate: number }>()
       for (const item of (payload.items || [])) {
         const qty = Number(item.quantity)
@@ -144,8 +200,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           priceByProduct.set(productId, product)
         }
         const real = priceByProduct.get(productId)!
-        if (Math.abs(Number(item.unit_price || 0) - Number(real.selling_price || 0)) > 0.01) {
+        const submittedPrice = Number(item.unit_price || 0)
+        if (!priceOverrideAllowed && Math.abs(submittedPrice - Number(real.selling_price || 0)) > 0.01) {
           return { success: false, error: 'A product price changed since this was added to the cart — please refresh and try again' }
+        }
+        if (priceOverrideAllowed && (!Number.isFinite(submittedPrice) || submittedPrice < 0)) {
+          return { success: false, error: 'Item price must be a valid non-negative amount' }
         }
       }
 
@@ -153,14 +213,19 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       // Cart.tsx can be bypassed by a modified renderer) — and, in the same
       // pass, the server-authoritative subtotal/discount/tax this handler
       // now uses for the invoice header instead of trusting payload totals.
-      const maxDiscountPct = resolveMaxDiscountPct(user)
+      // The role-tier max_discount_pct system (Admin → Discounts → Max
+      // Discount Limits) is no longer the discount ceiling for anyone,
+      // including Company Admin — a product's own configured discount
+      // (resolveApplicableDiscount) is the only ceiling now, for every role.
+      // A product with no discount rule configured allows 0% discount.
       let itemsSubtotal = 0, itemsDiscountTotal = 0, itemsTaxTotal = 0
       {
         const TOLERANCE = 0.5 // absorb client-side rounding
         let clientItemDiscountTotal = 0
+        let minAllowedPct = Infinity // most restrictive product cap in this bill — used for the whole-bill discount check below
         for (const item of (payload.items || [])) {
           const real = priceByProduct.get(String(item.product_id))!
-          const unitPrice = money(real.selling_price)
+          const unitPrice = money(priceOverrideAllowed ? Number(item.unit_price ?? real.selling_price) : real.selling_price)
           const qty = Number(item.quantity)
           const pct = Number(item.discount_pct || 0)
           clientItemDiscountTotal += Number(item.discount_amount || 0)
@@ -169,22 +234,23 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           itemsSubtotal += unitPrice * qty
           itemsDiscountTotal += discountAmount
           itemsTaxTotal += money(taxable * (Number(real.tax_rate) || 0) / 100)
-          if (maxDiscountPct === null || unitPrice <= 0) continue
+          if (unitPrice <= 0) continue
           const auto = resolveApplicableDiscount(db, item.product_id, unitPrice, branchId)
-          const allowed = Math.max(maxDiscountPct, auto?.pct || 0)
+          const allowed = auto?.pct || 0
+          minAllowedPct = Math.min(minAllowedPct, allowed)
           if (pct > allowed + TOLERANCE) {
-            return { success: false, error: `Discount ${pct}% on an item exceeds your allowed limit (${allowed.toFixed(1)}%)` }
+            return { success: false, error: `Discount ${pct}% on an item exceeds this product's allowed limit (${allowed.toFixed(1)}%)` }
           }
         }
         itemsSubtotal = money(itemsSubtotal)
         itemsDiscountTotal = money(itemsDiscountTotal)
         itemsTaxTotal = money(itemsTaxTotal)
-        if (maxDiscountPct !== null) {
+        if (Number.isFinite(minAllowedPct)) {
           const subtotal = Number(payload.subtotal || 0)
           const globalDiscountAmount = Number(payload.discount_amount || 0) - clientItemDiscountTotal
           const globalDiscountPct = subtotal > 0 ? (globalDiscountAmount / subtotal) * 100 : 0
-          if (globalDiscountPct > maxDiscountPct + TOLERANCE) {
-            return { success: false, error: `Overall discount ${globalDiscountPct.toFixed(1)}% exceeds your allowed limit (${maxDiscountPct}%)` }
+          if (globalDiscountPct > minAllowedPct + TOLERANCE) {
+            return { success: false, error: `Overall discount ${globalDiscountPct.toFixed(1)}% exceeds the most restrictive product's allowed limit (${minAllowedPct.toFixed(1)}%)` }
           }
         }
       }
@@ -308,13 +374,14 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         })
 
         // Insert line items — money fields recomputed from the product's
-        // real price/tax_rate (validated above) and the already-capped
+        // real price/tax_rate (validated above, or the admin-authorized
+        // override price — see priceOverrideAllowed) and the already-capped
         // discount_pct, never taken as-is from the payload. Only the
         // percentage is trusted (it passed the discount-cap check above);
         // every absolute rupee figure is derived from it server-side.
         for (const item of (payload.items || [])) {
           const real = priceByProduct.get(String(item.product_id))!
-          const unitPrice = money(real.selling_price)
+          const unitPrice = money(priceOverrideAllowed ? Number(item.unit_price ?? real.selling_price) : real.selling_price)
           const qty = Number(item.quantity)
           const discountPct = Math.max(0, Math.min(100, Number(item.discount_pct) || 0))
           const discountAmount = money(unitPrice * qty * discountPct / 100)
@@ -517,6 +584,14 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         await enqueuSync('smartbuy_wallet', walletDebit.walletId, 'UPDATE', walletDebit.walletRow)
         await enqueuSync('smartbuy_wallet_transactions', walletDebit.transactionId, 'INSERT', walletDebit.transactionRow)
         await enqueuSync('payments', walletDebit.paymentId, 'INSERT', walletDebit.paymentRow)
+      }
+
+      // Bill/quotation notifications to customer — fire-and-forget, gated
+      // per-event by the Notification Triggers settings (Issue 24a).
+      if (payload.customer_id) {
+        const event = billType === 'QUOTATION' ? 'quotation' : 'bill'
+        const docWord = billType === 'QUOTATION' ? 'Quotation' : 'Invoice'
+        void sendInvoiceNotifications(db, event, docWord, invoiceNumber, String(payload.customer_id), itemRecords, finalTotalAmount)
       }
 
       return { success: true, data: { id, invoice_number: invoiceNumber, bill_type: billType } }
@@ -767,20 +842,6 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       return { success: true, data: { ...invoice as object, items, payments, ledger } }
   })
 
-  safeHandle(ipcMain, 'invoices:hold', async (_e, id: string) => {
-      const db = getDb()
-      const user = getAuthUser()
-      const invoice = db.prepare('SELECT branch_id FROM invoices WHERE id=?').get(id) as { branch_id: unknown } | undefined
-      if (!invoice) return { success: false, error: 'Invoice not found' }
-      const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
-      if (!perms.all && user?.branch_id && invoice.branch_id !== user.branch_id) {
-        return { success: false, error: 'Cannot hold a bill from another branch' }
-      }
-      db.prepare("UPDATE invoices SET status='held', updated_at=datetime('now') WHERE id=?").run(id)
-      await enqueuSync('invoices', id, 'UPDATE', { id, status: 'held' })
-      return { success: true }
-  })
-
   // Cancel invoice — restore stock for RETAIL and CREDIT bills
   safeHandle(ipcMain, 'invoices:cancel', async (_e, id: string, reason?: string) => {
       const db = getDb()
@@ -1008,18 +1069,6 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         await enqueuSync('edit_requests', payload.edit_request_id, 'UPDATE', { id: payload.edit_request_id, status: 'consumed' })
       }
       return { success: true }
-  })
-
-  safeHandle(ipcMain, 'invoices:listHeld', (_e) => {
-      const db = getDb()
-      const user = getAuthUser()
-      const rows = db.prepare(`
-        SELECT i.*, c.name as customer_name FROM invoices i
-        LEFT JOIN customers c ON c.id = i.customer_id
-        WHERE i.status = 'held' AND i.branch_id = ?
-        ORDER BY i.updated_at DESC LIMIT 5
-      `).all((user?.branch_id as string) || defaultBranchId())
-      return { success: true, data: rows }
   })
 
   // List pending-approval credit bills

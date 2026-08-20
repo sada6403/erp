@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer'
 import { pool } from './db'
+import { decryptSecret } from './secretCrypto'
 
 async function getSmtpSettings() {
   const { rows } = await pool.query(`SELECT value FROM system_settings WHERE \`key\` = 'smtp' LIMIT 1`)
@@ -45,6 +46,59 @@ export async function sendEmail(opts: {
     return { ok: true }
   } catch (err) {
     console.error('[email] send failed:', err)
+    return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' }
+  }
+}
+
+// ─── Per-company SMTP (Issue 24b — Super Admin-configured, per tenant) ─────────
+// Separate from getSmtpSettings() above, which is the PLATFORM's own outbound
+// mail (trial-expiry notices etc., stored in system_settings). This reads a
+// single company's SMTP config from companies.branding_json.smtp — storage
+// only for now, not wired into the local POS app's own send path.
+
+async function getCompanySmtpSettings(companyId: string): Promise<Record<string, unknown> | null> {
+  const { rows } = await pool.query(`SELECT branding_json FROM companies WHERE id = ?`, [companyId])
+  if (!rows.length) return null
+  const raw = (rows[0] as Record<string, unknown>).branding_json
+  if (!raw) return null
+  try {
+    const branding = JSON.parse(String(raw)) as Record<string, unknown>
+    const smtp = branding.smtp as Record<string, unknown> | undefined
+    if (!smtp?.host) return null
+    return smtp
+  } catch {
+    return null
+  }
+}
+
+export async function sendCompanyEmail(companyId: string, opts: {
+  to: string
+  subject: string
+  html: string
+  text?: string
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const smtp = await getCompanySmtpSettings(companyId)
+    if (!smtp?.host) return { ok: false, error: 'SMTP is not configured for this company' }
+
+    const transport = nodemailer.createTransport({
+      host: String(smtp.host),
+      port: Number(smtp.port ?? 587),
+      secure: Boolean(smtp.secure) || Number(smtp.port) === 465,
+      auth: smtp.user ? { user: String(smtp.user), pass: decryptSecret(String(smtp.pass || '')) } : undefined,
+    })
+
+    await transport.sendMail({
+      from: `"${String(smtp.from_name || 'POS ERP')}" <${String(smtp.from_email || smtp.user || '')}>`,
+      to:      opts.to,
+      subject: opts.subject,
+      html:    opts.html,
+      text:    opts.text,
+    })
+
+    return { ok: true }
+  } catch (err) {
+    console.error('[email] company send failed:', err)
     return { ok: false, error: err instanceof Error ? err.message : 'Unknown error' }
   }
 }

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import DeleteConfirmModal from '@/components/shared/DeleteConfirmModal'
@@ -277,7 +278,7 @@ function CustomerForm({ customer, onClose, onSave }: { customer: Customer | null
         </div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Email</label><input value={form.email} onChange={f('email')} className="input" /></div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Address *</label><input value={form.address} onChange={f('address')} className="input" /></div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Credit Limit (Rs.)</label><input type="number" value={form.credit_limit} onChange={f('credit_limit')} className="input" /></div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Credit Limit (Rs.)</label><NumberInput value={form.credit_limit} onChange={f('credit_limit')} className="input" /></div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><textarea value={form.notes} onChange={f('notes')} className="input h-20 resize-none" /></div>
       </div>
     </Modal>

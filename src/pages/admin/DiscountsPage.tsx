@@ -127,8 +127,6 @@ export default function DiscountsPage() {
         </table>
       </div>
 
-      <MaxDiscountLimits />
-
       {showForm && (
         <DiscountFormModal
           discount={showForm === 'new' ? null : showForm}
@@ -287,88 +285,3 @@ function DiscountFormModal({ discount, branches, onClose, onDone }: {
   )
 }
 
-// ── Per-role max discount cap (replaces the old hardcoded Cart.tsx values) ──
-function MaxDiscountLimits() {
-  const [roles, setRoles] = useState<Row[]>([])
-  const [edited, setEdited] = useState<Record<string, string>>({})
-  const [saving, setSaving] = useState<string | null>(null)
-
-  const load = useCallback(() => {
-    window.api.admin.roles.list().then((r: { success: boolean; data?: Row[] }) => {
-      if (r.success) setRoles(r.data || [])
-    }).catch(() => undefined)
-  }, [])
-
-  useEffect(() => { load() }, [load])
-
-  const permsOf = (role: Row): Record<string, unknown> => {
-    const raw = role.permissions
-    try { return typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>) || {} }
-    catch { return {} }
-  }
-
-  const legacyDefault = (roleName: string) => {
-    const lower = roleName.toLowerCase()
-    if (lower.includes('cashier')) return 5
-    if (lower.includes('manager')) return 15
-    return 100
-  }
-
-  const currentValue = (role: Row) => {
-    if (edited[String(role.id)] !== undefined) return edited[String(role.id)]
-    const perms = permsOf(role)
-    return perms.max_discount_pct != null ? String(perms.max_discount_pct) : String(legacyDefault(String(role.name)))
-  }
-
-  const save = async (role: Row) => {
-    const val = Math.max(0, Math.min(100, Number(currentValue(role)) || 0))
-    setSaving(String(role.id))
-    try {
-      const perms = permsOf(role)
-      const res = await window.api.admin.roles.update(String(role.id), {
-        name: role.name,
-        permissions: { ...perms, max_discount_pct: val },
-      })
-      if (res.success) { toast.success(`${role.name} max discount set to ${val}%`); load() }
-      else toast.error(String(res.error || 'Failed to save'))
-    } finally { setSaving(null) }
-  }
-
-  if (roles.length === 0) return null
-
-  return (
-    <div className="border-t px-6 py-4 flex-shrink-0" style={{ borderColor: 'var(--border)' }}>
-      <h3 className="font-semibold text-sm mb-1" style={{ color: 'var(--text-1)' }}>Max Discount Limits (per role)</h3>
-      <p className="text-xs mb-3" style={{ color: 'var(--text-3)' }}>
-        Caps how much discount a cashier/manager can manually apply at POS. Company Admin is unlimited. Enforced on the server, not just the screen.
-      </p>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
-        {roles.map(role => {
-          const isAdmin = Boolean(permsOf(role).all)
-          return (
-            <div key={String(role.id)} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
-              <p className="text-sm font-medium mb-1.5" style={{ color: 'var(--text-1)' }}>{String(role.name)}</p>
-              {isAdmin ? (
-                <span className="badge-blue">Unlimited</span>
-              ) : (
-                <div className="flex items-center gap-1.5">
-                  <input
-                    type="number" min={0} max={100}
-                    value={currentValue(role)}
-                    onChange={e => setEdited(p => ({ ...p, [String(role.id)]: e.target.value }))}
-                    className="input py-1 text-sm w-20"
-                  />
-                  <span className="text-xs" style={{ color: 'var(--text-3)' }}>%</span>
-                  <button onClick={() => save(role)} disabled={saving === String(role.id)}
-                    className="btn-secondary btn-sm ml-auto">
-                    {saving === String(role.id) ? '…' : 'Save'}
-                  </button>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}

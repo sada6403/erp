@@ -452,7 +452,7 @@ export default function LoginPage() {
     } else {
       setLoginState('error'); setPinShake(true)
       setTimeout(() => { setPinShake(false); setLoginState('idle') }, 600)
-      toast.error('Invalid PIN'); setPin('')
+      toast.error(result.error || 'Invalid PIN'); setPin('')
     }
   }
 

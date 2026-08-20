@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
-import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical } from 'lucide-react'
+import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi } from '../lib/api'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send } from 'lucide-react'
 
 type MenuItemDef =
   | { type: 'item'; label: string; icon: React.ComponentType<{ className?: string }>; onClick: () => void; danger?: boolean }
@@ -97,6 +97,7 @@ export default function CompaniesPage() {
   const [showBackups, setShowBackups] = useState<Company | null>(null)
   const [showExports, setShowExports] = useState<Company | null>(null)
   const [showBranding, setShowBranding] = useState<Company | null>(null)
+  const [showNotifCreds, setShowNotifCreds] = useState<Company | null>(null)
   const [showCompanyKey, setShowCompanyKey] = useState<Company | null>(null)
   const [error, setError] = useState('')
 
@@ -255,6 +256,7 @@ export default function CompaniesPage() {
                       { type: 'divider' },
                       { type: 'item', label: 'Feature Management',     icon: Settings2,   onClick: () => setShowCapabilities(c) },
                       { type: 'item', label: 'Branding (logo & color)', icon: Palette,    onClick: () => setShowBranding(c) },
+                      { type: 'item', label: 'Notification Credentials (SMTP/SMS)', icon: Mail, onClick: () => setShowNotifCreds(c) },
                       { type: 'item', label: 'Backups',                icon: Database,    onClick: () => setShowBackups(c) },
                       { type: 'item', label: 'Export Data',            icon: FileDown,    onClick: () => setShowExports(c) },
                       { type: 'divider' },
@@ -302,8 +304,12 @@ export default function CompaniesPage() {
       {showDevices && <DevicesModal company={showDevices} onClose={() => setShowDevices(null)} />}
       {showBackups && <BackupsModal company={showBackups} onClose={() => setShowBackups(null)} />}
       {showExports && <ExportsModal company={showExports} onClose={() => setShowExports(null)} />}
-      {showBranding && <BrandingModal company={showBranding} onClose={() => setShowBranding(null)} onSaved={load} />}
+      {showBranding && <BrandingModal company={showBranding} onClose={() => setShowBranding(null)} onSaved={updates => {
+        setRows(prev => prev.map(r => r.id === showBranding.id ? { ...r, ...updates } : r))
+        load()
+      }} />}
       {showCompanyKey && <CompanyKeyModal company={showCompanyKey} onClose={() => setShowCompanyKey(null)} onUpdated={load} />}
+      {showNotifCreds && <NotificationCredentialsModal company={showNotifCreds} onClose={() => setShowNotifCreds(null)} onSaved={load} />}
     </div>
   )
 }
@@ -2177,7 +2183,7 @@ function ResetAdminPasswordModal({ company, onClose }: { company: Company; onClo
 
 // ─── Branding Modal ───────────────────────────────────────────────────────────
 function BrandingModal({ company, onClose, onSaved }: {
-  company: Company; onClose: () => void; onSaved: () => void
+  company: Company; onClose: () => void; onSaved: (updates: Record<string, string>) => void
 }) {
   const [color, setColor]     = useState(company.brand_color || '#2563eb')
   const [logoUrl, setLogoUrl] = useState(company.brand_logo_url || '')
@@ -2207,7 +2213,11 @@ function BrandingModal({ company, onClose, onSaved }: {
     try {
       await api.update(company.id, { brandColor: color || null, brandLogoUrl: logoUrl || null, loginLogoUrl: loginLogoUrl || null })
       setSaved(true)
-      onSaved()
+      // Patch the row directly with exactly what was just confirmed-saved,
+      // rather than relying solely on a background list re-fetch (`load()`)
+      // to land before this modal is reopened — a slow/unlucky-timed refetch
+      // was the likely cause of the picker showing a stale colour on reopen.
+      onSaved({ brand_color: color || '', brand_logo_url: logoUrl || '' })
       setTimeout(() => { setSaved(false); onClose() }, 1200)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save')
@@ -2320,6 +2330,162 @@ function BrandingModal({ company, onClose, onSaved }: {
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn-primary flex items-center gap-2" onClick={handleSave} disabled={saving}>
             {saved ? '✓ Saved!' : saving ? 'Saving…' : 'Save Branding'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Notification Credentials Modal (Issue 24b) ────────────────────────────────
+// Per-company SMTP/SMS, stored in companies.branding_json (smtp/sms sub-keys),
+// encrypted at rest server-side. Storage + test-send only for now — not wired
+// into the company's own local POS app as a live credential source.
+const MASKED_SECRET = '********'
+
+function NotificationCredentialsModal({ company, onClose, onSaved }: {
+  company: Company; onClose: () => void; onSaved: () => void
+}) {
+  const initial = (() => {
+    try { return JSON.parse(company.branding_json || '{}') as Record<string, Record<string, unknown>> }
+    catch { return {} as Record<string, Record<string, unknown>> }
+  })()
+  const initSmtp = initial.smtp || {}
+  const initSms = initial.sms || {}
+
+  const [smtp, setSmtp] = useState({
+    host: String(initSmtp.host || ''), port: Number(initSmtp.port || 587), secure: Boolean(initSmtp.secure),
+    user: String(initSmtp.user || ''), pass: '', from_name: String(initSmtp.from_name || ''), from_email: String(initSmtp.from_email || ''),
+  })
+  const [sms, setSms] = useState({
+    base_url: String(initSms.base_url || ''), method: String(initSms.method || 'POST'), content_type: String(initSms.content_type || 'application/json'),
+    headers: String(initSms.headers || ''), body_template: String(initSms.body_template || '{"mobile":"{phone}","message":"{message}"}'),
+    api_key: '', sender_id: String(initSms.sender_id || ''),
+  })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [saved, setSaved] = useState(false)
+  const [testEmailTo, setTestEmailTo] = useState('')
+  const [testSmsTo, setTestSmsTo] = useState('')
+  const [testing, setTesting] = useState<{ email?: boolean; sms?: boolean }>({})
+  const [testResult, setTestResult] = useState<{ email?: { ok: boolean; msg: string }; sms?: { ok: boolean; msg: string } }>({})
+
+  async function handleSave() {
+    setSaving(true); setError('')
+    try {
+      // A blank password/API-key field means "leave the stored one alone"
+      // (avoids accidentally wiping a saved secret just by reopening and
+      // re-saving without retyping it) — sending the mask sentinel back
+      // signals that to the PATCH handler.
+      await api.update(company.id, {
+        smtp: { ...smtp, pass: smtp.pass || MASKED_SECRET },
+        sms: { ...sms, api_key: sms.api_key || MASKED_SECRET },
+      })
+      setSaved(true)
+      onSaved()
+      setTimeout(() => { setSaved(false); onClose() }, 1200)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save')
+    }
+    setSaving(false)
+  }
+
+  async function runTest(key: 'email' | 'sms', fn: () => Promise<unknown>) {
+    setTesting(t => ({ ...t, [key]: true }))
+    try {
+      await fn()
+      setTestResult(r => ({ ...r, [key]: { ok: true, msg: 'Sent!' } }))
+    } catch (err) {
+      setTestResult(r => ({ ...r, [key]: { ok: false, msg: err instanceof Error ? err.message : 'Failed' } }))
+    }
+    setTesting(t => ({ ...t, [key]: false }))
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <Mail className="w-4 h-4 text-blue-400" />
+            <h2 className="font-semibold text-white">Notification Credentials — {company.name}</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        </div>
+
+        <div className="p-5 space-y-6">
+          {error && <div className="bg-red-900/30 border border-red-700/50 rounded px-4 py-2 text-red-400 text-sm">{error}</div>}
+          <p className="text-xs text-gray-500">
+            Stored per company, encrypted at rest. Not yet connected to this company's local POS app —
+            a credentials vault with test-send only, for now.
+          </p>
+
+          {/* SMTP */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> SMTP (Email)</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Host</label><input className="input" value={smtp.host} onChange={e => setSmtp(s => ({ ...s, host: e.target.value }))} placeholder="smtp.gmail.com" /></div>
+              <div><label className="label">Port</label><input type="number" className="input" value={smtp.port} onChange={e => setSmtp(s => ({ ...s, port: Number(e.target.value) || 587 }))} placeholder="587" /></div>
+            </div>
+            <label className="flex items-center gap-2 text-xs text-gray-400">
+              <input type="checkbox" checked={smtp.secure} onChange={e => setSmtp(s => ({ ...s, secure: e.target.checked }))} /> Use SSL/TLS (port 465)
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Username</label><input className="input" value={smtp.user} onChange={e => setSmtp(s => ({ ...s, user: e.target.value }))} placeholder="you@gmail.com" /></div>
+              <div><label className="label">Password</label><input type="password" className="input" value={smtp.pass} onChange={e => setSmtp(s => ({ ...s, pass: e.target.value }))} placeholder={initSmtp.pass ? 'Unchanged — leave blank to keep' : '••••••'} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">From Name</label><input className="input" value={smtp.from_name} onChange={e => setSmtp(s => ({ ...s, from_name: e.target.value }))} placeholder={company.name} /></div>
+              <div><label className="label">From Email</label><input className="input" value={smtp.from_email} onChange={e => setSmtp(s => ({ ...s, from_email: e.target.value }))} placeholder="noreply@company.com" /></div>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <input className="input flex-1 text-sm" placeholder="Send test email to…" value={testEmailTo} onChange={e => setTestEmailTo(e.target.value)} />
+              <button type="button" disabled={!testEmailTo || testing.email} onClick={() => runTest('email', () => notifApi.testEmail(company.id, testEmailTo))} className="btn-ghost flex items-center gap-1.5 text-sm flex-shrink-0">
+                <Send className="w-3.5 h-3.5" /> {testing.email ? 'Sending…' : 'Send Test'}
+              </button>
+            </div>
+            {testResult.email && <p className={`text-xs ${testResult.email.ok ? 'text-green-400' : 'text-red-400'}`}>{testResult.email.ok ? '✓ ' : '✗ '}{testResult.email.msg}</p>}
+          </div>
+
+          <div className="border-t border-gray-800" />
+
+          {/* SMS */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Send className="w-3.5 h-3.5" /> SMS (Generic HTTP Gateway)</h3>
+            <p className="text-xs text-gray-500">Same generic gateway shape as the local POS app — works with any provider that accepts a configurable URL/method/headers/body template. No specific vendor SDK.</p>
+            <div><label className="label">API Base URL</label><input className="input" value={sms.base_url} onChange={e => setSms(s => ({ ...s, base_url: e.target.value }))} placeholder="https://api.provider.com/send" /></div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">Method</label>
+                <select className="input" value={sms.method} onChange={e => setSms(s => ({ ...s, method: e.target.value }))}>
+                  <option value="POST">POST</option><option value="GET">GET</option>
+                </select>
+              </div>
+              <div><label className="label">Content-Type</label><input className="input" value={sms.content_type} onChange={e => setSms(s => ({ ...s, content_type: e.target.value }))} /></div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div><label className="label">API Key / Token</label><input type="password" className="input" value={sms.api_key} onChange={e => setSms(s => ({ ...s, api_key: e.target.value }))} placeholder={initSms.api_key ? 'Unchanged — leave blank to keep' : '••••••'} /></div>
+              <div><label className="label">Sender ID</label><input className="input" value={sms.sender_id} onChange={e => setSms(s => ({ ...s, sender_id: e.target.value }))} /></div>
+            </div>
+            <div><label className="label">Custom Headers (one per line, &quot;Name: Value&quot;)</label>
+              <textarea className="input font-mono text-xs" rows={2} value={sms.headers} onChange={e => setSms(s => ({ ...s, headers: e.target.value }))} />
+            </div>
+            <div><label className="label">Body Template</label>
+              <textarea className="input font-mono text-xs" rows={2} value={sms.body_template} onChange={e => setSms(s => ({ ...s, body_template: e.target.value }))} />
+              <p className="text-xs text-gray-500 mt-1">Placeholders: {'{phone}'} {'{message}'} {'{sender_id}'} {'{api_key}'}</p>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <input className="input flex-1 text-sm" placeholder="Send test SMS to…" value={testSmsTo} onChange={e => setTestSmsTo(e.target.value)} />
+              <button type="button" disabled={!testSmsTo || testing.sms} onClick={() => runTest('sms', () => notifApi.testSms(company.id, testSmsTo))} className="btn-ghost flex items-center gap-1.5 text-sm flex-shrink-0">
+                <Send className="w-3.5 h-3.5" /> {testing.sms ? 'Sending…' : 'Send Test'}
+              </button>
+            </div>
+            {testResult.sms && <p className={`text-xs ${testResult.sms.ok ? 'text-green-400' : 'text-red-400'}`}>{testResult.sms.ok ? '✓ ' : '✗ '}{testResult.sms.msg}</p>}
+          </div>
+        </div>
+
+        <div className="px-5 py-4 border-t border-gray-800 flex gap-3 justify-end">
+          <button className="btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn-primary flex items-center gap-2" onClick={handleSave} disabled={saving}>
+            {saved ? '✓ Saved!' : saving ? 'Saving…' : 'Save Credentials'}
           </button>
         </div>
       </div>

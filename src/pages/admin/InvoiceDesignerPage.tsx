@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import PageHeader from '@/components/shared/PageHeader'
 import { Save, Plus, Trash2, ChevronUp, ChevronDown, X, Printer, Type, Minus, Image as ImageIcon, Barcode, QrCode } from 'lucide-react'
 import toast from 'react-hot-toast'
 
 type Align = 'left' | 'center' | 'right'
 type ElementType = 'text' | 'line' | 'image' | 'barcode' | 'qr'
-type Design = 'dot' | 'thermal' | 'a4'
+type Design = 'dot' | 'thermal' | 'a4' | 'b5'
 
 interface LayoutElement {
   id: string
@@ -38,7 +39,8 @@ interface CustomLayout {
 const DESIGN_META: Record<Design, { label: string; page: { w: number; h: number } }> = {
   dot:     { label: 'Dot Matrix', page: { w: 241, h: 279 } },
   thermal: { label: 'Thermal',    page: { w: 80,  h: 200 } },
-  a4:      { label: 'A4 / B5',    page: { w: 210, h: 297 } },
+  a4:      { label: 'A4',         page: { w: 210, h: 297 } },
+  b5:      { label: 'B5',         page: { w: 176, h: 250 } },
 }
 
 const BIND_GROUPS: { group: string; tokens: string[] }[] = [
@@ -346,19 +348,19 @@ export default function InvoiceDesignerPage() {
                       )}
                       <div className="grid grid-cols-2 gap-2">
                         <div><label className="label text-xs">X (mm)</label>
-                          <input type="number" step="0.5" value={el.x} onChange={e => updateElement(el.id, { x: parseFloat(e.target.value) || 0 })} className="input text-xs py-1" /></div>
+                          <NumberInput step="0.5" value={el.x} onChange={e => updateElement(el.id, { x: parseFloat(e.target.value) || 0 })} className="input text-xs py-1" /></div>
                         <div><label className="label text-xs">Y (mm)</label>
-                          <input type="number" step="0.5" value={el.y} onChange={e => updateElement(el.id, { y: parseFloat(e.target.value) || 0 })} className="input text-xs py-1" /></div>
+                          <NumberInput step="0.5" value={el.y} onChange={e => updateElement(el.id, { y: parseFloat(e.target.value) || 0 })} className="input text-xs py-1" /></div>
                       </div>
                       {(el.type === 'line' || el.type === 'image' || el.type === 'barcode' || el.type === 'qr') && (
                         <div><label className="label text-xs">Width (mm)</label>
-                          <input type="number" step="1" value={el.width || 0} onChange={e => updateElement(el.id, { width: parseFloat(e.target.value) || 0 })} className="input text-xs py-1" /></div>
+                          <NumberInput step="1" value={el.width || 0} onChange={e => updateElement(el.id, { width: parseFloat(e.target.value) || 0 })} className="input text-xs py-1" /></div>
                       )}
                       {el.type === 'text' && (
                         <>
                           <div className="grid grid-cols-3 gap-2">
                             <div><label className="label text-xs">Size (pt)</label>
-                              <input type="number" value={el.size || 9} onChange={e => updateElement(el.id, { size: parseFloat(e.target.value) || 9 })} className="input text-xs py-1" /></div>
+                              <NumberInput value={el.size || 9} onChange={e => updateElement(el.id, { size: parseFloat(e.target.value) || 9 })} className="input text-xs py-1" /></div>
                             <div><label className="label text-xs">Weight</label>
                               <select value={el.weight || 400} onChange={e => updateElement(el.id, { weight: parseInt(e.target.value) })} className="input text-xs py-1">
                                 <option value={400}>Normal</option>
@@ -389,11 +391,11 @@ export default function InvoiceDesignerPage() {
             <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Item Table</h3>
             <div className="grid grid-cols-2 gap-2">
               <div><label className="label text-xs">First Row Y (mm)</label>
-                <input type="number" step="0.5" value={layout.itemTable.y} onChange={e => setLayout(p => ({ ...p, itemTable: { ...p.itemTable, y: parseFloat(e.target.value) || 0 } }))} className="input text-xs py-1" /></div>
+                <NumberInput step="0.5" value={layout.itemTable.y} onChange={e => setLayout(p => ({ ...p, itemTable: { ...p.itemTable, y: parseFloat(e.target.value) || 0 } }))} className="input text-xs py-1" /></div>
               <div><label className="label text-xs">Row Height (mm)</label>
-                <input type="number" step="0.5" value={layout.itemTable.rowHeight} onChange={e => setLayout(p => ({ ...p, itemTable: { ...p.itemTable, rowHeight: parseFloat(e.target.value) || 1 } }))} className="input text-xs py-1" /></div>
+                <NumberInput step="0.5" value={layout.itemTable.rowHeight} onChange={e => setLayout(p => ({ ...p, itemTable: { ...p.itemTable, rowHeight: parseFloat(e.target.value) || 1 } }))} className="input text-xs py-1" /></div>
               <div><label className="label text-xs">Max Rows</label>
-                <input type="number" value={layout.itemTable.maxRows || 12} onChange={e => setLayout(p => ({ ...p, itemTable: { ...p.itemTable, maxRows: parseInt(e.target.value) || 1 } }))} className="input text-xs py-1" /></div>
+                <NumberInput value={layout.itemTable.maxRows || 12} onChange={e => setLayout(p => ({ ...p, itemTable: { ...p.itemTable, maxRows: parseInt(e.target.value) || 1 } }))} className="input text-xs py-1" /></div>
               <label className="flex items-center gap-2 text-xs mt-5" style={{ color: 'var(--text-3)' }}>
                 <input type="checkbox" checked={layout.itemTable.showHeader !== false} onChange={e => setLayout(p => ({ ...p, itemTable: { ...p.itemTable, showHeader: e.target.checked } }))} />
                 Print header row
@@ -406,7 +408,7 @@ export default function InvoiceDesignerPage() {
                     {ITEM_TOKENS.map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                   <input value={col.header || ''} onChange={e => updateColumn(i, { header: e.target.value })} placeholder="Header" className="input text-xs py-1 w-20" />
-                  <input type="number" step="0.5" value={col.x} onChange={e => updateColumn(i, { x: parseFloat(e.target.value) || 0 })} title="X (mm)" className="input text-xs py-1 w-16" />
+                  <NumberInput step="0.5" value={col.x} onChange={e => updateColumn(i, { x: parseFloat(e.target.value) || 0 })} title="X (mm)" className="input text-xs py-1 w-16" />
                   <select value={col.align || 'left'} onChange={e => updateColumn(i, { align: e.target.value as Align })} className="input text-xs py-1 w-20">
                     <option value="left">L</option><option value="center">C</option><option value="right">R</option>
                   </select>
@@ -433,8 +435,8 @@ export default function InvoiceDesignerPage() {
                   </label>
                   {pos && (
                     <>
-                      <input type="number" step="0.5" value={pos.x} onChange={e => setLayout(p => ({ ...p, totals: { ...p.totals, [key]: { ...pos, x: parseFloat(e.target.value) || 0 } } }))} className="input text-xs py-1 w-20" title="X (mm)" />
-                      <input type="number" step="0.5" value={pos.y} onChange={e => setLayout(p => ({ ...p, totals: { ...p.totals, [key]: { ...pos, y: parseFloat(e.target.value) || 0 } } }))} className="input text-xs py-1 w-20" title="Y (mm)" />
+                      <NumberInput step="0.5" value={pos.x} onChange={e => setLayout(p => ({ ...p, totals: { ...p.totals, [key]: { ...pos, x: parseFloat(e.target.value) || 0 } } }))} className="input text-xs py-1 w-20" title="X (mm)" />
+                      <NumberInput step="0.5" value={pos.y} onChange={e => setLayout(p => ({ ...p, totals: { ...p.totals, [key]: { ...pos, y: parseFloat(e.target.value) || 0 } } }))} className="input text-xs py-1 w-20" title="Y (mm)" />
                       <select value={pos.align || 'right'} onChange={e => setLayout(p => ({ ...p, totals: { ...p.totals, [key]: { ...pos, align: e.target.value as Align } } }))} className="input text-xs py-1">
                         <option value="left">L</option><option value="center">C</option><option value="right">R</option>
                       </select>
@@ -460,31 +462,38 @@ export default function InvoiceDesignerPage() {
             </div>
           )}
 
-          {/* Pre-printed / calibration (dot-matrix only) */}
-          {design === 'dot' && (
+          {/* Pre-printed stationery / uploaded template image (dot-matrix, A4, B5) */}
+          {design !== 'thermal' && (
             <div className="card space-y-2">
-              <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Pre-Printed Stationery</h3>
+              <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Pre-Printed Stationery / Template Image</h3>
               <label className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-3)' }}>
                 <input type="checkbox" checked={layout.prePrinted} onChange={e => setLayout(p => ({ ...p, prePrinted: e.target.checked }))} />
-                Company logo/labels/gridlines already colour pre-printed — print data only
+                Company logo/labels/gridlines already printed on real paper — print data only
               </label>
               <div>
-                <label className="label text-xs">Background reference (designer only, never printed)</label>
+                <label className="label text-xs">Background image</label>
                 <input type="file" accept="image/png,image/jpeg" onChange={onBackgroundUpload} className="input text-xs py-1" />
                 {layout.backgroundDataUrl && (
                   <button onClick={() => setLayout(p => ({ ...p, backgroundDataUrl: undefined }))} className="text-xs text-red-400 mt-1">Remove background</button>
                 )}
+                <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                  {layout.prePrinted
+                    ? 'Shown here as a positioning guide only — since "Pre-Printed" is on, real prints skip this image and only the data below is printed onto your real stationery.'
+                    : 'This image prints as the page background on real invoices too, with your live data on top — upload a photo/scan of your stationery design.'}
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div><label className="label text-xs">Calibration Offset X (mm)</label>
-                  <input type="number" step="0.5" value={layout.calibration.offsetX} onChange={e => setLayout(p => ({ ...p, calibration: { ...p.calibration, offsetX: parseFloat(e.target.value) || 0 } }))} className="input text-xs py-1" /></div>
+                  <NumberInput step="0.5" value={layout.calibration.offsetX} onChange={e => setLayout(p => ({ ...p, calibration: { ...p.calibration, offsetX: parseFloat(e.target.value) || 0 } }))} className="input text-xs py-1" /></div>
                 <div><label className="label text-xs">Calibration Offset Y (mm)</label>
-                  <input type="number" step="0.5" value={layout.calibration.offsetY} onChange={e => setLayout(p => ({ ...p, calibration: { ...p.calibration, offsetY: parseFloat(e.target.value) || 0 } }))} className="input text-xs py-1" /></div>
+                  <NumberInput step="0.5" value={layout.calibration.offsetY} onChange={e => setLayout(p => ({ ...p, calibration: { ...p.calibration, offsetY: parseFloat(e.target.value) || 0 } }))} className="input text-xs py-1" /></div>
               </div>
               <p className="text-xs" style={{ color: 'var(--text-3)' }}>Small nudge only (a few mm) — not the page size.</p>
-              <button onClick={printCalibrationSheet} disabled={printingCal} className="btn-secondary btn-sm gap-1.5">
-                <Printer size={13} /> {printingCal ? 'Printing…' : 'Print Calibration Sheet'}
-              </button>
+              {design === 'dot' && (
+                <button onClick={printCalibrationSheet} disabled={printingCal} className="btn-secondary btn-sm gap-1.5">
+                  <Printer size={13} /> {printingCal ? 'Printing…' : 'Print Calibration Sheet'}
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -9,6 +9,7 @@ import Store from 'electron-store'
 import * as XLSX from 'xlsx'
 import { safeHandle } from './ipcHandler'
 import { createNotification } from './notifications'
+import { validatePin, isAdminTypeRole } from '../services/pinPolicy'
 
 const store = new Store()
 
@@ -65,6 +66,27 @@ function nicTaken(db: ReturnType<typeof getDb>, nic: string, excludeId?: string)
 }
 
 export function registerAgentHandlers(ipcMain: IpcMain) {
+  // Positions lookup (Issue 19) — backs the Position dropdown on the Agent/
+  // staff form, with inline "create new" support (CreatableSearchSelect).
+  safeHandle(ipcMain, 'positions:list', () => {
+    return { success: true, data: getDb().prepare('SELECT * FROM positions ORDER BY name').all() }
+  })
+  safeHandle(ipcMain, 'positions:create', async (_e, p: { name?: string }) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.employees) return { success: false, error: 'Employee management access required' }
+    const name = String(p.name || '').trim()
+    if (!name) return { success: false, error: 'Position name is required' }
+    const db = getDb()
+    const dup = db.prepare('SELECT id FROM positions WHERE UPPER(TRIM(name)) = UPPER(TRIM(?))').get(name) as { id: string } | undefined
+    if (dup) return { success: false, error: `Position "${name}" already exists`, existingId: dup.id }
+    const id = crypto.randomUUID()
+    const caller = authUser()
+    const row = { id, name, created_by: (caller?.id as string) || null }
+    db.prepare('INSERT INTO positions (id, name, created_by) VALUES (@id, @name, @created_by)').run(row)
+    await enqueuSync('positions', id, 'INSERT', row)
+    return { success: true, data: { id, name } }
+  })
+
   safeHandle(ipcMain, 'agents:list', (_e, filters: Record<string, unknown> = {}) => {
     {
       const db = getDb()
@@ -309,13 +331,17 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
     if (!roleId) return { success: false, error: 'Role is required' }
     const role = db.prepare('SELECT id, permissions FROM roles WHERE id = ?').get(roleId) as { id: string; permissions: string } | undefined
     if (!role) return { success: false, error: 'Selected role not found' }
-    if (!isGlobalManage) {
-      const rolePerms = JSON.parse(role.permissions || '{}')
-      if (rolePerms.all) return { success: false, error: 'Cannot assign Company Admin role' }
+    const rolePerms = JSON.parse(role.permissions || '{}')
+    if (!isGlobalManage && rolePerms.all) return { success: false, error: 'Cannot assign Company Admin role' }
+    // Agent accounts are PIN-only (see passwordHash below) — an admin-type
+    // role would be unable to ever sign in if assigned here.
+    if (isAdminTypeRole(rolePerms)) {
+      return { success: false, error: 'This role signs in with email and password — PIN login is not available for admin-type roles. Create this person as a regular user instead.' }
     }
 
     const pin = String(payload.pin || '').trim()
-    if (!/^\d{4,6}$/.test(pin)) return { success: false, error: 'PIN must be 4-6 digits' }
+    const pinCheck = await validatePin(db, pin, String(agent.branch_id || '') || null)
+    if (!pinCheck.ok) return { success: false, error: pinCheck.error }
 
     const { getMaxUsers } = await import('../services/licenseService')
     const maxUsers = getMaxUsers()

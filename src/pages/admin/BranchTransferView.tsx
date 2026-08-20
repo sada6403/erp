@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Check, Truck, AlertTriangle, Printer, FileText } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -397,8 +398,8 @@ export default function BranchTransferView() {
                       </div>
                       <div className="col-span-3">
                         <label className="block text-xs text-slate-400 mb-1">Received Good</label>
-                        <input 
-                          type="number" min="0" max={item.sent_qty}
+                        <NumberInput
+                          min="0" max={item.sent_qty}
                           value={item.received_qty}
                           onChange={e => {
                             const val = parseFloat(e.target.value) || 0
@@ -414,8 +415,8 @@ export default function BranchTransferView() {
                       </div>
                       <div className="col-span-3">
                         <label className="block text-xs text-slate-400 mb-1">Damaged/Spoiled</label>
-                        <input 
-                          type="number" min="0" max={item.sent_qty}
+                        <NumberInput
+                          min="0" max={item.sent_qty}
                           value={item.damaged_qty}
                           onChange={e => {
                             const val = parseFloat(e.target.value) || 0

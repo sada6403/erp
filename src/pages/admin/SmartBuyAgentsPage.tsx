@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import MemberPaymentHistoryModal from '@/components/shared/MemberPaymentHistoryModal'
@@ -279,8 +280,8 @@ function AgentFormModal({ agent, branches, onClose, onSave }: { agent: Row | nul
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Default Commission %</label><input type="number" value={form.default_commission_pct} onChange={f('default_commission_pct')} className="input" min={0} max={100} step="0.01" /></div>
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Monthly Target (Rs.)</label><input type="number" value={form.monthly_target} onChange={f('monthly_target')} className="input" min={0} /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Default Commission %</label><NumberInput value={form.default_commission_pct} onChange={f('default_commission_pct')} className="input" min={0} max={100} step="0.01" /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Monthly Target (Rs.)</label><NumberInput value={form.monthly_target} onChange={f('monthly_target')} className="input" min={0} /></div>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Status</label>
@@ -768,7 +769,7 @@ function RecordRemittanceModal({ agentId, balance, onClose, onSaved }: { agentId
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Record'}</button></>}>
       <div className="space-y-3">
         <p className="text-xs" style={{ color: 'var(--text-3)' }}>Current cash-in-hand balance: <strong>Rs.{money(balance)}</strong></p>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><input type="number" value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><NumberInput value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Method</label>

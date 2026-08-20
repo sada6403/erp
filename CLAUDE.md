@@ -51,7 +51,7 @@ backend/               # Next.js API, PostgreSQL schema, Docker deployment
 ## Default Login
 - Email: `admin@pos.local`
 - Password: `admin123`
-- PIN: `1234`
+- No default PIN — PIN login is for cashier/staff accounts only, set per user in Admin → Users.
 
 ## POS Keyboard Shortcuts
 | Key | Action |

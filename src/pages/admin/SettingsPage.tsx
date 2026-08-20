@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
+import NumberInput from '@/components/shared/NumberInput'
 import {
   Save, Building2, Barcode, ReceiptText, Printer,
   Image as ImageIcon, Ruler, Eye, Shield, Cloud, RefreshCw,
@@ -494,7 +495,7 @@ function GeneralSettings({ form, f, setForm }: { form: Record<string, any>; f: (
 
       <Section title="Inventory">
         <Field label="Low Stock Alert Threshold">
-          <input type="number" value={form.low_stock_threshold} onChange={f('low_stock_threshold')} className="input w-32" min="0" />
+          <NumberInput value={form.low_stock_threshold} onChange={f('low_stock_threshold')} className="input w-32" min="0" />
         </Field>
       </Section>
 
@@ -674,8 +675,8 @@ function SecuritySettings({ form, f, check }: { form: Record<string, any>; f: (k
       <Section title="Authentication Policy">
         <Check label="Enable Two-Factor Authentication" checked={Boolean(form.two_factor_enabled)} onChange={check('two_factor_enabled')} />
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Session Timeout (minutes)"><input type="number" value={form.session_timeout_minutes} onChange={f('session_timeout_minutes')} className="input" min="5" /></Field>
-          <Field label="Minimum Password Length"><input type="number" value={form.password_min_length} onChange={f('password_min_length')} className="input" min="6" /></Field>
+          <Field label="Session Timeout (minutes)"><NumberInput value={form.session_timeout_minutes} onChange={f('session_timeout_minutes')} className="input" min="5" /></Field>
+          <Field label="Minimum Password Length"><NumberInput value={form.password_min_length} onChange={f('password_min_length')} className="input" min="6" /></Field>
         </div>
         <div className="grid grid-cols-3 gap-3">
           <Check label="Uppercase Required" checked={Boolean(form.password_require_uppercase)} onChange={check('password_require_uppercase')} />
@@ -729,10 +730,10 @@ function SyncSettings({ form, f, check, isActivated }: { form: Record<string, an
             <LockedApiUrlField value={form.cloud_api_url} onChange={f('cloud_api_url')} />
           </Field>
           <Field label="Sync Interval (minutes)">
-            <input type="number" value={form.sync_interval_minutes} onChange={f('sync_interval_minutes')} className="input" min="1" />
+            <NumberInput value={form.sync_interval_minutes} onChange={f('sync_interval_minutes')} className="input" min="1" />
           </Field>
           <Field label="Failed Retry (minutes)">
-            <input type="number" value={form.failed_sync_retry_minutes} onChange={f('failed_sync_retry_minutes')} className="input" min="1" />
+            <NumberInput value={form.failed_sync_retry_minutes} onChange={f('failed_sync_retry_minutes')} className="input" min="1" />
           </Field>
         </div>
         <div className="mt-3 rounded-lg border px-4 py-3 text-xs" style={{ borderColor: 'var(--border)', color: 'var(--text-3)', background: 'var(--bg-soft)' }}>
@@ -784,13 +785,13 @@ function BarcodeDesigner({ form, setForm, f, check }: {
                 <option value="Custom">Custom</option>
               </select>
             </Field>
-            <Field label="Labels Per Row"><input type="number" value={form.barcode_labels_per_row} onChange={f('barcode_labels_per_row')} className="input" min="1" max="6" /></Field>
-            <Field label="Label Width (mm)"><input type="number" value={form.barcode_label_width} onChange={f('barcode_label_width')} className="input" min="20" /></Field>
-            <Field label="Label Height (mm)"><input type="number" value={form.barcode_label_height} onChange={f('barcode_label_height')} className="input" min="12" /></Field>
-            <Field label="Barcode Height (px)"><input type="number" value={form.barcode_height} onChange={f('barcode_height')} className="input" min="24" /></Field>
-            <Field label="Margin (mm)"><input type="number" value={form.barcode_margin} onChange={f('barcode_margin')} className="input" min="0" /></Field>
-            <Field label="Product Font"><input type="number" value={form.barcode_product_font} onChange={f('barcode_product_font')} className="input" min="7" /></Field>
-            <Field label="Price Font"><input type="number" value={form.barcode_price_font} onChange={f('barcode_price_font')} className="input" min="8" /></Field>
+            <Field label="Labels Per Row"><NumberInput value={form.barcode_labels_per_row} onChange={f('barcode_labels_per_row')} className="input" min="1" max="6" /></Field>
+            <Field label="Label Width (mm)"><NumberInput value={form.barcode_label_width} onChange={f('barcode_label_width')} className="input" min="20" /></Field>
+            <Field label="Label Height (mm)"><NumberInput value={form.barcode_label_height} onChange={f('barcode_label_height')} className="input" min="12" /></Field>
+            <Field label="Barcode Height (px)"><NumberInput value={form.barcode_height} onChange={f('barcode_height')} className="input" min="24" /></Field>
+            <Field label="Margin (mm)"><NumberInput value={form.barcode_margin} onChange={f('barcode_margin')} className="input" min="0" /></Field>
+            <Field label="Product Font"><NumberInput value={form.barcode_product_font} onChange={f('barcode_product_font')} className="input" min="7" /></Field>
+            <Field label="Price Font"><NumberInput value={form.barcode_price_font} onChange={f('barcode_price_font')} className="input" min="8" /></Field>
             <Field label="Sample Barcode"><input value={form.barcode_sample_value} onChange={f('barcode_sample_value')} className="input font-mono" /></Field>
           </div>
         </Section>
@@ -820,8 +821,8 @@ function BarcodeDesigner({ form, setForm, f, check }: {
               <div key={label} className="rounded-lg border p-2" style={{ borderColor: 'var(--border)' }}>
                 <p className="font-semibold mb-1" style={{ color: 'var(--text-2)' }}>{label}</p>
                 <div className="flex gap-1">
-                  <input type="number" value={form[xKey]} onChange={f(xKey)} className="input py-1 text-xs" min="0" max="100" />
-                  <input type="number" value={form[yKey]} onChange={f(yKey)} className="input py-1 text-xs" min="0" max="100" />
+                  <NumberInput value={form[xKey]} onChange={f(xKey)} className="input py-1 text-xs" min="0" max="100" />
+                  <NumberInput value={form[yKey]} onChange={f(yKey)} className="input py-1 text-xs" min="0" max="100" />
                 </div>
               </div>
             ))}
@@ -970,10 +971,10 @@ function PreprintedStationerySection({ form, f, check }: {
         <>
           <div className="grid grid-cols-2 gap-3 mt-3">
             <Field label="Calibration Offset X (mm)">
-              <input type="number" step="0.5" value={form.invoice_dot_preprinted_offset_x} onChange={f('invoice_dot_preprinted_offset_x')} className="input" />
+              <NumberInput step="0.5" value={form.invoice_dot_preprinted_offset_x} onChange={f('invoice_dot_preprinted_offset_x')} className="input" />
             </Field>
             <Field label="Calibration Offset Y (mm)">
-              <input type="number" step="0.5" value={form.invoice_dot_preprinted_offset_y} onChange={f('invoice_dot_preprinted_offset_y')} className="input" />
+              <NumberInput step="0.5" value={form.invoice_dot_preprinted_offset_y} onChange={f('invoice_dot_preprinted_offset_y')} className="input" />
             </Field>
           </div>
           <button onClick={printCalibrationSheet} disabled={printing} className="btn-secondary btn-sm gap-1.5 mt-3">
@@ -1228,29 +1229,29 @@ function LoyaltySettings() {
           <Section title="Earn Rate">
             <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-2)' }}>
               <span>Customer earns</span>
-              <input type="number" min={1} value={cfg.earn_points} onChange={e => setCfg(c => ({ ...c, earn_points: parseInt(e.target.value) || 1 }))} className="input w-20 py-1 text-center" />
+              <NumberInput min={1} value={cfg.earn_points} onChange={e => setCfg(c => ({ ...c, earn_points: parseInt(e.target.value) || 1 }))} className="input w-20 py-1 text-center" />
               <span>point(s) for every</span>
-              <input type="number" min={1} value={cfg.earn_per_amount} onChange={e => setCfg(c => ({ ...c, earn_per_amount: parseFloat(e.target.value) || 100 }))} className="input w-24 py-1 text-center" />
+              <NumberInput min={1} value={cfg.earn_per_amount} onChange={e => setCfg(c => ({ ...c, earn_per_amount: parseFloat(e.target.value) || 100 }))} className="input w-24 py-1 text-center" />
               <span>Rs. spent</span>
             </div>
           </Section>
 
           <Section title="Redemption Rate">
             <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--text-2)' }}>
-              <input type="number" min={1} value={cfg.redeem_points} onChange={e => setCfg(c => ({ ...c, redeem_points: parseInt(e.target.value) || 100 }))} className="input w-24 py-1 text-center" />
+              <NumberInput min={1} value={cfg.redeem_points} onChange={e => setCfg(c => ({ ...c, redeem_points: parseInt(e.target.value) || 100 }))} className="input w-24 py-1 text-center" />
               <span>points =</span>
               <span style={{ color: 'var(--text-3)' }}>Rs.</span>
-              <input type="number" min={0.1} step={0.5} value={cfg.redeem_value} onChange={e => setCfg(c => ({ ...c, redeem_value: parseFloat(e.target.value) || 10 }))} className="input w-24 py-1 text-center" />
+              <NumberInput min={0.1} step={0.5} value={cfg.redeem_value} onChange={e => setCfg(c => ({ ...c, redeem_value: parseFloat(e.target.value) || 10 }))} className="input w-24 py-1 text-center" />
               <span>discount</span>
             </div>
           </Section>
 
           <Section title="Redemption Rules">
             <Field label="Minimum points to redeem">
-              <input type="number" min={0} value={cfg.min_redeem} onChange={e => setCfg(c => ({ ...c, min_redeem: parseInt(e.target.value) || 0 }))} className="input w-32" />
+              <NumberInput min={0} value={cfg.min_redeem} onChange={e => setCfg(c => ({ ...c, min_redeem: parseInt(e.target.value) || 0 }))} className="input w-32" />
             </Field>
             <Field label="Points expiry (days, 0 = never expire)">
-              <input type="number" min={0} value={cfg.expiry_days} onChange={e => setCfg(c => ({ ...c, expiry_days: parseInt(e.target.value) || 0 }))} className="input w-32" />
+              <NumberInput min={0} value={cfg.expiry_days} onChange={e => setCfg(c => ({ ...c, expiry_days: parseInt(e.target.value) || 0 }))} className="input w-32" />
             </Field>
           </Section>
 
@@ -1272,6 +1273,20 @@ function LoyaltySettings() {
 }
 
 // ── Communications Tab ────────────────────────────────────────────────────────
+
+// Which events can notify a customer, and through which channels — each
+// checkbox is stored as `notif_<key>_<channel>`. A channel only actually
+// sends when it's ALSO enabled above (Email/SMS/WhatsApp) — see
+// electron/services/chitNotifications.ts's notificationAllowed().
+// installment/low_stock have no WhatsApp send built yet, so that column is
+// shown disabled rather than a toggle that would silently do nothing.
+const NOTIF_EVENTS: { key: string; label: string; desc: string; disabledChannels?: ('email' | 'sms' | 'whatsapp')[] }[] = [
+  { key: 'bill', label: 'Bill / Invoice Created', desc: 'Sent to the customer when a retail or credit sale completes' },
+  { key: 'quotation', label: 'Quotation Created', desc: 'Sent to the customer when a quotation is created' },
+  { key: 'installment', label: 'Installment Reminder / Due', desc: 'Daily reminders for upcoming, due, and overdue installments', disabledChannels: ['whatsapp'] },
+  { key: 'chit', label: 'Smart Buy Notifications', desc: 'Winner selected, payment due, scheme closing' },
+  { key: 'low_stock', label: 'Low Stock Alert', desc: 'Daily alert to the company email/phone when items fall below minimum level', disabledChannels: ['whatsapp'] },
+]
 
 function CommunicationsSettings({ form, f, check }: {
   form: Record<string, unknown>
@@ -1314,7 +1329,7 @@ function CommunicationsSettings({ form, f, check }: {
             <input value={String(form.smtp_host || '')} onChange={f('smtp_host')} className="input font-mono text-sm" placeholder="smtp.gmail.com" disabled={!form.email_enabled} />
           </Field>
           <Field label="Port">
-            <input type="number" value={Number(form.smtp_port || 587)} onChange={f('smtp_port')} className="input" placeholder="587" disabled={!form.email_enabled} />
+            <NumberInput value={Number(form.smtp_port || 587)} onChange={f('smtp_port')} className="input" placeholder="587" disabled={!form.email_enabled} />
           </Field>
         </div>
         <Field label="Encryption">
@@ -1507,30 +1522,45 @@ function CommunicationsSettings({ form, f, check }: {
         </div>
       </Section>
 
-      {/* ── Reminder Schedule ──────────────────────────────────────────────── */}
-      <Section title="Auto Reminders">
+      {/* ── Notification Triggers ─────────────────────────────────────────── */}
+      <Section title="Notification Triggers">
         <p className="text-xs mb-3" style={{ color: 'var(--text-3)' }}>
-          The system automatically sends reminders every day at startup. Enable Email or SMS above to activate.
+          Choose which events notify a customer, and through which channel. A column only actually
+          sends once that channel is also enabled above (Email / SMS / WhatsApp) — leave everything
+          off here and nothing sends automatically, regardless of the channel settings.
         </p>
-        <div className="rounded-xl border divide-y" style={{ borderColor: 'var(--border)' }}>
-          {[
-            { label: 'Overdue installment notice', desc: 'Sent daily to customers whose payment is past due', icon: '🔴' },
-            { label: 'Due today reminder', desc: 'Sent on the day payment is due', icon: '🟡' },
-            { label: 'Due in 3 days reminder', desc: 'Early warning 3 days before due date', icon: '🟢' },
-            { label: 'Low stock alert', desc: 'Daily email/SMS to company email when items are below min level', icon: '📦' },
-          ].map(item => (
-            <div key={item.label} className="flex items-center gap-3 px-4 py-3">
-              <span className="text-base">{item.icon}</span>
-              <div>
-                <p className="text-sm font-medium" style={{ color: 'var(--text-1)' }}>{item.label}</p>
-                <p className="text-xs" style={{ color: 'var(--text-3)' }}>{item.desc}</p>
-              </div>
-              <span className="ml-auto text-xs px-2 py-0.5 rounded-full font-medium"
-                style={{ background: 'color-mix(in srgb, var(--brand-primary) 12%, transparent)', color: 'var(--brand-primary)' }}>
-                Auto
-              </span>
-            </div>
-          ))}
+        <div className="overflow-x-auto rounded-xl border" style={{ borderColor: 'var(--border)' }}>
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
+                <th className="text-left px-4 py-2 font-medium" style={{ color: 'var(--text-2)' }}>Event</th>
+                <th className="px-3 py-2 font-medium text-center" style={{ color: 'var(--text-2)' }}>Email</th>
+                <th className="px-3 py-2 font-medium text-center" style={{ color: 'var(--text-2)' }}>SMS</th>
+                <th className="px-3 py-2 font-medium text-center" style={{ color: 'var(--text-2)' }}>WhatsApp</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y" style={{ borderColor: 'var(--border)' }}>
+              {NOTIF_EVENTS.map(evt => (
+                <tr key={evt.key}>
+                  <td className="px-4 py-2.5">
+                    <p className="font-medium" style={{ color: 'var(--text-1)' }}>{evt.label}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-3)' }}>{evt.desc}</p>
+                  </td>
+                  {(['email', 'sms', 'whatsapp'] as const).map(channel => {
+                    const key = `notif_${evt.key}_${channel}`
+                    if (evt.disabledChannels?.includes(channel)) {
+                      return <td key={channel} className="px-3 py-2.5 text-center text-xs" style={{ color: 'var(--text-3)' }} title="Not available for this event yet">—</td>
+                    }
+                    return (
+                      <td key={channel} className="px-3 py-2.5 text-center">
+                        <input type="checkbox" checked={Boolean(form[key])} onChange={check(key)} className="w-4 h-4 accent-blue-600" />
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
 
         <div className="flex gap-2 mt-3">
@@ -1638,7 +1668,7 @@ function PrinterAssignmentRow({ module, label, printers, config, onSaved }: {
           </select>
         </Field>
         <Field label="Copies">
-          <input type="number" min={1} value={copies} onChange={e => setCopies(e.target.value)} className="input" />
+          <NumberInput min={1} value={copies} onChange={e => setCopies(e.target.value)} className="input" />
         </Field>
       </div>
       {connectionType === 'windows_driver' ? (
@@ -1658,7 +1688,7 @@ function PrinterAssignmentRow({ module, label, printers, config, onSaved }: {
             <input value={ipAddress} onChange={e => setIpAddress(e.target.value)} className="input" placeholder="e.g. 192.168.1.50" />
           </Field>
           <Field label="Port">
-            <input type="number" value={port} onChange={e => setPort(e.target.value)} className="input" placeholder="9100" />
+            <NumberInput value={port} onChange={e => setPort(e.target.value)} className="input" placeholder="9100" />
           </Field>
         </div>
       )}
@@ -1742,7 +1772,7 @@ function PrinterSettings({
             <input value={form.thermal_printer_ip || ''} onChange={f('thermal_printer_ip')} className="input" placeholder="e.g. 192.168.1.50" />
           </Field>
           <Field label="Port">
-            <input type="number" value={form.thermal_printer_port || 9100} onChange={f('thermal_printer_port')} className="input" placeholder="9100" />
+            <NumberInput value={form.thermal_printer_port || 9100} onChange={f('thermal_printer_port')} className="input" placeholder="9100" />
           </Field>
         </div>
         <button onClick={runEscPosTest} disabled={testingEscPos} className="btn-secondary btn-sm gap-1.5">

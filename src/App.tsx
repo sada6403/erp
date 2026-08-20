@@ -13,7 +13,6 @@ import BranchesPage from '@/pages/admin/BranchesPage'
 import BranchInspectPage from '@/pages/admin/BranchInspectPage'
 import BranchInspectDetailPage from '@/pages/admin/BranchInspectDetailPage'
 import UsersPage from '@/pages/admin/UsersPage'
-import AgentsPage from '@/pages/admin/AgentsPage'
 import RegionsPage from '@/pages/admin/RegionsPage'
 import ZonesPage from '@/pages/admin/ZonesPage'
 import SuppliersPage from '@/pages/admin/SuppliersPage'
@@ -205,7 +204,9 @@ export default function App() {
         <Route path="/admin/branch-inspect" element={<RequireSuperAdmin><BranchInspectPage /></RequireSuperAdmin>} />
         <Route path="/admin/branch-inspect/:branchId" element={<RequireSuperAdmin><BranchInspectDetailPage /></RequireSuperAdmin>} />
         <Route path="/admin/users" element={<UsersPage />} />
-        <Route path="/admin/agents" element={<AgentsPage />} />
+        {/* Agent is now a tab inside Employee Management, not its own page
+            (Issue 17) — redirect any old bookmark/link instead of 404ing. */}
+        <Route path="/admin/agents" element={<Navigate to="/admin/users" replace />} />
         <Route path="/admin/regions" element={<RegionsPage />} />
         <Route path="/admin/zones" element={<ZonesPage />} />
         <Route path="/admin/categories" element={<CategoriesPage />} />

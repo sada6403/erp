@@ -9,6 +9,7 @@ import { enqueuSync, enqueueUserRow } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { insertStockMovement } from '../services/stockMovement'
 import { syncStockRow } from '../services/stockSync'
+import { validatePin, isAdminTypeRole } from '../services/pinPolicy'
 import Store from 'electron-store'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import * as XLSX from 'xlsx'
@@ -426,16 +427,33 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     if (!perms.all && !perms.employees) {
       return { success: false, error: 'Employee management access required' }
     }
+    const targetRole = p.role_id
+      ? db.prepare('SELECT permissions FROM roles WHERE id=?').get(p.role_id) as { permissions: string } | undefined
+      : undefined
+    const targetPerms = targetRole ? JSON.parse(targetRole.permissions || '{}') : {}
+
     // Non-global callers can only create users in their own branch, and
     // can never assign a role that itself carries admin-level permissions
     // (would otherwise let a Branch Manager mint a new Company Admin).
     if (!perms.all) {
       if (caller.branch_id) p.branch_id = caller.branch_id
-      if (p.role_id) {
-        const targetRole = db.prepare('SELECT permissions FROM roles WHERE id=?').get(p.role_id) as { permissions: string } | undefined
-        const targetPerms = targetRole ? JSON.parse(targetRole.permissions || '{}') : {}
-        if (targetPerms.all) return { success: false, error: 'Cannot assign Company Admin role' }
+      if (p.role_id && targetPerms.all) return { success: false, error: 'Cannot assign Company Admin role' }
+    }
+
+    if (p.pin) {
+      if (p.role_id && isAdminTypeRole(targetPerms)) {
+        return { success: false, error: 'This role signs in with email and password — PIN login is not available for admin-type roles.' }
       }
+      const pinCheck = await validatePin(db, String(p.pin), p.branch_id || null)
+      if (!pinCheck.ok) return { success: false, error: pinCheck.error }
+    }
+
+    if (p.email) {
+      const email = String(p.email).trim().toLowerCase()
+      if (!EMAIL_RE_ADMIN.test(email)) return { success: false, error: 'Invalid email address' }
+      const dup = db.prepare('SELECT id FROM users WHERE LOWER(email) = ?').get(email) as { id: string } | undefined
+      if (dup) return { success: false, error: 'This email is already used by another user' }
+      p.email = email
     }
 
     const id = crypto.randomUUID()
@@ -471,13 +489,45 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       delete p.role_id
     }
 
+    if (p.email) {
+      const email = String(p.email).trim().toLowerCase()
+      if (!EMAIL_RE_ADMIN.test(email)) return { success: false, error: 'Invalid email address' }
+      const dup = db.prepare('SELECT id FROM users WHERE LOWER(email) = ? AND id != ?').get(email, id) as { id: string } | undefined
+      if (dup) return { success: false, error: 'This email is already used by another user' }
+      p.email = email
+    }
+
     if (p.password) {
+      // Self-service password change requires proving the current password —
+      // an admin resetting someone ELSE's password (id !== caller.id) is the
+      // "Super Admin override" case and skips this, matching the existing
+      // access already gated above (global, or Employee-management + own branch).
+      if (id === caller.id) {
+        const self = db.prepare('SELECT password_hash FROM users WHERE id=?').get(id) as { password_hash: string | null } | undefined
+        const currentOk = self?.password_hash
+          ? await bcrypt.compare(String(p.current_password || ''), self.password_hash)
+          : false
+        if (!currentOk) return { success: false, error: 'Current password is incorrect' }
+      }
       p.password_hash = await bcrypt.hash(p.password, 10)
       delete p.password
     }
+    delete p.current_password
     // PINs are stored hashed only
     if (p.pin === '') delete p.pin
     if (p.pin) {
+      const existing = db.prepare('SELECT branch_id, role_id FROM users WHERE id=?').get(id) as { branch_id: string | null; role_id: string | null } | undefined
+      const targetBranchId = p.branch_id || existing?.branch_id || null
+      const targetRoleId = p.role_id || existing?.role_id || null
+      if (targetRoleId) {
+        const targetRole = db.prepare('SELECT permissions FROM roles WHERE id=?').get(targetRoleId) as { permissions: string } | undefined
+        const targetPerms = targetRole ? JSON.parse(targetRole.permissions || '{}') : {}
+        if (isAdminTypeRole(targetPerms)) {
+          return { success: false, error: 'This role signs in with email and password — PIN login is not available for admin-type roles.' }
+        }
+      }
+      const pinCheck = await validatePin(db, String(p.pin), targetBranchId, id)
+      if (!pinCheck.ok) return { success: false, error: pinCheck.error }
       p.pin_hash = await bcrypt.hash(String(p.pin), 10)
       delete p.pin
     }
@@ -636,7 +686,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
     const wb = XLSX.utils.book_new()
     const sample = [
-      { 'Name': 'Nimal Perera', 'Role': roles.find(r => r.name !== 'Company Admin')?.name || 'Cashier', 'Branch': branches[0]?.name || 'Main Branch', 'Email': '', 'Password': '', 'PIN': '1234' },
+      { 'Name': 'Nimal Perera', 'Role': roles.find(r => r.name !== 'Company Admin')?.name || 'Cashier', 'Branch': branches[0]?.name || 'Main Branch', 'Email': '', 'Password': '', 'PIN': '' },
       { 'Name': '', 'Role': '', 'Branch': '', 'Email': '', 'Password': '', 'PIN': '' },
     ]
     const ws = XLSX.utils.json_to_sheet(sample)
@@ -831,10 +881,14 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'admin:suppliers:create', async (_e, p) => {
     const perms = currentPerms()
     if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
+    const name = String(p.name || '').trim()
+    if (!name) return { success: false, error: 'Supplier name is required' }
+    const dup = getDb().prepare('SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?)').get(name) as { id: string } | undefined
+    if (dup) return { success: false, error: `A supplier named "${name}" already exists`, existingId: dup.id }
     const id = crypto.randomUUID()
     getDb().prepare(`INSERT INTO suppliers (id,name,contact,phone,email,address,tax_number)
       VALUES (@id,@name,@contact,@phone,@email,@address,@tax_number)`)
-      .run({ id, name:p.name, contact:p.contact||null, phone:p.phone||null,
+      .run({ id, name, contact:p.contact||null, phone:p.phone||null,
              email:p.email||null, address:p.address||null, tax_number:p.tax_number||null })
     await enqueuSync('suppliers', id, 'INSERT', { id, ...p })
     return { success: true, data: { id } }
@@ -1825,16 +1879,15 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     // Seed main branch
     db.prepare(`
       INSERT OR IGNORE INTO branches (id, name, code, address, phone)
-      VALUES (?, 'Main Branch', 'MAIN', 'Head Office', '+94 11 000 0000')
+      VALUES (?, 'Main Branch', 'MAIN', '', '+94 11 000 0000')
     `).run(branchId)
 
-    // Seed default admin user
+    // Seed default admin user — no default PIN, admin logs in via email+password only
     const hash = await bcrypt.hash('admin123', 10)
-    const pinHash = await bcrypt.hash('1234', 10)
     db.prepare(`
-      INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
-      VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, ?, 1)
-    `).run(adminUserId, branchId, companyAdminRoleId, hash, pinHash)
+      INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, is_active)
+      VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, 1)
+    `).run(adminUserId, branchId, companyAdminRoleId, hash)
 
     // Clear the setup_required flag
     store.delete('setup_required')

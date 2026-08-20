@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import { AlertCircle, ArrowRightLeft, Plus, Lock, Clock } from 'lucide-react'
@@ -411,7 +412,7 @@ function AdjustBtn({ stockId: _stockId, productId, branchId, current, onDone }: 
 
   return (
     <div className="flex items-center gap-1">
-      <input type="number" value={qty} onChange={e => setQty(parseInt(e.target.value)||0)} className="input py-1 text-sm w-20" />
+      <NumberInput value={qty} onChange={e => setQty(parseInt(e.target.value)||0)} className="input py-1 text-sm w-20" />
       <input value={reason} onChange={e => setReason(e.target.value)} placeholder="reason" className="input py-1 text-sm w-28" />
       <button onClick={save} disabled={saving} className="btn-success btn-sm">OK</button>
       <button onClick={() => setOpen(false)} className="btn-ghost btn-sm">✕</button>
@@ -473,7 +474,7 @@ function TransferModal({ onClose, onSave }: { onClose: () => void; onSave: () =>
             </select>
           </div>
         </div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Quantity</label><input type="number" value={form.quantity} onChange={e => setForm(p => ({...p, quantity: parseInt(e.target.value)||1}))} className="input" min="1" /></div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Quantity</label><NumberInput value={form.quantity} onChange={e => setForm(p => ({...p, quantity: parseInt(e.target.value)||1}))} className="input" min="1" /></div>
         <div><label className="block text-xs font-medium text-slate-400 mb-1">Notes</label><input value={form.notes} onChange={e => setForm(p => ({...p, notes: e.target.value}))} className="input" /></div>
       </div>
     </Modal>

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
+import NumberInput from '@/components/shared/NumberInput'
 import { useAuthStore } from '@/store/authStore'
 import {
   CreditCard, AlertCircle, ChevronDown, ChevronUp, Phone, Calendar,
@@ -1049,12 +1050,12 @@ function NewSaleTab({ branchId, branchLabel, onSuccess }: { branchId: string; br
                     <tr key={idx} className="table-row">
                       <td className="table-cell" style={{ color: 'var(--text-1)' }}>{item.product.name}</td>
                       <td className="table-cell">
-                        <input type="number" min={1} value={item.qty}
+                        <NumberInput min={1} value={item.qty}
                           onChange={e => setItems(prev => prev.map((i, j) => j === idx ? { ...i, qty: Math.max(1, Number(e.target.value)) } : i))}
                           className="input text-center w-14 py-0.5 text-xs" />
                       </td>
                       <td className="table-cell">
-                        <input type="number" min={0} step={0.01} value={item.price}
+                        <NumberInput min={0} step={0.01} value={item.price}
                           onChange={e => setItems(prev => prev.map((i, j) => j === idx ? { ...i, price: Number(e.target.value) } : i))}
                           className="input text-right w-20 py-0.5 text-xs" />
                       </td>
@@ -1118,7 +1119,7 @@ function NewSaleTab({ branchId, branchLabel, onSuccess }: { branchId: string; br
           {iType !== 'no_interest' && (
             <div>
               <label className="label">Interest Rate (%)</label>
-              <input type="number" min={0} step={0.1} value={iRate}
+              <NumberInput min={0} step={0.1} value={iRate}
                 onChange={e => setIRate(Number(e.target.value))}
                 className="input text-xs w-full" placeholder="e.g. 12" />
             </div>
@@ -1129,7 +1130,7 @@ function NewSaleTab({ branchId, branchLabel, onSuccess }: { branchId: string; br
               Down Payment (Rs.)
               {minDown > 0 && <span className="ml-2 text-[10px] text-orange-400">Min: {fmt(minDown)}</span>}
             </label>
-            <input type="number" min={0} step={100} value={downPmt}
+            <NumberInput min={0} step={100} value={downPmt}
               onChange={e => setDownPmt(Number(e.target.value))}
               className="input text-xs w-full" />
           </div>
@@ -1364,23 +1365,23 @@ function PlanFormModal({ initial, onClose, onSave }: {
         {form.interest_type !== 'no_interest' && (
           <div>
             <label className="label">Interest Rate (%)</label>
-            <input type="number" min={0} step={0.1} value={form.interest_rate || 0}
+            <NumberInput min={0} step={0.1} value={form.interest_rate || 0}
               onChange={e => set('interest_rate', Number(e.target.value))} className="input w-full" />
           </div>
         )}
         <div>
           <label className="label">Min Down Payment (%)</label>
-          <input type="number" min={0} max={100} step={1} value={form.min_down_payment_pct || 0}
+          <NumberInput min={0} max={100} step={1} value={form.min_down_payment_pct || 0}
             onChange={e => set('min_down_payment_pct', Number(e.target.value))} className="input w-full" />
         </div>
         <div>
           <label className="label">Late Fee (Rs.)</label>
-          <input type="number" min={0} step={100} value={form.late_fee || 0}
+          <NumberInput min={0} step={100} value={form.late_fee || 0}
             onChange={e => set('late_fee', Number(e.target.value))} className="input w-full" placeholder="0 = no fee" />
         </div>
         <div>
           <label className="label">Grace Period (Days)</label>
-          <input type="number" min={0} step={1} value={form.grace_period_days || 0}
+          <NumberInput min={0} step={1} value={form.grace_period_days || 0}
             onChange={e => set('grace_period_days', Number(e.target.value))} className="input w-full" />
         </div>
         <div className="col-span-2 flex items-center gap-3">
@@ -1806,7 +1807,7 @@ function PaymentModal({ installment, onClose, onSave }: {
         {/* Amount */}
         <div>
           <label className="label">Payment Amount (Rs.)</label>
-          <input type="number" value={amount} min={1} step={0.01} max={maxAmt}
+          <NumberInput value={amount} min={1} step={0.01} max={maxAmt}
             onChange={e => setAmount(parseFloat(e.target.value) || 0)}
             className="input text-2xl font-bold text-center py-3 w-full" />
           <div className="flex gap-2 mt-1.5">

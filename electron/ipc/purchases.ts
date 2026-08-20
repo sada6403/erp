@@ -76,10 +76,19 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
         LEFT JOIN branches b  ON b.id  = po.branch_id
         WHERE po.id=?`).get(id)
       if (!po) throw new Error('Purchase order not found')
+      // pack_uom_name/pack_conversion_factor: see the identical pattern (and
+      // comment) on stockCounts:get in electron/ipc/stocks.ts — lets Receive
+      // Items accept "N boxes + M pcs" for products with a configured pack unit.
       const items = db.prepare(`
-        SELECT pi.*, p.name as product_name, p.sku
+        SELECT pi.*, p.name as product_name, p.sku,
+          pu.uom_name as pack_uom_name, pu.conversion_factor as pack_conversion_factor
         FROM purchase_items pi
         LEFT JOIN products p ON p.id = pi.product_id
+        LEFT JOIN product_uom pu ON pu.id = (
+          SELECT id FROM product_uom
+          WHERE product_id = pi.product_id AND is_base = 0 AND conversion_factor > 1
+          ORDER BY sort_order LIMIT 1
+        )
         WHERE pi.po_id=?`).all(id)
       return { success: true, data: { ...po as object, items } }
   })

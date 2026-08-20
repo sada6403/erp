@@ -52,7 +52,6 @@ export default function BranchInspectPage() {
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <h3 className="font-bold truncate" style={{ color: 'var(--text-1)' }}>{b.name as string}</h3>
-                      {isMain(b) && <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 text-xs rounded flex-shrink-0">Head Office</span>}
                     </div>
                     <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                       Manager: {String(b.manager_name || 'Unassigned')}

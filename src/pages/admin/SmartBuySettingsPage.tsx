@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
+import NumberInput from '@/components/shared/NumberInput'
 import toast from 'react-hot-toast'
 
 type Row = Record<string, unknown>
@@ -74,7 +75,7 @@ export default function SmartBuySettingsPage() {
           <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Minimum Members</h3>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Default Minimum Members to Activate</label>
-            <input type="number" value={form.smartbuy_default_min_members} onChange={num('smartbuy_default_min_members')} className="input" min={1} />
+            <NumberInput value={form.smartbuy_default_min_members} onChange={num('smartbuy_default_min_members')} className="input" min={1} />
             <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>A scheme stays "Pending" — no draws, no first-installment collection — until enrolled members reach this number, unless overridden at creation.</p>
           </div>
         </div>
@@ -84,11 +85,11 @@ export default function SmartBuySettingsPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Grace Period (days into the month)</label>
-              <input type="number" value={form.smartbuy_default_late_payment_days} onChange={num('smartbuy_default_late_payment_days')} className="input" min={0} />
+              <NumberInput value={form.smartbuy_default_late_payment_days} onChange={num('smartbuy_default_late_payment_days')} className="input" min={0} />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Late Fee (Rs.)</label>
-              <input type="number" value={form.smartbuy_default_late_fee_amount} onChange={num('smartbuy_default_late_fee_amount')} className="input" min={0} />
+              <NumberInput value={form.smartbuy_default_late_fee_amount} onChange={num('smartbuy_default_late_fee_amount')} className="input" min={0} />
             </div>
           </div>
           <p className="text-xs" style={{ color: 'var(--text-3)' }}>A cycle contribution recorded after this day of the month automatically adds the late fee on top. Set grace days to 0 to disable by default.</p>
@@ -98,7 +99,7 @@ export default function SmartBuySettingsPage() {
           <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Repayment</h3>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Default Repayment Duration (months)</label>
-            <input type="number" value={form.smartbuy_default_repayment_months} onChange={num('smartbuy_default_repayment_months')} className="input" min={1} />
+            <NumberInput value={form.smartbuy_default_repayment_months} onChange={num('smartbuy_default_repayment_months')} className="input" min={1} />
             <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>How long a winner has to repay the balance between their product's value and what they'd already contributed.</p>
           </div>
         </div>
@@ -118,15 +119,15 @@ export default function SmartBuySettingsPage() {
           <div className="grid grid-cols-3 gap-3">
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Good Margin % (🟢 threshold)</label>
-              <input type="number" value={form.smartbuy_calc_good_margin_pct} onChange={num('smartbuy_calc_good_margin_pct')} className="input" min={0} step="0.1" />
+              <NumberInput value={form.smartbuy_calc_good_margin_pct} onChange={num('smartbuy_calc_good_margin_pct')} className="input" min={0} step="0.1" />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Minimum Margin % (🔴 floor)</label>
-              <input type="number" value={form.smartbuy_calc_min_margin_pct} onChange={num('smartbuy_calc_min_margin_pct')} className="input" step="0.1" />
+              <NumberInput value={form.smartbuy_calc_min_margin_pct} onChange={num('smartbuy_calc_min_margin_pct')} className="input" step="0.1" />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Cash Flow Risk % (of income)</label>
-              <input type="number" value={form.smartbuy_calc_cash_risk_pct} onChange={num('smartbuy_calc_cash_risk_pct')} className="input" min={0} step="0.1" />
+              <NumberInput value={form.smartbuy_calc_cash_risk_pct} onChange={num('smartbuy_calc_cash_risk_pct')} className="input" min={0} step="0.1" />
             </div>
           </div>
           <p className="text-xs" style={{ color: 'var(--text-3)' }}>

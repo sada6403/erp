@@ -4,6 +4,7 @@ import Modal from '@/components/shared/Modal'
 import { Plus, ArrowLeft, CheckCircle, XCircle, ClipboardList, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 
 type Session = Record<string, unknown>
 type CountItem = Record<string, unknown>
@@ -297,16 +298,26 @@ function ItemRow({ item, editable, onUpdate }: {
   editable: boolean
   onUpdate: (qty: number) => Promise<void>
 }) {
-  const [val, setVal]     = useState<string>(item.counted_qty !== null ? String(item.counted_qty) : '')
+  // A product with a configured box/pack unit (product_uom, non-base) is
+  // counted as "N boxes + M pieces" — the natural way to count a shelf —
+  // converted to a single base-unit total for the stock ledger, which is
+  // still the only thing stockCounts:updateItem/finalize ever deals with.
+  const pack: PackUom | null = item.pack_uom_name && Number(item.pack_conversion_factor) > 1
+    ? { uom_name: String(item.pack_uom_name), conversion_factor: Number(item.pack_conversion_factor) }
+    : null
+  const initialSplit = splitQty(item.counted_qty !== null ? Number(item.counted_qty) : 0, pack)
+  const [boxes, setBoxes]   = useState<string>(item.counted_qty !== null ? String(initialSplit.boxes) : '')
+  const [pieces, setPieces] = useState<string>(item.counted_qty !== null ? String(initialSplit.pieces) : '')
   const [saving, setSaving] = useState(false)
 
   const variance = item.counted_qty !== null ? (item.counted_qty as number) - (item.system_qty as number) : null
 
   const commit = async () => {
-    const qty = parseInt(val)
-    if (isNaN(qty) || qty < 0) return
+    const b = parseInt(boxes) || 0
+    const p = parseFloat(pieces) || 0
+    if (b === 0 && p === 0 && boxes === '' && pieces === '') return
     setSaving(true)
-    await onUpdate(qty)
+    await onUpdate(toBaseQty(b, p, pack))
     setSaving(false)
   }
 
@@ -315,22 +326,51 @@ function ItemRow({ item, editable, onUpdate }: {
       <td className="table-cell font-medium text-sm">{item.product_name as string}</td>
       <td className="table-cell font-mono text-xs text-slate-400">{item.sku as string}</td>
       <td className="table-cell text-slate-400 text-xs">{item.unit as string}</td>
-      <td className="table-cell font-bold text-slate-300">{item.system_qty as number}</td>
+      <td className="table-cell font-bold text-slate-300">{formatQtyWithUom(item.system_qty as number, pack, item.unit as string || 'pcs')}</td>
       <td className="table-cell">
         {editable ? (
-          <input
-            type="number"
-            min="0"
-            value={val}
-            onChange={e => setVal(e.target.value)}
-            onBlur={commit}
-            onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
-            disabled={saving}
-            placeholder="Enter count"
-            className="input py-1 text-sm w-28"
-          />
+          pack ? (
+            <div className="flex items-center gap-1">
+              <input
+                type="number" min="0"
+                value={boxes}
+                onChange={e => setBoxes(e.target.value)}
+                onBlur={commit}
+                onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
+                disabled={saving}
+                placeholder="0"
+                title={pack.uom_name}
+                className="input py-1 text-sm w-16"
+              />
+              <span className="text-xs text-slate-500">{pack.uom_name} +</span>
+              <input
+                type="number" min="0"
+                value={pieces}
+                onChange={e => setPieces(e.target.value)}
+                onBlur={commit}
+                onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
+                disabled={saving}
+                placeholder="0"
+                title={item.unit as string}
+                className="input py-1 text-sm w-16"
+              />
+              <span className="text-xs text-slate-500">{item.unit as string}</span>
+            </div>
+          ) : (
+            <input
+              type="number"
+              min="0"
+              value={pieces}
+              onChange={e => setPieces(e.target.value)}
+              onBlur={commit}
+              onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } }}
+              disabled={saving}
+              placeholder="Enter count"
+              className="input py-1 text-sm w-28"
+            />
+          )
         ) : (
-          <span className="font-bold">{item.counted_qty !== null ? item.counted_qty as number : '—'}</span>
+          <span className="font-bold">{item.counted_qty !== null ? formatQtyWithUom(item.counted_qty as number, pack, item.unit as string || 'pcs') : '—'}</span>
         )}
       </td>
       <td className="table-cell">
@@ -340,7 +380,7 @@ function ItemRow({ item, editable, onUpdate }: {
           <span className="badge-green">0</span>
         ) : (
           <span className={`font-bold ${variance > 0 ? 'text-blue-400' : 'text-red-400'}`}>
-            {variance > 0 ? '+' : ''}{variance}
+            {variance > 0 ? '+' : ''}{variance} {item.unit as string}
           </span>
         )}
       </td>

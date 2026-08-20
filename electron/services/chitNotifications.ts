@@ -6,16 +6,47 @@ import { sendWhatsApp } from './whatsappService'
 
 const store = new Store<Record<string, unknown>>()
 
+// Settings are persisted as one nested blob under 'app_settings' (see
+// electron/ipc/settings.ts's settings:update) — a flat store.get('email_enabled')
+// reads a key that's never written and always falls back to its default.
+function appSettings(): Record<string, unknown> {
+  return (store.get('app_settings') as Record<string, unknown>) || {}
+}
+
 export function channelsEnabled() {
+  const s = appSettings()
   return {
-    email: Boolean(store.get('email_enabled', false)),
-    sms: Boolean(store.get('sms_enabled', false)),
-    whatsapp: Boolean(store.get('whatsapp_enabled', false)),
+    email: Boolean(s.email_enabled ?? false),
+    sms: Boolean(s.sms_enabled ?? false),
+    whatsapp: Boolean(s.whatsapp_enabled ?? false),
   }
 }
 
 function companyName() {
-  return String(store.get('company_name', 'POS System'))
+  return String(appSettings().company_name ?? 'POS System')
+}
+
+// Per-event, per-channel notification triggers (Settings → Communications →
+// Notification Triggers). A send only happens when BOTH the channel is
+// globally enabled (email_enabled/sms_enabled/whatsapp_enabled) AND this
+// specific event×channel toggle is on — matches electron/ipc/settings.ts's
+// DEFAULTS, whose comment there explains why each default is true/false.
+const EVENT_CHANNEL_DEFAULTS: Record<string, boolean> = {
+  notif_bill_email: true, notif_bill_sms: false, notif_bill_whatsapp: false,
+  notif_quotation_email: false, notif_quotation_sms: false, notif_quotation_whatsapp: false,
+  notif_installment_email: true, notif_installment_sms: true, notif_installment_whatsapp: false,
+  notif_chit_email: true, notif_chit_sms: true, notif_chit_whatsapp: true,
+  notif_low_stock_email: true, notif_low_stock_sms: true, notif_low_stock_whatsapp: false,
+}
+
+export function notificationAllowed(
+  settings: Record<string, unknown>,
+  event: 'bill' | 'quotation' | 'installment' | 'chit' | 'low_stock',
+  channel: 'email' | 'sms' | 'whatsapp'
+): boolean {
+  if (!(settings[`${channel}_enabled`] ?? false)) return false
+  const eventKey = `notif_${event}_${channel}`
+  return Boolean(settings[eventKey] ?? EVENT_CHANNEL_DEFAULTS[eventKey] ?? false)
 }
 
 // Best-effort, non-blocking send across whichever channels are configured
@@ -28,21 +59,21 @@ export async function notifyCustomer(
   customer: { phone?: unknown; email?: unknown } | undefined, subject: string, message: string
 ): Promise<{ attempted: string[]; sent: string[] }> {
   if (!customer) return { attempted: [], sent: [] }
-  const enabled = channelsEnabled()
+  const settings = appSettings()
   const attempted: string[] = []
   const jobs: Promise<{ channel: string; ok: boolean }>[] = []
-  if (enabled.email && customer.email) {
+  if (notificationAllowed(settings, 'chit', 'email') && customer.email) {
     attempted.push('email')
     jobs.push(sendEmail({
       to: String(customer.email), subject,
       html: `<div style="font-family:sans-serif;max-width:480px;margin:auto"><h2 style="color:#4f46e5">${companyName()}</h2><p>${message.replace(/\n/g, '<br/>')}</p></div>`,
     }).then(r => ({ channel: 'email', ok: Boolean(r?.success) })).catch(() => ({ channel: 'email', ok: false })))
   }
-  if (enabled.sms && customer.phone) {
+  if (notificationAllowed(settings, 'chit', 'sms') && customer.phone) {
     attempted.push('sms')
     jobs.push(sendSms({ to: String(customer.phone), message }).then(r => ({ channel: 'sms', ok: Boolean(r?.success) })).catch(() => ({ channel: 'sms', ok: false })))
   }
-  if (enabled.whatsapp && customer.phone) {
+  if (notificationAllowed(settings, 'chit', 'whatsapp') && customer.phone) {
     attempted.push('whatsapp')
     jobs.push(sendWhatsApp({ to: String(customer.phone), message }).then(r => ({ channel: 'whatsapp', ok: Boolean(r?.success) })).catch(() => ({ channel: 'whatsapp', ok: false })))
   }

@@ -334,6 +334,11 @@ export class SyncService {
       'commission_approval_logs', 'commission_statement_history', 'commission_rule_history',
       // Cycle payment reminder history — member-keyed, pulled directly.
       'chit_payment_reminders',
+      // POS cart "Hold" — branch-scoped, no special reconciliation needed
+      // (recall deletes the row, same as any other delete-on-consume table).
+      'held_carts',
+      // Staff/Agent positions — company-wide lookup list, pulled directly.
+      'positions',
     ]
 
     let pulledInstallmentIds: string[] = []

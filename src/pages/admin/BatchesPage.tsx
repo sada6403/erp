@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import PageHeader from '@/components/shared/PageHeader'
 import { Package, AlertTriangle, Clock, Search, Plus, ChevronDown, ChevronUp } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -305,8 +306,8 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
           <div><label className="label">Expiry Date</label><input type="date" value={form.expiry_date} onChange={f('expiry_date')} className="input" /></div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="label">Quantity *</label><input type="number" min={1} value={form.quantity} onChange={f('quantity')} className="input" /></div>
-          <div><label className="label">Cost Price</label><input type="number" min={0} step={0.01} value={form.cost_price} onChange={f('cost_price')} className="input" /></div>
+          <div><label className="label">Quantity *</label><NumberInput min={1} value={form.quantity} onChange={f('quantity')} className="input" /></div>
+          <div><label className="label">Cost Price</label><NumberInput min={0} step={0.01} value={form.cost_price} onChange={f('cost_price')} className="input" /></div>
         </div>
       </div>
     </Modal>

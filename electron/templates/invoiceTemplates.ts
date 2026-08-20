@@ -62,17 +62,19 @@ function invoiceBool(settings: Record<string, unknown>, design: string, field: s
   return settingBool(settings, `invoice_${field}`, fallback)
 }
 
-export function normalizeInvoiceDesign(value: unknown): 'dot' | 'thermal' | 'a4' {
+export function normalizeInvoiceDesign(value: unknown): 'dot' | 'thermal' | 'a4' | 'b5' {
   const design = String(value || '').toLowerCase()
   if (design === 'dot' || design === 'dot_matrix' || design.includes('dot')) return 'dot'
+  if (design === 'b5' || design.includes('b5')) return 'b5'
   if (design === 'a4' || design.includes('a4')) return 'a4'
   return 'thermal'
 }
 
-export function selectedPaperType(settings: Record<string, unknown>, design: 'dot' | 'thermal' | 'a4'): string {
+export function selectedPaperType(settings: Record<string, unknown>, design: 'dot' | 'thermal' | 'a4' | 'b5'): string {
   const scoped = String(settings[`invoice_${design}_paper_type`] || '')
   if (design === 'dot') return 'dot_matrix'
   if (design === 'thermal') return scoped === '58mm' ? '58mm' : '80mm'
+  if (design === 'b5') return 'B5'
   return scoped === 'A5' ? 'A5' : scoped === 'B5' ? 'B5' : 'A4'
 }
 
@@ -279,14 +281,18 @@ td{padding:11px 14px;font-size:12px;color:#374151}
 .qr svg{width:100%;height:100%;display:block}
 .sig{width:190px;margin:24px auto 0;border-top:1px solid #6b7280;padding-top:5px;font-size:10px;color:#4b5563}
 ${compact ? `
+/* Thermal (58/80mm) legibility pass: the original 8-9px sizes were too
+   small/thin for typical ~203dpi thermal print heads to render cleanly
+   (reported as blurry). Nothing here drops below 10px, and line/table
+   items — the text that matters most on a receipt — sit at 11-12px. */
 .hdr{display:block;text-align:center;margin-bottom:6px}.brand{justify-content:center;gap:8px}.inv-right{text-align:center;margin-top:4px}
-.logo{width:42px;height:42px;border-radius:9px}.co-name{font-size:18px}.co-sub{font-size:9px}.inv-word{font-size:18px;letter-spacing:1px;color:#111}.inv-num{font-size:10px}
+.logo{width:42px;height:42px;border-radius:9px}.co-name{font-size:19px}.co-sub{font-size:10px}.inv-word{font-size:19px;letter-spacing:1px;color:#111}.inv-num{font-size:11px}
 .gbar{height:2px;margin:6px 0}.two{display:block;margin-bottom:8px}.meta-box{min-width:0;margin-top:6px;padding:6px;border-radius:6px}
-.info-box h4{font-size:9px}.info-box p{font-size:10px;line-height:1.3}.mrow{padding:2px 0}.mv{font-size:10px}.ml{font-size:8px}
-table{margin-bottom:8px}th,td{padding:4px 3px;font-size:9px}.pname{font-size:10px}.psku{font-size:8px}
-.bottom{display:block;margin-bottom:8px}.pay-box{padding:8px;margin-bottom:6px;border-radius:6px}.pay-box h4{font-size:9px}.badge{font-size:9px;padding:3px 8px}.prow{font-size:10px;padding:2px 0}.tot-box{width:100%}
-.trow{font-size:11px;padding:4px 0}.trow.grand{padding:8px 10px;border-radius:6px}.trow.grand .tl,.trow.grand .tv{font-size:14px}.note{padding:6px 8px;margin-bottom:8px}.note p,.foot .contact{font-size:9px}.foot{padding-top:8px}.foot .ty{font-size:13px}
-.barcode{margin:6px auto 2px;max-width:130px}.barcode svg{height:28px}.bc-num{font-size:9px;margin-bottom:4px}.qr{width:72px;height:72px;margin:6px auto}
+.info-box h4{font-size:10px}.info-box p{font-size:11px;line-height:1.4}.mrow{padding:3px 0}.mv{font-size:11px}.ml{font-size:9px}
+table{margin-bottom:8px}th,td{padding:5px 4px;font-size:11px}.pname{font-size:12px}.psku{font-size:10px}
+.bottom{display:block;margin-bottom:8px}.pay-box{padding:8px;margin-bottom:6px;border-radius:6px}.pay-box h4{font-size:10px}.badge{font-size:10px;padding:3px 8px}.prow{font-size:11px;padding:3px 0}.tot-box{width:100%}
+.trow{font-size:12px;padding:4px 0}.trow.grand{padding:8px 10px;border-radius:6px}.trow.grand .tl,.trow.grand .tv{font-size:15px}.note{padding:6px 8px;margin-bottom:8px}.note p,.foot .contact{font-size:10px}.foot{padding-top:8px}.foot .ty{font-size:14px}
+.barcode{margin:6px auto 2px;max-width:130px}.barcode svg{height:28px}.bc-num{font-size:10px;margin-bottom:4px}.qr{width:72px;height:72px;margin:6px auto}
 ` : ''}
 ${dotMatrix ? `
 /* Dot-matrix: dense, fully-ruled letterhead form — logo shown, solid rules
@@ -314,7 +320,12 @@ tbody tr,tbody tr:nth-child(even){background:#fff}
 .sign .line{border-top:1px solid #111;padding-top:5px;font-size:10px;color:#111;text-align:left}
 ` : ''}
 ${thermal ? `
-/* Thermal: clean black & white, no logo, no colour */
+/* Thermal: clean black & white, no logo, no colour. Segoe UI's thin strokes
+   wash out on thermal print heads at small sizes — Arial/Helvetica render
+   with heavier, more uniform strokes and are standard system fonts (not a
+   web font that could fail to embed in the print job). */
+body,.page{font-family:'Arial','Helvetica Neue',sans-serif}
+td,.psku,.mv,.trow,.ml{font-weight:500}
 .logo{display:none}
 .brand{gap:0}
 .co-name,.inv-word,.inv-num,.foot .ty,.pay-box h4,.pv.green,.badge{color:#000!important}
@@ -531,7 +542,7 @@ export function buildPreprintedInvoiceHtml(payload: InvoicePayload, settings: Re
 
   const itemRows = payload.items.map((item, i) => {
     const y = L.itemsStartY + L.rowHeight * i
-    const descHtml = `${esc(item.product_name)}${item.sku ? `<div style="font-size:8pt;margin-top:1mm">${esc(item.sku)}</div>` : ''}`
+    const descHtml = `${esc(item.product_name)}${item.sku ? `<div style="font-size:9pt;margin-top:1mm">${esc(item.sku)}</div>` : ''}`
     return [
       posDiv(L.col.line.x, y, ox, oy, L.col.line.align, String(i + 1)),
       posDiv(L.col.desc.x, y, ox, oy, L.col.desc.align, descHtml, 'white-space:normal;max-width:100mm'),
@@ -547,7 +558,10 @@ export function buildPreprintedInvoiceHtml(payload: InvoicePayload, settings: Re
     @page { size: ${PREPRINTED_PAGE_MM.width}mm ${PREPRINTED_PAGE_MM.height}mm; margin: 0; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: transparent; }
-    body { font-family: 'Courier New', monospace; font-size: 9pt; color: #000; }
+    /* 9pt/8pt was too fine for a dot-matrix impact head to reproduce cleanly
+       (reported as blurry) — bumped up a point and made semi-bold, which
+       impact printers render as denser, more solid dots per character. */
+    body { font-family: 'Courier New', monospace; font-size: 10pt; font-weight: 600; color: #000; }
     .page { position: relative; width: ${PREPRINTED_PAGE_MM.width}mm; height: ${PREPRINTED_PAGE_MM.height}mm; }
   </style></head><body>
     <div class="page">
@@ -738,14 +752,25 @@ export async function buildCustomLayoutHtml(
 // branded template. Used by both printer:printInvoice (actual print/PDF) and
 // printer:renderInvoiceHtml (designer live preview) so they can never drift.
 export async function resolveInvoiceHtml(
-  payload: InvoicePayload, settings: Record<string, unknown>, design: 'dot' | 'thermal' | 'a4',
+  payload: InvoicePayload, settings: Record<string, unknown>, design: 'dot' | 'thermal' | 'a4' | 'b5',
   opts: { includeBackground?: boolean } = {}
 ): Promise<string> {
   const customLayoutRaw = settings[`invoice_${design}_custom_layout_json`] as string | undefined
   if (customLayoutRaw) {
     try {
       const layout = JSON.parse(customLayoutRaw) as CustomLayout
-      if (layout.enabled) return buildCustomLayoutHtml(payload, settings, layout, opts)
+      if (layout.enabled) {
+        // A real print job (no explicit opts) bakes the uploaded background
+        // image in unless the layout is marked prePrinted — i.e. a company
+        // printing onto plain A4/B5 paper gets the image as part of the
+        // output, while one with real pre-printed stationery still gets
+        // data-only output, matching how dot-matrix pre-printed mode already
+        // behaves. Callers that explicitly pass includeBackground (the
+        // designer's live preview, always wants it on for calibration) are
+        // unaffected either way.
+        const effectiveOpts = { ...opts, includeBackground: opts.includeBackground ?? !layout.prePrinted }
+        return buildCustomLayoutHtml(payload, settings, layout, effectiveOpts)
+      }
     } catch { /* fall through to built-in templates on malformed JSON */ }
   }
   if (design === 'dot' && Boolean(settings.invoice_dot_preprinted_mode)) {

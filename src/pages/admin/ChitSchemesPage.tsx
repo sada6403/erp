@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -354,23 +355,23 @@ function ChitSchemeForm({ branches, agents, onClose, onSave }: {
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Contribution Amount (Rs.) *</label>
-            <input type="number" value={form.contribution_amount} onChange={f('contribution_amount')} className="input" min={0} />
+            <NumberInput value={form.contribution_amount} onChange={f('contribution_amount')} className="input" min={0} />
             <p className="text-[11px] text-slate-500 mt-1">Paid per member, per cycle</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Duration (months) *</label>
-            <input type="number" value={form.cycle_count} onChange={f('cycle_count')} className="input" min={1} />
+            <NumberInput value={form.cycle_count} onChange={f('cycle_count')} className="input" min={1} />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Product Value (Rs.) *</label>
-            <input type="number" value={form.chit_value} onChange={f('chit_value')} className="input" min={0} />
+            <NumberInput value={form.chit_value} onChange={f('chit_value')} className="input" min={0} />
             <p className="text-[11px] text-slate-500 mt-1">What a winner receives</p>
           </div>
         </div>
 
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Maximum Members *</label>
-          <input type="number" value={form.member_count} onChange={f('member_count')} className="input" min={1} />
+          <NumberInput value={form.member_count} onChange={f('member_count')} className="input" min={1} />
           <p className="text-xs text-slate-500 mt-1">This scheme activates once enrollment reaches this number. If it exceeds the duration ({Number(form.cycle_count) || 0} cycles), all remaining members receive their product together at the final cycle.</p>
         </div>
 
@@ -429,13 +430,13 @@ function ChitSchemeForm({ branches, agents, onClose, onSave }: {
         {showAdvanced && (
           <div className="space-y-4 rounded-lg border p-3" style={{ borderColor: 'var(--border)' }}>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Slots</label><input type="number" value={form.early_redemption_count} onChange={f('early_redemption_count')} className="input" min={0} /></div>
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Amount (Rs.)</label><input type="number" value={form.early_redemption_amount} onChange={f('early_redemption_amount')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Slots</label><NumberInput value={form.early_redemption_count} onChange={f('early_redemption_count')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Early Redemption Amount (Rs.)</label><NumberInput value={form.early_redemption_amount} onChange={f('early_redemption_amount')} className="input" min={0} /></div>
             </div>
             <p className="text-xs text-slate-500 -mt-2">The first N members (by join order) can take the product immediately for this starting amount, then repay the rest afterward.</p>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Repayment Duration (months)</label><input type="number" value={form.repayment_months} onChange={f('repayment_months')} className="input" min={1} /></div>
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Agent Commission %</label><input type="number" value={form.agent_commission_pct} onChange={f('agent_commission_pct')} className="input" min={0} max={100} step="0.01" /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Repayment Duration (months)</label><NumberInput value={form.repayment_months} onChange={f('repayment_months')} className="input" min={1} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Agent Commission %</label><NumberInput value={form.agent_commission_pct} onChange={f('agent_commission_pct')} className="input" min={0} max={100} step="0.01" /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Opens</label><input type="date" value={form.registration_start_date} onChange={f('registration_start_date')} className="input" /></div>
@@ -443,14 +444,14 @@ function ChitSchemeForm({ branches, agents, onClose, onSave }: {
             </div>
             <p className="text-xs text-slate-500 -mt-2">Leave blank for no registration lock — new members can enroll any time.</p>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Late Payment Grace (days into month)</label><input type="number" value={form.late_payment_days} onChange={f('late_payment_days')} className="input" min={0} /></div>
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Late Fee (Rs.)</label><input type="number" value={form.late_fee_amount} onChange={f('late_fee_amount')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Late Payment Grace (days into month)</label><NumberInput value={form.late_payment_days} onChange={f('late_payment_days')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Late Fee (Rs.)</label><NumberInput value={form.late_fee_amount} onChange={f('late_fee_amount')} className="input" min={0} /></div>
             </div>
             <p className="text-xs text-slate-500 -mt-2">A cycle payment collected after this day of the month automatically adds the late fee. Set grace days to 0 to disable.</p>
             <div className="grid grid-cols-3 gap-3">
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Projected Early Winners</label><input type="number" value={form.projected_early_winners} onChange={f('projected_early_winners')} className="input" min={0} /></div>
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Avg. Product Cost (Rs.)</label><input type="number" value={form.avg_product_cost} onChange={f('avg_product_cost')} className="input" min={0} /></div>
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Other Expenses (Rs.)</label><input type="number" value={form.other_expenses} onChange={f('other_expenses')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Projected Early Winners</label><NumberInput value={form.projected_early_winners} onChange={f('projected_early_winners')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Avg. Product Cost (Rs.)</label><NumberInput value={form.avg_product_cost} onChange={f('avg_product_cost')} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Other Expenses (Rs.)</label><NumberInput value={form.other_expenses} onChange={f('other_expenses')} className="input" min={0} /></div>
             </div>
             <p className="text-xs text-slate-500 -mt-2">Viability Calculator planning inputs (unrelated to Early Redemption Slots above) — how many monthly-draw winners this plan expects, and the assumed product cost/expenses used for this scheme's Projected financial view. Use "Calculate Viability" above to fill these in automatically.</p>
           </div>

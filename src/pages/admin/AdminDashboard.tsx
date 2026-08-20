@@ -175,7 +175,7 @@ export default function AdminDashboard() {
                 <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Branch operations, approvals, stock health, and cashier activity</p>
               </div>
               <span className="px-2 py-0.5 rounded-full text-xs font-semibold text-white" style={{ background: 'var(--brand-primary)' }}>
-                {branchScoped ? 'Branch View' : 'Head Office View'}
+                {branchScoped ? 'Branch View' : 'Main Branch View'}
               </span>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">

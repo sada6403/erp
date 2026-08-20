@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
+import NumberInput from '@/components/shared/NumberInput'
 import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { useProductsStore } from '@/store/productsStore'
 import { resolveImageSrc } from '@/lib/imageUrl'
 
 type UOMRow = { id?: string; uom_name: string; conversion_factor: number; is_base: boolean; wastage: number }
@@ -23,16 +25,13 @@ type CatalogAudit = {
 }
 
 export default function ProductsPage() {
-  const [products, setProducts]     = useState<Product[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
-  const [suppliers, setSuppliers]   = useState<Supplier[]>([])
+  const { products, categories, suppliers, loading, load: loadProducts } = useProductsStore()
   const [search, setSearch]         = useState('')
   const [catFilter, setCatFilter]   = useState('')
   const [brandFilter, setBrandFilter] = useState('')
   const [showForm, setShowForm]     = useState(false)
   const [editing, setEditing]       = useState<Product | null>(null)
   const [editRequestId, setEditRequestId] = useState<string | undefined>(undefined)
-  const [loading, setLoading]       = useState(true)
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
   const [deleteReason, setDeleteReason] = useState('')
   const [deleting, setDeleting]     = useState(false)
@@ -47,26 +46,9 @@ export default function ProductsPage() {
   const { user: currentUser } = useAuthStore()
   const isCompanyAdmin = Boolean((currentUser?.role?.permissions as Record<string,boolean>)?.all)
 
-  const load = async () => {
-    setLoading(true)
-    try {
-      const [p, c, s] = await Promise.all([
-        window.api.products.list({}),
-        window.api.admin.categories.list(),
-        window.api.admin.suppliers.list()
-      ])
-      if (p.success) setProducts(p.data as Product[])
-      else toast.error(p.error || 'Failed to load products')
-      if (c.success) setCategories(c.data as Category[])
-      else toast.error(c.error || 'Failed to load categories')
-      if (s.success) setSuppliers(s.data as Supplier[])
-      else toast.error(s.error || 'Failed to load suppliers')
-    } catch (err) {
-      toast.error('Failed to load product data: ' + String(err))
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Post-mutation refresh (create/update/delete/import/normalize) always
+  // forces a real refetch — only the initial mount below uses the cache.
+  const load = () => loadProducts(true)
 
   const loadAudit = async () => {
     setAuditLoading(true)
@@ -82,8 +64,9 @@ export default function ProductsPage() {
   }
 
   useEffect(() => {
-    load()
+    loadProducts() // no force — instant if already cached from a prior visit
     loadAudit()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const categoryPath = (categoryId: string) => {
@@ -1045,17 +1028,17 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
               </div>
               <div>
                 <label className="label">Alert Qty</label>
-                <input type="number" value={form.alert_qty} onChange={f('alert_qty')} className="input" min="0" />
+                <NumberInput value={form.alert_qty} onChange={f('alert_qty')} className="input" min="0" />
               </div>
               <div>
                 <label className="label">Weight</label>
-                <input type="number" value={form.weight} onChange={f('weight')} className="input" min="0" step="0.01" placeholder="weight" />
+                <NumberInput value={form.weight} onChange={f('weight')} className="input" min="0" step="0.01" placeholder="weight" />
               </div>
               <div>
                 <label className="label">Base Cost</label>
                 <div className="flex">
                   <span className="flex items-center px-2.5 rounded-l-lg text-sm" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none', color: 'var(--text-3)' }}>Rs.</span>
-                  <input type="number" value={form.cost_price} onChange={f('cost_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
+                  <NumberInput value={form.cost_price} onChange={f('cost_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
                 </div>
               </div>
 
@@ -1063,25 +1046,25 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
                 <label className="label">Base Price</label>
                 <div className="flex">
                   <span className="flex items-center px-2.5 rounded-l-lg text-sm" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none', color: 'var(--text-3)' }}>Rs.</span>
-                  <input type="number" value={form.selling_price} onChange={f('selling_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
+                  <NumberInput value={form.selling_price} onChange={f('selling_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
                 </div>
               </div>
               <div>
                 <label className="label">Wholesale Price</label>
                 <div className="flex">
                   <span className="flex items-center px-2.5 rounded-l-lg text-sm" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none', color: 'var(--text-3)' }}>Rs.</span>
-                  <input type="number" value={form.wholesale_price} onChange={f('wholesale_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
+                  <NumberInput value={form.wholesale_price} onChange={f('wholesale_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
                 </div>
               </div>
               <div>
                 <label className="label">Tax Rate (%)</label>
-                <input type="number" value={form.tax_rate} onChange={f('tax_rate')} className="input" min="0" max="100" step="0.5" />
+                <NumberInput value={form.tax_rate} onChange={f('tax_rate')} className="input" min="0" max="100" step="0.5" />
               </div>
               <div>
                 <label className="label">Max Discount (%)</label>
-                <input type="number" value={discountPct || ''} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
+                <NumberInput value={discountPct || ''} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
                   className="input" min="0" max="100" step="0.5" placeholder="0"
-                  title="Maximum discount % a cashier can manually apply to this product at checkout. Also manageable per-branch in Admin > Discounts." />
+                  title="Maximum discount % anyone — including Company Admin — can manually apply to this product at checkout. This is the only discount ceiling in the app now. Also manageable per-branch in Admin > Discounts." />
               </div>
               <div>
                 <label className="label">Image</label>
@@ -1140,7 +1123,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex gap-1">
-                          <input type="number" value={row.conversion_factor}
+                          <NumberInput value={row.conversion_factor}
                             onChange={e => setUOM(i, 'conversion_factor', parseFloat(e.target.value)||1)}
                             className="input text-sm py-1.5 w-24" min="0" step="0.001" />
                           <button className="btn-ghost btn-sm p-1.5" title="Calculator"><Calculator size={12} /></button>
@@ -1153,7 +1136,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-1">
-                          <input type="number" value={row.wastage}
+                          <NumberInput value={row.wastage}
                             onChange={e => setUOM(i, 'wastage', parseFloat(e.target.value)||0)}
                             className="input text-sm py-1.5 w-20" min="0" step="0.1" />
                           <span className="text-xs text-slate-400 whitespace-nowrap">{row.uom_name || 'UOM'}</span>
@@ -1195,7 +1178,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
               <div className="flex-1 max-w-xs">
                 <label className="label">Employee Commission</label>
                 <div className="flex">
-                  <input type="number" value={form.employee_commission} onChange={f('employee_commission')}
+                  <NumberInput value={form.employee_commission} onChange={f('employee_commission')}
                     className="input rounded-r-none border-r-0 w-28" min="0" step="0.01" />
                   <select value={form.commission_type} onChange={f('commission_type')} className="input rounded-l-none border-l-0 w-24">
                     <option value="fixed">Rs</option>
@@ -1248,7 +1231,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
           {/* ── Stock ─────────────────────────────────────────────────── */}
           <div>
             <label className="label">{product ? 'Current Stock Qty' : 'Initial Stock Qty'}</label>
-            <input type="number" value={stockQty} onChange={e => setStockQty(parseInt(e.target.value)||0)}
+            <NumberInput value={stockQty} onChange={e => setStockQty(parseInt(e.target.value)||0)}
               className="input w-40" min="0" />
           </div>
 

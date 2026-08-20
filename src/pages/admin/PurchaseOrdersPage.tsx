@@ -3,6 +3,9 @@ import { Plus, RefreshCw, Eye, Send, PackageCheck, XCircle } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
+import CreatableSearchSelect from '@/components/shared/CreatableSearchSelect'
+import NumberInput from '@/components/shared/NumberInput'
+import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 import toast from 'react-hot-toast'
 
 type PO = Record<string, unknown>
@@ -236,6 +239,12 @@ function PODetailModal({ po, onClose, onReceive, onSend, onCancel }:
   )
 }
 
+function itemPackUom(item: POItem): PackUom | null {
+  return item.pack_uom_name && Number(item.pack_conversion_factor) > 1
+    ? { uom_name: String(item.pack_uom_name), conversion_factor: Number(item.pack_conversion_factor) }
+    : null
+}
+
 function ReceivePOModal({ po, onClose, onDone }:
   { po: PO & { items?: POItem[] }; onClose: () => void; onDone: (items: Record<string, unknown>[]) => void }) {
   const [qtys, setQtys] = useState<Record<string, number>>(() => {
@@ -270,21 +279,49 @@ function ReceivePOModal({ po, onClose, onDone }:
           <tbody>
             {(po.items || []).map((item: POItem) => {
               const remaining = Number(item.quantity) - Number(item.received_qty || 0)
+              const pack = itemPackUom(item)
+              const current = qtys[String(item.id)] ?? 0
+              const split = splitQty(current, pack)
               return (
                 <tr key={String(item.id)} className="border-b border-slate-800">
                   <td className="py-2 font-medium">{String(item.product_name || '—')}</td>
-                  <td className="text-right py-2">{Number(item.quantity)}</td>
-                  <td className="text-right py-2 text-slate-400">{Number(item.received_qty || 0)}</td>
+                  <td className="text-right py-2">{formatQtyWithUom(Number(item.quantity), pack)}</td>
+                  <td className="text-right py-2 text-slate-400">{formatQtyWithUom(Number(item.received_qty || 0), pack)}</td>
                   <td className="text-right py-2">
-                    <input
-                      type="number"
-                      min={0}
-                      max={remaining}
-                      value={qtys[String(item.id)] ?? 0}
-                      onChange={e => setQtys(q => ({ ...q, [String(item.id)]: Math.min(remaining, Math.max(0, parseInt(e.target.value) || 0)) }))}
-                      className="input w-20 text-right py-1 text-sm"
-                      disabled={remaining <= 0}
-                    />
+                    {pack ? (
+                      <div className="flex items-center justify-end gap-1">
+                        <NumberInput
+                          min={0}
+                          value={split.boxes}
+                          onChange={e => {
+                            const boxes = Math.max(0, parseInt(e.target.value) || 0)
+                            setQtys(q => ({ ...q, [String(item.id)]: Math.min(remaining, toBaseQty(boxes, split.pieces, pack)) }))
+                          }}
+                          className="input w-14 text-right py-1 text-sm"
+                          disabled={remaining <= 0}
+                        />
+                        <span className="text-xs text-slate-500">{pack.uom_name}+</span>
+                        <NumberInput
+                          min={0}
+                          value={split.pieces}
+                          onChange={e => {
+                            const pieces = Math.max(0, parseFloat(e.target.value) || 0)
+                            setQtys(q => ({ ...q, [String(item.id)]: Math.min(remaining, toBaseQty(split.boxes, pieces, pack)) }))
+                          }}
+                          className="input w-14 text-right py-1 text-sm"
+                          disabled={remaining <= 0}
+                        />
+                      </div>
+                    ) : (
+                      <NumberInput
+                        min={0}
+                        max={remaining}
+                        value={current}
+                        onChange={e => setQtys(q => ({ ...q, [String(item.id)]: Math.min(remaining, Math.max(0, parseInt(e.target.value) || 0)) }))}
+                        className="input w-20 text-right py-1 text-sm"
+                        disabled={remaining <= 0}
+                      />
+                    )}
                   </td>
                 </tr>
               )
@@ -366,10 +403,21 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="label">Supplier *</label>
-            <select className="input" value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
-              <option value="">Select supplier...</option>
-              {suppliers.map(s => <option key={String(s.id)} value={String(s.id)}>{String(s.name)}</option>)}
-            </select>
+            <CreatableSearchSelect
+              items={suppliers.map(s => ({ id: String(s.id), label: String(s.name) }))}
+              value={form.supplier_id}
+              onChange={id => setForm(f => ({ ...f, supplier_id: id }))}
+              placeholder="Select supplier..."
+              createLabel="Add supplier"
+              onCreate={async (name) => {
+                const res = await window.api.admin.suppliers.create({ name })
+                if (!res.success) { toast.error(res.error || 'Failed to create supplier'); return null }
+                const created = { id: String(res.data.id), name }
+                setSuppliers(prev => [...prev, created])
+                toast.success(`Supplier "${name}" added`)
+                return { id: created.id, label: created.name }
+              }}
+            />
           </div>
           <div>
             <label className="label">Expected Delivery Date</label>
@@ -406,14 +454,14 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
                   value={item.product_id}
                   onChange={id => setItem(idx, 'product_id', id)}
                 />
-                <input
-                  type="number" min={1}
+                <NumberInput
+                  min={1}
                   className="input text-sm py-1.5 text-center"
                   value={item.quantity}
                   onChange={e => setItem(idx, 'quantity', parseInt(e.target.value) || 1)}
                 />
-                <input
-                  type="number" min={0}
+                <NumberInput
+                  min={0}
                   className="input text-sm py-1.5"
                   value={item.unit_cost}
                   onChange={e => setItem(idx, 'unit_cost', parseFloat(e.target.value) || 0)}

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import { useParams, useNavigate } from 'react-router-dom'
 import Modal from '@/components/shared/Modal'
 import StatCard from '@/components/shared/StatCard'
@@ -741,7 +742,7 @@ function RegisterHistoricalMemberModal({ schemeId, defaultAgentId, onClose, onSa
         <hr style={{ borderColor: 'var(--border)' }} />
         <p className="text-xs font-semibold uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>Initial Payment (Advance)</p>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.)</label><input type="number" value={initialAmount} onChange={e => setInitialAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.)</label><NumberInput value={initialAmount} onChange={e => setInitialAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Method</label>
             <select value={method} onChange={e => setMethod(e.target.value)} className="input">
@@ -1313,10 +1314,10 @@ function RecordContributionModal({ member, schemeId, defaultCycleNo, onClose, on
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Record Payment'}</button></>}>
       <div className="space-y-3">
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><input type="number" value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
+          <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><NumberInput value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">For cycle #</label>
-            <input type="number" value={cycleNo} onChange={e => setCycleNo(parseInt(e.target.value) || 1)} className="input" min={1} />
+            <NumberInput value={cycleNo} onChange={e => setCycleNo(parseInt(e.target.value) || 1)} className="input" min={1} />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -1389,7 +1390,7 @@ function EarlyRedeemModal({ member, minAmount, onClose, onSave }: { member: Row;
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Processing...' : 'Release Product'}</button></>}>
       <div className="space-y-3">
         <p className="text-sm" style={{ color: 'var(--text-2)' }}>This member can take the product now by paying at least Rs.{money(minAmount)}. The remaining balance is collected afterward via a normal installment schedule.</p>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><input type="number" value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={minAmount} /></div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><NumberInput value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={minAmount} /></div>
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Method</label>
@@ -1511,7 +1512,7 @@ function ReviewWithdrawalModal({ withdrawal, onClose, onSave }: { withdrawal: Ro
         </p>
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Refund amount (Rs.) — only used if approving</label>
-          <input type="number" value={refundAmount} onChange={e => setRefundAmount(parseFloat(e.target.value) || 0)} className="input" min={0} />
+          <NumberInput value={refundAmount} onChange={e => setRefundAmount(parseFloat(e.target.value) || 0)} className="input" min={0} />
           <p className="text-xs text-slate-500 mt-1">No fixed formula — enter whatever the business decides is fair for this case. It cannot exceed the member's net contribution (checked on submit).</p>
         </div>
         <div>
@@ -1623,7 +1624,7 @@ function RecordRedemptionModal({ member, schemeChitValue, schemeProductId, onClo
           <label className="block text-xs font-medium text-slate-400 mb-1">Product *</label>
           <ProductSearchSelect products={products} value={productId} onChange={setProductId} />
         </div>
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Quantity</label><input type="number" value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="input" min={1} /></div>
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Quantity</label><NumberInput value={qty} onChange={e => setQty(Math.max(1, parseInt(e.target.value) || 1))} className="input" min={1} /></div>
         {productId && (
           <p className="text-xs" style={{ color: 'var(--text-3)' }}>
             Unit price Rs.{money(unitPrice)} × {qty} {taxRate > 0 ? `+ ${taxRate}% tax` : ''} = <strong>Rs.{money(estimatedTotal)}</strong>

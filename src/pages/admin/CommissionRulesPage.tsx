@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import NumberInput from '@/components/shared/NumberInput'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import { Plus, Pencil, Trash2, Percent, Gift, Clock, ChevronDown, ChevronUp } from 'lucide-react'
@@ -279,7 +280,7 @@ function RuleFormModal({ rule, schemes, products, categories, onClose, onSave }:
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">{form.calculation_type === 'fixed' ? 'Amount (Rs.)' : 'Rate (%)'}</label>
-            <input type="number" value={form.rate} onChange={e => setForm(f => ({ ...f, rate: parseFloat(e.target.value) || 0 }))} className="input" min={0} step="0.01" />
+            <NumberInput value={form.rate} onChange={e => setForm(f => ({ ...f, rate: parseFloat(e.target.value) || 0 }))} className="input" min={0} step="0.01" />
           </div>
         </div>
 
@@ -301,13 +302,13 @@ function RuleFormModal({ rule, schemes, products, categories, onClose, onSave }:
             </div>
             {form.ownership_model === 'split' && (
               <div className="grid grid-cols-2 gap-3">
-                <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Share %</label><input type="number" value={form.registration_share_pct} onChange={e => setForm(f => ({ ...f, registration_share_pct: parseFloat(e.target.value) || 0 }))} className="input" min={0} max={100} /></div>
-                <div><label className="block text-xs font-medium text-slate-400 mb-1">Sales Share %</label><input type="number" value={form.sales_share_pct} onChange={e => setForm(f => ({ ...f, sales_share_pct: parseFloat(e.target.value) || 0 }))} className="input" min={0} max={100} /></div>
+                <div><label className="block text-xs font-medium text-slate-400 mb-1">Registration Share %</label><NumberInput value={form.registration_share_pct} onChange={e => setForm(f => ({ ...f, registration_share_pct: parseFloat(e.target.value) || 0 }))} className="input" min={0} max={100} /></div>
+                <div><label className="block text-xs font-medium text-slate-400 mb-1">Sales Share %</label><NumberInput value={form.sales_share_pct} onChange={e => setForm(f => ({ ...f, sales_share_pct: parseFloat(e.target.value) || 0 }))} className="input" min={0} max={100} /></div>
               </div>
             )}
 
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="block text-xs font-medium text-slate-400 mb-1">Priority (higher wins if multiple base rules match)</label><input type="number" value={form.priority} onChange={e => setForm(f => ({ ...f, priority: parseInt(e.target.value) || 0 }))} className="input" min={0} /></div>
+              <div><label className="block text-xs font-medium text-slate-400 mb-1">Priority (higher wins if multiple base rules match)</label><NumberInput value={form.priority} onChange={e => setForm(f => ({ ...f, priority: parseInt(e.target.value) || 0 }))} className="input" min={0} /></div>
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">Status</label>
                 <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} className="input">

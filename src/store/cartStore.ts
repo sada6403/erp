@@ -16,6 +16,7 @@ interface CartState {
   removeItem: (productId: string) => void
   updateQty: (productId: string, qty: number) => void
   setItemDiscount: (productId: string, pct: number) => void
+  updatePrice: (productId: string, price: number) => void
   setCustomer: (customer: Customer | null) => void
   setGlobalDiscount: (pct: number) => void
   setNotes: (notes: string) => void
@@ -23,6 +24,15 @@ interface CartState {
   setValidUntil: (date: string) => void
   setDueDate: (date: string) => void
   clear: () => void
+  restoreCart: (data: {
+    items: CartItem[]
+    customer: Customer | null
+    globalDiscount: number
+    notes: string
+    billType: BillType
+    validUntil?: string
+    dueDate?: string
+  }) => void
 
   // Computed
   subtotal: number
@@ -126,6 +136,15 @@ export const useCartStore = create<CartState>((set, get) => ({
     set({ items: newItems, ...computeTotals(newItems, globalDiscount) })
   },
 
+  updatePrice: (productId, price) => {
+    const { items, globalDiscount } = get()
+    const clamped = Math.max(0, price)
+    const newItems = items.map(i =>
+      i.product.id === productId ? calcLine({ ...i, unit_price: clamped }) : i
+    )
+    set({ items: newItems, ...computeTotals(newItems, globalDiscount) })
+  },
+
   setCustomer: (customer) => set({ customer }),
   setNotes:    (notes)    => set({ notes }),
 
@@ -147,4 +166,22 @@ export const useCartStore = create<CartState>((set, get) => ({
     billType: 'RETAIL', validUntil: defaultValidUntil(), dueDate: defaultDueDate(),
     subtotal: 0, discountAmount: 0, taxAmount: 0, total: 0,
   }),
+
+  // Recalling a held cart (Issue 13) — items already have discount_pct/
+  // unit_price/etc. baked in from when they were held, so they're restored
+  // via calcLine (not addItem, which would re-floor discounts) to reproduce
+  // the exact same line totals rather than recomputing from scratch.
+  restoreCart: (data) => {
+    const items = data.items.map(calcLine)
+    set({
+      items,
+      customer: data.customer,
+      globalDiscount: data.globalDiscount,
+      notes: data.notes,
+      billType: data.billType,
+      validUntil: data.validUntil || defaultValidUntil(),
+      dueDate: data.dueDate || defaultDueDate(),
+      ...computeTotals(items, data.globalDiscount),
+    })
+  },
 }))

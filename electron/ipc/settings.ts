@@ -143,6 +143,29 @@ const DEFAULTS = {
   // collections so far this month triggers a "branch performance alert" to
   // Super Admin — gives collection time to start before flagging it.
   smartbuy_branch_alert_day: 15,
+
+  // Notification triggers — per event, per channel. Bill/Installment/Smart
+  // Buy/Low Stock default ON for Email+SMS (+WhatsApp for Smart Buy, which
+  // already supported it) to preserve today's already-shipped behavior;
+  // Quotation and the brand-new SMS/WhatsApp bill channels default OFF since
+  // nothing sends them today and a new channel shouldn't start firing
+  // unannounced. See electron/services/chitNotifications.ts's
+  // notif(event, channel) helper for how these are read.
+  notif_bill_email: true,
+  notif_bill_sms: false,
+  notif_bill_whatsapp: false,
+  notif_quotation_email: false,
+  notif_quotation_sms: false,
+  notif_quotation_whatsapp: false,
+  notif_installment_email: true,
+  notif_installment_sms: true,
+  notif_installment_whatsapp: false,
+  notif_chit_email: true,
+  notif_chit_sms: true,
+  notif_chit_whatsapp: true,
+  notif_low_stock_email: true,
+  notif_low_stock_sms: true,
+  notif_low_stock_whatsapp: false,
 }
 
 function encryptSecret(value: string): string {

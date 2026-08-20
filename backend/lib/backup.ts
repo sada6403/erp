@@ -14,7 +14,7 @@ function storageDir(): string {
   return process.env.BACKUP_STORAGE_DIR || path.join(process.cwd(), 'tenant-backups')
 }
 
-function encryptionKey(): Buffer {
+export function encryptionKey(): Buffer {
   const hex = process.env.BACKUP_ENCRYPTION_KEY
   if (!hex || hex.length !== 64) {
     throw new Error('BACKUP_ENCRYPTION_KEY must be set to a 64-character hex string (32 bytes)')

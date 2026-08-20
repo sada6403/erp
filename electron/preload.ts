@@ -26,6 +26,7 @@ const api = {
   // Products
   products: {
     list:       (filters?: unknown) => ipcRenderer.invoke('products:list', filters),
+    uomListAll: ()                  => ipcRenderer.invoke('products:uom:listAll'),
     get:        (id: string)        => ipcRenderer.invoke('products:get', id),
     search:     (query: string)     => ipcRenderer.invoke('products:search', query),
     searchSku:  (sku: string)       => ipcRenderer.invoke('products:searchSku', sku),
@@ -46,10 +47,8 @@ const api = {
     get:                (id: string)                              => ipcRenderer.invoke('invoices:get', id),
     create:             (payload: unknown)                        => ipcRenderer.invoke('invoices:create', payload),
     update:             (id: string, payload: unknown)            => ipcRenderer.invoke('invoices:update', id, payload),
-    hold:               (id: string)                              => ipcRenderer.invoke('invoices:hold', id),
     cancel:             (id: string)                              => ipcRenderer.invoke('invoices:cancel', id),
     return:             (id: string, payload: unknown)            => ipcRenderer.invoke('invoices:return', id, payload),
-    listHeld:           ()                                        => ipcRenderer.invoke('invoices:listHeld'),
     nextNumber:         (billType?: string)                       => ipcRenderer.invoke('invoices:nextNumber', billType),
     convert:            (id: string)                              => ipcRenderer.invoke('invoices:convert', id),
     approveCreditBill:  (id: string)                              => ipcRenderer.invoke('invoices:approveCreditBill', id),
@@ -57,6 +56,14 @@ const api = {
     pendingApproval:    ()                                        => ipcRenderer.invoke('invoices:pendingApproval'),
     creditSummary:      (customerId: string)                      => ipcRenderer.invoke('invoices:creditSummary', customerId),
     applyEdit:          (id: string, payload: unknown)            => ipcRenderer.invoke('invoices:applyEdit', id, payload),
+  },
+
+  // POS cart "Hold" — pauses a cart-in-progress, separate from invoices
+  // (see held_carts table comment in electron/database.ts)
+  holds: {
+    create: (payload: unknown) => ipcRenderer.invoke('holds:create', payload),
+    list:   ()                 => ipcRenderer.invoke('holds:list'),
+    recall: (id: string)       => ipcRenderer.invoke('holds:recall', id),
   },
 
   // Customers
@@ -89,6 +96,12 @@ const api = {
     reportAllSummary: (filters?: unknown) => ipcRenderer.invoke('agents:reportAllSummary', filters),
     importExcel:      ()                  => ipcRenderer.invoke('agents:importExcel'),
     downloadTemplate: ()                  => ipcRenderer.invoke('agents:downloadTemplate'),
+  },
+
+  // Staff/Agent positions lookup (Issue 19)
+  positions: {
+    list:   ()                   => ipcRenderer.invoke('positions:list'),
+    create: (payload: { name: string }) => ipcRenderer.invoke('positions:create', payload),
   },
 
   regions: {

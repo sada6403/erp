@@ -4,6 +4,7 @@ import { Package, AlertCircle, MapPin, ArrowRightLeft, Check } from 'lucide-reac
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
 import { resolveImageSrc } from '@/lib/imageUrl'
+import { formatQtyWithUom, type PackUom } from '@/lib/uom'
 
 interface Props {
   categoryId: string | null
@@ -201,6 +202,7 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
   const [loading, setLoading]           = useState(true)
   const [focused, setFocused]           = useState(0)
   const [checkProduct, setCheckProduct] = useState<Product | null>(null)
+  const [packUomMap, setPackUomMap]     = useState<Map<string, PackUom>>(new Map())
   const gridRef = useRef<HTMLDivElement>(null)
 
   const load = useCallback((silent = false) => {
@@ -211,6 +213,20 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
   }, [categoryId])
 
   useEffect(() => { setFocused(0); load() }, [load])
+
+  // Product pack/box units rarely change — fetch once, not per category
+  // switch, so switching categories never re-triggers this extra request.
+  useEffect(() => {
+    window.api.products.uomListAll().then((res: any) => {
+      if (res.success) {
+        const map = new Map<string, PackUom>()
+        for (const row of res.data as { product_id: string; uom_name: string; conversion_factor: number }[]) {
+          map.set(row.product_id, { uom_name: row.uom_name, conversion_factor: row.conversion_factor })
+        }
+        setPackUomMap(map)
+      }
+    }).catch(() => undefined)
+  }, [])
 
   // Refresh stock counts after a sale (or any stock change) without flashing the skeleton
   useEffect(() => {
@@ -252,6 +268,7 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
           <ProductCard
             key={product.id}
             product={product}
+            pack={packUomMap.get(product.id) || null}
             isFocused={focused === idx}
             onFocus={() => setFocused(idx)}
             onSelect={() => onSelect(product)}
@@ -271,8 +288,8 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
 }
 
 // ─── Product Card ─────────────────────────────────────────────────────────────
-function ProductCard({ product, isFocused, onFocus, onSelect, onCheckBranches }: {
-  product: Product; isFocused: boolean
+function ProductCard({ product, pack, isFocused, onFocus, onSelect, onCheckBranches }: {
+  product: Product; pack: PackUom | null; isFocused: boolean
   onFocus: () => void; onSelect: () => void; onCheckBranches: () => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
@@ -312,9 +329,9 @@ function ProductCard({ product, isFocused, onFocus, onSelect, onCheckBranches }:
         {outOfStock ? (
           <span className="badge-red text-xs">Out</span>
         ) : lowStock ? (
-          <span className="badge-yellow text-xs">{product.stock}</span>
+          <span className="badge-yellow text-xs" title={`${product.stock || 0} ${product.unit || 'pcs'}`}>{formatQtyWithUom(product.stock || 0, pack, product.unit || 'pcs')}</span>
         ) : (
-          <span className="text-xs" style={{ color: 'var(--text-3)' }}>{product.stock}</span>
+          <span className="text-xs" style={{ color: 'var(--text-3)' }} title={`${product.stock || 0} ${product.unit || 'pcs'}`}>{formatQtyWithUom(product.stock || 0, pack, product.unit || 'pcs')}</span>
         )}
       </div>
 

@@ -5,6 +5,8 @@ import { randomUUID, createHash, timingSafeEqual } from 'crypto'
 import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
 import { decryptSecret } from './settings'
 import { safeHandle } from './ipcHandler'
+import { getDb } from '../database'
+import { reconcileLocalMainBranch } from '../services/branchReconcile'
 
 const store = new Store()
 
@@ -198,13 +200,19 @@ export function registerActivationHandlers() {
       brand_logo_url:  data.brand_logo_url ?? null,
     })
 
-    // Main Branch (the locally-seeded branch, id b1111111-...) is the
-    // company's permanent Head Office — it stays active and keeps its own
-    // staff regardless of which cloud branch was picked during activation.
-    // (Previously this block deactivated it and moved the seeded admin off
-    // it once a real branch was chosen — removed, since Head Office is a
-    // real, ongoing branch with its own manager/cashier, not a bootstrap
-    // placeholder to hide.)
+    // Re-point the locally-seeded Main Branch (id b1111111-...) onto whichever
+    // real cloud branch was picked during activation, so the local branch
+    // BECOMES that branch instead of the next sync pulling the cloud's own
+    // copy down as a second, duplicate row (see branchReconcile.ts). Keeps
+    // all locally-recorded staff/sales/stock under the branch, just under its
+    // real cloud id from here on.
+    if (branch_id) {
+      try {
+        reconcileLocalMainBranch(getDb(), String(branch_id))
+      } catch (err) {
+        console.error('[Activation] Branch reconciliation failed:', err)
+      }
+    }
 
     // Kick off an immediate full sync so the device shows the company's
     // existing data (users, branches, products, sales, branding) right away.

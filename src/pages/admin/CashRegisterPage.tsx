@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
+import NumberInput from '@/components/shared/NumberInput'
 import { DollarSign, Unlock, Lock, History, TrendingUp, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
@@ -31,8 +32,8 @@ function DenomGrid({ values, onChange, disabled }: {
               {d >= 1 ? `${d}` : `${d * 100}¢`}
             </span>
             <span className="text-xs" style={{ color: 'var(--text-3)' }}>×</span>
-            <input
-              type="number" min={0}
+            <NumberInput
+              min={0}
               value={values[d] || ''}
               onChange={e => onChange(d, Math.max(0, parseInt(e.target.value) || 0))}
               disabled={disabled}
