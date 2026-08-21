@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
@@ -853,6 +853,36 @@ function InvoiceDesigner({ form, f, check }: { form: Record<string, any>; f: (k:
   const k = (field: string) => `${prefix}${field}`
   const activeMeta = INVOICE_DESIGNS.find(d => d.id === design)!
 
+  const handleTestPrint = async () => {
+    try {
+      const samplePayload = {
+        invoice_number: 'MAIN-INV-2026-0062',
+        bill_type: 'RETAIL',
+        invoice_design: design,
+        invoice_date: new Date().toLocaleString(),
+        cashier_name: 'System Admin',
+        customer_name: 'Walk-in Customer',
+        customer_phone: '+94 77 123 4567',
+        items: [
+          { product_name: 'Kids Chair', sku: 'SAM-CH-TR-6565', quantity: 1, unit_price: 6000, discount_amount: 0, line_total: 6000 },
+          { product_name: 'Electric Cooker', sku: 'TAT-COOK-TR-0052', quantity: 1, unit_price: 15000, discount_amount: 0, line_total: 15000 },
+        ],
+        subtotal: 21000,
+        discount_amount: 0,
+        tax_amount: 0,
+        total_amount: 21000,
+        paid_amount: 21000,
+        change_amount: 0,
+        payment_method: 'cash',
+      }
+      const res = await window.api.printer.printInvoice(samplePayload) as { success: boolean; error?: string }
+      if (res.success) toast.success('Test invoice sent to printer')
+      else toast.error(res.error || 'Failed to print test invoice')
+    } catch (err) {
+      toast.error('Print failed: ' + String(err))
+    }
+  }
+
   return (
     <div className="grid grid-cols-1 xl:grid-cols-[520px_1fr] gap-6">
       <div className="space-y-6">
@@ -932,7 +962,7 @@ function InvoiceDesigner({ form, f, check }: { form: Record<string, any>; f: (k:
         )}
       </div>
 
-      <PreviewPanel title="Invoice Live Preview" onPrint={() => window.print()}>
+      <PreviewPanel title="Invoice Live Preview" onPrint={handleTestPrint}>
         <InvoicePreview form={form} design={design} />
       </PreviewPanel>
     </div>
@@ -1068,78 +1098,66 @@ function designValue(form: Record<string, any>, design: InvoiceDesignId, field: 
 }
 
 function InvoicePreview({ form, design }: { form: Record<string, any>; design: InvoiceDesignId }) {
+  const [previewHtml, setPreviewHtml] = useState('')
+  const [loading, setLoading] = useState(true)
+  const debounceRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (debounceRef.current) window.clearTimeout(debounceRef.current)
+    debounceRef.current = window.setTimeout(async () => {
+      try {
+        const samplePayload = {
+          invoice_number: 'MAIN-INV-2026-0062',
+          bill_type: 'RETAIL',
+          invoice_design: design,
+          invoice_date: '27/06/2026 10:30 AM',
+          cashier_name: 'System Admin',
+          customer_name: 'Walk-in Customer',
+          customer_phone: '+94 77 123 4567',
+          items: [
+            { product_name: 'Kids Chair', sku: 'SAM-CH-TR-6565', quantity: 1, unit_price: 6000, discount_amount: 0, line_total: 6000 },
+            { product_name: 'Electric Cooker', sku: 'TAT-COOK-TR-0052', quantity: 1, unit_price: 15000, discount_amount: 0, line_total: 15000 },
+          ],
+          subtotal: 21000,
+          discount_amount: 0,
+          tax_amount: 0,
+          total_amount: 21000,
+          paid_amount: 21000,
+          change_amount: 0,
+          payment_method: 'cash',
+          overrideSettings: form,
+        }
+        const res = await window.api.printer.renderInvoiceHtml(samplePayload) as { success: boolean; html?: string; error?: string }
+        if (res.success && res.html) {
+          setPreviewHtml(res.html)
+        }
+      } catch (err) {
+        console.error('Invoice preview failed:', err)
+      } finally {
+        setLoading(false)
+      }
+    }, 150)
+    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current) }
+  }, [form, design])
+
   const paperType = String(designValue(form, design, 'paper_type', design === 'dot' ? 'dot_matrix' : design === 'a4' ? 'A4' : '80mm'))
-  const thermal = paperType === '80mm' || paperType === '58mm'
-  const dot = paperType === 'dot_matrix'
-  const show = (field: string, fallback = true) => Boolean(designValue(form, design, field, fallback))
+  const width = design === 'dot' ? '720px' : paperType === '58mm' ? '240px' : paperType === '80mm' ? '320px' : '650px'
+  const height = design === 'dot' ? '500px' : paperType === '58mm' || paperType === '80mm' ? '600px' : '820px'
+
   return (
-    <div className="bg-slate-200 p-5 rounded-lg overflow-auto">
-      <div className={`bg-white text-black mx-auto shadow-lg ${dot ? 'p-4 font-mono' : 'p-5'}`} style={{ width: dot ? 720 : thermal ? (paperType === '58mm' ? 220 : 302) : 620 }}>
-        <div className={`text-center border-b border-slate-300 pb-3 ${dot ? 'border-dashed' : ''}`}>
-          {show('show_logo') && (
-            <div className="mx-auto mb-2 w-12 h-12 rounded border border-slate-300 flex items-center justify-center overflow-hidden">
-              {designValue(form, design, 'logo_url') ? <img src={resolveImageSrc(String(designValue(form, design, 'logo_url')))} className="w-full h-full object-cover" alt="" /> : <ImageIcon size={18} />}
-            </div>
-          )}
-          {show('show_company') && <h2 className="font-bold text-lg">{form.company_name || 'Company Name'}</h2>}
-          {show('show_branch') && <p className="text-xs">{form.branch_name || 'Main Branch'}</p>}
-          {show('show_address') && <p className="text-xs">{form.company_address || 'Company address'}</p>}
-          {show('show_phone') && <p className="text-xs">{form.company_phone || '+94 11 000 0000'}</p>}
-          {show('show_tax_no') && <p className="text-xs">Tax No: {form.company_tin || 'TIN-0000'}</p>}
-          <p className="text-xs mt-2">{String(designValue(form, design, 'header_message', ''))}</p>
+    <div className="bg-slate-800 p-4 rounded-lg overflow-auto flex justify-center min-h-[500px]">
+      {previewHtml ? (
+        <iframe
+          title="Invoice Live Preview"
+          srcDoc={previewHtml}
+          className="bg-white shadow-2xl rounded"
+          style={{ width, height, border: 'none' }}
+        />
+      ) : (
+        <div className="p-10 text-center text-slate-400 text-sm self-center">
+          {loading ? 'Generating real print preview…' : 'Preview unavailable'}
         </div>
-
-        <div className="py-3 text-xs grid grid-cols-2 gap-2 border-b border-slate-300">
-          <span>Invoice No: MAIN-INV-2026-0062</span>
-          <span className="text-right">Date: 27/06/2026</span>
-          <span>Customer: Walk-in</span>
-          <span className="text-right">Cashier: System Admin</span>
-        </div>
-
-        <table className="w-full text-xs my-3">
-          <thead>
-            <tr className="border-b border-slate-300">
-              <th className="text-left py-1">Item</th>
-              {show('show_sku_column') && <th className="text-left py-1">SKU</th>}
-              <th className="text-right py-1">Qty</th>
-              <th className="text-right py-1">Price</th>
-              {show('show_discount_column') && <th className="text-right py-1">Disc</th>}
-              {show('show_tax_column') && <th className="text-right py-1">Tax</th>}
-              <th className="text-right py-1">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[
-              ['Kids Chair', 'SAM-CH-TR-6565', '1', '6,000', '0', '0', '6,000'],
-              ['Electric cooker', 'TAT-COOK-tr-0052', '1', '15,000', '0', '0', '15,000'],
-            ].map(row => (
-              <tr key={row[1]} className="border-b border-slate-200">
-                <td className="py-1">{row[0]}</td>
-                {show('show_sku_column') && <td className="py-1">{row[1]}</td>}
-                <td className="py-1 text-right">{row[2]}</td>
-                <td className="py-1 text-right">{row[3]}</td>
-                {show('show_discount_column') && <td className="py-1 text-right">{row[4]}</td>}
-                {show('show_tax_column') && <td className="py-1 text-right">{row[5]}</td>}
-                <td className="py-1 text-right font-semibold">{row[6]}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <div className="ml-auto w-48 text-xs space-y-1">
-          <div className="flex justify-between"><span>Subtotal</span><span>Rs.21,000</span></div>
-          <div className="flex justify-between"><span>Discount</span><span>Rs.0</span></div>
-          <div className="flex justify-between font-bold text-base border-t border-slate-300 pt-1"><span>Total</span><span>Rs.21,000</span></div>
-        </div>
-
-        <div className="text-center text-xs mt-5 border-t border-slate-300 pt-3">
-          {show('show_barcode') && <BarcodeSvg value="MAIN-INV-2026-0062" height={34} />}
-          {show('show_qr') && <div className="flex justify-center"><QrPreview /></div>}
-          {show('show_signature') && <div className="mt-6 border-t border-slate-400 w-40 mx-auto pt-1">Authorized Signature</div>}
-          <p className="font-semibold mt-2">{String(designValue(form, design, 'footer_message', ''))}</p>
-          <p className="mt-1">{String(designValue(form, design, 'terms', ''))}</p>
-        </div>
-      </div>
+      )}
     </div>
   )
 }

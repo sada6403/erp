@@ -99,8 +99,9 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
   // buildCustomLayoutHtml() used for real printing, just fed draft data
   // instead of the saved settings blob. Once saved, printing and preview
   // read the identical persisted layout, so there's no drift either way.
-  safeHandle(ipcMain, 'printer:renderInvoiceHtml', async (_e, payload: InvoicePayload, draftLayout?: CustomLayout) => {
-    const settings = store.get('app_settings') as Record<string, unknown> || {}
+  safeHandle(ipcMain, 'printer:renderInvoiceHtml', async (_e, payload: InvoicePayload & { overrideSettings?: Record<string, unknown> }, draftLayout?: CustomLayout) => {
+    const savedSettings = store.get('app_settings') as Record<string, unknown> || {}
+    const settings = payload.overrideSettings ? { ...savedSettings, ...payload.overrideSettings } : savedSettings
     if (draftLayout) {
       const html = await buildCustomLayoutHtml(payload, settings, draftLayout, { includeBackground: true })
       return { success: true, html }
