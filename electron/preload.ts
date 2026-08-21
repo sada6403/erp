@@ -464,7 +464,7 @@ const api = {
   // Communications (Email / SMS / WhatsApp)
   comm: {
     email: {
-      test:        (testTo: string) => ipcRenderer.invoke('comm:email:test', testTo),
+      test:        (testTo: string, overrideConfig?: unknown) => ipcRenderer.invoke('comm:email:test', testTo, overrideConfig),
       sendInvoice: (payload: unknown) => ipcRenderer.invoke('comm:email:sendInvoice', payload),
     },
     sms: {

@@ -16,21 +16,36 @@ export interface EmailPayload {
 // need to be typed into Settings at all on a machine provisioned this way.
 // Mirrors the same `env || stored-setting || default` precedence already
 // used for the cloud API URL in electron/ipc/activation.ts.
-function getConfig() {
-  // Settings are persisted as one nested blob under 'app_settings' (see
-  // electron/ipc/settings.ts's settings:update) — a flat store.get('smtp_host')
-  // reads a key that's never written and always falls back to its default.
+function getConfig(override?: Record<string, unknown>) {
   const s = (store.get('app_settings') as Record<string, unknown>) || {}
+  const rawPort = override?.smtp_port ?? override?.port ?? process.env.SMTP_PORT ?? s.smtp_port ?? 587
+  const port = Number(rawPort) || 587
+  const encryption = String(override?.smtp_encryption ?? override?.encryption ?? process.env.SMTP_ENCRYPTION ?? s.smtp_encryption ?? (port === 465 ? 'SSL' : 'TLS'))
+
+  // Rules:
+  // Port 465 => secure: true (implicit SSL)
+  // Port 587 => secure: false (STARTTLS)
+  // Any other port => secure = true if SSL, false if TLS/None
+  let secure = false
+  if (port === 465) {
+    secure = true
+  } else if (port === 587) {
+    secure = false
+  } else {
+    secure = encryption === 'SSL'
+  }
+
   return {
-    enabled:    process.env.SMTP_ENABLED !== undefined ? process.env.SMTP_ENABLED === 'true' : Boolean(s.email_enabled ?? false),
-    host:       process.env.SMTP_HOST       || String(s.smtp_host ?? ''),
-    port:       Number(process.env.SMTP_PORT || s.smtp_port || 587),
-    encryption: process.env.SMTP_ENCRYPTION || String(s.smtp_encryption ?? 'TLS'),
-    user:       process.env.SMTP_USERNAME   || String(s.smtp_username ?? ''),
-    pass:       process.env.SMTP_PASSWORD   || String(s.smtp_password ?? ''),
-    fromEmail:  process.env.SMTP_FROM_EMAIL || String(s.smtp_from_email ?? ''),
-    fromName:   process.env.SMTP_FROM_NAME  || String(s.smtp_from_name ?? 'POS System'),
-    replyTo:    process.env.SMTP_REPLY_TO   || String(s.smtp_reply_to ?? ''),
+    enabled:    Boolean(override?.email_enabled ?? (process.env.SMTP_ENABLED !== undefined ? process.env.SMTP_ENABLED === 'true' : s.email_enabled ?? false)),
+    host:       String(override?.smtp_host ?? override?.host ?? process.env.SMTP_HOST ?? s.smtp_host ?? ''),
+    port,
+    encryption,
+    secure,
+    user:       String(override?.smtp_username ?? override?.user ?? process.env.SMTP_USERNAME ?? s.smtp_username ?? ''),
+    pass:       String(override?.smtp_password ?? override?.pass ?? process.env.SMTP_PASSWORD ?? s.smtp_password ?? ''),
+    fromEmail:  String(override?.smtp_from_email ?? override?.fromEmail ?? process.env.SMTP_FROM_EMAIL ?? s.smtp_from_email ?? ''),
+    fromName:   String(override?.smtp_from_name ?? override?.fromName ?? process.env.SMTP_FROM_NAME ?? s.smtp_from_name ?? 'POS System'),
+    replyTo:    String(override?.smtp_reply_to ?? override?.replyTo ?? process.env.SMTP_REPLY_TO ?? s.smtp_reply_to ?? ''),
   }
 }
 
@@ -38,8 +53,7 @@ function createTransport(cfg = getConfig()) {
   return nodemailer.createTransport({
     host: cfg.host,
     port: cfg.port,
-    secure: cfg.encryption === 'SSL',
-    requireTLS: cfg.encryption === 'TLS',
+    secure: cfg.secure,
     auth: cfg.user ? { user: cfg.user, pass: cfg.pass } : undefined,
   })
 }
@@ -65,8 +79,8 @@ export async function sendEmail(payload: EmailPayload): Promise<{ success: boole
   }
 }
 
-export async function testEmail(testTo: string): Promise<{ success: boolean; error?: string }> {
-  const cfg = getConfig()
+export async function testEmail(testTo: string, overrideConfig?: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  const cfg = getConfig(overrideConfig)
   if (!cfg.host) return { success: false, error: 'SMTP host not configured' }
   try {
     const transport = createTransport(cfg)

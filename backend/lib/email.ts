@@ -26,11 +26,14 @@ export async function sendEmail(opts: {
     const smtp = await getSmtpSettings()
     if (!smtp?.host) return { ok: false, error: 'SMTP not configured' }
 
+    const port = Number(smtp.port ?? 587)
+    const isSecure = port === 465 ? true : port === 587 ? false : (Boolean(smtp.secure) || smtp.encryption === 'SSL')
+
     const transport = nodemailer.createTransport({
-      host: smtp.host,
-      port: Number(smtp.port ?? 587),
-      secure: Number(smtp.port) === 465,
-      auth: { user: smtp.user, pass: smtp.pass },
+      host: String(smtp.host),
+      port,
+      secure: isSecure,
+      auth: { user: String(smtp.user || ''), pass: String(smtp.pass || '') },
     })
 
     const branding = await getBrandingSettings()
@@ -81,10 +84,13 @@ export async function sendCompanyEmail(companyId: string, opts: {
     const smtp = await getCompanySmtpSettings(companyId)
     if (!smtp?.host) return { ok: false, error: 'SMTP is not configured for this company' }
 
+    const port = Number(smtp.port ?? 587)
+    const isSecure = port === 465 ? true : port === 587 ? false : (Boolean(smtp.secure) || String(smtp.encryption) === 'SSL')
+
     const transport = nodemailer.createTransport({
       host: String(smtp.host),
-      port: Number(smtp.port ?? 587),
-      secure: Boolean(smtp.secure) || Number(smtp.port) === 465,
+      port,
+      secure: isSecure,
       auth: smtp.user ? { user: String(smtp.user), pass: decryptSecret(String(smtp.pass || '')) } : undefined,
     })
 

@@ -2353,9 +2353,18 @@ function NotificationCredentialsModal({ company, onClose, onSaved }: {
   const initSmtp = initial.smtp || {}
   const initSms = initial.sms || {}
 
-  const [smtp, setSmtp] = useState({
-    host: String(initSmtp.host || ''), port: Number(initSmtp.port || 587), secure: Boolean(initSmtp.secure),
-    user: String(initSmtp.user || ''), pass: '', from_name: String(initSmtp.from_name || ''), from_email: String(initSmtp.from_email || ''),
+  const [smtp, setSmtp] = useState(() => {
+    const port = Number(initSmtp.port || 587)
+    const secure = port === 465 ? true : port === 587 ? false : Boolean(initSmtp.secure)
+    return {
+      host: String(initSmtp.host || ''),
+      port,
+      secure,
+      user: String(initSmtp.user || ''),
+      pass: '',
+      from_name: String(initSmtp.from_name || ''),
+      from_email: String(initSmtp.from_email || ''),
+    }
   })
   const [sms, setSms] = useState({
     base_url: String(initSms.base_url || ''), method: String(initSms.method || 'POST'), content_type: String(initSms.content_type || 'application/json'),
@@ -2424,10 +2433,37 @@ function NotificationCredentialsModal({ company, onClose, onSaved }: {
             <h3 className="text-sm font-semibold text-white flex items-center gap-2"><Mail className="w-3.5 h-3.5" /> SMTP (Email)</h3>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label">Host</label><input className="input" value={smtp.host} onChange={e => setSmtp(s => ({ ...s, host: e.target.value }))} placeholder="smtp.gmail.com" /></div>
-              <div><label className="label">Port</label><input type="number" className="input" value={smtp.port} onChange={e => setSmtp(s => ({ ...s, port: Number(e.target.value) || 587 }))} placeholder="587" /></div>
+              <div>
+                <label className="label">Port</label>
+                <input
+                  type="number"
+                  className="input"
+                  value={smtp.port}
+                  onChange={e => {
+                    const newPort = Number(e.target.value) || 587
+                    setSmtp(s => ({
+                      ...s,
+                      port: newPort,
+                      secure: newPort === 465 ? true : newPort === 587 ? false : s.secure
+                    }))
+                  }}
+                  placeholder="587"
+                />
+              </div>
             </div>
             <label className="flex items-center gap-2 text-xs text-gray-400">
-              <input type="checkbox" checked={smtp.secure} onChange={e => setSmtp(s => ({ ...s, secure: e.target.checked }))} /> Use SSL/TLS (port 465)
+              <input
+                type="checkbox"
+                checked={smtp.secure}
+                onChange={e => {
+                  const isChecked = e.target.checked
+                  setSmtp(s => ({
+                    ...s,
+                    secure: isChecked,
+                    port: isChecked ? 465 : (s.port === 465 ? 587 : s.port)
+                  }))
+                }}
+              /> Use SSL/TLS (port 465) — OFF for STARTTLS (port 587)
             </label>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label">Username</label><input className="input" value={smtp.user} onChange={e => setSmtp(s => ({ ...s, user: e.target.value }))} placeholder="you@gmail.com" /></div>

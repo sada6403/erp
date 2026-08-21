@@ -513,11 +513,12 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
             ? decryptSecret(settings.smtp_password)
             : ''
 
+          const isSecure = smtpPort === 465 ? true : smtpPort === 587 ? false : encryption === 'SSL'
+
           const transport = nodemailer.createTransport({
             host: smtpHost,
             port: smtpPort,
-            secure: encryption === 'SSL',
-            requireTLS: encryption === 'TLS',
+            secure: isSecure,
             auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
           })
 

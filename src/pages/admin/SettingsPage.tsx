@@ -1347,13 +1347,34 @@ function CommunicationsSettings({ form, f, check }: {
             <input value={String(form.smtp_host || '')} onChange={f('smtp_host')} className="input font-mono text-sm" placeholder="smtp.gmail.com" disabled={!form.email_enabled} />
           </Field>
           <Field label="Port">
-            <NumberInput value={Number(form.smtp_port || 587)} onChange={f('smtp_port')} className="input" placeholder="587" disabled={!form.email_enabled} />
+            <NumberInput
+              value={Number(form.smtp_port || 587)}
+              onChange={e => {
+                const val = Number(e.target.value) || 587
+                const newEnc = val === 465 ? 'SSL' : val === 587 ? 'TLS' : String(form.smtp_encryption || 'TLS')
+                f('smtp_port')(e)
+                f('smtp_encryption')({ target: { value: newEnc } } as any)
+              }}
+              className="input"
+              placeholder="587"
+              disabled={!form.email_enabled}
+            />
           </Field>
         </div>
         <Field label="Encryption">
-          <select value={String(form.smtp_encryption || 'TLS')} onChange={f('smtp_encryption')} className="input max-w-xs" disabled={!form.email_enabled}>
-            <option value="TLS">STARTTLS (port 587)</option>
-            <option value="SSL">SSL/TLS (port 465)</option>
+          <select
+            value={String(form.smtp_encryption || (Number(form.smtp_port) === 465 ? 'SSL' : 'TLS'))}
+            onChange={e => {
+              const enc = e.target.value
+              const newPort = enc === 'SSL' ? 465 : enc === 'TLS' ? 587 : 25
+              f('smtp_encryption')(e)
+              f('smtp_port')({ target: { value: newPort, type: 'number' } } as any)
+            }}
+            className="input max-w-xs"
+            disabled={!form.email_enabled}
+          >
+            <option value="TLS">STARTTLS (port 587, SSL/TLS OFF)</option>
+            <option value="SSL">SSL/TLS (port 465, SSL/TLS ON)</option>
             <option value="NONE">None (port 25)</option>
           </select>
         </Field>
@@ -1388,7 +1409,7 @@ function CommunicationsSettings({ form, f, check }: {
           />
           <button
             disabled={!testEmail || testing.email || !form.email_enabled}
-            onClick={() => runTest('Email', () => window.api.comm.email.test(testEmail))}
+            onClick={() => runTest('Email', () => window.api.comm.email.test(testEmail, form))}
             className="btn-secondary btn-sm"
           >
             {testing.email ? 'Sending…' : 'Send Test Email'}
