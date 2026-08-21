@@ -98,10 +98,10 @@ export const settings = {
 // SMTP/SMS itself is saved via companies.update({ smtp, sms }) — same PATCH as
 // every other company field. These are just the two test-send buttons.
 export const companyNotifications = {
-  testEmail: (companyId: string, to: string) =>
-    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/email-test`, { method: 'POST', body: JSON.stringify({ to }) }),
-  testSms:   (companyId: string, to: string) =>
-    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/sms-test`, { method: 'POST', body: JSON.stringify({ to }) }),
+  testEmail: (companyId: string, to: string, smtp?: unknown) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/email-test`, { method: 'POST', body: JSON.stringify({ to, smtp }) }),
+  testSms:   (companyId: string, to: string, sms?: unknown) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/sms-test`, { method: 'POST', body: JSON.stringify({ to, sms }) }),
 }
 
 // ─── Company Devices ──────────────────────────────────────────────────────────

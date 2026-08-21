@@ -2475,7 +2475,7 @@ function NotificationCredentialsModal({ company, onClose, onSaved }: {
             </div>
             <div className="flex items-center gap-2 pt-1">
               <input className="input flex-1 text-sm" placeholder="Send test email to…" value={testEmailTo} onChange={e => setTestEmailTo(e.target.value)} />
-              <button type="button" disabled={!testEmailTo || testing.email} onClick={() => runTest('email', () => notifApi.testEmail(company.id, testEmailTo))} className="btn-ghost flex items-center gap-1.5 text-sm flex-shrink-0">
+              <button type="button" disabled={!testEmailTo || testing.email} onClick={() => runTest('email', () => notifApi.testEmail(company.id, testEmailTo, smtp))} className="btn-ghost flex items-center gap-1.5 text-sm flex-shrink-0">
                 <Send className="w-3.5 h-3.5" /> {testing.email ? 'Sending…' : 'Send Test'}
               </button>
             </div>
