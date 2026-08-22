@@ -1,5 +1,6 @@
 import nodemailer from 'nodemailer'
 import Store from 'electron-store'
+import { decryptSecret } from '../ipc/settings'
 
 const store = new Store<Record<string, unknown>>()
 
@@ -35,6 +36,9 @@ function getConfig(override?: Record<string, unknown>) {
     secure = encryption === 'SSL'
   }
 
+  const rawPass = String(override?.smtp_password ?? override?.pass ?? process.env.SMTP_PASSWORD ?? s.smtp_password ?? '')
+  const pass = decryptSecret(rawPass)
+
   return {
     enabled:    Boolean(override?.email_enabled ?? (process.env.SMTP_ENABLED !== undefined ? process.env.SMTP_ENABLED === 'true' : s.email_enabled ?? false)),
     host:       String(override?.smtp_host ?? override?.host ?? process.env.SMTP_HOST ?? s.smtp_host ?? ''),
@@ -42,7 +46,7 @@ function getConfig(override?: Record<string, unknown>) {
     encryption,
     secure,
     user:       String(override?.smtp_username ?? override?.user ?? process.env.SMTP_USERNAME ?? s.smtp_username ?? ''),
-    pass:       String(override?.smtp_password ?? override?.pass ?? process.env.SMTP_PASSWORD ?? s.smtp_password ?? ''),
+    pass,
     fromEmail:  String(override?.smtp_from_email ?? override?.fromEmail ?? process.env.SMTP_FROM_EMAIL ?? s.smtp_from_email ?? ''),
     fromName:   String(override?.smtp_from_name ?? override?.fromName ?? process.env.SMTP_FROM_NAME ?? s.smtp_from_name ?? 'POS System'),
     replyTo:    String(override?.smtp_reply_to ?? override?.replyTo ?? process.env.SMTP_REPLY_TO ?? s.smtp_reply_to ?? ''),

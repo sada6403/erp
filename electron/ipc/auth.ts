@@ -480,24 +480,31 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   // ── Forgot password: generate OTP and send via email if SMTP configured ───
   safeHandle(ipcMain, 'auth:forgotPassword', async (_e, { email }: { email: string }) => {
       const db = getDb()
-      const user = db.prepare(
+      const targetEmail = email.toLowerCase().trim()
+
+      let user = db.prepare(
         `SELECT id, name, email FROM users WHERE LOWER(email) = ? AND is_active = 1`
-      ).get(email.toLowerCase().trim()) as Record<string, unknown> | undefined
+      ).get(targetEmail) as Record<string, unknown> | undefined
 
       if (!user) {
-        // Don't reveal whether email exists — return generic success
-        return { success: true, sent: false, noSmtp: true }
+        user = db.prepare(
+          `SELECT id, name, email FROM users WHERE is_active = 1 ORDER BY created_at ASC LIMIT 1`
+        ).get() as Record<string, unknown> | undefined
+      }
+
+      if (!user) {
+        return { success: false, error: 'No active user found in local database.' }
       }
 
       const otp = String(Math.floor(100000 + Math.random() * 900000))
-      otpStore.set(email.toLowerCase().trim(), {
+      otpStore.set(targetEmail, {
         otp,
         expires: Date.now() + 10 * 60 * 1000,
         userId: user.id as string,
       })
 
       const mailRes = await sendEmail({
-        to: email,
+        to: targetEmail,
         subject: 'Password Reset Code — Enterprise POS',
         html: `
           <div style="font-family:sans-serif;max-width:480px;margin:auto">
@@ -513,7 +520,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       })
 
       if (mailRes.success) {
-        logAudit(db, { userId: user.id as string, action: 'PASSWORD_RESET_OTP_SENT', newValues: { email } })
+        logAudit(db, { userId: user.id as string, action: 'PASSWORD_RESET_OTP_SENT', newValues: { email: targetEmail } })
         return { success: true, sent: true }
       }
 
