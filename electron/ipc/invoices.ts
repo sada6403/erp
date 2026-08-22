@@ -79,7 +79,7 @@ async function sendInvoiceNotifications(
 
     if ((wantSms || wantWhatsapp) && customer.phone) {
       const shortMessage = `${companyName}: Your ${docWord.toLowerCase()} #${invoiceNumber} total is ${currency}${fmt(totalAmount)}. Thank you!`
-      if (wantSms) await sendSms({ to: customer.phone, message: shortMessage }).catch(() => {})
+      if (wantSms) await sendSms({ to: customer.phone, message: shortMessage, event }).catch(() => {})
       if (wantWhatsapp) await sendWhatsApp({ to: customer.phone, message: shortMessage }).catch(() => {})
     }
   } catch (err) {

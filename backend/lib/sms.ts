@@ -50,13 +50,14 @@ function parseCustomHeaders(raw: string): Record<string, string> {
   return headers
 }
 
-function buildBody(template: string, phone: string, message: string, senderId: string, apiKey: string): string {
+function buildBody(template: string, phone: string, message: string, senderId: string, apiKey: string, urlEncode = false): string {
+  const enc = (v: string) => urlEncode ? encodeURIComponent(v) : v
   return template
-    .replace(/\{phone\}/g, phone)
-    .replace(/\{mobile\}/g, phone)
-    .replace(/\{message\}/g, message.replace(/"/g, '\\"'))
-    .replace(/\{sender_id\}/g, senderId)
-    .replace(/\{api_key\}/g, apiKey)
+    .replace(/\{phone\}/g, enc(phone))
+    .replace(/\{mobile\}/g, enc(phone))
+    .replace(/\{message\}/g, urlEncode ? encodeURIComponent(message) : message.replace(/"/g, '\\"'))
+    .replace(/\{sender_id\}/g, enc(senderId))
+    .replace(/\{api_key\}/g, enc(apiKey))
 }
 
 export async function sendCompanySms(companyId: string, to: string, message: string): Promise<{ ok: boolean; error?: string }> {
@@ -71,10 +72,10 @@ export async function sendCompanySms(companyId: string, to: string, message: str
     let url = cfg.baseUrl
     let body: string | undefined
     if (cfg.method === 'GET') {
-      const params = buildBody(cfg.bodyTemplate, to, message, cfg.senderId, cfg.apiKey)
+      const params = buildBody(cfg.bodyTemplate, to, message, cfg.senderId, cfg.apiKey, true)
       url = url.includes('?') ? `${url}&${params}` : `${url}?${params}`
     } else {
-      body = buildBody(cfg.bodyTemplate, to, message, cfg.senderId, cfg.apiKey)
+      body = buildBody(cfg.bodyTemplate, to, message, cfg.senderId, cfg.apiKey, false)
     }
 
     const res = await fetch(url, { method: cfg.method, headers, body })

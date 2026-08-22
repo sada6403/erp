@@ -1,11 +1,38 @@
 import Store from 'electron-store'
 import { net } from 'electron'
+import { randomUUID } from 'crypto'
+import { getDb } from '../database'
 
 const store = new Store<Record<string, unknown>>()
 
 export interface SmsPayload {
   to: string | string[]
   message: string
+  event?: string
+}
+
+// Sri Lankan mobile numbers, normalized to the 94-prefixed format gateways
+// expect (e.g. Mobitel Enterprise SMS's `r` param). Accepts 07XXXXXXXX,
+// 7XXXXXXXX, or an already-normalized 94XXXXXXXXX; anything else is passed
+// through digits-only so the gateway's own error code (not a silent mangle)
+// surfaces the problem.
+export function normalizeSriLankanMobile(input: string): string {
+  const digits = String(input || '').replace(/\D/g, '')
+  if (digits.length === 10 && digits.startsWith('0')) return `94${digits.slice(1)}`
+  if (digits.length === 11 && digits.startsWith('94')) return digits
+  if (digits.length === 9 && digits.startsWith('7')) return `94${digits}`
+  return digits
+}
+
+function logSmsAttempt(recipient: string, message: string, event: string | undefined, status: 'sent' | 'failed', response?: string, error?: string) {
+  try {
+    getDb().prepare(`
+      INSERT INTO sms_logs (id, recipient, message, event, status, response, error)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(randomUUID(), recipient, message, event || null, status, response || null, error || null)
+  } catch {
+    // Logging must never break SMS sending.
+  }
 }
 
 // Env vars override the Settings-UI-configured values when present — same
@@ -29,13 +56,15 @@ function getConfig() {
   }
 }
 
-function buildBody(template: string, phone: string, message: string): string {
+function buildBody(template: string, phone: string, message: string, urlEncode = false): string {
+  const enc = (v: string) => urlEncode ? encodeURIComponent(v) : v
+  const cfg = getConfig()
   return template
-    .replace(/\{phone\}/g, phone)
-    .replace(/\{mobile\}/g, phone)
-    .replace(/\{message\}/g, message.replace(/"/g, '\\"'))
-    .replace(/\{sender_id\}/g, getConfig().senderId)
-    .replace(/\{api_key\}/g, getConfig().apiKey)
+    .replace(/\{phone\}/g, enc(phone))
+    .replace(/\{mobile\}/g, enc(phone))
+    .replace(/\{message\}/g, urlEncode ? encodeURIComponent(message) : message.replace(/"/g, '\\"'))
+    .replace(/\{sender_id\}/g, enc(cfg.senderId))
+    .replace(/\{api_key\}/g, enc(cfg.apiKey))
 }
 
 async function httpRequest(url: string, options: { method: string; headers: Record<string,string>; body?: string }): Promise<{ ok: boolean; status: number; text: string }> {
@@ -80,22 +109,38 @@ export async function sendSms(payload: SmsPayload): Promise<{ success: boolean; 
     headers['Authorization'] = `Bearer ${cfg.apiKey}`
   }
 
-  for (const phone of phones) {
+  for (const rawPhone of phones) {
+    const phone = normalizeSriLankanMobile(rawPhone)
     try {
       let url = cfg.baseUrl
       let body: string | undefined
+      const isGet = cfg.method === 'GET'
 
-      if (cfg.method === 'GET') {
-        const params = buildBody(cfg.bodyTemplate, phone, payload.message)
+      if (isGet) {
+        const params = buildBody(cfg.bodyTemplate, phone, payload.message, true)
         url = url.includes('?') ? `${url}&${params}` : `${url}?${params}`
       } else {
-        body = buildBody(cfg.bodyTemplate, phone, payload.message)
+        body = buildBody(cfg.bodyTemplate, phone, payload.message, false)
       }
 
       const res = await httpRequest(url, { method: cfg.method, headers, body })
-      if (!res.ok) errors.push(`${phone}: HTTP ${res.status} — ${res.text.slice(0, 100)}`)
+      const bareCode = res.text.trim().match(/^\d{1,3}$/) ? res.text.trim() : null
+
+      if (!res.ok) {
+        const err = `HTTP ${res.status} — ${res.text.slice(0, 100)}`
+        errors.push(`${phone}: ${err}`)
+        logSmsAttempt(phone, payload.message, payload.event, 'failed', res.text.slice(0, 500), err)
+      } else if (bareCode && bareCode !== '200') {
+        const err = `Gateway error code ${bareCode}`
+        errors.push(`${phone}: ${err}`)
+        logSmsAttempt(phone, payload.message, payload.event, 'failed', res.text.slice(0, 500), err)
+      } else {
+        logSmsAttempt(phone, payload.message, payload.event, 'sent', res.text.slice(0, 500))
+      }
     } catch (err) {
-      errors.push(`${phone}: ${String(err)}`)
+      const errMsg = String(err)
+      errors.push(`${phone}: ${errMsg}`)
+      logSmsAttempt(phone, payload.message, payload.event, 'failed', undefined, errMsg)
     }
   }
 
@@ -104,7 +149,7 @@ export async function sendSms(payload: SmsPayload): Promise<{ success: boolean; 
 }
 
 export async function testSms(testTo: string): Promise<{ success: boolean; error?: string }> {
-  return sendSms({ to: testTo, message: 'POS System — SMS test message. Configuration is working correctly.' })
+  return sendSms({ to: testTo, message: 'POS System — SMS test message. Configuration is working correctly.', event: 'manual_test' })
 }
 
 // Common SMS message templates

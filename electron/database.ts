@@ -2295,6 +2295,26 @@ function runMigrations(): void {
       console.error('[DB] Positions backfill migration failed:', err)
     }
   }
+
+  // ── SMS delivery log ────────────────────────────────────────────────────
+  // Local-only diagnostic record for every outbound SMS attempt (bill/quote
+  // receipt, installment reminders, low-stock alerts, chit notifications,
+  // manual tests) — previously every send was fire-and-forget with no trace
+  // of success/failure. Not part of the cloud-sync mechanism (no synced_at).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS sms_logs (
+      id         TEXT PRIMARY KEY,
+      recipient  TEXT NOT NULL,
+      message    TEXT NOT NULL,
+      event      TEXT,
+      status     TEXT NOT NULL,
+      response   TEXT,
+      error      TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_sms_logs_status ON sms_logs(status);
+    CREATE INDEX IF NOT EXISTS idx_sms_logs_created ON sms_logs(created_at);
+  `)
 }
 
 function seedDefaultData() {

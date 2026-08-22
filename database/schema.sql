@@ -584,6 +584,21 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_user   ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_date   ON audit_logs(created_at);
 
+-- ─── SMS LOGS ──────────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS sms_logs (
+  id         TEXT PRIMARY KEY,
+  recipient  TEXT NOT NULL,
+  message    TEXT NOT NULL,
+  event      TEXT,
+  status     TEXT NOT NULL, -- sent|failed
+  response   TEXT,
+  error      TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_sms_logs_status  ON sms_logs(status);
+CREATE INDEX IF NOT EXISTS idx_sms_logs_created ON sms_logs(created_at);
+
 -- ─── SEED DEFAULT ROLES ────────────────────────────────────────────────────
 INSERT OR IGNORE INTO roles (id, name, permissions) VALUES
   ('3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d',   'Company Admin',   '{"all":true}'),

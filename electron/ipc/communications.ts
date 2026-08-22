@@ -98,7 +98,7 @@ export function registerCommunicationHandlers() {
       const msg = isOverdue
         ? installmentOverdueMessage(String(inst.customer_name), amount, cfg.currency, dueDate, cfg.companyName)
         : installmentDueMessage(String(inst.customer_name), amount, cfg.currency, dueDate, cfg.companyName)
-      results.sms = await sendSms({ to: String(inst.customer_phone), message: msg })
+      results.sms = await sendSms({ to: String(inst.customer_phone), message: msg, event: isOverdue ? 'installment_overdue' : 'installment_due' })
     }
 
     return { success: true, results }
@@ -133,7 +133,7 @@ export function registerCommunicationHandlers() {
     }
 
     if (adminPhone) {
-      results.sms = await sendSms({ to: adminPhone, message: lowStockMessage(items.length, companyName) })
+      results.sms = await sendSms({ to: adminPhone, message: lowStockMessage(items.length, companyName), event: 'low_stock' })
     }
 
     return { success: true, results, count: items.length }
@@ -252,7 +252,7 @@ export function startReminderScheduler() {
             }).catch(() => {})
           }
           if (inst.phone && installmentSmsAllowed) {
-            await sendSms({ to: String(inst.phone), message: installmentOverdueMessage(String(inst.customer_name), amount, currency, dueDate, companyName) }).catch(() => {})
+            await sendSms({ to: String(inst.phone), message: installmentOverdueMessage(String(inst.customer_name), amount, currency, dueDate, companyName), event: 'installment_overdue' }).catch(() => {})
           }
         }
 
@@ -267,7 +267,7 @@ export function startReminderScheduler() {
             }).catch(() => {})
           }
           if (inst.phone && installmentSmsAllowed) {
-            await sendSms({ to: String(inst.phone), message: installmentDueMessage(String(inst.customer_name), amount, currency, dueDate, companyName) }).catch(() => {})
+            await sendSms({ to: String(inst.phone), message: installmentDueMessage(String(inst.customer_name), amount, currency, dueDate, companyName), event: 'installment_due' }).catch(() => {})
           }
         }
       }
@@ -293,7 +293,7 @@ export function startReminderScheduler() {
             }).catch(() => {})
           }
           if (adminPhone && lowStockSmsAllowed) {
-            await sendSms({ to: adminPhone, message: lowStockMessage(lowItems.length, companyName) }).catch(() => {})
+            await sendSms({ to: adminPhone, message: lowStockMessage(lowItems.length, companyName), event: 'low_stock' }).catch(() => {})
           }
         }
       }

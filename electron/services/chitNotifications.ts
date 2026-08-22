@@ -71,7 +71,7 @@ export async function notifyCustomer(
   }
   if (notificationAllowed(settings, 'chit', 'sms') && customer.phone) {
     attempted.push('sms')
-    jobs.push(sendSms({ to: String(customer.phone), message }).then(r => ({ channel: 'sms', ok: Boolean(r?.success) })).catch(() => ({ channel: 'sms', ok: false })))
+    jobs.push(sendSms({ to: String(customer.phone), message, event: 'chit' }).then(r => ({ channel: 'sms', ok: Boolean(r?.success) })).catch(() => ({ channel: 'sms', ok: false })))
   }
   if (notificationAllowed(settings, 'chit', 'whatsapp') && customer.phone) {
     attempted.push('whatsapp')
