@@ -602,6 +602,20 @@ export class SyncService {
           changed = true
         }
       }
+      if (branding.smtp && typeof branding.smtp === 'object') {
+        const smtp = branding.smtp as Record<string, unknown>
+        if (smtp.host) {
+          if (settings.email_enabled !== true) { settings.email_enabled = true; changed = true }
+          if (settings.smtp_host !== String(smtp.host)) { settings.smtp_host = String(smtp.host); changed = true }
+          if (smtp.port && settings.smtp_port !== Number(smtp.port)) { settings.smtp_port = Number(smtp.port); changed = true }
+          const enc = Number(smtp.port) === 465 || Boolean(smtp.secure) ? 'SSL' : 'TLS'
+          if (settings.smtp_encryption !== enc) { settings.smtp_encryption = enc; changed = true }
+          if (smtp.user && settings.smtp_username !== String(smtp.user)) { settings.smtp_username = String(smtp.user); changed = true }
+          if (smtp.pass && smtp.pass !== '********' && settings.smtp_password !== String(smtp.pass)) { settings.smtp_password = String(smtp.pass); changed = true }
+          if (smtp.from_name && settings.smtp_from_name !== String(smtp.from_name)) { settings.smtp_from_name = String(smtp.from_name); changed = true }
+          if (smtp.from_email && settings.smtp_from_email !== String(smtp.from_email)) { settings.smtp_from_email = String(smtp.from_email); changed = true }
+        }
+      }
       if (changed) store.set('app_settings', settings)
       store.set('company_branding_synced', incoming)
     } catch (err) {
