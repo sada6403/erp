@@ -372,6 +372,7 @@ export async function ensureTenantCompatibility(dbSchema: string) {
        printed_by       CHAR(36)      NULL,
        print_type       VARCHAR(32)   NOT NULL DEFAULT 'print',
        created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
        synced_at        DATETIME      NULL,
        INDEX idx_btp_transfer (transfer_id)
      )`,
@@ -428,6 +429,7 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     `ALTER TABLE stock_transfers ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
     `ALTER TABLE stock_transfers ADD COLUMN synced_at DATETIME NULL`,
     `ALTER TABLE branch_transfers ADD COLUMN approved_by CHAR(36) NULL`,
+    `ALTER TABLE branch_transfer_prints ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
 
     // ── customer_orders / customer_order_items — were whitelisted and pushed
     // from every device, but the cloud table never existed, so every real

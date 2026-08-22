@@ -392,6 +392,7 @@ function runMigrations(): void {
       printed_by       TEXT,
       print_type       TEXT NOT NULL DEFAULT 'print',
       created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
       synced_at        TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_btp_transfer ON branch_transfer_prints(transfer_id);
@@ -818,6 +819,9 @@ function runMigrations(): void {
   // show up in stock-on-hand and sales/tax reporting like any other sale.
   if (!hasColumn('chit_members', 'redemption_invoice_id')) {
     db.exec(`ALTER TABLE chit_members ADD COLUMN redemption_invoice_id TEXT REFERENCES invoices(id)`)
+  }
+  if (!hasColumn('branch_transfer_prints', 'updated_at')) {
+    db.exec(`ALTER TABLE branch_transfer_prints ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))`)
   }
   db.exec(`
 

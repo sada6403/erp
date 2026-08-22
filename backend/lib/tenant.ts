@@ -510,6 +510,7 @@ CREATE TABLE IF NOT EXISTS branch_transfer_prints (
   printed_by       CHAR(36)      NULL,
   print_type       VARCHAR(32)   NOT NULL DEFAULT 'print',
   created_at       DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at       DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
   synced_at        DATETIME      NULL,
   INDEX idx_btp_transfer (transfer_id)
 );
