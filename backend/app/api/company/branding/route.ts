@@ -27,6 +27,8 @@ async function requireCompany(request: NextRequest) {
   }
 }
 
+import { decryptSecret } from '@/lib/secretCrypto'
+
 export async function GET(request: NextRequest) {
   const auth = await requireCompany(request)
   if (auth.error) return auth.error
@@ -47,6 +49,15 @@ export async function GET(request: NextRequest) {
   if (!branding.company_name)      branding.company_name      = c.name
   if (!branding.brand_color)       branding.brand_color       = c.brand_color ?? null
   if (!branding.company_logo_url)  branding.company_logo_url  = c.brand_logo_url ?? null
+
+  if (branding.smtp && typeof branding.smtp === 'object') {
+    const smtp = { ...(branding.smtp as Record<string, unknown>) }
+    if (smtp.pass && smtp.pass !== '********') {
+      const dec = decryptSecret(String(smtp.pass))
+      smtp.pass = dec || smtp.pass
+    }
+    branding.smtp = smtp
+  }
 
   return NextResponse.json({ branding, updated_at: c.updated_at ?? null })
 }

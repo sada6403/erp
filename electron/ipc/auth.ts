@@ -8,6 +8,7 @@ import { sendEmail } from '../services/emailService'
 import { generateSecret, verifyTOTP, generateQrDataUrl } from '../services/totpService'
 import { decryptSecret } from './settings'
 import { enqueueUserRow } from '../services/syncQueue'
+import { getSyncService } from '../services/syncService'
 import { logAudit } from '../services/auditLog'
 import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
 import { isAdminTypeRole } from '../services/pinPolicy'
@@ -502,6 +503,16 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
         expires: Date.now() + 10 * 60 * 1000,
         userId: user.id as string,
       })
+
+      // Pull latest company SMTP settings from cloud if local settings are missing/disabled
+      const currentSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+      if (!currentSettings.smtp_host || !currentSettings.email_enabled) {
+        try {
+          await getSyncService().pullLatestBranding()
+        } catch {
+          // Keep local fallback if offline
+        }
+      }
 
       const mailRes = await sendEmail({
         to: targetEmail,

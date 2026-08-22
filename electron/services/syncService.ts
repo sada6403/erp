@@ -577,7 +577,14 @@ export class SyncService {
   }
 
   // Company branding: retry a pending local push first, otherwise pull the
-  // company-wide branding and apply it to this device's app_settings.
+  public async pullLatestBranding(): Promise<void> {
+    const cloud = this.getCloudApi()
+    if (cloud) {
+      await this.syncBranding(cloud)
+    }
+  }
+
+  // Fetch company-wide branding and apply it to this device's app_settings.
   private async syncBranding(cloud: CloudApi): Promise<void> {
     try {
       if (store.get('branding_push_pending')) {
@@ -588,9 +595,11 @@ export class SyncService {
       const { branding } = await cloud.getBranding()
       if (!branding) return
       const incoming = JSON.stringify(branding)
-      if (incoming === String(store.get('company_branding_synced') || '')) return
 
       const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+      const needsSmtpSync = branding.smtp && typeof branding.smtp === 'object' && Boolean((branding.smtp as Record<string, unknown>).host) && !settings.smtp_host
+      if (!needsSmtpSync && incoming === String(store.get('company_branding_synced') || '')) return
+
       let changed = false
       for (const key of CLOUD_BRANDING_KEYS) {
         if (!(key in branding)) continue
