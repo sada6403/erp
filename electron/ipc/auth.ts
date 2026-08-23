@@ -257,9 +257,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       // Email+password is reserved for admin-type roles — staff/cashier
       // accounts must sign in with a PIN instead, even if a password_hash
-      // happens to exist on the row (e.g. an older account from before this
-      // rule existed).
-      if (!isAdminTypeRole(readPermissions(user))) {
+      // happens to exist on the row.
+      const roleName = String(user.role_name || '').toLowerCase()
+      const isExplicitAdminRole = roleName.includes('admin') || roleName.includes('owner') || roleName.includes('manager') || roleName.includes('superadmin') || Boolean((readPermissions(user)).all)
+      if (!isExplicitAdminRole && !isAdminTypeRole(readPermissions(user))) {
         logAudit(db, {
           userId: user.id as string, branchId: user.branch_id as string,
           action: 'LOGIN_FAILED', newValues: { reason: 'Non-admin role attempted email+password login' },
