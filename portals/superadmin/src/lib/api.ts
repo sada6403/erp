@@ -87,7 +87,7 @@ export const companies = {
   update: (id: string, body: unknown) => request<unknown>(`/api/superadmin/companies/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   cancel:             (id: string) => request<unknown>(`/api/superadmin/companies/${id}`, { method: 'DELETE', body: JSON.stringify({}) }),
   hardDelete:         (id: string) => request<unknown>(`/api/superadmin/companies/${id}`, { method: 'DELETE', body: JSON.stringify({ permanent: true }) }),
-  resetAdminPassword: (id: string) => request<{ tempPassword: string; adminEmail: string; adminName: string }>(`/api/superadmin/companies/${id}/reset-admin-password`, { method: 'POST' }),
+  resetAdminPassword: (id: string, body?: { password?: string; email?: string; name?: string }) => request<{ tempPassword: string; adminEmail: string; adminName: string }>(`/api/superadmin/companies/${id}/reset-admin-password`, { method: 'POST', body: JSON.stringify(body || {}) }),
 }
 
 // ─── Packages ─────────────────────────────────────────────────────────────────

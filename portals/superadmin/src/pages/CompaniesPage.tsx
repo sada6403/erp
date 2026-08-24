@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send } from 'lucide-react'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck } from 'lucide-react'
 
 type MenuItemDef =
   | { type: 'item'; label: string; icon: React.ComponentType<{ className?: string }>; onClick: () => void; danger?: boolean }
@@ -1724,18 +1724,6 @@ function CompanyCapabilitiesModal({ company, onClose, onSaved }: {
               </p>
             </div>
           )}
-
-          {tab === 'audit' && (
-            <div className="space-y-2">
-              {audit.map((row, idx) => (
-                <div key={String(row.id ?? idx)} className="rounded-lg border border-gray-800 bg-gray-800/30 px-4 py-3">
-                  <p className="text-sm text-white">{String(row.action ?? 'event')}</p>
-                  <p className="text-xs text-gray-500">{String(row.actor_name ?? 'system')} · {String(row.created_at ?? '')}</p>
-                </div>
-              ))}
-              {audit.length === 0 && <p className="text-sm text-gray-500">No audit records available.</p>}
-            </div>
-          )}
         </div>
 
         <div className="px-5 py-4 border-t border-gray-800 flex justify-between items-center">
@@ -1751,7 +1739,7 @@ function CompanyCapabilitiesModal({ company, onClose, onSaved }: {
 function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
   company: Company; pkgs: Pkg[]; onClose: () => void; onSaved: () => void
 }) {
-  type Tab = 'info' | 'limits' | 'subscription'
+  type Tab = 'info' | 'admin' | 'limits' | 'subscription'
   const [tab, setTab] = useState<Tab>('info')
 
   const [info, setInfo] = useState({
@@ -1760,6 +1748,11 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
     phone:   company.phone   || '',
     address: company.address || '',
     notes:   company.notes   || '',
+  })
+  const [admin, setAdmin] = useState({
+    adminName:     company.admin_name  || '',
+    adminEmail:    company.admin_email || company.email || '',
+    adminPassword: '',
   })
   const [limits, setLimits] = useState({
     maxBranches:   String(company.max_branches   ?? 1),
@@ -1780,6 +1773,7 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
   const [saved,  setSaved]  = useState(false)
 
   const si = (k: string) => (v: string) => setInfo(f => ({ ...f, [k]: v }))
+  const sa = (k: string) => (v: string) => setAdmin(f => ({ ...f, [k]: v }))
   const sl = (k: string) => (v: string) => setLimits(f => ({ ...f, [k]: v }))
   const ss = (k: string) => (v: string) => setSub(f => ({ ...f, [k]: v }))
 
@@ -1794,6 +1788,12 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
         body.phone   = info.phone
         body.address = info.address
         body.notes   = info.notes
+      }
+
+      if (tab === 'admin') {
+        if (admin.adminName)     body.adminName     = admin.adminName
+        if (admin.adminEmail)    body.adminEmail    = admin.adminEmail
+        if (admin.adminPassword) body.adminPassword = admin.adminPassword
       }
 
       if (tab === 'limits') {
@@ -1828,9 +1828,10 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
   }
 
   const TAB_LABELS: { key: Tab; label: string; icon: React.ReactNode }[] = [
-    { key: 'info',         label: 'Info',         icon: <Edit2 className="w-3.5 h-3.5" /> },
-    { key: 'limits',       label: 'Limits',       icon: <Sliders className="w-3.5 h-3.5" /> },
-    { key: 'subscription', label: 'Subscription', icon: <CalendarClock className="w-3.5 h-3.5" /> },
+    { key: 'info',         label: 'Info',          icon: <Edit2 className="w-3.5 h-3.5" /> },
+    { key: 'admin',        label: 'Admin Account', icon: <UserCheck className="w-3.5 h-3.5" /> },
+    { key: 'limits',       label: 'Limits',        icon: <Sliders className="w-3.5 h-3.5" /> },
+    { key: 'subscription', label: 'Subscription',  icon: <CalendarClock className="w-3.5 h-3.5" /> },
   ]
 
   return (
@@ -1889,6 +1890,28 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
             </div>
           )}
 
+          {tab === 'admin' && (
+            <div className="space-y-4">
+              <div className="bg-indigo-950/30 border border-indigo-700/40 rounded-lg px-4 py-3 text-xs text-indigo-300">
+                Update the Company Admin credentials. This directly changes the Admin login email and password for this company across POS and cloud sync.
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="label">Admin Name</label>
+                  <input className="input" value={admin.adminName} onChange={e => sa('adminName')(e.target.value)} placeholder="Company Admin" />
+                </div>
+                <div>
+                  <label className="label">Admin Email (Login Email)</label>
+                  <input className="input" type="email" value={admin.adminEmail} onChange={e => sa('adminEmail')(e.target.value)} placeholder="admin@company.com" />
+                </div>
+                <div>
+                  <label className="label">Change Password (leave blank to keep unchanged)</label>
+                  <input className="input" type="password" value={admin.adminPassword} onChange={e => sa('adminPassword')(e.target.value)} placeholder="Enter new password (min 8 chars)" />
+                </div>
+              </div>
+            </div>
+          )}
+
           {tab === 'limits' && (
             <div className="space-y-4">
               <p className="text-xs text-gray-500">These limits are enforced in real-time by the POS app.</p>
@@ -1932,18 +1955,6 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
                 </div>
               </div>
 
-              {company.status === 'suspended' && company.suspension_reason && (
-                <div className="bg-red-900/20 border border-red-900/40 rounded-lg px-4 py-3 text-sm space-y-1">
-                  <div className="text-red-400 font-medium flex items-center gap-1.5">
-                    <Ban className="w-3.5 h-3.5" /> Suspension reason
-                  </div>
-                  <p className="text-gray-300">{company.suspension_reason}</p>
-                  {company.suspended_at && (
-                    <p className="text-xs text-gray-500">Since {new Date(company.suspended_at).toLocaleString()}</p>
-                  )}
-                </div>
-              )}
-
               <div>
                 <label className="label">Change Package</label>
                 <select className="input" value={sub.newPackageId} onChange={e => ss('newPackageId')(e.target.value)}>
@@ -1959,28 +1970,19 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
               </div>
 
               <div>
-                <label className="label">Extend License (days)</label>
-                <div className="flex gap-2">
-                  {['7','30','90'].map(d => (
-                    <button key={d} onClick={() => ss('extendDays')(d)}
-                      className={`px-3 py-1.5 rounded text-sm border transition-colors ${
-                        sub.extendDays === d ? 'bg-indigo-600 border-indigo-500 text-white' : 'border-gray-700 text-gray-400 hover:text-white'
-                      }`}>+{d}d</button>
-                  ))}
-                  <input className="input flex-1 text-sm" type="number" min="1" placeholder="Custom days"
-                    value={sub.extendDays} onChange={e => ss('extendDays')(e.target.value)} />
-                </div>
-                <p className="text-xs text-gray-500 mt-1">Adds days to current end date (or from today if expired).</p>
+                <label className="label">Or Extend Trial / Subscription by (Days)</label>
+                <input className="input" type="number" min="1" placeholder="e.g. 30"
+                  value={sub.extendDays} onChange={e => ss('extendDays')(e.target.value)} />
               </div>
             </div>
           )}
-        </div>
 
-        <div className="px-5 py-4 border-t border-gray-800 flex gap-3 justify-end">
-          <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary flex items-center gap-2" onClick={save} disabled={saving}>
-            {saved ? '✓ Saved!' : saving ? 'Saving…' : 'Save Changes'}
-          </button>
+          <div className="flex justify-end gap-3 pt-2 border-t border-gray-800">
+            <button className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn-primary" onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : saved ? 'Saved!' : 'Save Changes'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2060,17 +2062,22 @@ function DeleteCompanyModal({ company, onClose, onDeleted }: {
 
 // ─── Reset Admin Password Modal ───────────────────────────────────────────────
 function ResetAdminPasswordModal({ company, onClose }: { company: Company; onClose: () => void }) {
-  const [confirmed, setConfirmed] = useState(false)
-  const [loading, setLoading]     = useState(false)
-  const [error, setError]         = useState('')
-  const [result, setResult]       = useState<{ tempPassword: string; adminEmail: string; adminName: string } | null>(null)
-  const [copied, setCopied]       = useState(false)
+  const [adminEmail, setAdminEmail] = useState(company.admin_email || company.email || '')
+  const [adminName, setAdminName]   = useState(company.admin_name || company.name || '')
+  const [customPassword, setCustomPassword] = useState('')
+  const [loading, setLoading]       = useState(false)
+  const [error, setError]           = useState('')
+  const [result, setResult]         = useState<{ tempPassword: string; adminEmail: string; adminName: string } | null>(null)
+  const [copied, setCopied]         = useState(false)
 
-  async function handleReset() {
-    if (!confirmed) { setConfirmed(true); return }
+  async function handleReset(passwordToSet?: string) {
     setLoading(true); setError('')
     try {
-      const r = await api.resetAdminPassword(company.id)
+      const r = await api.resetAdminPassword(company.id, {
+        email: adminEmail,
+        name: adminName,
+        password: passwordToSet || customPassword || undefined,
+      })
       setResult(r)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset password')
@@ -2100,45 +2107,47 @@ function ResetAdminPasswordModal({ company, onClose }: { company: Company; onClo
           {!result ? (
             <>
               <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg px-4 py-3 text-sm text-amber-300 space-y-1">
-                <p className="font-semibold text-amber-200">Reset Company Admin Password</p>
+                <p className="font-semibold text-amber-200">Set Company Admin Credentials</p>
                 <p className="text-xs text-amber-300/80">
-                  This generates a new temporary password for the Company Admin of <strong className="text-amber-200">{company.name}</strong>.
-                  The admin will be forced to change it on their next login.
+                  Set a custom password (like <code>admin123</code>) or auto-generate a random secure password for <strong className="text-amber-200">{company.name}</strong>.
                 </p>
               </div>
 
               {error && <p className="text-sm text-red-400">{error}</p>}
 
-              {confirmed ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-gray-300">Are you sure? A new temporary password will be generated and the old one will stop working immediately.</p>
-                  <div className="flex gap-3">
-                    <button className="btn-ghost flex-1" onClick={() => setConfirmed(false)} disabled={loading}>
-                      Cancel
-                    </button>
-                    <button
-                      className="flex-1 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-colors disabled:opacity-50"
-                      onClick={handleReset} disabled={loading}>
-                      {loading ? 'Resetting…' : 'Yes, Reset Password'}
-                    </button>
-                  </div>
+              <div className="space-y-3">
+                <div>
+                  <label className="label">Admin Name</label>
+                  <input className="input" value={adminName} onChange={e => setAdminName(e.target.value)} placeholder="Company Admin" />
                 </div>
-              ) : (
-                <div className="flex gap-3 pt-1">
-                  <button className="btn-ghost flex-1" onClick={onClose}>Cancel</button>
+
+                <div>
+                  <label className="label">Admin Email</label>
+                  <input className="input" type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} placeholder="admin@company.com" />
+                </div>
+
+                <div>
+                  <label className="label">Custom Password (optional)</label>
+                  <input className="input" type="text" value={customPassword} onChange={e => setCustomPassword(e.target.value)} placeholder="e.g. admin123 (or leave blank to auto-generate)" />
+                </div>
+
+                <div className="flex gap-3 pt-2">
+                  <button className="btn-ghost flex-1" onClick={onClose} disabled={loading}>
+                    Cancel
+                  </button>
                   <button
-                    className="flex-1 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-colors"
-                    onClick={handleReset}>
-                    Generate Temp Password
+                    className="flex-1 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-colors disabled:opacity-50"
+                    onClick={() => handleReset(customPassword || undefined)} disabled={loading}>
+                    {loading ? 'Saving…' : customPassword ? 'Set Password' : 'Auto-Generate'}
                   </button>
                 </div>
-              )}
+              </div>
             </>
           ) : (
             <div className="space-y-4">
               <div className="bg-green-900/20 border border-green-700/40 rounded-lg px-4 py-3 text-sm text-green-300">
-                <p className="font-semibold text-green-200 mb-1">✓ Password Reset Successfully</p>
-                <p className="text-xs text-green-300/80">Share these credentials securely. The admin will be forced to change their password on first login.</p>
+                <p className="font-semibold text-green-200 mb-1">✓ Admin Password Saved Successfully</p>
+                <p className="text-xs text-green-300/80">The admin user can now log into POS and the admin portal with these credentials.</p>
               </div>
 
               <div>
@@ -2150,7 +2159,7 @@ function ResetAdminPasswordModal({ company, onClose }: { company: Company; onClo
                 <p className="text-sm text-white font-mono">{result.adminEmail}</p>
               </div>
               <div>
-                <p className="text-xs text-gray-500 mb-2">Temporary Password</p>
+                <p className="text-xs text-gray-500 mb-2">Password</p>
                 <div className="flex gap-2">
                   <code className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-lg font-mono font-bold text-amber-300 tracking-wider text-center">
                     {result.tempPassword}
@@ -2163,16 +2172,7 @@ function ResetAdminPasswordModal({ company, onClose }: { company: Company; onClo
                 </div>
               </div>
 
-              <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg px-4 py-3 text-xs text-blue-300 space-y-1">
-                <p className="font-semibold text-blue-200">Next steps:</p>
-                <ol className="list-decimal list-inside space-y-0.5">
-                  <li>Share the email and password with the company admin securely</li>
-                  <li>They log in to the admin portal with these credentials</li>
-                  <li>They will be prompted to set a new permanent password immediately</li>
-                </ol>
-              </div>
-
-              <button className="btn-primary w-full" onClick={onClose}>Done</button>
+              <button className="btn-primary w-full mt-2" onClick={onClose}>Done</button>
             </div>
           )}
         </div>
