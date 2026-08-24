@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
-import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi } from '../lib/api'
+import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi, companySecurity as securityApi } from '../lib/api'
 import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send } from 'lucide-react'
 
 type MenuItemDef =
@@ -98,6 +98,7 @@ export default function CompaniesPage() {
   const [showExports, setShowExports] = useState<Company | null>(null)
   const [showBranding, setShowBranding] = useState<Company | null>(null)
   const [showNotifCreds, setShowNotifCreds] = useState<Company | null>(null)
+  const [showClearDataPw, setShowClearDataPw] = useState<Company | null>(null)
   const [showCompanyKey, setShowCompanyKey] = useState<Company | null>(null)
   const [error, setError] = useState('')
 
@@ -257,6 +258,7 @@ export default function CompaniesPage() {
                       { type: 'item', label: 'Feature Management',     icon: Settings2,   onClick: () => setShowCapabilities(c) },
                       { type: 'item', label: 'Branding (logo & color)', icon: Palette,    onClick: () => setShowBranding(c) },
                       { type: 'item', label: 'Notification Credentials (SMTP/SMS)', icon: Mail, onClick: () => setShowNotifCreds(c) },
+                      { type: 'item', label: 'Clear-All-Data Password', icon: Lock, onClick: () => setShowClearDataPw(c) },
                       { type: 'item', label: 'Backups',                icon: Database,    onClick: () => setShowBackups(c) },
                       { type: 'item', label: 'Export Data',            icon: FileDown,    onClick: () => setShowExports(c) },
                       { type: 'divider' },
@@ -310,6 +312,7 @@ export default function CompaniesPage() {
       }} />}
       {showCompanyKey && <CompanyKeyModal company={showCompanyKey} onClose={() => setShowCompanyKey(null)} onUpdated={load} />}
       {showNotifCreds && <NotificationCredentialsModal company={showNotifCreds} onClose={() => setShowNotifCreds(null)} onSaved={load} />}
+      {showClearDataPw && <ClearDataPasswordModal company={showClearDataPw} onClose={() => setShowClearDataPw(null)} />}
     </div>
   )
 }
@@ -322,6 +325,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
     name: '', email: '', phone: '', address: '',
     adminName: '', adminEmail: '', adminPhone: '',
     adminPassword: '', confirmPassword: '',
+    clearDataPassword: '', confirmClearDataPassword: '',
     packageId: '', trialDays: '14', timezone: 'Asia/Colombo', currency: 'LKR', country: 'LK',
     maxBranches: '1', maxUsers: '5', maxPosDevices: '2', maxStorageGb: '5',
   })
@@ -358,6 +362,8 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
     e.preventDefault()
     if (form.adminPassword !== form.confirmPassword) { setError('Passwords do not match'); return }
     if (form.adminPassword.length < 8) { setError('Admin password must be at least 8 characters'); return }
+    if (form.clearDataPassword !== form.confirmClearDataPassword) { setError('Clear-All-Data passwords do not match'); return }
+    if (form.clearDataPassword.length < 8) { setError('Clear-All-Data password must be at least 8 characters'); return }
     setError(''); setLoading(true)
     try {
       const res = await api.create({
@@ -495,6 +501,28 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
           </div>
 
           <div className="border-t border-gray-800 pt-4">
+            <p className="text-xs font-semibold text-gray-400 uppercase mb-1">Clear-All-Data Password</p>
+            <p className="text-xs text-gray-500 mb-3">Required to run "Clear All Data" in this company's POS app. Checked server-side only — never stored on the local device.</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="label">Password *</label>
+                <input className="input" type="password" required minLength={8}
+                  placeholder="Min 8 characters"
+                  value={form.clearDataPassword} onChange={e => set('clearDataPassword', e.target.value)} />
+              </div>
+              <div>
+                <label className="label">Confirm Password *</label>
+                <input className="input" type="password" required minLength={8}
+                  placeholder="Repeat password"
+                  value={form.confirmClearDataPassword} onChange={e => set('confirmClearDataPassword', e.target.value)} />
+                {form.confirmClearDataPassword && form.clearDataPassword !== form.confirmClearDataPassword && (
+                  <p className="text-xs text-red-400 mt-1">Passwords do not match</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="border-t border-gray-800 pt-4">
             <p className="text-xs font-semibold text-gray-400 uppercase mb-1">Resource Limits</p>
             <p className="text-xs text-gray-500 mb-3">Auto-filled from package. Override manually if needed.</p>
             <div className="grid grid-cols-4 gap-3">
@@ -520,7 +548,8 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
           <div className="flex gap-3 pt-2">
             <button type="button" className="btn-ghost flex-1" onClick={onClose}>Cancel</button>
             <button type="submit" className="btn-primary flex-1"
-              disabled={loading || !form.adminPassword || form.adminPassword !== form.confirmPassword}>
+              disabled={loading || !form.adminPassword || form.adminPassword !== form.confirmPassword
+                || !form.clearDataPassword || form.clearDataPassword !== form.confirmClearDataPassword}>
               {loading ? 'Creating…' : 'Create Company'}
             </button>
           </div>
@@ -2175,6 +2204,79 @@ function ResetAdminPasswordModal({ company, onClose }: { company: Company; onClo
               <button className="btn-primary w-full" onClick={onClose}>Done</button>
             </div>
           )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Clear-All-Data Password Modal (Issue 29) ──────────────────────────────────
+// Write-only, confirm-twice pattern (mirrors this portal's own "Change
+// Password" form) — never reads back the current hash, since a company's
+// Clear-All-Data password is a one-way check the local POS device verifies
+// against, not something a superadmin ever needs to see again.
+function ClearDataPasswordModal({ company, onClose }: { company: Company; onClose: () => void }) {
+  const [newPw, setNewPw]   = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg]       = useState<{ ok: boolean; text: string } | null>(null)
+
+  async function save() {
+    if (!newPw || !confirm) { setMsg({ ok: false, text: 'Both fields are required' }); return }
+    if (newPw !== confirm) { setMsg({ ok: false, text: 'Passwords do not match' }); return }
+    if (newPw.length < 8) { setMsg({ ok: false, text: 'Password must be at least 8 characters' }); return }
+    setSaving(true); setMsg(null)
+    try {
+      await securityApi.setClearDataPassword(company.id, newPw)
+      setMsg({ ok: true, text: 'Password saved successfully' })
+      setNewPw(''); setConfirm('')
+    } catch (err) {
+      setMsg({ ok: false, text: err instanceof Error ? err.message : 'Failed to save' })
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <Lock className="w-4 h-4 text-amber-400" />
+            <h2 className="font-semibold text-white">Clear-All-Data Password — {company.name}</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg px-4 py-3 text-xs text-amber-300 space-y-1">
+            <p className="font-semibold text-amber-200">Required to run "Clear All Data" in the POS app</p>
+            <p className="text-amber-300/80">
+              This is checked server-side by the device — it is never sent to or stored on the local
+              POS install. Setting a new password here immediately replaces the old one.
+            </p>
+          </div>
+
+          {msg && <p className={`text-sm ${msg.ok ? 'text-green-400' : 'text-red-400'}`}>{msg.text}</p>}
+
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">New Password</label>
+            <input type="password" className="input w-full" value={newPw} onChange={e => setNewPw(e.target.value)}
+              placeholder="At least 8 characters" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-1 block">Confirm New Password</label>
+            <input type="password" className="input w-full" value={confirm} onChange={e => setConfirm(e.target.value)}
+              placeholder="Re-type the password" />
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <button className="btn-ghost flex-1" onClick={onClose}>Close</button>
+            <button
+              className="flex-1 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-colors disabled:opacity-50"
+              onClick={save} disabled={saving}>
+              {saving ? 'Saving…' : 'Save Password'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

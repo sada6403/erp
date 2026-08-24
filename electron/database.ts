@@ -2315,6 +2315,22 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_sms_logs_status ON sms_logs(status);
     CREATE INDEX IF NOT EXISTS idx_sms_logs_created ON sms_logs(created_at);
   `)
+
+  // ── Multi-device forced-lock signal (Issue 30) ──────────────────────────
+  // One row per Clear All Data event, synced company-wide (see
+  // electron/services/syncService.ts's globalTables and the matching
+  // backend/lib/auth.ts tenant table) so every other device can detect it
+  // on its next sync pull and show the forced lock screen.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS data_clear_events (
+      id         TEXT PRIMARY KEY,
+      cleared_by TEXT,
+      cleared_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at  TEXT
+    );
+  `)
 }
 
 function seedDefaultData() {

@@ -113,6 +113,7 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/admin/chit-customers', label: 'Customers', perm: ['chits'] },
       { to: '/admin/smart-buy-agents', label: 'Agents', perm: ['chits'] },
       { to: '/admin/smart-buy-reminders', label: 'Payment Reminders', perm: ['chits'] },
+      { to: '/admin/smart-buy-transfers', label: 'Bank Transfers', perm: ['chits'] },
       { to: '/admin/smart-buy-reports', label: 'Reports', perm: ['chits'] },
       // Was adminOnly:true — same story as Scheme Master above: the route
       // (RequireSmartBuyAccess) and backend (canViewCommissions = chits∨all)

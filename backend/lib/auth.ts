@@ -1324,6 +1324,19 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     `ALTER TABLE chit_schemes ADD COLUMN projected_early_winners INT NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_schemes ADD COLUMN avg_product_cost DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_schemes ADD COLUMN other_expenses DECIMAL(14,2) NOT NULL DEFAULT 0`,
+
+    // Multi-device forced-lock signal (Issue 30) — one row per Clear All
+    // Data event, the source of truth every other device's normal sync pull
+    // checks against (added to globalTables/ALLOWED_TABLES, rides the
+    // existing poll — no new channel). `updated_at` is required for every
+    // synced table's generic changes query.
+    `CREATE TABLE IF NOT EXISTS data_clear_events (
+       id           CHAR(36)     NOT NULL PRIMARY KEY,
+       cleared_by   VARCHAR(255) NULL,
+       cleared_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+     )`,
   ]
 
   for (const sql of [...statements, ...stockTransferColumns]) {

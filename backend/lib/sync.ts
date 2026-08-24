@@ -51,6 +51,13 @@ export const ALLOWED_TABLES = new Set([
   // Staff/Agent positions lookup — see positions table comment in
   // electron/database.ts.
   'positions',
+  // Agent Management location grouping — see regions/zones table comments
+  // in electron/database.ts. Company-wide reference data, same shape as
+  // positions/branches.
+  'regions', 'zones',
+  // Multi-device forced-lock signal (Issue 30) — see comment in
+  // lib/auth.ts's ensureTenantCompatibility.
+  'data_clear_events',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {

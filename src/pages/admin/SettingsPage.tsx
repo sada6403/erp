@@ -196,6 +196,7 @@ export default function SettingsPage() {
   const [opsLoading, setOpsLoading] = useState(false)
   const [showClearAll, setShowClearAll] = useState(false)
   const [clearConfirmText, setClearConfirmText] = useState('')
+  const [clearPassword, setClearPassword] = useState('')
   const [clearing, setClearing] = useState(false)
   const { logout } = useAuthStore()
   const navigate = useNavigate()
@@ -273,15 +274,16 @@ export default function SettingsPage() {
     setForm(p => ({ ...p, [k]: e.target.checked }))
 
   const handleClearAllData = async () => {
-    if (clearConfirmText !== 'DELETE ALL') return
+    if (clearConfirmText !== 'DELETE ALL' || !clearPassword) return
     setClearing(true)
     try {
-      const res = await window.api.admin.clearAllData() as { success: boolean; error?: string }
+      const res = await window.api.admin.clearAllData(clearPassword) as { success: boolean; error?: string }
       if (res.success) {
-        toast.success('All data cleared. Starting setup wizard...')
+        toast.success('All data cleared. Please log back in.')
         setShowClearAll(false)
         setClearConfirmText('')
-        setTimeout(async () => { await logout(); navigate('/setup', { replace: true }) }, 1200)
+        setClearPassword('')
+        setTimeout(async () => { await logout(); navigate('/login', { replace: true }) }, 1200)
       } else {
         toast.error(res.error || 'Failed to clear data')
       }
@@ -350,7 +352,7 @@ export default function SettingsPage() {
               <div className="grid grid-cols-2 gap-3 mb-5">
                 <div className="rounded-lg p-3 space-y-1.5" style={{ background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.15)' }}>
                   <p className="text-xs font-semibold uppercase tracking-wider mb-2 text-red-400">Will be deleted</p>
-                  {['All Products','All Invoices','All Transactions','All Customers','All Payments','All Stock Records','Purchase Orders','All Expenses','Branches','Categories & Suppliers','All Users & Roles','Sync Queue'].map(item => (
+                  {['All Products','All Invoices','All Transactions','All Customers','All Payments','All Stock Records','Purchase Orders','All Expenses','Categories & Suppliers','Sync Queue'].map(item => (
                     <div key={item} className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-2)' }}>
                       <X size={10} className="text-red-500 flex-shrink-0" /> {item}
                     </div>
@@ -361,9 +363,12 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-2)' }}>
                     <span className="text-green-400 flex-shrink-0">✓</span> Settings & Configuration
                   </div>
+                  <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-2)' }}>
+                    <span className="text-green-400 flex-shrink-0">✓</span> User Accounts, Roles & Branches
+                  </div>
                   <div className="mt-3 rounded p-2 text-xs" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)' }}>
                     <p className="text-blue-400 font-semibold mb-1">After clearing:</p>
-                    <p style={{ color: 'var(--text-2)' }}>You will be redirected to the <span className="text-blue-300 font-semibold">Setup Wizard</span> to create a new admin account with custom credentials.</p>
+                    <p style={{ color: 'var(--text-2)' }}>You'll be logged out and returned to the login screen. Your existing staff accounts and their passwords/PINs are unaffected — log back in as usual.</p>
                   </div>
                 </div>
               </div>
@@ -409,11 +414,24 @@ export default function SettingsPage() {
               />
             </div>
 
+            <div className="mb-4">
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5">
+                Clear-All-Data Password
+              </label>
+              <input
+                type="password"
+                value={clearPassword}
+                onChange={e => setClearPassword(e.target.value)}
+                className="input font-mono"
+                placeholder="Set by your Super Admin"
+              />
+            </div>
+
             <div className="flex gap-2 justify-end">
-              <button onClick={() => { setShowClearAll(false); setClearConfirmText('') }} className="btn-secondary btn-sm">Cancel</button>
+              <button onClick={() => { setShowClearAll(false); setClearConfirmText(''); setClearPassword('') }} className="btn-secondary btn-sm">Cancel</button>
               <button
                 onClick={handleClearAllData}
-                disabled={clearing || clearConfirmText !== 'DELETE ALL'}
+                disabled={clearing || clearConfirmText !== 'DELETE ALL' || !clearPassword}
                 className="btn-sm px-4 py-2 rounded-lg text-white text-sm font-semibold disabled:opacity-40"
                 style={{ background: 'linear-gradient(135deg,#dc2626,#991b1b)' }}>
                 {clearing ? 'Clearing...' : 'Clear All Data'}

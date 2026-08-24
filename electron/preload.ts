@@ -335,7 +335,7 @@ const api = {
     productUom:  { list: (productId: string) => ipcRenderer.invoke('admin:productUom:list', productId), save: (productId: string, uoms: unknown) => ipcRenderer.invoke('admin:productUom:save', productId, uoms) },
     expenseCategories: { list: () => ipcRenderer.invoke('admin:expenseCategories:list'), create: (p: unknown) => ipcRenderer.invoke('admin:expenseCategories:create', p), delete: (id: string) => ipcRenderer.invoke('admin:expenseCategories:delete', id) },
     expenses:    { list: (filters?: unknown) => ipcRenderer.invoke('admin:expenses:list', filters), create: (p: unknown) => ipcRenderer.invoke('admin:expenses:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:expenses:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:expenses:delete', id) },
-    clearAllData:      () => ipcRenderer.invoke('admin:clearAllData'),
+    clearAllData:      (password: string) => ipcRenderer.invoke('admin:clearAllData', password),
     forceReset:        () => ipcRenderer.invoke('admin:forceReset'),
     isSetupRequired:   () => ipcRenderer.invoke('admin:isSetupRequired'),
     seedLocalDefaults: () => ipcRenderer.invoke('admin:seedLocalDefaults'),
@@ -505,6 +505,8 @@ const api = {
   // Device Activation + Fingerprinting
   app: {
     isActivated:        () => ipcRenderer.invoke('app:isActivated'),
+    getPendingClearEvent: () => ipcRenderer.invoke('app:getPendingClearEvent'),
+    refreshAfterClear:  () => ipcRenderer.invoke('app:refreshAfterClear'),
     getDeviceInfo:      () => ipcRenderer.invoke('app:getDeviceInfo'),
     getActivationInfo:  () => ipcRenderer.invoke('app:getActivationInfo'),
     getVersion:         () => ipcRenderer.invoke('app:getVersion'),

@@ -14,6 +14,9 @@ import Store from 'electron-store'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import * as XLSX from 'xlsx'
 import { safeHandle, safeHandleModule } from './ipcHandler'
+import { decryptSecret } from './settings'
+import { CloudApi } from '../services/cloudApi'
+import type Database from 'better-sqlite3'
 
 const store = new Store()
 
@@ -114,6 +117,65 @@ function nextInstallmentNumber(branchId: string) {
     WHERE branch_id = ? AND substr(created_at, 1, 4) = ?
   `).get(branchId, String(year)) as { count: number }
   return `${code}-INS-${year}-${String(Number(count?.count || 0) + 1).padStart(4, '0')}`
+}
+
+// Shared by `admin:clearAllData` (Issue 29, password-gated) and the
+// multi-device forced-lock "Refresh" flow (Issue 30) — a single deletion
+// implementation, never duplicated. Deletes all transactional/test data but
+// keeps app_settings/config. Safe to re-run: every statement is a plain
+// DELETE, so calling this again on already-empty tables is a no-op, and the
+// whole thing runs inside one transaction (atomic — a crash mid-wipe leaves
+// the previous state intact, never a half-wiped database).
+//
+// Issue 31: `users`/`branches`/`roles` used to be deleted here too. That is
+// structural/config data (who is allowed to log in, where they work), not
+// transactional test data, and deleting it had a serious real-world
+// consequence: after the delete, the next sync pull re-populates these
+// tables from the cloud tenant database (since Clear All Data never touches
+// the cloud copy) — and if the cloud's copy of a user's role ever drifted
+// from the local copy for any reason, that drift silently overwrites the
+// correct local data the moment it gets wiped and re-pulled, locking real
+// admins out. Never delete these three tables here again.
+export function wipeLocalTransactionalData(db: Database.Database): void {
+  const tables = [
+    'sync_queue',
+    'audit_logs',
+    'loyalty_transactions',
+    'return_items',
+    'returns',
+    'installment_payments',
+    'installment_schedules',
+    'installments',
+    'order_items',
+    'orders',
+    'invoice_items',
+    'payments',
+    'invoices',
+    'stock_count_items',
+    'stock_counts',
+    'stock_transfer_items',
+    'stock_transfers',
+    'stock_movements',
+    'batches',
+    'stocks',
+    'purchase_order_items',
+    'purchase_orders',
+    'expenses',
+    'customers',
+    'products',
+    'notifications',
+    'categories',
+    'suppliers',
+  ]
+
+  // Disable FK constraints so we can delete in any order
+  db.pragma('foreign_keys = OFF')
+  db.transaction(() => {
+    for (const table of tables) {
+      try { db.prepare(`DELETE FROM ${table}`).run() } catch { /* table may not exist */ }
+    }
+  })()
+  db.pragma('foreign_keys = ON')
 }
 
 export function registerAdminHandlers(ipcMain: IpcMain) {
@@ -1696,57 +1758,59 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   })
 
   // ── Clear All Data (wipe all transactional/test data, keep config) ────────
-  safeHandle(ipcMain, 'admin:clearAllData', (_e) => {
-    const db = getDb()
+  // Exported so Issue 30's device-lock-screen "Refresh" flow can reuse the
+  // exact same deletion routine instead of a second, possibly inconsistent
+  // implementation.
+  safeHandle(ipcMain, 'admin:clearAllData', async (_e, password: string) => {
     const caller = authUser()
     const rolePerms = (caller?.role as Record<string,unknown>)?.permissions as Record<string,unknown> || {}
     const directPerms = (caller?.permissions as Record<string,unknown>) || {}
     const perms = Object.keys(rolePerms).length ? rolePerms : directPerms
     if (!perms.all) return { success: false, error: 'Only Company Admin can clear all data' }
 
-    // Delete in FK-safe order
-    const tables = [
-      'sync_queue',
-      'audit_logs',
-      'loyalty_transactions',
-      'return_items',
-      'returns',
-      'installment_payments',
-      'installment_schedules',
-      'installments',
-      'order_items',
-      'orders',
-      'invoice_items',
-      'payments',
-      'invoices',
-      'stock_count_items',
-      'stock_counts',
-      'stock_transfer_items',
-      'stock_transfers',
-      'stock_movements',
-      'batches',
-      'stocks',
-      'purchase_order_items',
-      'purchase_orders',
-      'expenses',
-      'customers',
-      'products',
-      'notifications',
-      'categories',
-      'suppliers',
-    ]
-
-    // Disable FK constraints so we can delete in any order
-    db.pragma('foreign_keys = OFF')
-    db.transaction(() => {
-      for (const table of tables) {
-        try { db.prepare(`DELETE FROM ${table}`).run() } catch { /* table may not exist */ }
+    // Verify the Clear-All-Data password server-side before touching
+    // anything (Issue 29) — the hash never reaches this device, so
+    // connectivity is required by design for this fully destructive action.
+    const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const apiUrl = String(appSettings.cloud_api_url || '').trim()
+    const apiKey = decryptSecret(appSettings.cloud_api_key).trim()
+    if (!apiUrl || !apiKey) {
+      return { success: false, error: 'Cannot verify password — this device is not connected to the cloud' }
+    }
+    const cloud = new CloudApi({ baseUrl: apiUrl, apiKey })
+    try {
+      const verify = await cloud.verifyClearDataPassword(password || '')
+      if (!verify.success) {
+        return { success: false, error: verify.error || 'Incorrect password' }
       }
-      try { db.prepare(`DELETE FROM users`).run() } catch { /* ok */ }
-      try { db.prepare(`DELETE FROM branches`).run() } catch { /* ok */ }
-      try { db.prepare(`DELETE FROM roles`).run() } catch { /* ok */ }
-    })()
-    db.pragma('foreign_keys = ON')
+    } catch (err) {
+      return { success: false, error: (err as Error).message || 'Unable to verify password — check your internet connection' }
+    }
+
+    // Record a company-wide "data cleared" event BEFORE wiping anything
+    // (Issue 30) — this device's own sync_queue is about to be deleted as
+    // part of the wipe, so the event is pushed directly rather than via the
+    // normal local sync_queue (which would never survive to be sent). If
+    // this push fails, abort entirely with no local changes — otherwise
+    // every other device would never learn this device's data no longer
+    // matches reality.
+    const clearEventId = crypto.randomUUID()
+    try {
+      await cloud.push({
+        table: 'data_clear_events',
+        operation: 'INSERT',
+        recordId: clearEventId,
+        record: { id: clearEventId, cleared_by: (caller?.name as string) || (caller?.email as string) || null, cleared_at: new Date().toISOString() },
+      })
+    } catch (err) {
+      return { success: false, error: 'Failed to record the clear event — nothing was deleted. ' + ((err as Error).message || '') }
+    }
+    // This device originated the event — mark it acknowledged immediately
+    // so its own next sync pull recognizes this exact event as already
+    // handled and never shows itself the lock screen.
+    store.set('last_acknowledged_clear_event_id', clearEventId)
+
+    wipeLocalTransactionalData(getDb())
 
     // Delete all uploaded images (product photos, logos etc.)
     const uploadsDir = path.join(app.getPath('userData'), 'uploads')
@@ -1754,8 +1818,9 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       fs.rmSync(uploadsDir, { recursive: true, force: true })
     }
 
-    // Mark first-time setup required and clear session
-    store.set('setup_required', true)
+    // Clear session (force a fresh login) — no longer marks setup_required:
+    // users/roles/branches now survive the wipe (Issue 31), so there's
+    // nothing to set up again, just log back in normally.
     store.delete('auth_user')
     store.delete('auth_token')
     store.delete('last_pull_timestamp')
@@ -1777,7 +1842,13 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     // config, a reachable non-401 response, or a network error all abort.
     const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
     const apiUrl = String(appSettings.cloud_api_url || '')
-    const apiKey = String(appSettings.cloud_api_key || '')
+    // Issue 31: cloud_api_key is stored encrypted (SECRET_KEYS in settings.ts)
+    // — this was reading the raw ciphertext, so it NEVER matched the real
+    // key. Every call here got a 401 for the wrong reason (bad credentials,
+    // not a real tenant deletion), and this handler treats ANY 401 as
+    // "cloud confirms this tenant is gone" — meaning it could have wiped
+    // local data on a false positive every single time it fired.
+    const apiKey = decryptSecret(appSettings.cloud_api_key)
     if (!apiUrl || !apiKey) {
       return { success: false, error: 'Reset refused: no cloud configuration to verify against' }
     }

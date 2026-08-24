@@ -27,6 +27,7 @@ import SmartBuyDashboardPage from '@/pages/admin/SmartBuyDashboardPage'
 import CommissionRulesPage from '@/pages/admin/CommissionRulesPage'
 import SmartBuyReportsPage from '@/pages/admin/SmartBuyReportsPage'
 import PaymentRemindersPage from '@/pages/admin/PaymentRemindersPage'
+import SmartBuyBankTransfersPage from '@/pages/admin/SmartBuyBankTransfersPage'
 import SmartBuySettingsPage from '@/pages/admin/SmartBuySettingsPage'
 import SchemeMasterPage from '@/pages/admin/SchemeMasterPage'
 import SmartBuyAwardWizardPage from '@/pages/admin/SmartBuyAwardWizardPage'
@@ -65,6 +66,7 @@ import SystemHealthPage from '@/pages/admin/SystemHealthPage'
 import TransactionReportPage from '@/pages/admin/TransactionReportPage'
 import AdvancedReportsPage from '@/pages/admin/AdvancedReportsPage'
 import ActivationPage from '@/pages/ActivationPage'
+import DataClearedLockScreen from '@/pages/DataClearedLockScreen'
 import SetupWizardPage from '@/pages/SetupWizardPage'
 import { loadAndApplySystemTheme } from '@/lib/systemTheme'
 import { getLandingRoute } from '@/lib/sessionRouting'
@@ -124,6 +126,18 @@ export default function App() {
   const { init, refreshSilently } = useAuthStore()
   const navigate   = useNavigate()
   const [activated, setActivated] = useState<boolean | null>(null)
+  const [pendingClearEvent, setPendingClearEvent] = useState<{ locked: boolean; eventId: string | null } | null>(null)
+
+  // Multi-device forced lock screen (Issue 30) — checked first thing at
+  // boot, ahead of the activation/login sequence, purely from local
+  // storage (no network needed), so the lock reappears immediately on
+  // every relaunch even if this device is offline.
+  useEffect(() => {
+    if (!window.api?.app?.getPendingClearEvent) { setPendingClearEvent({ locked: false, eventId: null }); return }
+    window.api.app.getPendingClearEvent()
+      .then((r: { locked: boolean; eventId: string | null }) => setPendingClearEvent(r))
+      .catch(() => setPendingClearEvent({ locked: false, eventId: null }))
+  }, [])
 
   async function finishActivation() {
     setActivated(true)
@@ -177,6 +191,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activated])
 
+  if (pendingClearEvent === null) return <LoadingScreen />
+  if (pendingClearEvent.locked) {
+    return <DataClearedLockScreen onUnlocked={() => setPendingClearEvent({ locked: false, eventId: null })} />
+  }
+
   if (activated === null) return <LoadingScreen />
   if (!activated) return <ActivationPage onActivated={() => { finishActivation().catch(() => navigate('/login', { replace: true })) }} />
 
@@ -224,6 +243,7 @@ export default function App() {
         <Route path="/admin/commission-rules" element={<RequireSmartBuyAccess><CommissionRulesPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-reports" element={<RequireSmartBuyAccess><SmartBuyReportsPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-reminders" element={<RequireSmartBuyAccess><PaymentRemindersPage /></RequireSmartBuyAccess>} />
+        <Route path="/admin/smart-buy-transfers" element={<RequireSmartBuyAccess><SmartBuyBankTransfersPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/smart-buy-settings" element={<RequireSuperAdmin><SmartBuySettingsPage /></RequireSuperAdmin>} />
         {/* Was RequireSuperAdmin — the menu link now shows for chits users too
             (AppLayout.tsx), and the backend (chits:templates:list) already

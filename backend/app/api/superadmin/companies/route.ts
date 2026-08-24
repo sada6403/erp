@@ -29,13 +29,20 @@ export async function POST(req: NextRequest) {
   const { name, email, phone, address, timezone, currency, country,
           adminEmail, adminName, adminPhone, adminPassword,
           packageId, trialDays, notes,
-          maxBranches, maxUsers, maxPosDevices, maxStorageGb } = body
+          maxBranches, maxUsers, maxPosDevices, maxStorageGb,
+          clearDataPassword } = body
 
   if (!name || !email || !adminEmail || !adminName) {
     return NextResponse.json({ error: 'name, email, adminEmail, adminName required' }, { status: 400 })
   }
   if (!adminPassword || adminPassword.length < 8) {
     return NextResponse.json({ error: 'adminPassword must be at least 8 characters' }, { status: 400 })
+  }
+  // Mandatory at creation time (Issue 29) — no company should ever end up
+  // without one going forward; pre-existing companies were backfilled with
+  // a shared default (see lib/db.ts's autoMigrate).
+  if (!clearDataPassword || clearDataPassword.length < 8) {
+    return NextResponse.json({ error: 'clearDataPassword must be at least 8 characters' }, { status: 400 })
   }
 
   const result = await createTenant({
@@ -44,6 +51,7 @@ export async function POST(req: NextRequest) {
     packageId, trialDays,
     createdBy: auth.payload.sub, notes,
     maxBranches, maxUsers, maxPosDevices, maxStorageGb,
+    clearDataPassword,
   })
 
   await auditLog({ portal: 'superadmin', actorType: 'superadmin', actorId: auth.payload.sub,

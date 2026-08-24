@@ -1,5 +1,6 @@
 import mysql, { type Pool, type PoolOptions } from 'mysql2/promise'
 import { format as sqlFormat } from 'mysql2'
+import bcrypt from 'bcryptjs'
 
 // ─── Convert PostgreSQL $1,$2 placeholders → MySQL ? ─────────────────────────
 function convertSql(sql: string): string {
@@ -382,6 +383,14 @@ async function autoMigrate() {
        started_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
        ended_at       DATETIME     NULL
      )`,
+
+    // Clear-All-Data password gate (Issue 29) — a one-way bcrypt hash, never
+    // decrypted/read back, so it's a dedicated column rather than nested in
+    // branding_json (which is for reversible integration config). Attempts/
+    // lockout mirror the same 5-attempt/15-minute shape as user login.
+    `ALTER TABLE companies ADD COLUMN clear_data_password_hash VARCHAR(60) NULL`,
+    `ALTER TABLE companies ADD COLUMN clear_data_attempts INT NOT NULL DEFAULT 0`,
+    `ALTER TABLE companies ADD COLUMN clear_data_locked_until DATETIME NULL`,
   ]
 
   for (const sql of stmts) {
@@ -391,6 +400,21 @@ async function autoMigrate() {
       // Log but don't crash — ALTER TABLE IF NOT EXISTS may be unsupported on older MySQL
       console.warn('[autoMigrate] skipped:', (e as Error).message?.slice(0, 120))
     }
+  }
+
+  // One-time backfill: companies created before this feature existed would
+  // otherwise be permanently unable to use Clear All Data (Issue 29 requires
+  // a password to be set). Client-confirmed default for pre-existing
+  // companies. New companies set their own at creation time (see
+  // lib/tenant.ts's createTenant) and never hit this path.
+  try {
+    const hash = await bcrypt.hash('naturalplantation2026@', 10)
+    await pool.query(
+      `UPDATE companies SET clear_data_password_hash = ? WHERE clear_data_password_hash IS NULL`,
+      [hash]
+    )
+  } catch (e) {
+    console.warn('[autoMigrate] clear-data-password backfill skipped:', (e as Error).message?.slice(0, 120))
   }
 }
 

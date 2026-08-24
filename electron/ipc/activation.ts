@@ -7,6 +7,8 @@ import { decryptSecret } from './settings'
 import { safeHandle } from './ipcHandler'
 import { getDb } from '../database'
 import { reconcileLocalMainBranch } from '../services/branchReconcile'
+import { wipeLocalTransactionalData } from './admin'
+import { CloudApi } from '../services/cloudApi'
 
 const store = new Store()
 
@@ -93,6 +95,57 @@ export function getDeviceFingerprint(): string {
 export function registerActivationHandlers() {
   safeHandle(ipcMain, 'app:isActivated', () => {
     return Boolean(store.get('device_activated'))
+  })
+
+  // Multi-device forced lock screen (Issue 30). Checked at boot, before any
+  // normal UI — purely local, no network needed, so the lock persists even
+  // if this device later goes offline after already detecting the event.
+  safeHandle(ipcMain, 'app:getPendingClearEvent', () => {
+    const pending = store.get('pending_clear_event_id') as string | null | undefined
+    const acknowledged = store.get('last_acknowledged_clear_event_id') as string | null | undefined
+    const locked = Boolean(pending) && pending !== acknowledged
+    return { locked, eventId: locked ? pending : null }
+  })
+
+  // The lock screen's one button. Deliberately unauthenticated — this fires
+  // before any login screen even renders, same as admin:forceReset firing
+  // with no logged-in user. Reuses the exact same deletion routine as the
+  // password-gated Clear All Data (Issue 29), never a second implementation.
+  safeHandle(ipcMain, 'app:refreshAfterClear', async () => {
+    const pending = store.get('pending_clear_event_id') as string | null | undefined
+    if (!pending) return { success: true }
+
+    const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const apiUrl = String(appSettings.cloud_api_url || '').trim()
+    const apiKey = decryptSecret(appSettings.cloud_api_key).trim()
+    if (!apiUrl || !apiKey) {
+      return { success: false, error: 'Cannot refresh — this device is not connected to the cloud' }
+    }
+    const cloud = new CloudApi({ baseUrl: apiUrl, apiKey })
+    try {
+      await cloud.health()
+    } catch {
+      return { success: false, error: 'Unable to reach the cloud — check your internet connection and try again' }
+    }
+
+    try {
+      wipeLocalTransactionalData(getDb())
+    } catch (err) {
+      return { success: false, error: 'Failed to reset local data: ' + ((err as Error).message || '') }
+    }
+
+    // Force a full re-pull — the same "first sync" mechanism a newly
+    // activated device already uses (see this file's own activation success
+    // handler below), rather than a delta from a cursor that no longer
+    // matches reality after a wipe.
+    store.set('last_pull_timestamp', '1970-01-01T00:00:00.000Z')
+    try {
+      const { getSyncService } = await import('../services/syncService')
+      getSyncService().runSoon()
+    } catch { /* best-effort trigger, same as the activation flow's own call */ }
+
+    store.set('last_acknowledged_clear_event_id', pending)
+    return { success: true }
   })
 
   // Gate for the hidden server-settings panels (activation page + settings)

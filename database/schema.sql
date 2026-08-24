@@ -599,6 +599,16 @@ CREATE TABLE IF NOT EXISTS sms_logs (
 CREATE INDEX IF NOT EXISTS idx_sms_logs_status  ON sms_logs(status);
 CREATE INDEX IF NOT EXISTS idx_sms_logs_created ON sms_logs(created_at);
 
+-- ─── DATA CLEAR EVENTS ──────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS data_clear_events (
+  id         TEXT PRIMARY KEY,
+  cleared_by TEXT,
+  cleared_at TEXT NOT NULL DEFAULT (datetime('now')),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at  TEXT
+);
+
 -- ─── SEED DEFAULT ROLES ────────────────────────────────────────────────────
 INSERT OR IGNORE INTO roles (id, name, permissions) VALUES
   ('3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d',   'Company Admin',   '{"all":true}'),

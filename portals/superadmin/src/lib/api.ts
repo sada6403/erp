@@ -104,6 +104,12 @@ export const companyNotifications = {
     request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/sms-test`, { method: 'POST', body: JSON.stringify({ to }) }),
 }
 
+// ─── Clear-All-Data password (Issue 29) — write-only, never read back ─────────
+export const companySecurity = {
+  setClearDataPassword: (companyId: string, newPassword: string) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/clear-data-password`, { method: 'POST', body: JSON.stringify({ newPassword }) }),
+}
+
 // ─── Company Devices ──────────────────────────────────────────────────────────
 export const devices = {
   list:       (companyId: string) => request<unknown[]>(`/api/superadmin/companies/${companyId}/devices`),

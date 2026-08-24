@@ -99,6 +99,18 @@ export class CloudApi {
     return result.data
   }
 
+  // Verifies a Clear-All-Data password server-side (Issue 29) — the hash
+  // itself never reaches this device. Always resolves (never throws for a
+  // normal wrong-password/lockout response, since the backend returns 200
+  // with {success:false, error} for those cases); a thrown error here means
+  // the device itself couldn't reach/authenticate to the backend at all.
+  async verifyClearDataPassword(password: string): Promise<{ success: boolean; error?: string }> {
+    return this.request('/api/company/clear-data-password/verify', {
+      method: 'POST',
+      body: JSON.stringify({ password }),
+    })
+  }
+
   async getBranding(): Promise<{ branding: Record<string, unknown>; updated_at: string | null }> {
     return this.request('/api/company/branding')
   }

@@ -212,7 +212,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a1a}
 .brand{display:flex;align-items:center;gap:14px}
 .logo{width:62px;height:62px;background:linear-gradient(135deg,#15803d,#166534);border-radius:14px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .co-name{font-size:26px;font-weight:800;color:#15803d;letter-spacing:-0.5px;line-height:1.1}
-.co-sub{font-size:10px;color:#9ca3af;margin-top:4px;letter-spacing:1px;text-transform:uppercase}
+.co-sub{font-size:10px;color:#4b5563;margin-top:4px;letter-spacing:1px;text-transform:uppercase}
 .inv-right{text-align:right}
 .inv-word{font-size:34px;font-weight:900;color:#e5e7eb;letter-spacing:5px;text-transform:uppercase;line-height:1}
 .inv-num{font-size:14px;color:#15803d;font-weight:700;margin-top:6px;font-family:monospace;letter-spacing:0.5px}
@@ -223,14 +223,14 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#1a1a1a}
 /* Two col */
 .two{display:flex;justify-content:space-between;gap:32px;margin-bottom:32px}
 .left-col{flex:1}
-.info-box h4{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#9ca3af;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6}
+.info-box h4{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#4b5563;margin-bottom:6px;padding-bottom:4px;border-bottom:1px solid #f3f4f6}
 .iname{font-weight:700;font-size:15px;color:#111;margin-bottom:3px}
 .info-box p{font-size:12px;color:#4b5563;line-height:1.7}
 
 .meta-box{background:#f9fafb;border-radius:10px;padding:16px 20px;border:1px solid #e5e7eb;min-width:230px}
 .mrow{display:flex;justify-content:space-between;align-items:center;padding:6px 0}
 .mrow:not(:last-child){border-bottom:1px solid #f3f4f6}
-.ml{font-size:10px;color:#9ca3af;text-transform:uppercase;letter-spacing:0.8px;font-weight:600}
+.ml{font-size:10px;color:#4b5563;text-transform:uppercase;letter-spacing:0.8px;font-weight:600}
 .mv{font-size:12px;font-weight:600;color:#111}
 
 /* Table */
@@ -245,7 +245,7 @@ tbody tr:nth-child(even){background:#fafafa}
 td{padding:11px 14px;font-size:12px;color:#374151}
 .tr{text-align:right}
 .pname{font-weight:600;color:#111;font-size:13px}
-.psku{font-size:10px;color:#9ca3af;margin-top:2px;font-family:monospace}
+.psku{font-size:10px;color:#4b5563;margin-top:2px;font-family:monospace}
 
 /* Bottom: payment + totals */
 .bottom{display:flex;justify-content:space-between;align-items:flex-start;gap:32px;margin-bottom:24px}
@@ -254,13 +254,13 @@ td{padding:11px 14px;font-size:12px;color:#374151}
 .badge{display:inline-block;background:#15803d;color:#fff;padding:5px 14px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.8px;margin-bottom:12px}
 .prow{display:flex;justify-content:space-between;font-size:12px;padding:5px 0}
 .pref{padding-top:0;font-size:11px}
-.pl{color:#6b7280}
+.pl{color:#4b5563}
 .pv{font-weight:600;color:#111}
 .pv.green{color:#15803d}
 
 .tot-box{width:256px}
 .trow{display:flex;justify-content:space-between;padding:7px 0;font-size:13px;border-bottom:1px solid #f3f4f6}
-.tl{color:#6b7280}
+.tl{color:#4b5563}
 .tv{font-weight:500;color:#111}
 .trow.disc .tv{color:#dc2626}
 .trow.grand{background:#15803d;margin:10px -14px 0;padding:14px 14px;border-radius:10px;border:none}
@@ -268,12 +268,12 @@ td{padding:11px 14px;font-size:12px;color:#374151}
 
 /* Note */
 .note{background:#fffbeb;border-left:3px solid #f59e0b;padding:10px 14px;border-radius:0 6px 6px 0;margin-bottom:24px}
-.note p{font-size:11px;color:#78716c;font-style:italic}
+.note p{font-size:11px;color:#4b5563;font-style:italic}
 
 /* Footer */
 .foot{border-top:2px solid #e5e7eb;padding-top:20px;text-align:center}
 .foot .ty{font-size:17px;font-weight:700;color:#15803d;margin-bottom:4px}
-.foot .contact{font-size:11px;color:#9ca3af;margin-top:10px}
+.foot .contact{font-size:11px;color:#4b5563;margin-top:10px}
 .barcode{margin:12px auto 2px;max-width:250px;line-height:0}
 .barcode svg{width:100%;height:46px;display:block}
 .bc-num{font-size:10px;font-family:monospace;letter-spacing:2px;margin-bottom:8px;color:#111}

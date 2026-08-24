@@ -564,6 +564,7 @@ export async function createTenant(params: {
   timezone?: string; currency?: string; country?: string
   packageId?: string; trialDays?: number; createdBy?: string; notes?: string
   maxBranches?: number; maxUsers?: number; maxPosDevices?: number; maxStorageGb?: number
+  clearDataPassword: string
 }): Promise<{ companyId: string; slug: string; dbSchema: string; apiKey: string; companyKey: string }> {
   const slug     = await uniqueSlug(slugify(params.name))
   const dbSchema = `pos_erp_${slug.replace(/-/g, '_').slice(0, 35)}_${Date.now().toString(36)}`
@@ -571,6 +572,7 @@ export async function createTenant(params: {
   const apiKey    = randomUUID()   // unique key the Electron POS uses to sync
   const companyKey = randomUUID()  // shared activation key for POS device onboarding
   const trialDays = params.trialDays ?? 14
+  const clearDataPasswordHash = await bcrypt.hash(params.clearDataPassword, 10)
 
   // Fetch package limits, then apply any manual overrides from params
   let maxBranches = 1, maxUsers = 5, maxPosDevices = 2, maxStorageGb = 5
@@ -599,8 +601,9 @@ export async function createTenant(params: {
        (id, slug, name, email, phone, address, timezone, currency, country,
         db_schema, api_key, company_key, status, trial_ends_at,
         max_branches, max_users, max_pos_devices, max_storage_gb,
-        admin_email, admin_name, admin_phone, notes, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'trial', DATE_ADD(NOW(), INTERVAL ? DAY),?,?,?,?,?,?,?,?,?)`,
+        admin_email, admin_name, admin_phone, notes, created_by,
+        clear_data_password_hash)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'trial', DATE_ADD(NOW(), INTERVAL ? DAY),?,?,?,?,?,?,?,?,?,?)`,
     [
       companyId, slug, params.name, params.email, params.phone ?? null, params.address ?? null,
       params.timezone ?? 'Asia/Colombo', params.currency ?? 'LKR', params.country ?? 'LK',
@@ -608,6 +611,7 @@ export async function createTenant(params: {
       maxBranches, maxUsers, maxPosDevices, maxStorageGb,
       params.adminEmail, params.adminName, params.adminPhone ?? null,
       params.notes ?? null, params.createdBy ?? null,
+      clearDataPasswordHash,
     ]
   )
 

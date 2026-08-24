@@ -706,7 +706,7 @@ export default function TransactionReportPage() {
                     </span>
                   </td>
                   <td className="px-3 py-2">
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                    <div className="flex items-center gap-1">
                       <button
                         onClick={() => openDetail(r.id)}
                         className="flex items-center gap-1 px-2 py-1 rounded bg-surface-600 hover:bg-surface-500 text-slate-300 text-xs"

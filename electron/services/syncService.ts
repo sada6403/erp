@@ -339,6 +339,15 @@ export class SyncService {
       'held_carts',
       // Staff/Agent positions — company-wide lookup list, pulled directly.
       'positions',
+      // Agent Management location grouping — company-wide lookup lists,
+      // pulled directly, same treatment as positions/branches. Previously
+      // missing here (and from the backend allowlist), so every push for
+      // these two tables permanently failed with "Unsupported sync table".
+      'regions', 'zones',
+      // Multi-device forced-lock signal (Issue 30) — rides this same pull
+      // cycle for free, no new polling mechanism. See the special-case
+      // handling right after this loop fetches each table's rows below.
+      'data_clear_events',
     ]
 
     let pulledInstallmentIds: string[] = []
@@ -366,6 +375,20 @@ export class SyncService {
       }
       if (table === 'chit_schemes') {
         pulledChitSchemeIds = data.map(row => String(row.id))
+      }
+      // Multi-device forced-lock signal (Issue 30) — the latest event by
+      // cleared_at is what matters (handled by event id, not a boolean, so
+      // a second clear while one is still unacknowledged just supersedes
+      // which id is pending). Skip if it's the exact event THIS device
+      // already acknowledged (either because it originated it, or because
+      // Refresh already ran for it).
+      if (table === 'data_clear_events') {
+        const latest = data.reduce((a, b) => (String(a.cleared_at) > String(b.cleared_at) ? a : b))
+        const latestId = String(latest.id)
+        const acknowledged = store.get('last_acknowledged_clear_event_id') as string | null
+        if (latestId !== acknowledged) {
+          store.set('pending_clear_event_id', latestId)
+        }
       }
 
       const pendingIds = (db.prepare(`
