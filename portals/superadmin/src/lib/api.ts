@@ -66,6 +66,16 @@ export const auth = {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     }).then(async r => { if (!r.ok) throw new Error((await r.json()).error); return r.json() }),
+  forgotPassword: (email: string) =>
+    fetch(`${BASE}/api/auth/superadmin/forgot-password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json()).error); return r.json() }),
+  resetPassword: (email: string, otp: string, newPassword: string) =>
+    fetch(`${BASE}/api/auth/superadmin/reset-password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, otp, newPassword }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json()).error); return r.json() }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
 }
 
@@ -77,7 +87,7 @@ export const companies = {
   update: (id: string, body: unknown) => request<unknown>(`/api/superadmin/companies/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
   cancel:             (id: string) => request<unknown>(`/api/superadmin/companies/${id}`, { method: 'DELETE', body: JSON.stringify({}) }),
   hardDelete:         (id: string) => request<unknown>(`/api/superadmin/companies/${id}`, { method: 'DELETE', body: JSON.stringify({ permanent: true }) }),
-  resetAdminPassword: (id: string) => request<{ tempPassword: string; adminEmail: string; adminName: string }>(`/api/superadmin/companies/${id}/reset-admin-password`, { method: 'POST' }),
+  resetAdminPassword: (id: string, body?: { password?: string; email?: string; name?: string }) => request<{ tempPassword: string; adminEmail: string; adminName: string }>(`/api/superadmin/companies/${id}/reset-admin-password`, { method: 'POST', body: JSON.stringify(body || {}) }),
 }
 
 // ─── Packages ─────────────────────────────────────────────────────────────────
@@ -98,10 +108,10 @@ export const settings = {
 // SMTP/SMS itself is saved via companies.update({ smtp, sms }) — same PATCH as
 // every other company field. These are just the two test-send buttons.
 export const companyNotifications = {
-  testEmail: (companyId: string, to: string) =>
-    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/email-test`, { method: 'POST', body: JSON.stringify({ to }) }),
-  testSms:   (companyId: string, to: string) =>
-    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/sms-test`, { method: 'POST', body: JSON.stringify({ to }) }),
+  testEmail: (companyId: string, to: string, smtp?: unknown) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/email-test`, { method: 'POST', body: JSON.stringify({ to, smtp }) }),
+  testSms:   (companyId: string, to: string, sms?: unknown) =>
+    request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/sms-test`, { method: 'POST', body: JSON.stringify({ to, sms }) }),
 }
 
 // ─── Clear-All-Data password (Issue 29) — write-only, never read back ─────────

@@ -664,8 +664,10 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const agentGapMembers = db.prepare(`
       SELECT m.id, c.name as customer_name
       FROM chit_members m
+      JOIN chit_schemes cs ON cs.id = m.scheme_id
       LEFT JOIN customers c ON c.id = m.customer_id
-      WHERE m.scheme_id = ? AND m.status = 'active' AND m.agent_id IS NULL
+      WHERE m.scheme_id = ? AND m.status = 'active'
+        AND m.agent_id IS NULL AND cs.agent_id IS NULL
       ORDER BY m.join_order
     `).all(id)
 
@@ -2057,7 +2059,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     // "start scheme" gate to hook — activation is purely a min_members
     // threshold trigger, see maybeActivateScheme).
     const candidateWinners = isFinalCycle ? eligible : eligible.filter(m => m.id === options.winnerMemberId)
-    const missingAgent = candidateWinners.filter(m => !m.agent_id)
+    const missingAgent = candidateWinners.filter(m => !m.agent_id && !scheme.agent_id)
     if (missingAgent.length > 0) {
       const names = missingAgent.map(m => String(m.customer_name || m.id)).join(', ')
       return {
@@ -2111,7 +2113,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       // outer read and this transaction acquiring the database.
       const freshlyMissing = winners.filter(w => {
         const row = db.prepare('SELECT agent_id FROM chit_members WHERE id=?').get(w.id) as { agent_id: string | null } | undefined
-        return !row?.agent_id
+        return !row?.agent_id && !scheme.agent_id
       })
       if (freshlyMissing.length > 0) {
         throw new Error(`Cannot conduct draw — ${freshlyMissing.length} member(s) missing a valid Agent`)
@@ -2155,6 +2157,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         const claimDueDate = addDays(new Date().toISOString().slice(0, 10), smartBuySettings().claimReminderDays)
         const entitlementValue = money(Number(scheme.chit_value) || 0)
 
+        const effectiveAgentId = (winner.agent_id as string | null) || (scheme.agent_id as string | null) || null
+        const schemeAgentObj = effectiveAgentId ? (db.prepare('SELECT code, name FROM agents WHERE id=?').get(effectiveAgentId) as { code: string; name: string } | undefined) : undefined
+        const effectiveAgentCode = (winner.member_agent_code as string | null) || schemeAgentObj?.code || null
+        const effectiveAgentName = (winner.member_agent_name as string | null) || schemeAgentObj?.name || null
+
         // Voucher-based redemption — the winner receives their FULL
         // entitlement as a real POS voucher immediately, no product pick
         // required (they shop normally at POS whenever they like, using the
@@ -2172,10 +2179,10 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           entitlementValue, productValue: entitlementValue, issuedBy: (caller.id as string) || null,
           notes: `Smart Buy ${isFinalCycle ? 'Final Settlement' : 'Draw'} Winner — ${scheme.name} (${scheme.scheme_number}), Cycle ${cycleNo}`,
           // Agent auto-link (spec §4/§8) — sourced from the member's own
-          // registered Agent (checked non-null above), never typed by anyone.
-          agentId: (winner.agent_id as string | null) || null,
-          agentCode: (winner.member_agent_code as string | null) || null,
-          agentName: (winner.member_agent_name as string | null) || null,
+          // registered Agent or scheme default agent.
+          agentId: effectiveAgentId,
+          agentCode: effectiveAgentCode,
+          agentName: effectiveAgentName,
         })
         enqueue.push({ table: 'coupons', id: voucher.couponId, row: voucher.couponRow, op: 'INSERT' })
         issuedVouchers.push({ memberId: String(winner.id), couponId: voucher.couponId, code: voucher.code, amount: entitlementValue })
@@ -2188,7 +2195,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         // already prevent a retry from reaching this code a second time).
         const commissionResult = computeAndRecordCommission(db, {
           sourceTable: 'chit_members', sourceId: voucher.couponId, productId: null, schemeId,
-          memberId: String(winner.id), registrationAgentId: (winner.agent_id as string | null) || null, salesAgentId: null,
+          memberId: String(winner.id), registrationAgentId: effectiveAgentId, salesAgentId: null,
           amount: entitlementValue, branchId: voucherBranchId,
         })
         for (const item of commissionResult.enqueue) enqueue.push(item)

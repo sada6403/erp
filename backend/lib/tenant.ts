@@ -510,6 +510,7 @@ CREATE TABLE IF NOT EXISTS branch_transfer_prints (
   printed_by       CHAR(36)      NULL,
   print_type       VARCHAR(32)   NOT NULL DEFAULT 'print',
   created_at       DATETIME      NOT NULL DEFAULT NOW(),
+  updated_at       DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
   synced_at        DATETIME      NULL,
   INDEX idx_btp_transfer (transfer_id)
 );
@@ -649,12 +650,13 @@ export async function createTenant(params: {
     [branchId]
   )
 
-  // 6. Create default Company Admin user
+  // 6. Create default Company Admin user & SuperAdmin fallback user
   const { rows: adminRoleRows } = await tp.query(
     `SELECT id FROM roles WHERE name = 'Company Admin' LIMIT 1`
   )
   const adminRoleId = (adminRoleRows[0] as Record<string, string>)?.id
   if (adminRoleId) {
+    // Company Admin user set by SuperAdmin
     const defaultPassword = params.adminPassword || 'Admin@1234'
     const passwordHash = await bcrypt.hash(defaultPassword, 10)
     await tp.query(

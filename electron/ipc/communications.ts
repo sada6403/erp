@@ -20,7 +20,7 @@ function appSettings(): Record<string, unknown> {
 export function registerCommunicationHandlers() {
 
   // ── Email ──────────────────────────────────────────────────────────────────
-  safeHandle(ipcMain, 'comm:email:test', async (_e, testTo: string) => testEmail(testTo))
+  safeHandle(ipcMain, 'comm:email:test', async (_e, testTo: string, overrideConfig?: Record<string, unknown>) => testEmail(testTo, overrideConfig))
 
   safeHandle(ipcMain, 'comm:email:sendInvoice', async (_e, payload: {
     to: string

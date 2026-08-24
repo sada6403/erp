@@ -392,6 +392,7 @@ function runMigrations(): void {
       printed_by       TEXT,
       print_type       TEXT NOT NULL DEFAULT 'print',
       created_at       TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at       TEXT NOT NULL DEFAULT (datetime('now')),
       synced_at        TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_btp_transfer ON branch_transfer_prints(transfer_id);
@@ -818,6 +819,9 @@ function runMigrations(): void {
   // show up in stock-on-hand and sales/tax reporting like any other sale.
   if (!hasColumn('chit_members', 'redemption_invoice_id')) {
     db.exec(`ALTER TABLE chit_members ADD COLUMN redemption_invoice_id TEXT REFERENCES invoices(id)`)
+  }
+  if (!hasColumn('branch_transfer_prints', 'updated_at')) {
+    db.exec(`ALTER TABLE branch_transfer_prints ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))`)
   }
   db.exec(`
 
@@ -2334,16 +2338,12 @@ function runMigrations(): void {
 }
 
 function seedDefaultData() {
-  const bcrypt = require('bcryptjs')
-
-  // Seed a default branch (using standard UUID format)
   const branchId = 'b1111111-1111-4111-8111-111111111111'
   db.prepare(`
     INSERT OR IGNORE INTO branches (id, name, address, phone)
     VALUES (?, 'Main Branch', '', '+94 11 000 0000')
   `).run(branchId)
 
-  // Seed a default warehouse (using standard UUID format)
   db.prepare(`
     INSERT OR IGNORE INTO warehouses (id, branch_id, name)
     VALUES (?, ?, 'Main Warehouse')
@@ -2352,6 +2352,9 @@ function seedDefaultData() {
   // Seed default company admin user (using standard UUID format and company admin role UUID)
   // No default PIN — admin roles log in via email+password only (see Issue 1/2:
   // PIN login is reserved for cashier/staff accounts, set explicitly per user).
+  // INSERT OR IGNORE — a genuinely one-time seed on a fresh install only,
+  // never resets an existing account's password on subsequent boots.
+  const bcrypt = require('bcryptjs')
   const hash = bcrypt.hashSync('admin123', 10)
   db.prepare(`
     INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash)

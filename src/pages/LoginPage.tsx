@@ -414,9 +414,14 @@ export default function LoginPage() {
   const handleForgotRequest = async (e: React.FormEvent) => {
     e.preventDefault(); setForgotLoading(true)
     try {
-      const res = await (window as unknown as { api: { auth: { forgotPassword: (e: string) => Promise<{ success: boolean; sent?: boolean; noSmtp?: boolean }> } } }).api.auth.forgotPassword(forgotEmail)
-      if (res.success) { setForgotNoSmtp(Boolean(res.noSmtp) || !res.sent); setForgotStep('otp') }
-      else toast.error('Something went wrong. Try again.')
+      const res = await (window as unknown as { api: { auth: { forgotPassword: (e: string) => Promise<{ success: boolean; sent?: boolean; noSmtp?: boolean; error?: string }> } } }).api.auth.forgotPassword(forgotEmail)
+      if (res.success) {
+        setForgotNoSmtp(Boolean(res.noSmtp) || !res.sent)
+        setForgotStep('otp')
+        if (res.sent) toast.success('Reset code sent to your email!')
+      } else {
+        toast.error(res.error || 'Failed to send reset email')
+      }
     } catch { toast.error('Request failed') }
     finally { setForgotLoading(false) }
   }

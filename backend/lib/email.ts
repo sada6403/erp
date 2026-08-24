@@ -26,11 +26,14 @@ export async function sendEmail(opts: {
     const smtp = await getSmtpSettings()
     if (!smtp?.host) return { ok: false, error: 'SMTP not configured' }
 
+    const port = Number(smtp.port ?? 587)
+    const isSecure = port === 465 ? true : port === 587 ? false : (Boolean(smtp.secure) || smtp.encryption === 'SSL')
+
     const transport = nodemailer.createTransport({
-      host: smtp.host,
-      port: Number(smtp.port ?? 587),
-      secure: Number(smtp.port) === 465,
-      auth: { user: smtp.user, pass: smtp.pass },
+      host: String(smtp.host),
+      port,
+      secure: isSecure,
+      auth: { user: String(smtp.user || ''), pass: String(smtp.pass || '') },
     })
 
     const branding = await getBrandingSettings()
@@ -71,21 +74,54 @@ async function getCompanySmtpSettings(companyId: string): Promise<Record<string,
   }
 }
 
-export async function sendCompanyEmail(companyId: string, opts: {
-  to: string
-  subject: string
-  html: string
-  text?: string
-}): Promise<{ ok: boolean; error?: string }> {
+const MASKED_SECRET = '********'
+
+function resolvePassword(passInput?: unknown, storedPass?: unknown): string {
+  const pStr = String(passInput || '')
+  let raw = pStr
+  if (!raw || raw === MASKED_SECRET) {
+    raw = String(storedPass || '')
+  }
+  if (!raw) return ''
+  const decrypted = decryptSecret(raw)
+  return decrypted || raw
+}
+
+export async function sendCompanyEmail(
+  companyId: string,
+  opts: {
+    to: string
+    subject: string
+    html: string
+    text?: string
+  },
+  overrideSmtp?: Record<string, unknown>
+): Promise<{ ok: boolean; error?: string }> {
   try {
-    const smtp = await getCompanySmtpSettings(companyId)
+    const storedSmtp = await getCompanySmtpSettings(companyId)
+    const smtp = overrideSmtp ? { ...storedSmtp, ...overrideSmtp } : storedSmtp
     if (!smtp?.host) return { ok: false, error: 'SMTP is not configured for this company' }
+
+    const port = Number(smtp.port ?? 587)
+    // STRICT RULE:
+    // Port 587 => secure MUST be false (STARTTLS)
+    // Port 465 => secure MUST be true (implicit SSL)
+    let isSecure = false
+    if (port === 465) {
+      isSecure = true
+    } else if (port === 587) {
+      isSecure = false
+    } else {
+      isSecure = Boolean(smtp.secure) || String(smtp.encryption) === 'SSL'
+    }
+
+    const pass = resolvePassword(smtp.pass, storedSmtp?.pass)
 
     const transport = nodemailer.createTransport({
       host: String(smtp.host),
-      port: Number(smtp.port ?? 587),
-      secure: Boolean(smtp.secure) || Number(smtp.port) === 465,
-      auth: smtp.user ? { user: String(smtp.user), pass: decryptSecret(String(smtp.pass || '')) } : undefined,
+      port,
+      secure: isSecure,
+      auth: smtp.user ? { user: String(smtp.user), pass } : undefined,
     })
 
     await transport.sendMail({

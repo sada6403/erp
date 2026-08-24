@@ -4,10 +4,11 @@ import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import Store from 'electron-store'
 import crypto from 'crypto'
-import nodemailer from 'nodemailer'
+import { sendEmail } from '../services/emailService'
 import { generateSecret, verifyTOTP, generateQrDataUrl } from '../services/totpService'
 import { decryptSecret } from './settings'
 import { enqueueUserRow } from '../services/syncQueue'
+import { getSyncService } from '../services/syncService'
 import { logAudit } from '../services/auditLog'
 import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
 import { isAdminTypeRole } from '../services/pinPolicy'
@@ -205,6 +206,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'auth:login', async (_e, { email, password }) => {
       const db = getDb()
       const normalizedEmail = String(email || '').trim().toLowerCase()
+
       const user = db.prepare(`
         SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
                b.name as branch_name
@@ -480,75 +482,60 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   // ── Forgot password: generate OTP and send via email if SMTP configured ───
   safeHandle(ipcMain, 'auth:forgotPassword', async (_e, { email }: { email: string }) => {
       const db = getDb()
+      const targetEmail = email.toLowerCase().trim()
+
       const user = db.prepare(
         `SELECT id, name, email FROM users WHERE LOWER(email) = ? AND is_active = 1`
-      ).get(email.toLowerCase().trim()) as Record<string, unknown> | undefined
+      ).get(targetEmail) as Record<string, unknown> | undefined
 
       if (!user) {
-        // Don't reveal whether email exists — return generic success
+        // Don't reveal whether this email exists — return generic success.
         return { success: true, sent: false, noSmtp: true }
       }
 
       const otp = String(Math.floor(100000 + Math.random() * 900000))
-      otpStore.set(email.toLowerCase().trim(), {
+      otpStore.set(targetEmail, {
         otp,
         expires: Date.now() + 10 * 60 * 1000,
         userId: user.id as string,
       })
 
-      // Try to send via SMTP — read from app_settings (where settings are stored)
-      const settings = (store.get('app_settings') as Record<string, unknown>) || {}
-      const smtpEnabled = Boolean(settings.email_enabled)
-      const smtpHost = String(settings.smtp_host || '')
-
-      if (smtpEnabled && smtpHost) {
+      // Pull latest company SMTP settings from cloud if local settings are missing/disabled
+      const currentSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+      if (!currentSettings.smtp_host || !currentSettings.email_enabled) {
         try {
-          const smtpPort = Number(settings.smtp_port || 587)
-          const encryption = String(settings.smtp_encryption || 'TLS')
-          const smtpUser = String(settings.smtp_username || '')
-          const fromEmail = String(settings.smtp_from_email || smtpUser)
-          const fromName = String(settings.smtp_from_name || 'POS System')
-
-          const smtpPass = settings.smtp_password
-            ? decryptSecret(settings.smtp_password)
-            : ''
-
-          const transport = nodemailer.createTransport({
-            host: smtpHost,
-            port: smtpPort,
-            secure: encryption === 'SSL',
-            requireTLS: encryption === 'TLS',
-            auth: smtpUser ? { user: smtpUser, pass: smtpPass } : undefined,
-          })
-
-          await transport.sendMail({
-            from: `"${fromName}" <${fromEmail}>`,
-            to: email,
-            subject: 'Password Reset Code — Enterprise POS',
-            html: `
-              <div style="font-family:sans-serif;max-width:480px;margin:auto">
-                <h2 style="color:#4f46e5">Password Reset Request</h2>
-                <p>Hello <strong>${user.name}</strong>,</p>
-                <p>Your password reset code is:</p>
-                <div style="font-size:36px;font-weight:bold;letter-spacing:10px;padding:20px;background:#f1f5f9;border-radius:8px;text-align:center;color:#1e293b">
-                  ${otp}
-                </div>
-                <p style="color:#64748b;font-size:13px">This code expires in 10 minutes. If you did not request this, contact your administrator.</p>
-              </div>`,
-            text: `Your Enterprise POS password reset code is: ${otp}\nExpires in 10 minutes.`,
-          })
-
-          logAudit(db, { userId: user.id as string, action: 'PASSWORD_RESET_OTP_SENT', newValues: { email } })
-
-          return { success: true, sent: true }
-        } catch (emailErr) {
-          // SMTP failed — fall through to no-SMTP response
-          console.error('[ForgotPassword] SMTP error:', emailErr)
+          await getSyncService().pullLatestBranding()
+        } catch {
+          // Keep local fallback if offline
         }
       }
 
-      // No SMTP or send failed — OTP is still stored, just not emailed
-      return { success: true, sent: false, noSmtp: !smtpEnabled || !smtpHost }
+      const mailRes = await sendEmail({
+        to: targetEmail,
+        subject: 'Password Reset Code — Enterprise POS',
+        html: `
+          <div style="font-family:sans-serif;max-width:480px;margin:auto">
+            <h2 style="color:#4f46e5">Password Reset Request</h2>
+            <p>Hello <strong>${user.name}</strong>,</p>
+            <p>Your password reset code is:</p>
+            <div style="font-size:36px;font-weight:bold;letter-spacing:10px;padding:20px;background:#f1f5f9;border-radius:8px;text-align:center;color:#1e293b">
+              ${otp}
+            </div>
+            <p style="color:#64748b;font-size:13px">This code expires in 10 minutes. If you did not request this, contact your administrator.</p>
+          </div>`,
+        text: `Your Enterprise POS password reset code is: ${otp}\nExpires in 10 minutes.`,
+      })
+
+      if (mailRes.success) {
+        logAudit(db, { userId: user.id as string, action: 'PASSWORD_RESET_OTP_SENT', newValues: { email: targetEmail } })
+        return { success: true, sent: true }
+      }
+
+      if (mailRes.error?.includes('not enabled') || mailRes.error?.includes('not configured')) {
+        return { success: true, sent: false, noSmtp: true }
+      }
+
+      return { success: false, error: mailRes.error || 'Failed to send reset email' }
   })
 
   // ── Reset password using OTP ──────────────────────────────────────────────
