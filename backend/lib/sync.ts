@@ -109,7 +109,7 @@ function normalizeValue(value: unknown): unknown {
   return value
 }
 
-async function resolveRoleId(client: QueryClient, record: Record<string, unknown>): Promise<void> {
+async function resolveRoleId(client: QueryClient, record: Record<string, unknown>, userId: string): Promise<void> {
   if (!record.role_id) return
 
   const roleId = String(record.role_id)
@@ -119,32 +119,34 @@ async function resolveRoleId(client: QueryClient, record: Record<string, unknown
   )
   if (existing.rows[0]) return
 
-  const email = String(record.email || '').toLowerCase()
-  const name = String(record.name || '').toLowerCase()
-  const localBranchManagerRoleId = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
-  // Kept in parity with the pull-side fallback (electron/services/syncService.ts,
-  // insertFiltered's 'users' case) — both must agree or a user pushed before
-  // their role syncs silently gets different permissions than one pulled.
-  const fallbackRoleName =
-    email.includes('admin') || name.includes('admin')
-      ? 'Company Admin'
-      : roleId === localBranchManagerRoleId || email.startsWith('manager.') || email.includes('manager') || name.includes('manager')
-        ? 'Branch Manager'
-        : 'Cashier'
-
-  const fallback = await client.query<{ id: string }>(
-    `SELECT id FROM roles WHERE name = ? LIMIT 1`,
-    [fallbackRoleName]
+  // Issue 32a: this used to silently GUESS a replacement role by matching
+  // "admin"/"manager" substrings in the email/name, defaulting to Cashier
+  // otherwise — kept "in parity" with an identical pull-side guess in
+  // electron/services/syncService.ts. That's the exact mechanism that
+  // silently downgraded a real Company Admin to Cashier during the Issue 31
+  // incident (their name/email had no such substring). Never guess a role.
+  // Preserve whatever role this user already has in this tenant's cloud
+  // database (if any); only leave it unresolved if there's truly nothing to
+  // preserve, and always log loudly instead of silently changing access.
+  const existingCloud = await client.query<{ role_id: string | null }>(
+    `SELECT role_id FROM users WHERE id = ? LIMIT 1`,
+    [userId]
   )
-  if (fallback.rows[0]?.id) {
-    record.role_id = fallback.rows[0].id
-    return
+  if (existingCloud.rows[0]?.role_id) {
+    console.warn(
+      `[sync] Pushed user ${record.email || userId} references role_id ${roleId}, which does not exist ` +
+      `in this tenant's cloud database (role-ID drift — see Issue 32a). Keeping this user's existing ` +
+      `cloud role_id (${existingCloud.rows[0].role_id}) instead of guessing.`
+    )
+    record.role_id = existingCloud.rows[0].role_id
+  } else {
+    console.warn(
+      `[sync] Pushed user ${record.email || userId} references role_id ${roleId}, which does not exist ` +
+      `in this tenant's cloud database, and no existing cloud role was found to preserve. Leaving ` +
+      `role_id unresolved — needs admin review.`
+    )
+    delete record.role_id
   }
-
-  const anyRole = await client.query<{ id: string }>(
-    `SELECT id FROM roles ORDER BY is_system DESC, created_at ASC LIMIT 1`
-  )
-  if (anyRole.rows[0]?.id) record.role_id = anyRole.rows[0].id
 }
 
 export async function applySyncOperation(
@@ -194,7 +196,7 @@ export async function applySyncOperation(
       else delete record.password_hash
     }
     if (!record.pin_hash) delete record.pin_hash
-    await resolveRoleId(client, record)
+    await resolveRoleId(client, record, String(record.id || input.recordId))
   }
 
   if (input.table === 'stocks' && !record.id) {

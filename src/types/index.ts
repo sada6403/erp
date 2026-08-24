@@ -329,6 +329,12 @@ export interface AuthUser {
     subBranchId?: string | null
     agentId?: string | null
   }
+  // Emergency support access (Issue 33) — set only while this session was
+  // opened via a Super Admin's single-use support token, never on a normal
+  // login. Drives AppLayout's persistent "Support Session" banner.
+  isSupportSession?: boolean
+  supportSessionId?: string
+  supportSessionExpiresAt?: string
 }
 
 export interface LoginCredentials {

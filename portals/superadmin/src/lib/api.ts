@@ -118,6 +118,14 @@ export const companyNotifications = {
 export const companySecurity = {
   setClearDataPassword: (companyId: string, newPassword: string) =>
     request<{ ok: boolean }>(`/api/superadmin/companies/${companyId}/clear-data-password`, { method: 'POST', body: JSON.stringify({ newPassword }) }),
+  // Emergency support access (Issue 33) — single-use, time-boxed. The
+  // returned token is shown to the caller exactly once; only its hash is
+  // ever persisted server-side.
+  generateSupportToken: (companyId: string, reason: string, durationMinutes: number) =>
+    request<{ token: string; session_id: string; expires_at: string }>(
+      `/api/superadmin/companies/${companyId}/support-token`,
+      { method: 'POST', body: JSON.stringify({ reason, duration_minutes: durationMinutes }) }
+    ),
 }
 
 // ─── Company Devices ──────────────────────────────────────────────────────────

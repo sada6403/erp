@@ -383,6 +383,22 @@ async function autoMigrate() {
        ended_at       DATETIME     NULL
      )`,
 
+    // Emergency Support Access (Issue 33) — extends the previously-unused
+    // support_sessions table instead of adding a parallel one. Every token
+    // is a fresh CSPRNG value, hashed at rest here (never stored in
+    // plaintext, never shown to the Super Admin more than once), and its
+    // row is scoped to exactly one company_id — see
+    // backend/app/api/superadmin/companies/[id]/support-token/route.ts.
+    // `started_at` (existing column, now nullable) is repurposed as
+    // "redeemed at" — NULL until the token is redeemed.
+    `ALTER TABLE support_sessions ADD COLUMN superadmin_name VARCHAR(255) NULL`,
+    `ALTER TABLE support_sessions ADD COLUMN token_hash CHAR(64) NULL`,
+    `ALTER TABLE support_sessions ADD COLUMN created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP`,
+    `ALTER TABLE support_sessions ADD COLUMN expires_at DATETIME NULL`,
+    `ALTER TABLE support_sessions ADD COLUMN redeemed_device_id VARCHAR(64) NULL`,
+    `ALTER TABLE support_sessions MODIFY COLUMN started_at DATETIME NULL`,
+    `CREATE UNIQUE INDEX idx_ss_token_hash ON support_sessions (token_hash)`,
+
     // Clear-All-Data password gate (Issue 29) — a one-way bcrypt hash, never
     // decrypted/read back, so it's a dedicated column rather than nested in
     // branding_json (which is for reversible integration config). Attempts/

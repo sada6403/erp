@@ -409,6 +409,8 @@ export default function AppLayout() {
   const [lockDetail, setLockDetail] = useState<string | null>(null)
   const [enabledModules, setEnabledModules] = useState<string[] | null>(null)
   const [hasPendingStockRequests, setHasPendingStockRequests] = useState(false)
+  const [supportSecondsLeft, setSupportSecondsLeft] = useState<number | null>(null)
+  const [endingSupportSession, setEndingSupportSession] = useState(false)
   const sidebarNavRef = useRef<HTMLElement | null>(null)
   const brand401CountRef = useRef(0)
 
@@ -572,6 +574,41 @@ export default function AppLayout() {
     toast.success('Logged out successfully')
   }
 
+  // Emergency support session (Issue 33) — client-side countdown drives the
+  // persistent banner and force-logs-out the instant time runs out, rather
+  // than waiting for the next 60s whoami poll. This is UX-layer only; the
+  // actual enforcement is server-side (the redeemed JWT's own expiry, plus
+  // SyncService's periodic status check), so a tampered local clock can
+  // delay this specific countdown but not extend real access.
+  useEffect(() => {
+    if (!user?.isSupportSession || !user.supportSessionExpiresAt) { setSupportSecondsLeft(null); return }
+    const deadline = new Date(user.supportSessionExpiresAt).getTime()
+    const tick = () => {
+      const secondsLeft = Math.max(0, Math.round((deadline - Date.now()) / 1000))
+      setSupportSecondsLeft(secondsLeft)
+      if (secondsLeft <= 0) {
+        window.api.auth.endSupportSession().finally(() => {
+          logout().then(() => navigate('/login'))
+        })
+      }
+    }
+    tick()
+    const interval = window.setInterval(tick, 1000)
+    return () => window.clearInterval(interval)
+  }, [user?.isSupportSession, user?.supportSessionExpiresAt, logout, navigate])
+
+  const handleEndSupportSession = async () => {
+    setEndingSupportSession(true)
+    try {
+      await window.api.auth.endSupportSession()
+      await logout()
+      navigate('/login')
+      toast.success('Support session ended')
+    } finally {
+      setEndingSupportSession(false)
+    }
+  }
+
   if (isLocked) {
     const isCancelled = lockReason === 'cancelled'
     return (
@@ -726,6 +763,16 @@ export default function AppLayout() {
         </aside>
 
         <main className="relative flex-1 overflow-hidden flex flex-col">
+          {user?.isSupportSession && supportSecondsLeft !== null && (
+            <div className="flex items-center gap-3 px-4 py-2 text-xs font-semibold flex-shrink-0 bg-amber-500/20 text-amber-300 border-b border-amber-500/30">
+              <Shield size={13} className="flex-shrink-0" />
+              Support Session active — ends in {String(Math.floor(supportSecondsLeft / 60)).padStart(2, '0')}:{String(supportSecondsLeft % 60).padStart(2, '0')}
+              <button onClick={handleEndSupportSession} disabled={endingSupportSession}
+                className="ml-auto underline underline-offset-2 disabled:opacity-50">
+                {endingSupportSession ? 'Ending…' : 'End Support Session'}
+              </button>
+            </div>
+          )}
           {(subStatus === 'grace' || subStatus === 'expired') && (
             <div className={`flex items-center gap-3 px-4 py-2 text-xs font-medium flex-shrink-0 ${subStatus === 'expired' ? 'bg-red-600/20 text-red-300 border-b border-red-600/30' : 'bg-yellow-500/20 text-yellow-300 border-b border-yellow-500/30'}`}>
               <AlertCircle size={13} className="flex-shrink-0" />

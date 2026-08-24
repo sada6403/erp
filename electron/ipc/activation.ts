@@ -7,6 +7,7 @@ import { decryptSecret } from './settings'
 import { safeHandle } from './ipcHandler'
 import { getDb } from '../database'
 import { reconcileLocalMainBranch } from '../services/branchReconcile'
+import { reconcileLocalDefaultRoles } from '../services/roleReconcile'
 import { wipeLocalTransactionalData } from './admin'
 import { CloudApi } from '../services/cloudApi'
 
@@ -265,6 +266,26 @@ export function registerActivationHandlers() {
       } catch (err) {
         console.error('[Activation] Branch reconciliation failed:', err)
       }
+    }
+
+    // Same reconciliation for the 5 default roles (Issue 32a) — the local
+    // install seeds them with fixed placeholder ids, but the cloud
+    // generated its own random UUID() for this tenant's rows. Fetch this
+    // tenant's actual role rows and re-point local references onto the
+    // real cloud ids, so a later full re-pull never has to fall back to
+    // guessing which role a user belongs to.
+    try {
+      const cloud = new CloudApi({ baseUrl: apiUrl, apiKey: String(data.api_key || '') })
+      const cloudRoles = await cloud.changes('roles', '1970-01-01T00:00:00.000Z')
+      const cloudRolesByName: Record<string, string> = {}
+      for (const row of cloudRoles) {
+        const name = String(row.name || '')
+        const id = String(row.id || '')
+        if (name && id) cloudRolesByName[name] = id
+      }
+      reconcileLocalDefaultRoles(getDb(), cloudRolesByName)
+    } catch (err) {
+      console.error('[Activation] Role reconciliation failed:', err)
     }
 
     // Kick off an immediate full sync so the device shows the company's

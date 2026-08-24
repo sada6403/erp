@@ -5,6 +5,7 @@ import path from 'path'
 import { app } from 'electron'
 import { CloudApi, CloudRateLimitError } from './cloudApi'
 import { CLOUD_BRANDING_KEYS, decryptSecret, pushBrandingToCloud } from '../ipc/settings'
+import { reconcileLocalDefaultRoles } from './roleReconcile'
 
 const store = new Store()
 const BATCH_SIZE = 10
@@ -63,6 +64,7 @@ export class SyncService {
       this.resetFailedForAutoRetry()
       if (this.needsBootstrapPull()) {
         this.ensureLocalSystemRoles()
+        await this.reconcileDefaultRolesFromCloud(cloud)
         store.delete('last_pull_timestamp')
         await this.pullChanges(cloud)
       }
@@ -76,6 +78,7 @@ export class SyncService {
       // too, sometimes for the full ~2-minute resetFailedForAutoRetry cycle.
       await this.pullChanges(cloud)
       await this.syncBranding(cloud)
+      await this.reconcileSupportSession(cloud)
     } catch (err) {
       if (err instanceof CloudRateLimitError) {
         this.backoffUntil = Date.now() + err.retryAfterSeconds * 1000
@@ -196,6 +199,48 @@ export class SyncService {
       `).run()
     } catch {
       // Cloud sync can continue; insertFiltered will surface any real schema issue.
+    }
+  }
+
+  // Issue 32a: ensureLocalSystemRoles() above just re-seeded the 5 default
+  // roles at their fixed local placeholder ids — this is the exact
+  // recurring trigger that caused the Issue 31 incident (a bootstrap pull
+  // reintroducing placeholder ids that don't match this tenant's real cloud
+  // role ids). Reconcile immediately, before pullChanges() processes
+  // `users`, so role_id references resolve correctly on the very first
+  // pass instead of falling back to a guess.
+  private async reconcileDefaultRolesFromCloud(cloud: CloudApi): Promise<void> {
+    try {
+      const cloudRoles = await cloud.changes('roles', '1970-01-01T00:00:00.000Z')
+      const cloudRolesByName: Record<string, string> = {}
+      for (const row of cloudRoles) {
+        const name = String(row.name || '')
+        const id = String(row.id || '')
+        if (name && id) cloudRolesByName[name] = id
+      }
+      reconcileLocalDefaultRoles(getDb(), cloudRolesByName)
+    } catch (err) {
+      console.error('[SyncService] Role reconciliation failed:', err)
+    }
+  }
+
+  // Server-side kill-switch for an active emergency support session (Issue
+  // 33) — independent of the device's own local clock, which the whoami
+  // handler's expiry check alone cannot defend against (a tampered system
+  // clock could otherwise keep a support session "valid" indefinitely).
+  // A no-op whenever no support session is active locally.
+  private async reconcileSupportSession(cloud: CloudApi): Promise<void> {
+    const supportSession = store.get('support_session') as { id: string; expiresAt: string } | undefined
+    if (!supportSession) return
+    try {
+      const status = await cloud.getSupportSessionStatus(supportSession.id)
+      if (!status.active) {
+        store.delete('support_session')
+        store.delete('auth_token')
+        store.delete('auth_user')
+      }
+    } catch (err) {
+      console.error('[SyncService] Support session status check failed:', err)
     }
   }
 
@@ -691,6 +736,18 @@ export class SyncService {
     if (table === 'roles') {
       const existingByName = db.prepare(`SELECT id FROM roles WHERE name = ? LIMIT 1`).get(String(localRow.name)) as { id?: string } | undefined
       if (existingByName?.id && existingByName.id !== localRow.id) {
+        // Issue 32a consistency-check safeguard: a role name existing on
+        // both sides with a different id is exactly the drift that caused
+        // the Issue 31 incident. This doesn't auto-fix it (the reconcile
+        // call in runOnce()/activation.ts is what actively fixes the 5
+        // known default roles) — it just makes sure any remaining drift is
+        // never silent, including for a role name reconciliation doesn't
+        // cover (e.g. one that was renamed to collide with another).
+        console.warn(
+          `[SyncService] Role-ID drift detected: local role "${localRow.name}" has id ${existingByName.id}, ` +
+          `but the cloud's same-named role has id ${localRow.id}. Updating local role's other fields in place ` +
+          `(name/permissions), but NOT changing its id — existing users keep their current role assignment.`
+        )
         const updateKeys = keys.filter(k => k !== 'id')
         if (updateKeys.length > 0) {
           db.prepare(
@@ -767,15 +824,26 @@ export class SyncService {
         const roleId = String(localRow.role_id)
         const exists = db.prepare(`SELECT id FROM roles WHERE id = ? LIMIT 1`).get(roleId)
         if (!exists) {
-          const email = String(localRow.email || '').toLowerCase()
-          const name = String(localRow.name || '').toLowerCase()
-          const fallbackRoleName = email.includes('admin') || name.includes('admin')
-            ? 'Company Admin'
-            : email.includes('manager') || name.includes('manager')
-              ? 'Branch Manager'
-              : 'Cashier'
-          const fallback = db.prepare(`SELECT id FROM roles WHERE name = ? LIMIT 1`).get(fallbackRoleName) as { id?: string } | undefined
-          if (fallback?.id) localRow.role_id = fallback.id
+          // Issue 32a: this used to silently GUESS a replacement role by
+          // matching "admin"/"manager" substrings in the email/name,
+          // defaulting to Cashier otherwise — this is what silently
+          // downgraded a real Company Admin to Cashier during the Issue 31
+          // incident (their name/email had no such substring). Never guess
+          // a role. Preserve whatever role this user already has locally
+          // (if any); only fall back to unassigned if there's truly nothing
+          // to preserve — and always log loudly so it surfaces for review
+          // instead of silently changing someone's access.
+          const existingLocal = db.prepare(`
+            SELECT u.role_id FROM users u JOIN roles r ON r.id = u.role_id WHERE u.id = ?
+          `).get(String(localRow.id)) as { role_id?: string } | undefined
+          console.warn(
+            `[SyncService] Pulled user ${localRow.email || localRow.id} references role_id ${roleId}, ` +
+            `which does not exist locally (role-ID drift — see Issue 32a). ` +
+            (existingLocal?.role_id
+              ? `Keeping this user's existing local role_id (${existingLocal.role_id}) instead of guessing.`
+              : `No existing local role for this user — leaving role_id unassigned instead of guessing. Needs admin review.`)
+          )
+          localRow.role_id = existingLocal?.role_id ?? null
         }
       }
       if (localRow.branch_id) {

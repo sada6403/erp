@@ -111,6 +111,32 @@ export class CloudApi {
     })
   }
 
+  // Redeems a single-use emergency support-access token (Issue 33). Requires
+  // connectivity by design — there is no offline bypass. Returns the target
+  // Company Admin user's identity only, never a password.
+  async redeemSupportToken(token: string, deviceId: string | null): Promise<{
+    success: boolean; error?: string
+    session_id?: string; expires_at?: string
+    user?: { id: string; name: string; email: string }
+  }> {
+    return this.request('/api/companies/support-token/redeem', {
+      method: 'POST',
+      body: JSON.stringify({ token, device_id: deviceId }),
+    })
+  }
+
+  async endSupportSession(sessionId: string): Promise<{ success: boolean; error?: string }> {
+    return this.request('/api/companies/support-token/end', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    })
+  }
+
+  async getSupportSessionStatus(sessionId: string): Promise<{ active: boolean }> {
+    const query = new URLSearchParams({ session_id: sessionId })
+    return this.request(`/api/companies/support-token/status?${query.toString()}`)
+  }
+
   async getBranding(): Promise<{ branding: Record<string, unknown>; updated_at: string | null }> {
     return this.request('/api/company/branding')
   }

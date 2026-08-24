@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi, companySecurity as securityApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck } from 'lucide-react'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield } from 'lucide-react'
 
 type MenuItemDef =
   | { type: 'item'; label: string; icon: React.ComponentType<{ className?: string }>; onClick: () => void; danger?: boolean }
@@ -99,6 +99,7 @@ export default function CompaniesPage() {
   const [showBranding, setShowBranding] = useState<Company | null>(null)
   const [showNotifCreds, setShowNotifCreds] = useState<Company | null>(null)
   const [showClearDataPw, setShowClearDataPw] = useState<Company | null>(null)
+  const [showSupportAccess, setShowSupportAccess] = useState<Company | null>(null)
   const [showCompanyKey, setShowCompanyKey] = useState<Company | null>(null)
   const [error, setError] = useState('')
 
@@ -259,6 +260,7 @@ export default function CompaniesPage() {
                       { type: 'item', label: 'Branding (logo & color)', icon: Palette,    onClick: () => setShowBranding(c) },
                       { type: 'item', label: 'Notification Credentials (SMTP/SMS)', icon: Mail, onClick: () => setShowNotifCreds(c) },
                       { type: 'item', label: 'Clear-All-Data Password', icon: Lock, onClick: () => setShowClearDataPw(c) },
+                      { type: 'item', label: 'Generate Support Access', icon: Shield, onClick: () => setShowSupportAccess(c) },
                       { type: 'item', label: 'Backups',                icon: Database,    onClick: () => setShowBackups(c) },
                       { type: 'item', label: 'Export Data',            icon: FileDown,    onClick: () => setShowExports(c) },
                       { type: 'divider' },
@@ -313,6 +315,7 @@ export default function CompaniesPage() {
       {showCompanyKey && <CompanyKeyModal company={showCompanyKey} onClose={() => setShowCompanyKey(null)} onUpdated={load} />}
       {showNotifCreds && <NotificationCredentialsModal company={showNotifCreds} onClose={() => setShowNotifCreds(null)} onSaved={load} />}
       {showClearDataPw && <ClearDataPasswordModal company={showClearDataPw} onClose={() => setShowClearDataPw(null)} />}
+      {showSupportAccess && <SupportAccessModal company={showSupportAccess} onClose={() => setShowSupportAccess(null)} />}
     </div>
   )
 }
@@ -2277,6 +2280,131 @@ function ClearDataPasswordModal({ company, onClose }: { company: Company; onClos
               {saving ? 'Saving…' : 'Save Password'}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Emergency Support Access Modal (Issue 33) ─────────────────────────────────
+// Generates a single-use, time-boxed support token for this one company.
+// The token is shown exactly once here — the backend only ever persists its
+// hash, so there is no way to retrieve it again after this modal closes.
+const SUPPORT_DURATION_PRESETS: { label: string; minutes: number }[] = [
+  { label: '15 minutes', minutes: 15 },
+  { label: '1 hour',     minutes: 60 },
+  { label: '1 day',      minutes: 60 * 24 },
+  { label: '7 days',     minutes: 60 * 24 * 7 },
+  { label: '30 days (max)', minutes: 60 * 24 * 30 },
+]
+
+function SupportAccessModal({ company, onClose }: { company: Company; onClose: () => void }) {
+  const [reason, setReason]     = useState('')
+  const [minutes, setMinutes]   = useState(SUPPORT_DURATION_PRESETS[0].minutes)
+  const [generating, setGenerating] = useState(false)
+  const [error, setError]       = useState('')
+  const [result, setResult]     = useState<{ token: string; expires_at: string } | null>(null)
+  const [copied, setCopied]     = useState(false)
+
+  async function generate() {
+    if (!reason.trim()) { setError('A reason is required'); return }
+    setGenerating(true); setError('')
+    try {
+      const res = await securityApi.generateSupportToken(company.id, reason.trim(), minutes)
+      setResult({ token: res.token, expires_at: res.expires_at })
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate token')
+    }
+    setGenerating(false)
+  }
+
+  function copyToken() {
+    if (!result) return
+    navigator.clipboard.writeText(result.token).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-amber-400" />
+            <h2 className="font-semibold text-white">Emergency Support Access — {company.name}</h2>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {!result ? (
+            <>
+              <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg px-4 py-3 text-xs text-amber-300 space-y-1">
+                <p className="font-semibold text-amber-200">Single-use, this company only</p>
+                <p className="text-amber-300/80">
+                  Generates a one-time token that logs the redeeming device in as this
+                  company's Company Admin. It cannot be reused, cannot be redeemed by any
+                  other company, and expires automatically. Generation and redemption are
+                  both fully audit-logged under your identity.
+                </p>
+              </div>
+
+              {error && <p className="text-sm text-red-400">{error}</p>}
+
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Reason (required, for the audit log)</label>
+                <textarea className="input w-full" rows={2} value={reason} onChange={e => setReason(e.target.value)}
+                  placeholder="e.g. Customer reported a stuck invoice, investigating on their request" />
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Valid for</label>
+                <select className="input w-full" value={minutes} onChange={e => setMinutes(Number(e.target.value))}>
+                  {SUPPORT_DURATION_PRESETS.map(p => (
+                    <option key={p.minutes} value={p.minutes}>{p.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex gap-3 pt-1">
+                <button className="btn-ghost flex-1" onClick={onClose}>Cancel</button>
+                <button
+                  className="flex-1 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-colors disabled:opacity-50"
+                  onClick={generate} disabled={generating || !reason.trim()}>
+                  {generating ? 'Generating…' : 'Generate Token'}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="bg-red-900/20 border border-red-700/40 rounded-lg px-4 py-3 text-xs text-red-300">
+                <p className="font-semibold text-red-200">This token will not be shown again.</p>
+                <p className="text-red-300/80 mt-0.5">Copy it now and hand it to the person who needs it.</p>
+              </div>
+
+              <div>
+                <label className="text-xs text-gray-500 mb-1 block">Support Token</label>
+                <div className="flex gap-2">
+                  <input readOnly className="input w-full font-mono text-xs" value={result.token} onFocus={e => e.currentTarget.select()} />
+                  <button onClick={copyToken} className="btn-ghost px-3 flex items-center gap-1 text-xs">
+                    <Copy className="w-3.5 h-3.5" /> {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Expires: {new Date(result.expires_at).toLocaleString()}
+              </p>
+
+              <div className="flex gap-3 pt-1">
+                <button className="flex-1 px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-white font-semibold text-sm transition-colors"
+                  onClick={onClose}>
+                  Done
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>

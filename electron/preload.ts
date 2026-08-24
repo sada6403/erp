@@ -13,6 +13,8 @@ const api = {
     completeForcePasswordChange:(payload: unknown) => ipcRenderer.invoke('auth:completeForcePasswordChange', payload),
     forgotPassword:             (email: string)    => ipcRenderer.invoke('auth:forgotPassword', { email }),
     resetWithOtp:               (email: string, otp: string, newPassword: string) => ipcRenderer.invoke('auth:resetWithOtp', { email, otp, newPassword }),
+    redeemSupportToken:         (token: string)    => ipcRenderer.invoke('auth:redeemSupportToken', { token }),
+    endSupportSession:          ()                 => ipcRenderer.invoke('auth:endSupportSession'),
     // 2FA
     twoFa: {
       verifyLogin: (payload: unknown) => ipcRenderer.invoke('auth:2fa:verify', payload),

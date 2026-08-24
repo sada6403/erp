@@ -101,7 +101,7 @@ export default function LoginPage() {
   const { pinLogin, user, init } = useAuthStore()
   const { status: syncStatus } = useSyncStatus()
 
-  const [mode, setMode]                 = useState<'email' | 'pin'>('pin')
+  const [mode, setMode]                 = useState<'email' | 'pin' | 'support'>('pin')
   const [email, setEmail]               = useState('')
   const [password, setPassword]         = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -120,6 +120,11 @@ export default function LoginPage() {
   const [newPassword,      setNewPassword]       = useState('')
   const [confirmPassword,  setConfirmPassword]   = useState('')
   const [showNewPw,        setShowNewPw]         = useState(false)
+
+  // Emergency support access (Issue 33)
+  const [supportToken,   setSupportToken]   = useState('')
+  const [supportLoading, setSupportLoading] = useState(false)
+  const [supportState,   setSupportState]   = useState<'idle' | 'error'>('idle')
 
   // Forgot password
   const [forgotStep,    setForgotStep]    = useState<'off' | 'email' | 'otp' | 'done'>('off')
@@ -285,6 +290,27 @@ export default function LoginPage() {
       toast.error((err as Error)?.message || 'Login failed')
       setTimeout(() => setLoginState('idle'), 1500)
     } finally { setLoading(false) }
+  }
+
+  const handleSupportRedeem = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSupportLoading(true); setSupportState('idle')
+    try {
+      const result = await window.api.auth.redeemSupportToken(supportToken.trim()) as {
+        success: boolean; data?: { user: Record<string, unknown> }; error?: string
+      }
+      if (result.success && result.data) {
+        await init()
+        const u = useAuthStore.getState().user
+        setTimeout(() => navigate(redirectBySession(u), { replace: true }), 200)
+      } else {
+        setSupportState('error')
+        toast.error(result.error || 'Invalid support token')
+      }
+    } catch (err) {
+      setSupportState('error')
+      toast.error((err as Error)?.message || 'Failed to redeem support token')
+    } finally { setSupportLoading(false) }
   }
 
   const handleSyncUnlock = async () => {
@@ -778,10 +804,16 @@ export default function LoginPage() {
               {/* Admin link */}
               <div className="flex items-center justify-between pt-0.5">
                 <span className="text-xs font-mono" style={{ color: '#0f172a' }}>v{version} · {deviceId}</span>
-                <button onClick={() => { setMode('email'); setLoginState('idle') }}
-                  className="flex items-center gap-1 text-xs font-semibold" style={{ color: '#818cf8' }}>
-                  <Mail size={10} /> Admin
-                </button>
+                <div className="flex items-center gap-3">
+                  <button onClick={() => { setMode('support'); setSupportState('idle'); setSupportToken('') }}
+                    className="flex items-center gap-1 text-xs font-semibold" style={{ color: '#64748b' }}>
+                    <Shield size={10} /> Support Access
+                  </button>
+                  <button onClick={() => { setMode('email'); setLoginState('idle') }}
+                    className="flex items-center gap-1 text-xs font-semibold" style={{ color: '#818cf8' }}>
+                    <Mail size={10} /> Admin
+                  </button>
+                </div>
               </div>
 
               {(supportPhone || supportEmail) && (
@@ -958,6 +990,44 @@ export default function LoginPage() {
                   </button>
                 </form>
               )}
+            </div>
+          )}
+
+          {/* ═══════════ SUPPORT ACCESS ═══════════ */}
+          {mode === 'support' && !requires2FA && !requiresPwChange && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: '#94a3b8' }}>
+                  <Shield size={13} /> Support Access
+                </div>
+                <button onClick={() => { setMode('pin'); setSupportToken(''); setSupportState('idle') }}
+                  className="text-xs" style={{ color: '#475569' }}>
+                  ← Back to login
+                </button>
+              </div>
+
+              <div className="rounded-lg p-2.5 text-xs" style={{ background: 'rgba(148,163,184,0.08)', border: '1px solid rgba(148,163,184,0.2)', color: '#94a3b8' }}>
+                Enter the single-use support token given to you by an authorized Super Admin.
+                It only works once and expires automatically.
+              </div>
+
+              <form onSubmit={handleSupportRedeem} className="space-y-2.5">
+                <div className="relative">
+                  <Shield size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
+                  <input type="text" value={supportToken} autoFocus
+                    onChange={e => { setSupportToken(e.target.value); setSupportState('idle') }}
+                    className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none font-mono"
+                    style={{ background: '#0d1117', border: `1px solid ${supportState === 'error' ? '#ef4444' : '#1e293b'}` }}
+                    onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                    onBlur={e => { e.currentTarget.style.borderColor = supportState === 'error' ? '#ef4444' : '#1e293b' }}
+                    placeholder="Paste support token" required />
+                </div>
+                <button type="submit" disabled={supportLoading || !supportToken.trim()}
+                  className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
+                  style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', opacity: !supportToken.trim() ? 0.5 : 1 }}>
+                  {supportLoading ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Verifying…</> : 'Redeem Token'}
+                </button>
+              </form>
             </div>
           )}
 
