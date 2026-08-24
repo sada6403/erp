@@ -66,6 +66,16 @@ export const auth = {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
     }).then(async r => { if (!r.ok) throw new Error((await r.json()).error); return r.json() }),
+  forgotPassword: (email: string) =>
+    fetch(`${BASE}/api/auth/superadmin/forgot-password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json()).error); return r.json() }),
+  resetPassword: (email: string, otp: string, newPassword: string) =>
+    fetch(`${BASE}/api/auth/superadmin/reset-password`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, otp, newPassword }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json()).error); return r.json() }),
   logout: () => request('/api/auth/logout', { method: 'POST' }),
 }
 

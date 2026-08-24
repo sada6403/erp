@@ -208,14 +208,13 @@ async function autoMigrate() {
        updated_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
      )`,
 
-    `CREATE TABLE IF NOT EXISTS plan_modules (
-       id         VARCHAR(36) NOT NULL PRIMARY KEY DEFAULT (UUID()),
-       plan_id    VARCHAR(36) NOT NULL,
-       module_key VARCHAR(64) NOT NULL,
-       is_enabled TINYINT(1)  NOT NULL DEFAULT 1,
-       created_at DATETIME    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-       UNIQUE KEY uq_plan_module (plan_id, module_key),
-       CONSTRAINT fk_plan_modules_plan FOREIGN KEY (plan_id) REFERENCES plans(id) ON DELETE CASCADE
+    `CREATE TABLE IF NOT EXISTS superadmin_otps (
+       id          VARCHAR(36)  NOT NULL PRIMARY KEY DEFAULT (UUID()),
+       email       VARCHAR(255) NOT NULL,
+       otp         VARCHAR(16)  NOT NULL,
+       expires_at  DATETIME     NOT NULL,
+       created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       INDEX idx_sa_otp_email (email)
      )`,
 
     `CREATE TABLE IF NOT EXISTS plan_features (
