@@ -1344,20 +1344,6 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     }
   }
 
-  try {
-    const bcrypt = require('bcryptjs')
-    const hash = bcrypt.hashSync('admin123', 10)
-    const { rows: userRows } = await tp.query(`SELECT id FROM users WHERE LOWER(email) = 'admin@pos.local' LIMIT 1`)
-    if (!userRows.length) {
-      await tp.query(`
-        INSERT INTO users (id, branch_id, role_id, name, email, password_hash, is_active)
-        VALUES ('u9999999-9999-4999-8999-999999999999', 'b1111111-1111-4111-8111-111111111111', '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'System Admin', 'admin@pos.local', ?, 1)
-      `, [hash])
-    }
-  } catch {
-    // Ignore seeding error
-  }
-
   migratedTenantSchemas.add(dbSchema)
 }
 

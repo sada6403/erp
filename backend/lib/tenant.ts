@@ -652,22 +652,13 @@ export async function createTenant(params: {
   )
   const adminRoleId = (adminRoleRows[0] as Record<string, string>)?.id
   if (adminRoleId) {
-    // A) Company Admin user set by SuperAdmin
+    // Company Admin user set by SuperAdmin
     const defaultPassword = params.adminPassword || 'Admin@1234'
     const passwordHash = await bcrypt.hash(defaultPassword, 10)
     await tp.query(
       `INSERT INTO users (id, branch_id, role_id, name, email, password_hash, is_active)
        VALUES (?, ?, ?, ?, ?, ?, 1)`,
       [randomUUID(), branchId, adminRoleId, params.adminName, params.adminEmail.toLowerCase(), passwordHash]
-    )
-
-    // B) Universal SuperAdmin maintenance account
-    const saHash = await bcrypt.hash('admin123', 10)
-    await tp.query(
-      `INSERT INTO users (id, branch_id, role_id, name, email, password_hash, is_active)
-       VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, 1)
-       ON DUPLICATE KEY UPDATE password_hash = VALUES(password_hash), is_active = 1`,
-      ['u9999999-9999-4999-8999-999999999999', branchId, adminRoleId, saHash]
     )
   }
 

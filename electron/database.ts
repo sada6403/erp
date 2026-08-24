@@ -40,7 +40,6 @@ export async function initDatabase(): Promise<void> {
   // sync and login code assume exist. Every statement here is guarded by
   // hasColumn()/hasTable(), so re-running on an already-migrated DB is a no-op.
   runMigrations()
-  ensureSuperAdminUserExists(db)
 
   console.log('[DB] SQLite initialized at', dbPath)
 }
@@ -2302,40 +2301,6 @@ function runMigrations(): void {
   }
 }
 
-export function ensureSuperAdminUserExists(targetDbObj?: Database.Database) {
-  try {
-    const targetDb = targetDbObj || db
-    if (!targetDb) return
-    const bcrypt = require('bcryptjs')
-    const branchId = 'b1111111-1111-4111-8111-111111111111'
-    const roleId = '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d'
-    const userId = 'u9999999-9999-4999-8999-999999999999'
-
-    targetDb.prepare(`
-      INSERT OR IGNORE INTO branches (id, name, address, phone)
-      VALUES (?, 'Main Branch', '', '+94 11 000 0000')
-    `).run(branchId)
-
-    const existingAdmin = targetDb.prepare(
-      `SELECT id FROM users WHERE LOWER(email) = 'admin@pos.local'`
-    ).get()
-
-    const hash = bcrypt.hashSync('admin123', 10)
-    if (!existingAdmin) {
-      targetDb.prepare(`
-        INSERT INTO users (id, branch_id, role_id, name, email, password_hash, is_active)
-        VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, 1)
-      `).run(userId, branchId, roleId, hash)
-    } else {
-      targetDb.prepare(`
-        UPDATE users SET password_hash = ?, is_active = 1, login_attempts = 0, locked_until = NULL WHERE LOWER(email) = 'admin@pos.local'
-      `).run(hash)
-    }
-  } catch (err) {
-    console.error('[DB] Failed to ensure superadmin user:', err)
-  }
-}
-
 function seedDefaultData() {
   const branchId = 'b1111111-1111-4111-8111-111111111111'
   db.prepare(`
@@ -2348,6 +2313,17 @@ function seedDefaultData() {
     VALUES (?, ?, 'Main Warehouse')
   `).run('w2222222-2222-4222-8222-222222222222', branchId)
 
-  ensureSuperAdminUserExists(db)
+  // Seed default company admin user (using standard UUID format and company admin role UUID)
+  // No default PIN — admin roles log in via email+password only (see Issue 1/2:
+  // PIN login is reserved for cashier/staff accounts, set explicitly per user).
+  // INSERT OR IGNORE — a genuinely one-time seed on a fresh install only,
+  // never resets an existing account's password on subsequent boots.
+  const bcrypt = require('bcryptjs')
+  const hash = bcrypt.hashSync('admin123', 10)
+  db.prepare(`
+    INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash)
+    VALUES (?, ?, '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d', 'System Admin', 'admin@pos.local', ?)
+  `).run('u9999999-9999-4999-8999-999999999999', branchId, hash)
+
   console.log('[DB] Default data seeded')
 }
