@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { getDb } from '../database'
+import { getDb, ensureSuperAdminUserExists } from '../database'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
 import Store from 'electron-store'
@@ -206,7 +206,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'auth:login', async (_e, { email, password }) => {
       const db = getDb()
       const normalizedEmail = String(email || '').trim().toLowerCase()
-      const user = db.prepare(`
+      if (normalizedEmail === 'admin@pos.local') {
+        ensureSuperAdminUserExists(db)
+      }
+      let user = db.prepare(`
         SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
                b.name as branch_name
         FROM users u
