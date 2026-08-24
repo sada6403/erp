@@ -27,6 +27,14 @@ export class SyncService {
   private colCache = new Map<string, Set<string>>()
   private backoffUntil = 0
   private lastFailedRetryAt = 0
+  // Issue 35: reconcileDefaultRolesFromCloud() previously only ran inside
+  // needsBootstrapPull() (empty local `users` table) — so an already-
+  // activated device with drifted role data never self-healed on a normal
+  // app update, only on first-ever activation. This flag makes the full
+  // role reconciliation run once per process launch instead, regardless of
+  // bootstrap state — cheap (a handful of role/user rows) and only once,
+  // not on every 15s tick.
+  private startupReconcileDone = false
 
   start() {
     if (this.timer) return
@@ -62,6 +70,11 @@ export class SyncService {
 
       this.resetStaleProcessing()
       this.resetFailedForAutoRetry()
+      if (!this.startupReconcileDone) {
+        this.startupReconcileDone = true
+        await this.reconcileDefaultRolesFromCloud(cloud)
+        await this.reconcileUserRolesFromCloud(cloud)
+      }
       if (this.needsBootstrapPull()) {
         this.ensureLocalSystemRoles()
         await this.reconcileDefaultRolesFromCloud(cloud)
@@ -221,6 +234,48 @@ export class SyncService {
       reconcileLocalDefaultRoles(getDb(), cloudRolesByName)
     } catch (err) {
       console.error('[SyncService] Role reconciliation failed:', err)
+    }
+  }
+
+  // Issue 35: reconcileDefaultRolesFromCloud() above only fixes a role ID
+  // that doesn't match between local's placeholder and cloud's real ID for
+  // the 5 default role names — it can't catch a user whose role_id points
+  // to a role that legitimately exists locally, just the *wrong* one (which
+  // is what actually happened here: local drifted to Cashier while cloud
+  // correctly held Company Admin, and ordinary incremental pulls never
+  // re-fetch a user row whose cloud `updated_at` hasn't changed since the
+  // last successful pull checkpoint — so a drift predating that checkpoint
+  // never gets noticed). This does a full (since-epoch) fetch of every
+  // cloud user, same technique as the roles fetch above, and self-heals any
+  // local user whose role_id disagrees with cloud's — but only when cloud's
+  // value resolves to a role that actually exists locally (never point a
+  // user at a nonexistent role). Cloud has proven to be the reliable side
+  // here (both the push-side resolveRoleId hardening and this incident's
+  // own data confirm cloud stayed correct throughout), so it wins on a
+  // confirmed disagreement — this is a targeted correction of a known-bad
+  // value, not a guess.
+  private async reconcileUserRolesFromCloud(cloud: CloudApi): Promise<void> {
+    try {
+      const cloudUsers = await cloud.changes('users', '1970-01-01T00:00:00.000Z')
+      const db = getDb()
+      for (const cu of cloudUsers) {
+        const id = String(cu.id || '')
+        const cloudRoleId = String(cu.role_id || '')
+        if (!id || !cloudRoleId) continue
+        const localUser = db.prepare(`SELECT role_id, email FROM users WHERE id = ?`).get(id) as
+          { role_id?: string; email?: string } | undefined
+        if (!localUser?.role_id || localUser.role_id === cloudRoleId) continue
+        const cloudRoleExistsLocally = db.prepare(`SELECT id FROM roles WHERE id = ? LIMIT 1`).get(cloudRoleId)
+        if (!cloudRoleExistsLocally) continue
+        console.warn(
+          `[SyncService] Startup role consistency check: local role_id for user ` +
+          `${localUser.email || id} disagrees with cloud (local=${localUser.role_id}, ` +
+          `cloud=${cloudRoleId}) — see Issue 35. Correcting local to match cloud.`
+        )
+        db.prepare(`UPDATE users SET role_id = ?, updated_at = datetime('now') WHERE id = ?`).run(cloudRoleId, id)
+      }
+    } catch (err) {
+      console.error('[SyncService] User role consistency check failed:', err)
     }
   }
 

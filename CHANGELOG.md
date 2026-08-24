@@ -2,6 +2,33 @@
 
 Internal release log. Not customer-facing.
 
+## 2.6.12 — 2026-08-24 — Login reliability fix (Issue 35)
+
+Fixes the role-ID drift lockout recurring on an already-activated device
+after a normal app update (hit natural plantation right after updating to
+2.6.11 — same symptom as Issue 31 and the live recurrence found during
+Issue 32a).
+
+**Root cause**: `reconcileDefaultRolesFromCloud()` (Issue 32a's self-heal)
+only ran inside `needsBootstrapPull()` (empty local `users` table), so an
+already-activated device with existing data never re-checked after its
+first-ever bootstrap — only a fresh install/activation got the benefit of
+32a's fix.
+
+**Fix** (`electron/services/syncService.ts`):
+- Role reconciliation now runs once per app process launch, unconditionally
+  — not gated behind bootstrap state.
+- New `reconcileUserRolesFromCloud()`: does a full (since-epoch) fetch of
+  every cloud user and self-heals any local user whose `role_id` disagrees
+  with cloud's confirmed value — but only when cloud's value resolves to a
+  role that actually exists locally, and always with a loud warning. This
+  is the piece that actually catches this failure shape (a user pointed at
+  a real-but-wrong local role), which the default-role remap alone can't.
+
+Verified via a real (not mocked) end-to-end simulation against a scratch
+copy of the affected account's data and the live backend before this
+release was cut — see `ISSUE_TRACKER.md`, Issue 35.
+
 ## 2.6.11 — 2026-08-24 — Security response release
 
 Follow-up to 2.6.10. Documents the audit and closes out the incident opened
