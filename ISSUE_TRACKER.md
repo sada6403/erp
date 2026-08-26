@@ -49,3 +49,4 @@ Status legend: `PENDING` → not started · `IN PROGRESS` → current turn · `D
 - **v2.6.10** (2026-08-24) — Issues 25–33 batch + backdoor/reset-code removal (commit `f871461`). See `CHANGELOG.md`.
 - **v2.6.11** (2026-08-24) — Security response release. No code change; closes out Issue 34's audit (no exposure found, no rotation needed). See `CHANGELOG.md`.
 - **v2.6.12** (2026-08-24) — Login reliability fix (Issue 35). Role reconciliation now runs on every app launch, not just first bootstrap; new per-user role consistency self-heal. Verified via a real end-to-end simulation (scratch DB copy + live backend) before release. See `CHANGELOG.md`.
+- **v2.6.13** (2026-08-26) — Device authorization & remote revocation, Phase 1 (Issue 36). Ships the device build for the already-deployed backend enforcement. See `CHANGELOG.md`.

@@ -2,6 +2,37 @@
 
 Internal release log. Not customer-facing.
 
+## 2.6.13 — 2026-08-26 — Device authorization & remote revocation, Phase 1 (Issue 36)
+
+Ships the device build needed to actually exercise Phase 1's server-side
+work (already deployed to the backend on 2026-08-26): a Super Admin
+deactivating a POS device from the portal previously had no real effect on
+an already-activated device, online or offline — this closes that gap.
+
+- Every request now sends a per-device `x-device-id` header alongside the
+  existing company API key, so a specific device can be revoked without
+  affecting the rest of the company's fleet (verified live against the
+  `demo` company: revoking one test device blocked only that device,
+  other devices on the same company key were unaffected).
+- A device now checks its own authorization on every 5-minute license poll
+  and picks up a revocation while online; if offline, it can keep working
+  for up to 72 hours before requiring an online re-validation.
+- A revoked/expired-lease device shows a dedicated "Activation Required"
+  screen (reusing the existing activation flow) — no login screen, no
+  dashboard, no cached business data reachable. Local data itself is never
+  auto-purged on revocation, only locked, matching this project's existing
+  Clear-All-Data safety convention.
+- Reactivating with a fresh valid key always starts a clean authorization
+  state and forces a full re-sync, never restoring stale prior state.
+- Backward compatible: a device still on an older build (not yet sending
+  `x-device-id`) is unaffected by this change until it updates — same as
+  any other fix delivered via the normal update mechanism.
+
+Scope note: this is Phase 1 of a much larger architecture request. An
+idempotency ledger, version/conflict detection, uninstall data cleanup,
+and an observability dashboard are deliberately deferred to future
+sessions — see `ISSUE_TRACKER.md`, Issue 36.
+
 ## 2.6.12 — 2026-08-24 — Login reliability fix (Issue 35)
 
 Fixes the role-ID drift lockout recurring on an already-activated device
