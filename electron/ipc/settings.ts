@@ -247,7 +247,8 @@ function getCloudApiFromSettings(): CloudApi | null {
   const baseUrl = String(settings?.cloud_api_url || '').trim()
   const apiKey = decryptSecret(settings?.cloud_api_key).trim()
   if (!baseUrl || !apiKey) return null
-  return new CloudApi({ baseUrl, apiKey })
+  const deviceId = (store.get('device_id') as string | undefined) ?? null
+  return new CloudApi({ baseUrl, apiKey, deviceId })
 }
 
 function broadcastSettingsUpdated(reason: string, extra: Record<string, unknown> = {}) {

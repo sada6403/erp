@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { resolveCompany, AccountStatusError } from '@/lib/auth'
+import { resolveCompany, AccountStatusError, resolveDeviceAuthorization, DeviceAuthorizationError } from '@/lib/auth'
 import type { QueryClient } from '@/lib/db'
 import { applySyncOperation } from '@/lib/sync'
 import { syncLimiter } from '@/lib/rateLimit'
@@ -23,6 +23,15 @@ export async function POST(request: NextRequest) {
   }
   if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    await resolveDeviceAuthorization(request, company.id)
+  } catch (err) {
+    if (err instanceof DeviceAuthorizationError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 403 })
+    }
+    throw err
   }
 
   const entitlements = await resolveEntitlements({ companyId: company.id })

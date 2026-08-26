@@ -171,7 +171,8 @@ function getCloudApi(): CloudApi | null {
   const apiUrl = String(appSettings.cloud_api_url || '').trim()
   const apiKey = decryptSecret(appSettings.cloud_api_key).trim()
   if (!apiUrl || !apiKey) return null
-  return new CloudApi({ baseUrl: apiUrl, apiKey })
+  const deviceId = (store.get('device_id') as string | undefined) ?? null
+  return new CloudApi({ baseUrl: apiUrl, apiKey, deviceId })
 }
 
 type SupportSession = { id: string; expiresAt: string }

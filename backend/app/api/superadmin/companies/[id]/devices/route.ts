@@ -101,9 +101,11 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   if (action === 'deactivateAll') {
     const { rows } = await pool.query(
-      `UPDATE pos_devices SET status = 'deactivated', deactivated_at = NOW()
+      `UPDATE pos_devices SET status = 'deactivated', deactivated_at = NOW(),
+              authorization_version = authorization_version + 1,
+              revoked_at = NOW(), revoked_by = ?, revoke_reason = COALESCE(?, revoke_reason)
        WHERE company_id = ? AND status != 'deactivated'`,
-      [companyId]
+      [auth.payload.sub, notes ?? null, companyId]
     )
     const affected = (rows as unknown as { affectedRows?: number }).affectedRows ?? 0
     await auditLog({
@@ -117,7 +119,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   if (action === 'reactivateAll') {
     const { rows } = await pool.query(
-      `UPDATE pos_devices SET status = 'active', deactivated_at = NULL
+      `UPDATE pos_devices SET status = 'active', deactivated_at = NULL,
+              authorization_version = authorization_version + 1
        WHERE company_id = ? AND status = 'deactivated' AND device_id IS NOT NULL`,
       [companyId]
     )
@@ -136,20 +139,29 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   if (action === 'deactivate') {
+    // authorization_version bump is what an already-running, already-
+    // activated device can actually detect (see resolveDeviceAuthorization
+    // in backend/lib/auth.ts) — flipping status alone was previously
+    // invisible to a device that had already passed activation, since
+    // nothing re-checked it again.
     await pool.query(
-      `UPDATE pos_devices SET status = 'deactivated', deactivated_at = NOW(), notes = COALESCE(?, notes)
+      `UPDATE pos_devices SET status = 'deactivated', deactivated_at = NOW(), notes = COALESCE(?, notes),
+              authorization_version = authorization_version + 1,
+              revoked_at = NOW(), revoked_by = ?, revoke_reason = COALESCE(?, revoke_reason)
        WHERE id = ? AND company_id = ?`,
-      [notes ?? null, deviceRowId, companyId]
+      [notes ?? null, auth.payload.sub, notes ?? null, deviceRowId, companyId]
     )
     await auditLog({
       portal: 'superadmin', actorType: 'superadmin',
       actorId: auth.payload.sub, actorName: auth.payload.name,
       action: 'device.deactivate', resource: 'pos_devices', resourceId: deviceRowId, companyId,
+      newValues: { reason: notes ?? null },
     })
   } else if (action === 'reset') {
     // Reset device_id so the license can be activated on a new machine
     await pool.query(
-      `UPDATE pos_devices SET device_id = NULL, status = 'pending', activated_at = NULL, deactivated_at = NULL
+      `UPDATE pos_devices SET device_id = NULL, status = 'pending', activated_at = NULL, deactivated_at = NULL,
+              authorization_version = authorization_version + 1
        WHERE id = ? AND company_id = ?`,
       [deviceRowId, companyId]
     )

@@ -61,6 +61,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     const settings = store.get('app_settings') as Record<string, unknown> | undefined
     const url = String(settings?.cloud_api_url || '').trim()
     const key = decryptSecret(settings?.cloud_api_key).trim()
+    const deviceId = (store.get('device_id') as string | undefined) ?? null
 
     steps.push({
       step: 'Cloud API Config',
@@ -73,7 +74,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     try {
       if (!url || !key) throw new Error('Cloud API URL/key is missing')
       const health = await withTimeout(
-        new CloudApi({ baseUrl: url, apiKey: key }).health(),
+        new CloudApi({ baseUrl: url, apiKey: key, deviceId }).health(),
         5000,
         'Cloud API'
       )
@@ -95,7 +96,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
         queryDetail = `Skipped while ${activeQueue} item(s) are syncing`
       } else {
         const data = await withTimeout(
-          new CloudApi({ baseUrl: url, apiKey: key }).changes(
+          new CloudApi({ baseUrl: url, apiKey: key, deviceId }).changes(
             'categories',
             '1970-01-01T00:00:00.000Z'
           ),

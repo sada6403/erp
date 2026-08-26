@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { resolveCompany, AccountStatusError } from '@/lib/auth'
+import { resolveCompany, AccountStatusError, resolveDeviceAuthorization, DeviceAuthorizationError } from '@/lib/auth'
 import { assertRelatedKey, assertTable, quoteIdentifier } from '@/lib/sync'
 
 export const runtime = 'nodejs'
@@ -16,6 +16,15 @@ export async function POST(request: NextRequest) {
   }
   if (!company) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  try {
+    await resolveDeviceAuthorization(request, company.id)
+  } catch (err) {
+    if (err instanceof DeviceAuthorizationError) {
+      return NextResponse.json({ error: err.message, code: err.code }, { status: 403 })
+    }
+    throw err
   }
 
   try {

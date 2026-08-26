@@ -17,6 +17,7 @@ import { sendEmail, invoiceEmailHtml } from '../services/emailService'
 import { sendSms } from '../services/smsService'
 import { sendWhatsApp } from '../services/whatsappService'
 import { notificationAllowed } from '../services/chitNotifications'
+import { isDeviceLocked } from '../services/licenseService'
 
 const store = new Store()
 
@@ -149,6 +150,13 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
   // Create invoice — handles all 3 bill types
   safeHandle(ipcMain, 'invoices:create', async (_e, payload) => {
+      // Phase 1 device-authorization work — defense in depth alongside the
+      // App.tsx route-level lock screen: a locked device can't record a
+      // sale via this handler even if the renderer's guard were somehow
+      // bypassed (e.g. devtools driving IPC directly).
+      if (isDeviceLocked()) {
+        return { success: false, error: 'This device is not currently activated. Re-activation required.' }
+      }
       const db = getDb()
       const user = getAuthUser()
       const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}

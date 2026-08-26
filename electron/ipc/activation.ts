@@ -2,7 +2,7 @@ import { ipcMain } from 'electron'
 import Store from 'electron-store'
 import os from 'os'
 import { randomUUID, createHash, timingSafeEqual } from 'crypto'
-import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers } from '../services/licenseService'
+import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers, OFFLINE_LEASE_MS, isDeviceLocked, getDeviceLockReason } from '../services/licenseService'
 import { decryptSecret } from './settings'
 import { safeHandle } from './ipcHandler'
 import { getDb } from '../database'
@@ -108,6 +108,17 @@ export function registerActivationHandlers() {
     return { locked, eventId: locked ? pending : null }
   })
 
+  // Phase 1 device-authorization work — checked at boot (before the normal
+  // login screen) and re-polled periodically by the renderer, purely from
+  // local electron-store state set by licenseService.ts's /api/brand poll
+  // and syncService.ts's DeviceRevokedError handling. No network call here
+  // itself — this just reads whatever the main process already knows.
+  safeHandle(ipcMain, 'app:getDeviceLockStatus', () => ({
+    locked: isDeviceLocked(),
+    reason: getDeviceLockReason(),
+    deviceId: (store.get('device_id') as string | undefined) ?? null,
+  }))
+
   // The lock screen's one button. Deliberately unauthenticated — this fires
   // before any login screen even renders, same as admin:forceReset firing
   // with no logged-in user. Reuses the exact same deletion routine as the
@@ -122,7 +133,7 @@ export function registerActivationHandlers() {
     if (!apiUrl || !apiKey) {
       return { success: false, error: 'Cannot refresh — this device is not connected to the cloud' }
     }
-    const cloud = new CloudApi({ baseUrl: apiUrl, apiKey })
+    const cloud = new CloudApi({ baseUrl: apiUrl, apiKey, deviceId: (store.get('device_id') as string | undefined) ?? null })
     try {
       await cloud.health()
     } catch {
@@ -243,6 +254,18 @@ export function registerActivationHandlers() {
     store.set('device_id', device_id)
     store.set('activation_company_name', data.company_name ?? '')
 
+    // Phase 1 device-authorization work — a fresh activation (including a
+    // RE-activation of a previously-locked/revoked device) always starts a
+    // clean authorization state, never restores whatever was there before.
+    store.set('device_authorization_version', 1)
+    store.set('offline_authorization_expires_at', Date.now() + OFFLINE_LEASE_MS)
+    store.delete('device_locked')
+    store.delete('device_lock_reason')
+    // Force a full bootstrap re-pull rather than trusting whatever local
+    // data/cursor this device already had — matters most for the
+    // re-activation case (a previously revoked device coming back).
+    store.delete('last_pull_timestamp')
+
     // Auto-save api_key + branding into app_settings
     const current = (store.get('app_settings') as Record<string, unknown>) ?? {}
     store.set('app_settings', {
@@ -275,7 +298,7 @@ export function registerActivationHandlers() {
     // real cloud ids, so a later full re-pull never has to fall back to
     // guessing which role a user belongs to.
     try {
-      const cloud = new CloudApi({ baseUrl: apiUrl, apiKey: String(data.api_key || '') })
+      const cloud = new CloudApi({ baseUrl: apiUrl, apiKey: String(data.api_key || ''), deviceId: device_id })
       const cloudRoles = await cloud.changes('roles', '1970-01-01T00:00:00.000Z')
       const cloudRolesByName: Record<string, string> = {}
       for (const row of cloudRoles) {

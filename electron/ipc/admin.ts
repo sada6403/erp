@@ -1777,7 +1777,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     if (!apiUrl || !apiKey) {
       return { success: false, error: 'Cannot verify password — this device is not connected to the cloud' }
     }
-    const cloud = new CloudApi({ baseUrl: apiUrl, apiKey })
+    const cloud = new CloudApi({ baseUrl: apiUrl, apiKey, deviceId: (store.get('device_id') as string | undefined) ?? null })
     try {
       const verify = await cloud.verifyClearDataPassword(password || '')
       if (!verify.success) {

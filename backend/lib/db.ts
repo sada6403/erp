@@ -336,6 +336,19 @@ async function autoMigrate() {
     `ALTER TABLE pos_devices ADD COLUMN deactivated_at DATETIME     NULL`,
     `ALTER TABLE pos_devices ADD COLUMN updated_at     DATETIME     NULL ON UPDATE CURRENT_TIMESTAMP`,
 
+    // Device authorization/revocation (Phase 1 of the device-authorization
+    // architecture work) — a device's own row was previously only ever
+    // checked at activation time; nothing re-validated an already-activated
+    // device against it again. authorization_version lets an already-
+    // running device detect "something changed on my row" via a cheap
+    // integer comparison instead of re-deriving intent from status alone;
+    // bumped on every status-changing PATCH action (deactivate/reactivate/
+    // reset), not just revocation, so it's a general change signal.
+    `ALTER TABLE pos_devices ADD COLUMN authorization_version INT NOT NULL DEFAULT 1`,
+    `ALTER TABLE pos_devices ADD COLUMN revoked_at    DATETIME NULL`,
+    `ALTER TABLE pos_devices ADD COLUMN revoked_by    CHAR(36) NULL`,
+    `ALTER TABLE pos_devices ADD COLUMN revoke_reason TEXT     NULL`,
+
     `CREATE TABLE IF NOT EXISTS sync_logs (
        id         VARCHAR(36)  NOT NULL PRIMARY KEY DEFAULT (UUID()),
        company_id VARCHAR(36)  NOT NULL,

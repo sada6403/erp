@@ -11,7 +11,15 @@ interface VerifyResult {
 
 type Step = 'key' | 'branch' | 'activating' | 'done'
 
-interface Props { onActivated: () => void }
+interface Props {
+  onActivated: () => void
+  // Phase 1 device-authorization work — set when this page is being shown
+  // because a previously-activated device was revoked/deactivated, rather
+  // than a brand-new install. Reuses this exact component (same verified
+  // company-key/branch/activate flow) instead of a second, simplified
+  // reactivation form.
+  bannerMessage?: string
+}
 type VerifyResponse = VerifyResult & { success?: boolean; error?: string }
 
 // Built-in production server — devices activate with only the Company Key.
@@ -22,7 +30,7 @@ const DEFAULT_API_URL =
   (import.meta.env.VITE_CLOUD_API_URL as string | undefined)?.trim().replace(/\/+$/, '') ||
   (import.meta.env.DEV ? 'http://localhost:3000' : BUILT_IN_API_URL)
 
-export default function ActivationPage({ onActivated }: Props) {
+export default function ActivationPage({ onActivated, bannerMessage }: Props) {
   const [step, setStep]             = useState<Step>('key')
   const [companyKey, setCompanyKey] = useState('')
   const [apiUrl, setApiUrl]         = useState(DEFAULT_API_URL)
@@ -243,6 +251,12 @@ export default function ActivationPage({ onActivated }: Props) {
                 </button>
                 <p className="text-sm text-gray-400">Enter the Company Key provided by your administrator</p>
               </div>
+
+              {bannerMessage && (
+                <div className="rounded-xl border border-red-700/50 bg-red-900/20 px-4 py-3 text-red-300 text-sm">
+                  {bannerMessage}
+                </div>
+              )}
 
               <div className="rounded-xl border px-4 py-3 flex items-center gap-3" style={{ borderColor: '#2a2d3a', background: '#16181f' }}>
                 <Monitor className="w-5 h-5 text-gray-500 flex-shrink-0" />

@@ -3,6 +3,13 @@ import fs from 'fs'
 export interface CloudConfig {
   baseUrl: string
   apiKey: string
+  // Phase 1 device-authorization work — sent as x-device-id on every
+  // request so the backend can enforce per-device revocation (see
+  // resolveDeviceAuthorization in backend/lib/auth.ts) on top of the
+  // existing company-wide x-api-key check. Optional so older call sites
+  // that construct a CloudApi without a device id (there are none left
+  // after this change, but the type stays permissive) don't break.
+  deviceId?: string | null
 }
 
 export class CloudRateLimitError extends Error {
@@ -15,13 +22,25 @@ export class CloudRateLimitError extends Error {
   }
 }
 
+// Thrown when the backend reports this specific device as deactivated
+// (DEVICE_REVOKED) — distinct from CloudRateLimitError so callers (mainly
+// SyncService) can react by locking the device instead of just retrying.
+export class DeviceRevokedError extends Error {
+  constructor(message: string, public readonly code: string) {
+    super(message)
+    this.name = 'DeviceRevokedError'
+  }
+}
+
 export class CloudApi {
   private readonly baseUrl: string
   private readonly apiKey: string
+  private readonly deviceId: string | null
 
   constructor(config: CloudConfig) {
     this.baseUrl = config.baseUrl.replace(/\/+$/, '')
     this.apiKey = config.apiKey
+    this.deviceId = config.deviceId ?? null
   }
 
   async health(): Promise<{ status: string; database: string }> {
@@ -167,6 +186,7 @@ export class CloudApi {
       signal: init.signal || AbortSignal.timeout(15_000),
       headers: {
         'x-api-key': this.apiKey,
+        ...(this.deviceId ? { 'x-device-id': this.deviceId } : {}),
         ...(typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}),
         ...init.headers,
       },
@@ -192,6 +212,12 @@ export class CloudApi {
           ? Number((payload as { retryAfter: unknown }).retryAfter)
           : 0
         throw new CloudRateLimitError(message, Math.max(15, headerRetry || bodyRetry || 60))
+      }
+      const code = payload && typeof payload === 'object' && 'code' in payload
+        ? String((payload as { code: unknown }).code)
+        : ''
+      if (code === 'DEVICE_REVOKED' || code === 'DEVICE_SUSPENDED') {
+        throw new DeviceRevokedError(message, code)
       }
       throw new Error(message)
     }

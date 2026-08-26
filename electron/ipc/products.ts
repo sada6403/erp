@@ -500,7 +500,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const cloudKey = decryptSecret(settings?.cloud_api_key).trim()
       if (cloudUrl && cloudKey) {
         try {
-          const publicUrl = await new CloudApi({ baseUrl: cloudUrl, apiKey: cloudKey })
+          const publicUrl = await new CloudApi({ baseUrl: cloudUrl, apiKey: cloudKey, deviceId: (store.get('device_id') as string | undefined) ?? null })
             .uploadImage(destPath, fileName, contentType)
           return { success: true, data: publicUrl }
         } catch (err) {

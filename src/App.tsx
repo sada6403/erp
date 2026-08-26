@@ -67,6 +67,7 @@ import TransactionReportPage from '@/pages/admin/TransactionReportPage'
 import AdvancedReportsPage from '@/pages/admin/AdvancedReportsPage'
 import ActivationPage from '@/pages/ActivationPage'
 import DataClearedLockScreen from '@/pages/DataClearedLockScreen'
+import DeviceLockedScreen from '@/pages/DeviceLockedScreen'
 import SetupWizardPage from '@/pages/SetupWizardPage'
 import { loadAndApplySystemTheme } from '@/lib/systemTheme'
 import { getLandingRoute } from '@/lib/sessionRouting'
@@ -127,6 +128,29 @@ export default function App() {
   const navigate   = useNavigate()
   const [activated, setActivated] = useState<boolean | null>(null)
   const [pendingClearEvent, setPendingClearEvent] = useState<{ locked: boolean; eventId: string | null } | null>(null)
+  const [deviceLock, setDeviceLock] = useState<{ locked: boolean; reason: string | null; deviceId: string | null }>({ locked: false, reason: null, deviceId: null })
+
+  const checkDeviceLock = () => {
+    if (!window.api?.app?.getDeviceLockStatus) return
+    window.api.app.getDeviceLockStatus()
+      .then((r: { locked: boolean; reason: string | null; deviceId: string | null }) => setDeviceLock(r))
+      .catch(() => undefined)
+  }
+
+  // Phase 1 device-authorization work — checked once at boot (only
+  // meaningful for an already-activated device; a brand-new install goes
+  // through the normal ActivationPage instead) and re-polled periodically,
+  // since the actual lock decision is made in the main process
+  // (licenseService.ts's /api/brand poll, or a DeviceRevokedError caught by
+  // SyncService) and only surfaces here on the next check. Purely reads
+  // local electron-store state — no network call from the renderer itself.
+  useEffect(() => {
+    if (activated !== true) return
+    checkDeviceLock()
+    const interval = setInterval(checkDeviceLock, 30_000)
+    return () => clearInterval(interval)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activated])
 
   // Multi-device forced lock screen (Issue 30) — checked first thing at
   // boot, ahead of the activation/login sequence, purely from local
@@ -198,6 +222,20 @@ export default function App() {
 
   if (activated === null) return <LoadingScreen />
   if (!activated) return <ActivationPage onActivated={() => { finishActivation().catch(() => navigate('/login', { replace: true })) }} />
+
+  // Phase 1 device-authorization work — a revoked/deactivated device goes
+  // straight here, full-stop. No login screen, no dashboard, no cached
+  // business data is reachable while this renders (same "nothing else
+  // mounts" guarantee as DataClearedLockScreen above).
+  if (deviceLock.locked) {
+    return (
+      <DeviceLockedScreen
+        reason={deviceLock.reason}
+        deviceId={deviceLock.deviceId}
+        onReactivated={() => setDeviceLock({ locked: false, reason: null, deviceId: null })}
+      />
+    )
+  }
 
   return (
     <Routes>

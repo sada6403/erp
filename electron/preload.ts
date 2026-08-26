@@ -508,6 +508,7 @@ const api = {
   app: {
     isActivated:        () => ipcRenderer.invoke('app:isActivated'),
     getPendingClearEvent: () => ipcRenderer.invoke('app:getPendingClearEvent'),
+    getDeviceLockStatus: () => ipcRenderer.invoke('app:getDeviceLockStatus'),
     refreshAfterClear:  () => ipcRenderer.invoke('app:refreshAfterClear'),
     getDeviceInfo:      () => ipcRenderer.invoke('app:getDeviceInfo'),
     getActivationInfo:  () => ipcRenderer.invoke('app:getActivationInfo'),

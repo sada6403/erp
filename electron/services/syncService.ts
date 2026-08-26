@@ -3,9 +3,10 @@ import Store from 'electron-store'
 import fs from 'fs'
 import path from 'path'
 import { app } from 'electron'
-import { CloudApi, CloudRateLimitError } from './cloudApi'
+import { CloudApi, CloudRateLimitError, DeviceRevokedError } from './cloudApi'
 import { CLOUD_BRANDING_KEYS, decryptSecret, pushBrandingToCloud } from '../ipc/settings'
 import { reconcileLocalDefaultRoles } from './roleReconcile'
+import { isDeviceLocked, reportDeviceRevoked } from './licenseService'
 
 const store = new Store()
 const BATCH_SIZE = 10
@@ -55,12 +56,17 @@ export class SyncService {
     // decryptSecret passes plaintext values through unchanged
     const apiKey = decryptSecret(settings?.cloud_api_key).trim()
     if (!baseUrl || !apiKey) return null
-    return new CloudApi({ baseUrl, apiKey })
+    const deviceId = (store.get('device_id') as string | undefined) ?? null
+    return new CloudApi({ baseUrl, apiKey, deviceId })
   }
 
   async runOnce(): Promise<void> {
     if (this.running) return
     if (Date.now() < this.backoffUntil) return
+    // Phase 1 device-authorization work — a locked device must not push or
+    // pull anything, even if it somehow still has connectivity (defense in
+    // depth alongside the UI-level lock screen in App.tsx).
+    if (isDeviceLocked()) return
     this.running = true
 
     try {
@@ -96,6 +102,10 @@ export class SyncService {
       if (err instanceof CloudRateLimitError) {
         this.backoffUntil = Date.now() + err.retryAfterSeconds * 1000
         console.warn(`[SyncService] Rate limited. Retrying after ${err.retryAfterSeconds}s`)
+        return
+      }
+      if (err instanceof DeviceRevokedError) {
+        reportDeviceRevoked(err.message)
         return
       }
       console.error('[SyncService]', err)

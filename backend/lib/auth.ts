@@ -1412,6 +1412,53 @@ export async function resolveCompany(req: NextRequest): Promise<CompanyContext |
   }
 }
 
+// ─── Per-device authorization (Phase 1 of device-authorization work) ─────────
+// Companies authenticate via a single shared x-api-key; this layers a
+// per-DEVICE check on top via a new x-device-id header, so a specific POS
+// can be revoked without touching the rest of the company's fleet. Older
+// clients that don't yet send x-device-id (pre-update) are exempt from
+// device-level enforcement entirely — resolveCompany()'s existing
+// company-wide check still applies to them. Same for an unrecognized
+// device_id (e.g. a row created before this concept existed): fail OPEN,
+// never lock a device out due to incomplete data — only an explicit
+// non-active status on a device we can actually identify blocks it.
+export type DeviceContext = {
+  id: string
+  status: string
+  authorizationVersion: number
+}
+
+export class DeviceAuthorizationError extends Error {
+  constructor(
+    public readonly code: 'DEVICE_SUSPENDED' | 'DEVICE_REVOKED',
+    message: string
+  ) {
+    super(message)
+    this.name = 'DeviceAuthorizationError'
+  }
+}
+
+export async function resolveDeviceAuthorization(req: NextRequest, companyId: string): Promise<DeviceContext | null> {
+  const deviceId = req.headers.get('x-device-id')
+  if (!deviceId) return null
+
+  const { rows } = await pool.query(
+    `SELECT id, status, authorization_version FROM pos_devices WHERE company_id = ? AND device_id = ? LIMIT 1`,
+    [companyId, deviceId]
+  )
+  if (!rows.length) return null
+
+  const d = rows[0] as Record<string, string | number>
+  const status = String(d.status)
+  const authorizationVersion = Number(d.authorization_version ?? 1)
+
+  if (status === 'deactivated') {
+    throw new DeviceAuthorizationError('DEVICE_REVOKED', 'This device has been deactivated by your administrator. Re-activation required.')
+  }
+
+  return { id: String(d.id), status, authorizationVersion }
+}
+
 // ─── Legacy single-tenant API key check (kept for backward compat) ────────────
 export function isAuthorized(request: NextRequest): boolean {
   const expected = process.env.CLOUD_API_KEY

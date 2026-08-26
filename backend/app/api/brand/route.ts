@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { pool } from '@/lib/db'
 import { resolveEntitlements } from '@/lib/entitlements'
+import { resolveDeviceAuthorization, DeviceAuthorizationError } from '@/lib/auth'
 
 export async function GET(req: NextRequest) {
   try {
@@ -38,6 +39,20 @@ export async function GET(req: NextRequest) {
 
     const entitlements = await resolveEntitlements({ companyId: String(c.company_id) })
 
+    // Per-device authorization check (Phase 1) — this endpoint is already
+    // polled every 5 minutes by every device's licenseService, so it
+    // doubles as the primary "phone home" path for detecting a device
+    // revocation while online, with no new endpoint needed.
+    let device
+    try {
+      device = await resolveDeviceAuthorization(req, String(c.company_id))
+    } catch (err) {
+      if (err instanceof DeviceAuthorizationError) {
+        return NextResponse.json({ error: err.message, code: err.code }, { status: 403 })
+      }
+      throw err
+    }
+
     return NextResponse.json({
       company_name:    c.name,
       company_email:   c.email   ?? null,
@@ -56,6 +71,8 @@ export async function GET(req: NextRequest) {
       features:       entitlements.enabledFeatures,
       limits:         entitlements.limits,
       license_id:     entitlements.licenseId,
+      device_status:               device?.status ?? null,
+      device_authorization_version: device?.authorizationVersion ?? null,
     })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })
