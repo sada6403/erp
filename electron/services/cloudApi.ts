@@ -156,6 +156,14 @@ export class CloudApi {
     return this.request(`/api/companies/support-token/status?${query.toString()}`)
   }
 
+  // Issue 37 (36c) — cheap "did products/stocks/categories change" check,
+  // polled far more often than the full pull cycle so a branch notices an
+  // admin edit within a few seconds instead of waiting for the next
+  // 59-table sweep.
+  async getSyncWatermark(): Promise<{ watermark: string | null }> {
+    return this.request('/api/sync/watermark')
+  }
+
   async getBranding(): Promise<{ branding: Record<string, unknown>; updated_at: string | null }> {
     return this.request('/api/company/branding')
   }

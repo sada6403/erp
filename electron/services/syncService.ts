@@ -9,12 +9,24 @@ import { reconcileLocalDefaultRoles } from './roleReconcile'
 import { isDeviceLocked, reportDeviceRevoked } from './licenseService'
 
 const store = new Store()
-const BATCH_SIZE = 10
+// Issue 36: was 10 — a large bulk push (e.g. a 447-product bulk delete)
+// took ~45 cycles to drain at 10/cycle, since every cycle also pays the
+// full pullChanges() cost regardless. Raised to 50 to cut that roughly 3x;
+// the per-item REQUEST_DELAY_MS throttle below is untouched (shared-backend
+// rate-limit protection, out of scope for this fix).
+const BATCH_SIZE = 50
 const MAX_ATTEMPTS = 5
 const REQUEST_DELAY_MS = 300
 const STALE_PROCESSING_MINUTES = 3
 const SYNC_INTERVAL_MS = 15_000
 const DRAIN_RETRY_MS = 1_500
+// Issue 37 (36c) — near-instant propagation for the tables that matter most
+// for a cashier's day-to-day experience (products/pricing, stock counts,
+// categories) without shortening the full 59-table cycle (would just move
+// the ~25s bottleneck, not remove it). A cheap watermark check every 3s,
+// escalating to a targeted 3-table pull only when it actually changed.
+const WATERMARK_INTERVAL_MS = 3_000
+const WATERMARK_TABLES = ['products', 'stocks', 'categories']
 const DEFAULT_FAILED_RETRY_MINUTES = 2
 
 function sleep(ms: number) {
@@ -24,6 +36,8 @@ function sleep(ms: number) {
 export class SyncService {
   private timer: ReturnType<typeof setInterval> | null = null
   private drainTimer: ReturnType<typeof setTimeout> | null = null
+  private watermarkTimer: ReturnType<typeof setInterval> | null = null
+  private watermarkChecking = false
   private running = false
   private colCache = new Map<string, Set<string>>()
   private backoffUntil = 0
@@ -41,13 +55,92 @@ export class SyncService {
     if (this.timer) return
     this.timer = setInterval(() => this.runOnce(), SYNC_INTERVAL_MS)
     this.runOnce()
+    if (!this.watermarkTimer) {
+      this.watermarkTimer = setInterval(() => this.checkWatermark(), WATERMARK_INTERVAL_MS)
+    }
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer)
     if (this.drainTimer) clearTimeout(this.drainTimer)
+    if (this.watermarkTimer) clearInterval(this.watermarkTimer)
     this.timer = null
     this.drainTimer = null
+    this.watermarkTimer = null
+  }
+
+  // Issue 37 (36c) — the fast path. Skips entirely while a full runOnce()
+  // cycle is already in flight (it will cover these same 3 tables anyway as
+  // part of its normal sweep) or while the device is locked/offline, so
+  // this never does redundant or unauthorized work.
+  private async checkWatermark(): Promise<void> {
+    if (this.watermarkChecking || this.running) return
+    if (isDeviceLocked()) return
+    const cloud = this.getCloudApi()
+    if (!cloud) return
+
+    this.watermarkChecking = true
+    try {
+      const { watermark } = await cloud.getSyncWatermark()
+      if (!watermark) return
+      const lastSeen = store.get('last_seen_watermark') as string | undefined
+      if (lastSeen === watermark) return
+      store.set('last_seen_watermark', watermark)
+      // First-ever check on a device (no lastSeen yet) — nothing to react
+      // to, the normal bootstrap/full-cycle pull already covers it.
+      if (!lastSeen) return
+      await this.pullWatermarkTables(cloud)
+    } catch (err) {
+      if (err instanceof DeviceRevokedError) { reportDeviceRevoked(err.message); return }
+      if (err instanceof CloudRateLimitError) return // let the main cycle's backoff handle it
+      console.error('[SyncService] Watermark check failed:', err)
+    } finally {
+      this.watermarkChecking = false
+    }
+  }
+
+  // Targeted pull for just the watermark-tracked tables — same upsert logic
+  // as the full pullChanges() loop (insertFiltered), same idempotency
+  // guarantees, just scoped to 3 tables instead of 59 and on its own cursor
+  // so it never interacts with pullChanges()'s own cursor bookkeeping.
+  private async pullWatermarkTables(cloud: CloudApi): Promise<void> {
+    const db = getDb()
+    const lastPull = store.get('last_watermark_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
+    const newPullTime = new Date().toISOString()
+
+    for (const table of WATERMARK_TABLES) {
+      let data: Record<string, unknown>[] = []
+      try {
+        data = await cloud.changes(table, lastPull)
+      } catch (err) {
+        if (err instanceof CloudRateLimitError) throw err
+        console.error('[SyncService] Fast-path pull failed for table:', table, err)
+        continue
+      }
+      if (data.length === 0) continue
+
+      const pendingIds = (db.prepare(`
+        SELECT record_id FROM sync_queue
+        WHERE table_name = ? AND status IN ('pending', 'processing')
+      `).all(table) as { record_id: string }[]).map(row => row.record_id)
+
+      try {
+        db.transaction(() => {
+          for (const row of data) {
+            if (pendingIds.includes(String(row.id))) continue
+            try {
+              this.insertFiltered(db, table, row)
+            } catch (err) {
+              console.error(`[SyncService] Skipping row in ${table} (${row.id}) [fast path]:`, err)
+            }
+          }
+        })()
+      } catch (err) {
+        console.error(`[SyncService] Fast-path transaction failed for table ${table}:`, err)
+      }
+    }
+
+    store.set('last_watermark_pull_timestamp', newPullTime)
   }
 
   private getCloudApi(): CloudApi | null {
@@ -668,12 +761,31 @@ export class SyncService {
   // so a hard-deleted row (e.g. a deleted branch) simply isn't in a
   // `WHERE updated_at > since` result set anymore and would otherwise linger
   // forever on any device that already had it. Tracks its OWN cursor
-  // (`last_deletion_pull_timestamp`), separate from `last_pull_timestamp`,
-  // and only advances past deletions that were actually applied — a
-  // deletion that fails locally (e.g. a referencing row hasn't synced down
-  // yet) is retried on the next cycle instead of silently skipped forever.
-  // DELETE is naturally idempotent, so re-applying an already-gone row is a
-  // harmless no-op.
+  // (`last_deletion_pull_timestamp`), separate from `last_pull_timestamp`.
+  //
+  // Issue 36: this used to `break` the whole loop on the first row that
+  // failed to delete (e.g. FOREIGN KEY constraint failed — this app runs
+  // SQLite with foreign_keys=ON, so a branch that still has a local `stocks`
+  // row, a chit redemption, a discount, etc. referencing a product being
+  // deleted will hit exactly this). That `break` meant ONE conflicted row
+  // permanently froze `last_deletion_pull_timestamp`, and since the cursor
+  // never advanced, every future cycle re-fetched the exact same batch and
+  // hit the exact same conflict again — forever, blocking every OTHER
+  // table's deletions too, surviving even an app restart (the bootstrap-pull
+  // reset only clears `last_pull_timestamp`, never this cursor). Reproduced
+  // live against real production tombstone data during Issue 36's
+  // investigation: a single conflicting row blocked all 447 pending
+  // deletions in the same batch, indefinitely.
+  //
+  // Fix: attempt every entry every cycle (never let one failure block the
+  // rest), and only advance the cursor up to — never past — the first entry
+  // that's still failing, in chronological order. Already-applied entries
+  // being re-sent on a later cycle (because the cursor can't move past an
+  // earlier unresolved failure) is a harmless no-op — DELETE on an
+  // already-gone row affects 0 rows. Once whatever locally referenced the
+  // blocked row is itself cleared, that entry succeeds on some later cycle
+  // and the cursor becomes free to advance again — self-healing, no manual
+  // intervention or extra state needed.
   private async pullDeletions(cloud: CloudApi, db: ReturnType<typeof getDb>): Promise<void> {
     const lastPull = store.get('last_deletion_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
     let deletions: Array<{ table_name: string; record_id: string; deleted_at: string }> = []
@@ -693,6 +805,7 @@ export class SyncService {
     const SAFE_TABLE_NAME = /^[a-z][a-z0-9_]*$/
 
     let advanceTo = lastPull
+    let sawFailure = false
     for (const d of deletions) {
       if (!SAFE_TABLE_NAME.test(d.table_name) || !d.record_id) {
         console.error('[SyncService] Skipping malformed deletion entry:', d)
@@ -700,10 +813,10 @@ export class SyncService {
       }
       try {
         db.prepare(`DELETE FROM ${d.table_name} WHERE id = ?`).run(d.record_id)
-        advanceTo = d.deleted_at
+        if (!sawFailure) advanceTo = d.deleted_at
       } catch (err) {
-        console.error(`[SyncService] Failed to apply deletion for ${d.table_name}(${d.record_id}) — will retry next cycle:`, err)
-        break
+        console.error(`[SyncService] Deletion still blocked for ${d.table_name}(${d.record_id}) — see Issue 36; will retry every cycle until it clears:`, err)
+        sawFailure = true
       }
     }
     store.set('last_deletion_pull_timestamp', advanceTo)

@@ -2,6 +2,33 @@
 
 Internal release log. Not customer-facing.
 
+## 2.6.14 — 2026-08-27 — Product sync speed + delete correctness (Issue 37)
+
+**Fixes a severe, confirmed correctness bug**: a single product delete that
+conflicted with a branch's local data (e.g. a stock row, a chit redemption)
+would permanently freeze that device's deletion cursor — every future sync
+cycle re-hit the same conflict and silently blocked *every other pending
+deletion too*, surviving even an app restart. Reproduced live against the
+actual production incident (a 447-product bulk delete on natural
+plantation) and confirmed the fix resolves it: 446 of 447 now apply
+correctly, only the genuinely-conflicted one retries automatically until
+it clears.
+
+- `pullDeletions()` no longer stops the whole batch on one failure — every
+  other pending deletion still applies, and only the specific blocked
+  entry keeps retrying.
+- Bulk push throughput: `BATCH_SIZE` 10→50, cutting a large bulk
+  operation's push time roughly 3x (measured ~25 min → an estimated ~7 min
+  for a 447-item case).
+- New: a lightweight watermark check every 3 seconds so an admin's
+  product/stock/category edit reaches online branches within a few
+  seconds, instead of waiting for the next full ~25-30s sync cycle. The
+  full cycle is unchanged and still runs as the comprehensive catch-all
+  for every other table and for offline catch-up.
+
+See `ISSUE_TRACKER.md`, Issue 37 for the full measured diagnosis and
+reproduction details.
+
 ## 2.6.13 — 2026-08-26 — Device authorization & remote revocation, Phase 1 (Issue 36)
 
 Ships the device build needed to actually exercise Phase 1's server-side
