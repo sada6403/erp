@@ -129,6 +129,16 @@ export default function ProductsPage() {
     }
   }
 
+  const handleDownloadTemplate = async () => {
+    try {
+      const res = await window.api.products.downloadTemplate()
+      if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Download failed'); return }
+      toast.success('Bulk upload template downloaded successfully!')
+    } catch (err) {
+      toast.error('Download failed: ' + String(err))
+    }
+  }
+
   const handleNormalizeCatalog = async () => {
     setNormalizing(true)
     try {
@@ -266,6 +276,9 @@ export default function ProductsPage() {
                 <Trash2 size={14} /> Delete Selected ({selectedIds.size})
               </button>
             )}
+            <button onClick={handleDownloadTemplate} className="btn-secondary btn-sm gap-1.5" title="Download Product Bulk Upload Template">
+              <Download size={14} /> Download Template
+            </button>
             <button onClick={handleImportExcel} className="btn-secondary btn-sm gap-1.5">
               <FileSpreadsheet size={14} /> Import CSV / Excel
             </button>
@@ -341,16 +354,17 @@ export default function ProductsPage() {
                     className="cursor-pointer" title="Select all visible" />
                 </th>
               )}
-              {['Image', 'SKU', 'Product', 'Location', 'Unit Cost(Rs.)', 'Unit Price(Rs.)', 'Wholesale(Rs.)', 'Quantity', 'Action'].map(h => (
+              {['Image', 'SKU', 'Product', 'Location', 'Unit Cost(Rs.)', 'Unit Price(Rs.)', 'Discount (%)', 'Wholesale(Rs.)', 'Quantity', 'Action'].map(h => (
                 <th key={h} className="table-header px-3 py-3 text-left text-xs">{h}</th>
               ))}
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={10} className="text-center py-16 text-slate-500">Loading...</td></tr>
+              <tr><td colSpan={11} className="text-center py-16 text-slate-500">Loading...</td></tr>
             ) : filtered.map(p => {
               const pr = p as unknown as Record<string, unknown>
+              const discPct = Number(p.discount_pct || pr.discount_pct || 0)
               return (
                 <tr key={p.id} className="table-row">
                   {isCompanyAdmin && (
@@ -383,6 +397,15 @@ export default function ProductsPage() {
                     {pr.alert_qty ? <span className="text-xs text-slate-500 ml-1">({pr.alert_qty as number})</span> : null}
                   </td>
                   <td className="table-cell px-3 text-sm font-semibold" style={{ color: 'var(--brand-primary)' }}>{p.selling_price.toLocaleString()}</td>
+                  <td className="table-cell px-3 text-sm font-medium">
+                    {discPct > 0 ? (
+                      <span className="inline-block bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-0.5 rounded text-xs">
+                        {discPct}% OFF
+                      </span>
+                    ) : (
+                      <span className="text-slate-500 text-xs">0%</span>
+                    )}
+                  </td>
                   <td className="table-cell px-3 text-sm text-slate-400">{Number(pr.wholesale_price || 0).toLocaleString()}</td>
                   <td className="table-cell px-3 whitespace-nowrap">
                     <span className={`text-sm font-bold px-2 py-0.5 rounded text-white whitespace-nowrap
@@ -844,7 +867,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
   // Quick per-product discount % — a shortcut that creates/updates a
   // scope:'product', global-branch rule via the same Discounts module used
   // by Admin > Discounts, instead of a separate storage mechanism.
-  const [discountPct, setDiscountPct] = useState(0)
+  const [discountPct, setDiscountPct] = useState(product?.discount_pct ?? 0)
   const [existingDiscountId, setExistingDiscountId] = useState<string | null>(null)
   const [saving, setSaving]           = useState(false)
   const [uploading, setUploading]     = useState(false)
@@ -856,6 +879,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
 
   useEffect(() => {
     if (product) {
+      if (product.discount_pct !== undefined) setDiscountPct(product.discount_pct)
       window.api.stocks.get(product.id).then((res: { success: boolean; data?: unknown; error?: string }) => {
         if (res.success && res.data) setStockQty((res.data as { quantity: number }).quantity)
         else if (!res.success) toast.error(res.error || 'Failed to load stock quantity')
@@ -909,6 +933,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
       const branchId = user?.branch?.id || 'b1111111-1111-4111-8111-111111111111'
       const payload = {
         ...form,
+        discount_pct:           discountPct,
         not_for_sale:           form.not_for_sale ? 1 : 0,
         enable_emi:             form.enable_emi ? 1 : 0,
         is_manage_stock:        form.is_manage_stock ? 1 : 0,

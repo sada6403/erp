@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS products (
   cost_price      REAL NOT NULL DEFAULT 0,
   selling_price   REAL NOT NULL DEFAULT 0,
   tax_rate        REAL NOT NULL DEFAULT 0,
+  discount_pct    REAL NOT NULL DEFAULT 0,
   min_stock_level INTEGER NOT NULL DEFAULT 5,
   is_active       INTEGER NOT NULL DEFAULT 1,
   created_at      TEXT NOT NULL DEFAULT (datetime('now')),

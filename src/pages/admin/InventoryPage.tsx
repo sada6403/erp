@@ -65,10 +65,11 @@ export default function InventoryPage() {
   const summaryProductCount = activeSummary ? Number(activeSummary.product_count || 0) : 0
   const summaryLowStockCount = activeSummary ? Number(activeSummary.low_stock_count || 0) : lowStock.length
   const summaryOutOfStock = activeSummary ? Number(activeSummary.out_of_stock_count || 0) : outOfStockRows.length
+  const summaryTotalUnits = activeSummary ? Number(activeSummary.total_units || 0) : stocks.reduce((sum, s) => sum + Number(s.quantity || 0), 0)
   const totalProducts = catalogTotalProducts || summaryProductCount
   const outOfStock = summaryOutOfStock
   const lowStockCount = summaryLowStockCount
-  const remaining = Math.max(0, totalProducts - outOfStock - lowStockCount)
+
   const nextTransferStatus: Record<string, string> = {
     pending: 'approved', pending_approval: 'approved', approved: 'ready_for_dispatch',
     ready_for_dispatch: 'dispatched', dispatched: 'in_transit', in_transit: 'received'
@@ -130,9 +131,9 @@ export default function InventoryPage() {
           <div className="grid grid-cols-4 gap-3">
             {[
               { label: 'Total Products', value: totalProducts },
+              { label: 'Total Stock Qty', value: summaryTotalUnits.toLocaleString() },
               { label: 'Low Stock', value: lowStockCount },
               { label: 'Out of Stock', value: outOfStock },
-              { label: 'Remaining', value: remaining },
             ].map(card => (
               <div key={card.label} className="rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
                 <p className="text-xs uppercase tracking-wide" style={{ color: 'var(--text-3)' }}>{card.label}</p>
@@ -218,10 +219,14 @@ export default function InventoryPage() {
                         {out > 0 ? 'Out' : low > 0 ? 'Low' : 'OK'}
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-2 mt-4 text-center">
+                    <div className="grid grid-cols-4 gap-2 mt-4 text-center">
                       <div className="rounded-lg p-2" style={{ background: 'var(--bg-soft)' }}>
                         <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>Products</p>
                         <p className="font-bold" style={{ color: 'var(--text-1)' }}>{products}</p>
+                      </div>
+                      <div className="rounded-lg p-2" style={{ background: 'var(--bg-soft)' }}>
+                        <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>Total Qty</p>
+                        <p className="font-bold text-brand-400">{Number(b.total_units || 0).toLocaleString()}</p>
                       </div>
                       <div className="rounded-lg p-2" style={{ background: 'var(--bg-soft)' }}>
                         <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>Low</p>

@@ -37,6 +37,7 @@ const api = {
     delete:     (id: string)        => ipcRenderer.invoke('products:delete', id),
     selectAndUploadImage: ()        => ipcRenderer.invoke('products:selectAndUploadImage'),
     importExcel:          ()        => ipcRenderer.invoke('products:importExcel'),
+    downloadTemplate:     ()        => ipcRenderer.invoke('products:downloadTemplate'),
     exportCsv:            ()        => ipcRenderer.invoke('products:exportCsv'),
     normalizeCatalog:     ()        => ipcRenderer.invoke('products:normalizeCatalog'),
     catalogAudit:         ()        => ipcRenderer.invoke('products:catalogAudit'),

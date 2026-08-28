@@ -93,6 +93,7 @@ const KNOWN_COLUMN_ALIASES = new Set([
   'barcode', 'ean', 'upc', 'unit', 'uom', 'measure',
   'stock', 'quantity', 'qty', 'openingstock', 'tax', 'taxrate', 'vat',
   'minstock', 'reorder', 'reorderlevel', 'description', 'desc', 'notes',
+  'discount', 'discountpct', 'discountpercentage', 'discountpercent', 'discount_pct', 'discount_percentage',
 ])
 function isHeaderlessCodeNameFile(rows: Record<string, unknown>[]): boolean {
   if (!rows.length) return false
@@ -293,10 +294,10 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
         db.prepare(`
           INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
-            image_url, unit, cost_price, selling_price, tax_rate, min_stock_level)
+            image_url, unit, cost_price, selling_price, tax_rate, discount_pct, min_stock_level)
           VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
-            @image_url, @unit, @cost_price, @selling_price, @tax_rate, @min_stock_level)
-        `).run({ id, branch_id, ...rest, sku })
+            @image_url, @unit, @cost_price, @selling_price, @tax_rate, @discount_pct, @min_stock_level)
+        `).run({ id, branch_id, discount_pct: 0, ...rest, sku })
       })()
 
       await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku })
@@ -785,8 +786,25 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           const minStock     = parseInt(colMap(row, 'minstock', 'min stock', 'reorder', 'reorder level') || '5') || 5
           const description  = colMap(row, 'description', 'desc', 'notes')
           const stockQty     = parseInt(colMap(row, 'stock', 'quantity', 'qty', 'opening stock', 'openingstock') || '0') || 0
+          const discountVal  = colMap(row, 'discount', 'discountpct', 'discountpercentage', 'discountpercent', 'discount_pct', 'discount_percentage', 'discount %', 'discount percentage')
 
           if (!name) { skipped++; continue }
+
+          let discountPct = 0
+          if (discountVal !== '') {
+            const parsed = parseFloat(discountVal.replace(/%/g, '').trim())
+            if (isNaN(parsed)) {
+              errors.push(`Row ${i + 2}: Invalid Discount Percentage value "${discountVal}". Must be a number between 0 and 100.`)
+              skipped++
+              continue
+            }
+            if (parsed < 0 || parsed > 100) {
+              errors.push(`Row ${i + 2}: Discount Percentage must be between 0 and 100. Received: ${parsed}%`)
+              skipped++
+              continue
+            }
+            discountPct = parsed
+          }
 
           const normalizedCategory = normalizeCategoryPath(categoryName)
           const autoSku = buildSku(db, '', normalizedCategory || categoryName || name, sku)
@@ -803,20 +821,31 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
           if (existing) {
             db.prepare(`UPDATE products SET name=?, category_id=?, supplier_id=?, barcode=?, unit=?,
-              cost_price=?, selling_price=?, tax_rate=?, min_stock_level=?, description=?, updated_at=datetime('now')
+              cost_price=?, selling_price=?, tax_rate=?, discount_pct=?, min_stock_level=?, description=?, updated_at=datetime('now')
               WHERE id=?`).run(name, categoryId, supplierId, barcode || null, unit,
-              costPrice, sellingPrice, taxRate, minStock, description || null, productId)
+              costPrice, sellingPrice, taxRate, discountPct, minStock, description || null, productId)
           } else {
             db.prepare(`INSERT INTO products (id, branch_id, name, sku, barcode, category_id, supplier_id, unit,
-              cost_price, selling_price, tax_rate, min_stock_level, description)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(productId, importBranchId, name, autoSku, barcode || null,
-              categoryId, supplierId, unit, costPrice, sellingPrice, taxRate, minStock, description || null)
+              cost_price, selling_price, tax_rate, discount_pct, min_stock_level, description)
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(productId, importBranchId, name, autoSku, barcode || null,
+              categoryId, supplierId, unit, costPrice, sellingPrice, taxRate, discountPct, minStock, description || null)
             await enqueuSync('products', productId, 'INSERT', {
               id: productId, branch_id: importBranchId, name, sku: autoSku, barcode: barcode || null,
               category_id: categoryId, supplier_id: supplierId, unit, cost_price: costPrice,
-              selling_price: sellingPrice, tax_rate: taxRate, min_stock_level: minStock,
+              selling_price: sellingPrice, tax_rate: taxRate, discount_pct: discountPct, min_stock_level: minStock,
               description: description || null, is_active: true
             })
+          }
+
+          // Sync product discount rule if discountPct > 0
+          if (discountPct > 0) {
+            const existingDisc = db.prepare("SELECT id FROM discounts WHERE scope = 'product' AND product_id = ? AND branch_id IS NULL").get(productId) as { id: string } | undefined
+            if (existingDisc) {
+              db.prepare("UPDATE discounts SET value = ?, is_active = 1, updated_at = datetime('now') WHERE id = ?").run(discountPct, existingDisc.id)
+            } else {
+              db.prepare("INSERT INTO discounts (id, name, type, value, scope, product_id, is_active) VALUES (?, ?, 'percentage', ?, 'product', ?, 1)")
+                .run(crypto.randomUUID(), `${name} discount`, discountPct, productId)
+            }
           }
 
           // Set opening stock
@@ -964,7 +993,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       let sql = `
         SELECT p.sku, p.barcode, p.name, c.name as category, sp.name as supplier,
-               p.unit, p.cost_price, p.selling_price, p.tax_rate, p.min_stock_level,
+               p.unit, p.cost_price, p.selling_price, p.discount_pct as discount_percentage, p.tax_rate, p.min_stock_level,
                p.description, p.is_active, COALESCE(s.quantity, 0) as stock
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
@@ -982,7 +1011,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const rows = db.prepare(sql).all(...params) as Record<string, unknown>[]
       const headers = [
         'sku', 'barcode', 'name', 'category', 'supplier', 'unit', 'cost_price',
-        'selling_price', 'tax_rate', 'min_stock_level', 'stock', 'description', 'is_active'
+        'selling_price', 'discount_percentage', 'tax_rate', 'min_stock_level', 'stock', 'description', 'is_active'
       ]
       const csv = [
         headers.join(','),
@@ -991,5 +1020,31 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       fs.writeFileSync(result.filePath, csv, 'utf8')
       return { success: true, data: { path: result.filePath, exported: rows.length } }
+  })
+
+  safeHandle(ipcMain, 'products:downloadTemplate', async () => {
+      const result = await dialog.showSaveDialog({
+        title: 'Download Product Bulk Upload Template',
+        defaultPath: 'product-import-template.csv',
+        filters: [{ name: 'CSV', extensions: ['csv'] }]
+      })
+      if (result.canceled || !result.filePath) return { success: false, error: 'Cancelled' }
+
+      const headers = [
+        'Product Name', 'SKU', 'Category', 'Cost Price', 'Selling Price', 'Stock', 'Discount Percentage',
+        'Barcode', 'Supplier', 'Unit', 'Tax Rate', 'Min Stock Level', 'Description'
+      ]
+      const sampleRows = [
+        ['Chair', 'C001', 'Furniture', '5000', '7500', '20', '10', '4791234567801', 'Local Supplier', 'pcs', '0', '5', 'Ergonomic wooden chair'],
+        ['Table', 'T001', 'Furniture', '10000', '15000', '10', '15', '4791234567802', 'Local Supplier', 'pcs', '0', '5', 'Dining wooden table'],
+      ]
+
+      const csvContent = [
+        headers.join(','),
+        ...sampleRows.map(row => row.map(cell => csvCell(cell)).join(','))
+      ].join('\r\n')
+
+      fs.writeFileSync(result.filePath, csvContent, 'utf8')
+      return { success: true, data: { path: result.filePath } }
   })
 }

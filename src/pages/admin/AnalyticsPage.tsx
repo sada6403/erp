@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import PageHeader from '@/components/shared/PageHeader'
 import StatCard from '@/components/shared/StatCard'
-import { TrendingUp, ShoppingBag, Users, Package, FileSpreadsheet, FileText, DollarSign, CreditCard } from 'lucide-react'
+import { TrendingUp, ShoppingBag, Users, Package, FileSpreadsheet, FileText, DollarSign, CreditCard, Layers, GitBranch, BarChart3, PieChart } from 'lucide-react'
 import toast from 'react-hot-toast'
-
 
 export default function AnalyticsPage() {
   const [salesData, setSalesData]         = useState<Record<string,unknown>[]>([])
@@ -42,55 +41,55 @@ export default function AnalyticsPage() {
   const exportExcel = async () => {
     const filename = `analytics-report-${dateFrom}-to-${dateTo}`
     try {
-    const res = await window.api.reports.exportExcel({
-      filename,
-      sheets: [
-        {
-          name: 'Profit & Loss Summary',
-          rows: [{
-            'Date Range': `${dateFrom} to ${dateTo}`,
-            'Sales Total': profit?.sales_total || 0,
-            'Buy Price (COGS)': profit?.cogs || 0,
-            'Net Profit': profit?.net_profit || 0,
-            'Profit Margin %': profit?.sales_total ? (Number(profit?.net_profit || 0) / Number(profit?.sales_total || 1) * 100).toFixed(1) : 0,
-            'Installments Given': profit?.installment_given || 0,
-            'Installment Contracts': profit?.installment_contracts || 0,
-            'Installments Pending': profit?.installment_pending || 0,
-          }],
-        },
-        {
-          name: 'Daily Revenue',
-          rows: salesData.map(r => ({
-            Date: r.date,
-            'Total Revenue': r.total_revenue,
-            'Invoice Count': r.invoice_count,
-          })),
-        },
-        {
-          name: 'Top Products',
-          rows: topProducts.map(r => ({
-            Product: r.name,
-            'Units Sold': r.total_quantity,
-            'Revenue': r.total_revenue,
-          })),
-        },
-        {
-          name: 'Branch Performance',
-          rows: branchPerf.map(r => ({
-            Branch: r.branch_name,
-            'Total Revenue': r.total_revenue,
-            'Invoices': r.total_invoices,
-            'Avg Invoice': r.avg_invoice_value,
-          })),
-        },
-      ],
-    }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
-    if (res.success) {
-      toast.success('Excel report saved!')
-      if (res.filePath) window.api.reports.openFile(res.filePath).catch(() => toast.error('Failed to open file'))
-    } else if (!res.cancelled) {
-      toast.error(res.error || 'Export failed')
-    }
+      const res = await window.api.reports.exportExcel({
+        filename,
+        sheets: [
+          {
+            name: 'Profit & Loss Summary',
+            rows: [{
+              'Date Range': `${dateFrom} to ${dateTo}`,
+              'Sales Total': profit?.sales_total || 0,
+              'Buy Price (COGS)': profit?.cogs || 0,
+              'Net Profit': profit?.net_profit || 0,
+              'Profit Margin %': profit?.sales_total ? (Number(profit?.net_profit || 0) / Number(profit?.sales_total || 1) * 100).toFixed(1) : 0,
+              'Installments Given': profit?.installment_given || 0,
+              'Installment Contracts': profit?.installment_contracts || 0,
+              'Installments Pending': profit?.installment_pending || 0,
+            }],
+          },
+          {
+            name: 'Daily Revenue',
+            rows: salesData.map(r => ({
+              Date: r.date,
+              'Total Revenue': r.total_revenue,
+              'Invoice Count': r.invoice_count,
+            })),
+          },
+          {
+            name: 'Top Products',
+            rows: topProducts.map(r => ({
+              Product: r.name,
+              'Units Sold': r.total_quantity,
+              'Revenue': r.total_revenue,
+            })),
+          },
+          {
+            name: 'Branch Performance',
+            rows: branchPerf.map(r => ({
+              Branch: r.branch_name,
+              'Total Revenue': r.total_revenue,
+              'Invoices': r.total_invoices,
+              'Avg Invoice': r.avg_invoice_value,
+            })),
+          },
+        ],
+      }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
+      if (res.success) {
+        toast.success('Excel report saved!')
+        if (res.filePath) window.api.reports.openFile(res.filePath).catch(() => toast.error('Failed to open file'))
+      } else if (!res.cancelled) {
+        toast.error(res.error || 'Export failed')
+      }
     } catch (err) {
       toast.error((err as Error)?.message || 'Export failed')
     }
@@ -99,52 +98,52 @@ export default function AnalyticsPage() {
   const exportPdf = async () => {
     const filename = `analytics-report-${dateFrom}-to-${dateTo}`
     try {
-    const res = await window.api.reports.exportPdf({
-      filename,
-      title: 'Analytics Report',
-      metadata: { 'Date Range': `${dateFrom} to ${dateTo}`, 'Generated Time': new Date().toLocaleString() },
-      summary: [
-        ['Sales Total', profit?.sales_total],
-        ['Buy Price (COGS)', profit?.cogs],
-        ['Net Profit', profit?.net_profit],
-        ['Outstanding', rev?.outstanding?.total],
-        ['Installments Given', profit?.installment_given],
-        ['Installments Pending', profit?.installment_pending],
-      ],
-      sections: [
-        {
-          title: 'Daily Revenue',
-          rows: salesData.map(r => ({
-            Date: r.date,
-            'Total Revenue': r.total_revenue,
-            'Invoice Count': r.invoice_count,
-          })),
-        },
-        {
-          title: 'Top Products',
-          rows: topProducts.map(r => ({
-            Product: r.name,
-            'Units Sold': r.total_quantity,
-            'Revenue': r.total_revenue,
-          })),
-        },
-        {
-          title: 'Branch Performance',
-          rows: branchPerf.map(r => ({
-            Branch: r.branch_name,
-            'Total Revenue': r.total_revenue,
-            'Invoices': r.total_invoices,
-            'Avg Invoice': r.avg_invoice_value,
-          })),
-        },
-      ],
-    }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
-    if (res.success) {
-      toast.success('PDF report saved!')
-      if (res.filePath) window.api.reports.openFile(res.filePath).catch(() => toast.error('Failed to open file'))
-    } else if (!res.cancelled) {
-      toast.error(res.error || 'Export failed')
-    }
+      const res = await window.api.reports.exportPdf({
+        filename,
+        title: 'Analytics Report',
+        metadata: { 'Date Range': `${dateFrom} to ${dateTo}`, 'Generated Time': new Date().toLocaleString() },
+        summary: [
+          ['Sales Total', profit?.sales_total],
+          ['Buy Price (COGS)', profit?.cogs],
+          ['Net Profit', profit?.net_profit],
+          ['Outstanding', rev?.outstanding?.total],
+          ['Installments Given', profit?.installment_given],
+          ['Installments Pending', profit?.installment_pending],
+        ],
+        sections: [
+          {
+            title: 'Daily Revenue',
+            rows: salesData.map(r => ({
+              Date: r.date,
+              'Total Revenue': r.total_revenue,
+              'Invoice Count': r.invoice_count,
+            })),
+          },
+          {
+            title: 'Top Products',
+            rows: topProducts.map(r => ({
+              Product: r.name,
+              'Units Sold': r.total_quantity,
+              'Revenue': r.total_revenue,
+            })),
+          },
+          {
+            title: 'Branch Performance',
+            rows: branchPerf.map(r => ({
+              Branch: r.branch_name,
+              'Total Revenue': r.total_revenue,
+              'Invoices': r.total_invoices,
+              'Avg Invoice': r.avg_invoice_value,
+            })),
+          },
+        ],
+      }) as { success: boolean; filePath?: string; cancelled?: boolean; error?: string }
+      if (res.success) {
+        toast.success('PDF report saved!')
+        if (res.filePath) window.api.reports.openFile(res.filePath).catch(() => toast.error('Failed to open file'))
+      } else if (!res.cancelled) {
+        toast.error(res.error || 'Export failed')
+      }
     } catch (err) {
       toast.error((err as Error)?.message || 'Export failed')
     }
@@ -152,7 +151,7 @@ export default function AnalyticsPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <PageHeader title="Analytics" subtitle="Sales performance & insights"
+      <PageHeader title="Analytics & Reports" subtitle="Comprehensive financial, sales, stock, and branch performance insights"
         actions={
           <div className="flex gap-2 items-center flex-wrap">
             <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input py-1.5 text-sm" />
@@ -170,25 +169,25 @@ export default function AnalyticsPage() {
         }
       />
 
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-          <StatCard label="Today Revenue" value={`Rs.${(rev?.today?.revenue || 0).toLocaleString()}`} sub={`${rev?.today?.invoices || 0} invoices`} icon={TrendingUp} color="green" />
-          <StatCard label="Month Revenue" value={`Rs.${(rev?.month?.revenue || 0).toLocaleString()}`} sub={`${rev?.month?.invoices || 0} invoices`} icon={ShoppingBag} color="blue" />
-          <StatCard label="Avg Invoice" value={rev?.month?.invoices ? `Rs.${((rev?.month?.revenue || 0) / (rev?.month?.invoices || 1)).toLocaleString(undefined, {maximumFractionDigits:0})}` : '—'} icon={Package} color="purple" />
-          <StatCard label="Outstanding" value={`Rs.${(rev?.outstanding?.total || 0).toLocaleString()}`} icon={Users} color="yellow" />
-        </div>
+      <div className="flex-1 overflow-y-auto p-6 space-y-8">
 
-        <div className="grid grid-cols-2 xl:grid-cols-4 gap-4">
-          <StatCard label="Net Profit (selected range)" value={`Rs.${money(profit?.net_profit)}`} sub={`Sales Rs.${money(profit?.sales_total)} − Buy Price Rs.${money(profit?.cogs)}`} icon={DollarSign} color="green" />
-          <StatCard label="Installments Given (range)" value={`Rs.${money(profit?.installment_given)}`} sub={`${profit?.installment_contracts || 0} contracts`} icon={CreditCard} color="blue" />
-          <StatCard label="Installments Pending" value={`Rs.${money(profit?.installment_pending)}`} sub="Still to be collected" icon={CreditCard} color="yellow" />
-          <StatCard label="Profit Margin" value={profit?.sales_total ? `${(Number(profit?.net_profit || 0) / Number(profit?.sales_total || 1) * 100).toFixed(1)}%` : '—'} sub="Net profit ÷ sales" icon={TrendingUp} color="purple" />
-        </div>
+        {/* ── 1. SALES REPORT SECTION ───────────────────────────────────── */}
+        <section className="space-y-4 rounded-xl border p-5" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--border)' }}>
+            <TrendingUp size={20} className="text-brand-400" />
+            <h2 className="text-base font-bold text-slate-100">Sales Report</h2>
+          </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard label="Today Revenue" value={`Rs.${(rev?.today?.revenue || 0).toLocaleString()}`} sub={`${rev?.today?.invoices || 0} invoices`} icon={TrendingUp} color="green" />
+            <StatCard label="Month Revenue" value={`Rs.${(rev?.month?.revenue || 0).toLocaleString()}`} sub={`${rev?.month?.invoices || 0} invoices`} icon={ShoppingBag} color="blue" />
+            <StatCard label="Avg Invoice Value" value={rev?.month?.invoices ? `Rs.${((rev?.month?.revenue || 0) / (rev?.month?.invoices || 1)).toLocaleString(undefined, {maximumFractionDigits:0})}` : '—'} icon={Package} color="purple" />
+            <StatCard label="Outstanding Balance" value={`Rs.${(rev?.outstanding?.total || 0).toLocaleString()}`} icon={Users} color="yellow" />
+          </div>
+
           <div className="card">
-            <h3 className="font-semibold text-sm mb-4">Daily Revenue</h3>
-            <ResponsiveContainer width="100%" height={220}>
+            <h3 className="font-semibold text-sm mb-4">Daily Sales Revenue Chart</h3>
+            <ResponsiveContainer width="100%" height={240}>
               <BarChart data={salesData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 10 }} tickFormatter={d => (d as string).slice(5)} />
@@ -198,42 +197,91 @@ export default function AnalyticsPage() {
               </BarChart>
             </ResponsiveContainer>
           </div>
+        </section>
+
+        {/* ── 2. PROFIT & LOSS REPORT SECTION ──────────────────────────── */}
+        <section className="space-y-4 rounded-xl border p-5" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--border)' }}>
+            <DollarSign size={20} className="text-green-400" />
+            <h2 className="text-base font-bold text-slate-100">Profit & Loss Report</h2>
+          </div>
+
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard label="Net Profit (selected range)" value={`Rs.${money(profit?.net_profit)}`} sub={`Sales Rs.${money(profit?.sales_total)} − Buy Price Rs.${money(profit?.cogs)}`} icon={DollarSign} color="green" />
+            <StatCard label="Installments Given (range)" value={`Rs.${money(profit?.installment_given)}`} sub={`${profit?.installment_contracts || 0} contracts`} icon={CreditCard} color="blue" />
+            <StatCard label="Installments Pending" value={`Rs.${money(profit?.installment_pending)}`} sub="Still to be collected" icon={CreditCard} color="yellow" />
+            <StatCard label="Profit Margin" value={profit?.sales_total ? `${(Number(profit?.net_profit || 0) / Number(profit?.sales_total || 1) * 100).toFixed(1)}%` : '—'} sub="Net profit ÷ sales" icon={TrendingUp} color="purple" />
+          </div>
+
+          <div className="card">
+            <h3 className="font-semibold text-sm mb-4">Profit & Revenue Trend Chart</h3>
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={salesData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 10 }} tickFormatter={d => (d as string).slice(5)} />
+                <YAxis stroke="#64748b" tick={{ fontSize: 10 }} tickFormatter={v => `${(Number(v)/1000).toFixed(0)}k`} />
+                <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} formatter={(v) => [`Rs.${Number(v).toLocaleString()}`, 'Revenue']} />
+                <Line type="monotone" dataKey="total_revenue" stroke="#22c55e" strokeWidth={2.5} dot={{ r: 3 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </section>
+
+        {/* ── 3. STOCK & PRODUCT PERFORMANCE REPORT SECTION ───────────── */}
+        <section className="space-y-4 rounded-xl border p-5" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--border)' }}>
+            <Package size={20} className="text-purple-400" />
+            <h2 className="text-base font-bold text-slate-100">Stock & Product Performance Report</h2>
+          </div>
 
           <div className="card">
             <h3 className="font-semibold text-sm mb-4">Top Products by Revenue</h3>
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={240}>
               <BarChart data={topProducts} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
                 <XAxis type="number" stroke="#64748b" tick={{ fontSize: 10 }} tickFormatter={v => `${(Number(v)/1000).toFixed(0)}k`} />
-                <YAxis dataKey="name" type="category" stroke="#64748b" tick={{ fontSize: 10 }} width={90} tickFormatter={(v: string) => v.length > 12 ? v.slice(0,12)+'...' : v} />
+                <YAxis dataKey="name" type="category" stroke="#64748b" tick={{ fontSize: 10 }} width={120} tickFormatter={(v: string) => v.length > 16 ? v.slice(0,16)+'...' : v} />
                 <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} formatter={(v) => [`Rs.${Number(v).toLocaleString()}`, 'Revenue']} />
-                <Bar dataKey="total_revenue" fill="#22c55e" radius={[0,4,4,0]} />
+                <Bar dataKey="total_revenue" fill="#a855f7" radius={[0,4,4,0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
-        </div>
+        </section>
 
-        {/* Branch performance */}
-        <div className="card">
-          <h3 className="font-semibold text-sm mb-4">Branch Performance</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead><tr>
-                {['Branch', 'Total Revenue', 'Invoices', 'Avg Invoice Value'].map(h => <th key={h} className="table-header px-4 py-2 text-left">{h}</th>)}
-              </tr></thead>
-              <tbody>
-                {branchPerf.map(b => (
-                  <tr key={b.branch_id as string} className="table-row">
-                    <td className="table-cell font-medium">{b.branch_name as string}</td>
-                    <td className="table-cell text-brand-400 font-semibold">Rs.{Number(b.total_revenue || 0).toLocaleString()}</td>
-                    <td className="table-cell">{b.total_invoices as number}</td>
-                    <td className="table-cell text-slate-400">Rs.{Number(b.avg_invoice_value || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {/* ── 4. BRANCH PERFORMANCE REPORT SECTION ───────────────────── */}
+        <section className="space-y-4 rounded-xl border p-5" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <div className="flex items-center gap-2 border-b pb-3" style={{ borderColor: 'var(--border)' }}>
+            <GitBranch size={20} className="text-blue-400" />
+            <h2 className="text-base font-bold text-slate-100">Branch Performance Report</h2>
           </div>
-        </div>
+
+          <div className="card">
+            <h3 className="font-semibold text-sm mb-4">Branch Revenue & Sales Summary</h3>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr>
+                    {['Branch Name', 'Total Revenue', 'Invoices Count', 'Avg Invoice Value'].map(h => <th key={h} className="table-header px-4 py-2 text-left">{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {branchPerf.map(b => (
+                    <tr key={b.branch_id as string} className="table-row">
+                      <td className="table-cell font-medium">{b.branch_name as string}</td>
+                      <td className="table-cell text-brand-400 font-semibold">Rs.{Number(b.total_revenue || 0).toLocaleString()}</td>
+                      <td className="table-cell">{b.total_invoices as number}</td>
+                      <td className="table-cell text-slate-400">Rs.{Number(b.avg_invoice_value || 0).toLocaleString(undefined, {maximumFractionDigits: 0})}</td>
+                    </tr>
+                  ))}
+                  {branchPerf.length === 0 && (
+                    <tr><td colSpan={4} className="text-center py-6 text-slate-500">No branch data available</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
       </div>
     </div>
   )

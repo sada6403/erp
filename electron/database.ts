@@ -111,6 +111,7 @@ function runMigrations(): void {
     ['products', 'sale_by',             "TEXT NOT NULL DEFAULT 'normal'"],
     ['products', 'employee_commission', "REAL NOT NULL DEFAULT 0"],
     ['products', 'commission_type',     "TEXT NOT NULL DEFAULT 'fixed'"],
+    ['products', 'discount_pct',        "REAL NOT NULL DEFAULT 0"],
     ['products', 'custom_field1',       "TEXT"],
     ['products', 'custom_field2',       "TEXT"],
     ['products', 'custom_field3',       "TEXT"],

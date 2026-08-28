@@ -1,6 +1,5 @@
-sku,barcode,name,category,supplier,unit,cost_price,selling_price,tax_rate,min_stock_level,stock,description
-NP-RICE-5KG,4791234567890,Ponni Rice 5kg,Groceries,Local Supplier,pcs,850,980,0,10,50,Premium ponni boiled rice 5kg bag
-NP-SUGAR-1KG,4791234567891,White Sugar 1kg,Groceries,Local Supplier,pcs,210,245,0,15,80,Refined white sugar 1kg
-NP-COCONUT-OIL-1L,4791234567892,Coconut Oil 1L,Groceries,,pcs,520,620,0,8,30,Pure coconut oil 1 litre bottle
-NP-TEA-400G,4791234567893,Ceylon Black Tea 400g,Beverages,,pcs,480,560,0,10,40,Pure Ceylon black tea 400g pack
-NP-SEED-TOMATO,,Tomato Seeds Packet,Seeds,,pcs,60,90,0,20,100,Hybrid tomato seeds packet
+Product Name,SKU,Category,Cost Price,Selling Price,Stock,Discount Percentage,Barcode,Supplier,Unit,Tax Rate,Min Stock Level,Description
+Chair,C001,Furniture,5000,7500,20,10,4791234567801,Local Supplier,pcs,0,5,Ergonomic wooden chair
+Table,T001,Furniture,10000,15000,10,15,4791234567802,Local Supplier,pcs,0,5,Dining wooden table
+Ponni Rice 5kg,NP-RICE-5KG,Groceries,850,980,50,0,4791234567890,Local Supplier,pcs,0,10,Premium ponni boiled rice 5kg bag
+White Sugar 1kg,NP-SUGAR-1KG,Groceries,210,245,80,5,4791234567891,Local Supplier,pcs,0,15,Refined white sugar 1kg

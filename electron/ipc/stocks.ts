@@ -98,11 +98,38 @@ function auditTransferAction(
 }
 
 export function registerStockHandlers(ipcMain: IpcMain) {
-  safeHandle(ipcMain, 'stocks:list', (_e, branchId?: string) => {
+  safeHandle(ipcMain, 'stocks:list', (_e, targetBranchId?: string) => {
     const db = getDb()
-      const user = store.get('auth_user') as Record<string, unknown>
-      const bid = branchId || user?.branch_id || 'b1111111-1111-4111-8111-111111111111'
-      const rows = db.prepare(`
+    const user = store.get('auth_user') as Record<string, unknown>
+    const superAdmin = isSuperAdmin(user)
+
+    const isAll = targetBranchId === 'all' || (targetBranchId === '' && superAdmin) || (!targetBranchId && superAdmin && !user?.branch_id)
+    const bid = isAll ? null : (targetBranchId || (user?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111')
+
+    let rows: Record<string, unknown>[]
+    if (!bid) {
+      rows = db.prepare(`
+        SELECT
+          MIN(s.id) AS id,
+          p.id AS product_id,
+          'all' AS branch_id,
+          MIN(s.warehouse_id) AS warehouse_id,
+          COALESCE(SUM(COALESCE(s.quantity, 0)), 0) AS quantity,
+          COALESCE(SUM(COALESCE(s.damaged_qty, 0)), 0) AS damaged_qty,
+          p.name AS product_name,
+          COALESCE(p.sku, p.id) AS sku,
+          p.min_stock_level,
+          COALESCE(MAX(w.name), 'Main') AS warehouse_name,
+          MAX(s.updated_at) AS updated_at
+        FROM products p
+        LEFT JOIN stocks s ON s.product_id = p.id
+        LEFT JOIN warehouses w ON w.id = s.warehouse_id
+        WHERE p.is_active = 1
+        GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.min_stock_level
+        ORDER BY p.name
+      `).all() as Record<string, unknown>[]
+    } else {
+      rows = db.prepare(`
         SELECT
           MIN(s.id) AS id,
           p.id AS product_id,
@@ -124,8 +151,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           AND (p.branch_id = ? OR p.branch_id IS NULL)
         GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.min_stock_level
         ORDER BY p.name
-      `).all(bid, bid, bid)
-      return { success: true, data: rows }
+      `).all(bid, bid, bid) as Record<string, unknown>[]
+    }
+    return { success: true, data: rows }
   })
 
   safeHandle(ipcMain, 'stocks:lowStock', (_e, branchId?: string) => {
