@@ -79,7 +79,7 @@ export interface Product {
   cost_price: number
   selling_price: number
   tax_rate: number
-  discount_pct: number
+  discount_pct?: number
   min_stock_level: number
   is_active: boolean
   // joined

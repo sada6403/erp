@@ -13,6 +13,13 @@ import { safeHandle } from './ipcHandler'
 
 const store = new Store()
 
+function isSuperAdmin(user: Record<string, unknown> | undefined): boolean {
+  if (!user) return false
+  const role = user.role as Record<string, unknown> | undefined
+  const perms = (role?.permissions || {}) as Record<string, unknown>
+  return Boolean(perms.all) || String(role?.name || '').toLowerCase() === 'admin' || String(role?.name || '').toLowerCase() === 'super admin'
+}
+
 function currentBranchId(): string {
   const user = store.get('auth_user') as Record<string, unknown> | undefined
   return (user?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111'
