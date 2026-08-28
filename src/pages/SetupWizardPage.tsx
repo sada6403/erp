@@ -375,7 +375,7 @@ export default function SetupWizardPage() {
               Setup Locally (No Cloud)
             </button>
             <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>
-              Login: <span className="font-mono">admin@pos.local</span> / <span className="font-mono">admin123</span>
+              Login: <span className="font-mono">admin@pos.local</span> — you will be asked to set a new password on first sign-in.
             </p>
           </div>
         </div>

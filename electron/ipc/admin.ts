@@ -12,6 +12,39 @@ import { syncStockRow } from '../services/stockSync'
 import { validatePin, isAdminTypeRole } from '../services/pinPolicy'
 import Store from 'electron-store'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
+
+/**
+ * Builds a safe `SET` clause from a caller-supplied payload.
+ *
+ * An UPDATE's column names cannot be parameterised, so they are interpolated —
+ * which means they MUST be constrained to real columns of the target table.
+ * Without this, a payload KEY containing a `--` comment marker terminates the
+ * statement early, removing the trailing `WHERE id=@id`, and the UPDATE hits
+ * every row in the table. Reproduced on four handlers (Issue 40 / A-006), one
+ * of them from a plain Cashier session.
+ *
+ * `table` is a hardcoded literal at every call site, never caller-supplied, and
+ * is additionally shape-checked here so this helper cannot become a new vector.
+ *
+ * Also drops identity/bookkeeping columns: `id` is supplied separately by the
+ * caller of this helper, and the timestamps are set by the statement itself.
+ */
+function safeUpdateFields(
+  db: ReturnType<typeof getDb>,
+  table: string,
+  payload: Record<string, unknown>,
+  omitExtra: string[] = []
+): { fields: string; values: Record<string, unknown> } {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(table)) throw new Error(`Unsafe table name: ${table}`)
+  const columns = new Set(
+    (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name)
+  )
+  const omit = new Set(['id', 'created_at', 'updated_at', 'synced_at', ...omitExtra])
+  const values = Object.fromEntries(
+    Object.entries(payload || {}).filter(([k]) => columns.has(k) && !omit.has(k))
+  )
+  return { fields: Object.keys(values).map(k => `${k}=@${k}`).join(','), values }
+}
 import * as XLSX from 'xlsx'
 import { safeHandle, safeHandleModule } from './ipcHandler'
 import { decryptSecret } from './settings'
@@ -530,6 +563,20 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'admin:users:update', async (_e, id: string, p) => {
     const db = getDb()
 
+    // Credential material and row identity are derived by this handler itself,
+    // further down, AFTER the current-password check — never accept them from
+    // the caller. This is not redundant with the column filter applied before
+    // the UPDATE below: that filter is derived from PRAGMA table_info, and
+    // `users` genuinely has `password_hash`/`pin_hash` columns, so a
+    // PRAGMA-only filter would happily admit a caller-supplied `password_hash`
+    // and let anyone write a bcrypt hash of their choosing while skipping the
+    // "prove your current password" gate entirely.
+    delete p.password_hash
+    delete p.pin_hash
+    delete p.id
+    delete p.created_at
+    delete p.synced_at
+
     // Branch scope: non-global callers (e.g. Branch Manager) can only update
     // users of their own branch (including themselves).
     const caller = authUser()
@@ -596,9 +643,20 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     // Never clear branch_id or role_id with blank string — keep existing value
     if (p.branch_id === '') p.branch_id = null
     if (!p.role_id) delete p.role_id
-    const fields = Object.keys(p).filter(k => k !== 'is_active' || p[k] !== undefined)
-      .map(k=>`${k}=@${k}`).join(',')
-    if (fields) db.prepare(`UPDATE users SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
+    // The SET clause is built from caller-supplied object KEYS, so those keys
+    // MUST be constrained to real column names. Previously unfiltered: a key
+    // containing a `--` comment marker terminated the statement early,
+    // commenting out the trailing `WHERE id=@id`, so the UPDATE hit every row
+    // in `users`. Reproduced — a Cashier renamed and deactivated all 9 accounts
+    // in a single call. Same guard `admin:branches:update` already applies.
+    const existingCols = new Set(
+      (db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map(c => c.name)
+    )
+    const safe = Object.fromEntries(
+      Object.entries(p).filter(([k, v]) => existingCols.has(k) && (k !== 'is_active' || v !== undefined))
+    )
+    const fields = Object.keys(safe).map(k => `${k}=@${k}`).join(',')
+    if (fields) db.prepare(`UPDATE users SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({ ...safe, id })
     await enqueueUserRow(id)
     return { success: true }
   })
@@ -958,9 +1016,10 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'admin:suppliers:update', async (_e, id: string, p) => {
     const perms = currentPerms()
     if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
-    const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
-    getDb().prepare(`UPDATE suppliers SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
-    await enqueuSync('suppliers', id, 'UPDATE', { id, ...p })
+    const db = getDb()
+    const { fields, values } = safeUpdateFields(db, 'suppliers', p)
+    if (fields) db.prepare(`UPDATE suppliers SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({ ...values, id })
+    await enqueuSync('suppliers', id, 'UPDATE', { id, ...values })
     return { success: true }
   })
   // Soft delete (deactivate) — mirrors categories:delete. Suppliers are
@@ -1043,7 +1102,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     if (payload.parent_id === '') payload.parent_id = null
 
     const db = getDb()
-    const fields = Object.keys(payload).map(k=>`${k}=@${k}`).join(',')
+    const { fields, values } = safeUpdateFields(db, 'categories', payload)
     db.transaction(() => {
       if (!isAdmin) {
         const request = db.prepare(`
@@ -1055,10 +1114,10 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
           .run(request.id)
       }
-      if (fields) db.prepare(`UPDATE categories SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...payload,id})
+      if (fields) db.prepare(`UPDATE categories SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({ ...values, id })
     })()
 
-    await enqueuSync('categories', id, 'UPDATE', { id, ...payload })
+    await enqueuSync('categories', id, 'UPDATE', { id, ...values })
     if (!isAdmin && edit_request_id) {
       await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
     }
@@ -1094,6 +1153,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Deliveries
   safeHandleModule(ipcMain, 'admin:deliveries:list', 'deliveries', (_e, filters: Record<string,unknown> = {}) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.deliveries) return { success: false, error: 'Delivery management access required' }
     const db = getDb()
     let sql = `SELECT d.*, c.name as customer_name, i.invoice_number, u.name as assigned_name
                FROM deliveries d
@@ -1107,9 +1168,12 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: db.prepare(sql).all(...params) }
   })
   safeHandleModule(ipcMain, 'admin:deliveries:update', 'deliveries', async (_e, id: string, p) => {
-    const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
-    getDb().prepare(`UPDATE deliveries SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
-    await enqueuSync('deliveries', id, 'UPDATE', { id, ...p })
+    const perms = currentPerms()
+    if (!perms.all && !perms.deliveries) return { success: false, error: 'Delivery management access required' }
+    const db = getDb()
+    const { fields, values } = safeUpdateFields(db, 'deliveries', p)
+    if (fields) db.prepare(`UPDATE deliveries SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({ ...values, id })
+    await enqueuSync('deliveries', id, 'UPDATE', { id, ...values })
     return { success: true }
   })
 
@@ -1656,9 +1720,13 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Expense Categories
   safeHandleModule(ipcMain, 'admin:expenseCategories:list', 'expenses', () => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.expenses) return { success: false, error: 'Expense management access required' }
     return { success: true, data: getDb().prepare('SELECT * FROM expense_categories WHERE is_active=1 ORDER BY name').all() }
   })
   safeHandleModule(ipcMain, 'admin:expenseCategories:create', 'expenses', async (_e, p: Record<string,unknown>) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.expenses) return { success: false, error: 'Expense management access required' }
     const id = crypto.randomUUID()
     getDb().prepare('INSERT INTO expense_categories (id,name) VALUES (?,?)').run(id, p.name)
     await enqueuSync('expense_categories', id, 'INSERT', { id, name: p.name })
@@ -1685,6 +1753,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Expenses
   safeHandleModule(ipcMain, 'admin:expenses:list', 'expenses', (_e, filters: Record<string,unknown> = {}) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.expenses) return { success: false, error: 'Expense management access required' }
     const db = getDb()
     let sql = `
       SELECT e.*, ec.name as category_name, s.name as supplier_name,
@@ -1704,6 +1774,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: db.prepare(sql).all(...params) }
   })
   safeHandleModule(ipcMain, 'admin:expenses:create', 'expenses', async (_e, p: Record<string,unknown>) => {
+    const perms = currentPerms()
+    if (!perms.all && !perms.expenses) return { success: false, error: 'Expense management access required' }
     const db = getDb()
     const id = crypto.randomUUID()
     const paid = Number(p.paid_amount ?? p.amount)
@@ -1720,9 +1792,12 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: { id } }
   })
   safeHandleModule(ipcMain, 'admin:expenses:update', 'expenses', async (_e, id: string, p: Record<string,unknown>) => {
-    const fields = Object.keys(p).map(k=>`${k}=@${k}`).join(',')
-    getDb().prepare(`UPDATE expenses SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...p,id})
-    await enqueuSync('expenses', id, 'UPDATE', { id, ...p })
+    const perms = currentPerms()
+    if (!perms.all && !perms.expenses) return { success: false, error: 'Expense management access required' }
+    const db = getDb()
+    const { fields, values } = safeUpdateFields(db, 'expenses', p)
+    if (fields) db.prepare(`UPDATE expenses SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({ ...values, id })
+    await enqueuSync('expenses', id, 'UPDATE', { id, ...values })
     return { success: true }
   })
   // Hard delete — expenses is a real financial transaction record (has its
@@ -1956,8 +2031,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     // Seed default admin user — no default PIN, admin logs in via email+password only
     const hash = await bcrypt.hash('admin123', 10)
     db.prepare(`
-      INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, is_active)
-      VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, 1)
+      INSERT OR IGNORE INTO users (id, branch_id, role_id, name, email, password_hash, is_active, force_password_change)
+      VALUES (?, ?, ?, 'System Admin', 'admin@pos.local', ?, 1, 1)
     `).run(adminUserId, branchId, companyAdminRoleId, hash)
 
     // Clear the setup_required flag

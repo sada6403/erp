@@ -4,11 +4,30 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { safeHandle } from './ipcHandler'
+import Store from 'electron-store'
+
+const store = new Store()
+
+function authUser(): Record<string, unknown> {
+  return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+}
+
+function currentPerms(caller: Record<string, unknown> = authUser()): Record<string, unknown> {
+  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
+    || (caller.permissions as Record<string, unknown>)
+    || {}
+}
+
+/** Company-Admin-only, matching RequireSuperAdmin on the corresponding route. */
+function requireAdmin(): { success: false; error: string } | null {
+  return currentPerms().all ? null : { success: false, error: 'Company Admin access required' }
+}
 
 interface TableStat { name: string; count: number }
 
 export function registerMonitorHandlers(): void {
   safeHandle(ipcMain, 'monitor:health', () => {
+    const denied = requireAdmin(); if (denied) return denied
       const db = getDb()
       const userDataPath = app.getPath('userData')
       const dbPath = path.join(userDataPath, 'pos-erp.db')
@@ -91,12 +110,14 @@ export function registerMonitorHandlers(): void {
   })
 
   safeHandle(ipcMain, 'monitor:vacuum', () => {
+    const denied = requireAdmin(); if (denied) return denied
     const db = getDb()
     db.exec('VACUUM')
     return { success: true }
   })
 
   safeHandle(ipcMain, 'monitor:integrity', () => {
+    const denied = requireAdmin(); if (denied) return denied
     const db = getDb()
     const result = db.prepare(`PRAGMA integrity_check`).all() as { integrity_check: string }[]
     const passed = result.length === 1 && result[0].integrity_check === 'ok'

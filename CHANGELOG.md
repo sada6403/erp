@@ -2,6 +2,50 @@
 
 Internal release log. Not customer-facing.
 
+## 2.6.15 — 2026-08-28 — Security batch: five fixes from the full-app QA sweep (Issues 38-41, 43)
+
+Five security and correctness fixes found by a systematic QA sweep of the
+whole application (session 18). Four are Critical. No feature changes.
+
+**Three of these are the same bug in different places.** An `UPDATE` statement
+built its `SET` clause by interpolating caller-supplied JSON *keys* into SQL, so
+a key containing a `--` comment marker commented out the trailing `WHERE`
+clause and rewrote **every row** in the table. It was fixed in one handler
+(Issue 38), then found in four more (Issue 40) — including one reachable by a
+plain Cashier. It is now fixed as a class, via a single shared guard applied at
+every site, rather than handler by handler.
+
+- **Issue 38** — `admin:users:update` no longer accepts arbitrary object keys.
+  Previously a Cashier could rename and deactivate every account in the company
+  in one call, locking everyone out and queueing the corruption for cloud sync.
+- **Issue 40** — the same flaw in `admin:suppliers:update`,
+  `admin:categories:update`, `admin:expenses:update` and
+  `admin:deliveries:update`. All four confirmed exploitable before the fix; the
+  deliveries one needed no administrative permission at all.
+- **Issue 39** — the bootstrap `admin@pos.local` account is no longer left on
+  its shipped password. A password change is now required at next sign-in, the
+  Setup Wizard no longer prints the credentials, and existing installs are
+  migrated — but only where the password is still the shipped default, so an
+  operator who already changed it is never disturbed.
+- **Issue 41** — the Deliveries and Expenses screens had no server-side
+  authorization at all; any signed-in role could read and modify both. They now
+  require the same permissions the UI already assumed. Delivery Staff keeps full
+  delivery access.
+- **Issue 43** — backup file paths were validated with a string prefix check
+  that could be bypassed, allowing an arbitrary file on the machine to be
+  deleted or copied out through the export dialog. Paths are now matched against
+  the actual list of backups. Every backup and database-maintenance action is
+  also now restricted to Company Admin.
+
+Note for multi-role deployments: Issues 41 and 43 tighten handlers that
+previously accepted any signed-in session, so roles that were reaching
+Deliveries, Expenses, Backup or System Health without an explicit permission
+will now be refused. This is intentional.
+
+Verified by 95 automated checks against the real main-process handlers and a
+real database, including re-running each original exploit. See `QA_REPORT.md`
+and `ISSUE_TRACKER.md` (Issues 38-43) for the full diagnosis and evidence.
+
 ## 2.6.14 — 2026-08-27 — Product sync speed + delete correctness (Issue 37)
 
 **Fixes a severe, confirmed correctness bug**: a single product delete that

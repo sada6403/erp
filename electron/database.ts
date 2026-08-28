@@ -1875,6 +1875,50 @@ function runMigrations(): void {
   if (!hasColumn('users', 'force_password_change')) {
     db.exec(`ALTER TABLE users ADD COLUMN force_password_change INTEGER NOT NULL DEFAULT 0`)
   }
+
+  // The bootstrap `admin@pos.local` account has historically been seeded with
+  // the constant password 'admin123' and no rotation requirement, and is
+  // re-created by every Clear All Data. This one migration covers BOTH cases,
+  // which is why seedDefaultData() deliberately does NOT set the flag itself:
+  // on a fresh install seedDefaultData() runs BEFORE this function, at a point
+  // where `users.force_password_change` does not exist yet (schema.sql has
+  // drifted behind runMigrations — see the comment in initDatabase). Seeding
+  // the flag there fails with "no such column". Instead, the fresh-install case
+  // is caught here on the very same initDatabase() call, because a
+  // just-seeded admin is by definition still on 'admin123'.
+  //
+  // The discriminator is a bcrypt compare against the shipped default, NOT the
+  // mere existence of the row: an operator who has already rotated this
+  // password must never be forced to change it again.
+  {
+    const Store = require('electron-store')
+    const bcrypt = require('bcryptjs')
+    const store = new Store()
+    const FLAG = 'force_pw_change_default_admin_v1'
+    const DEFAULT_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
+    if (!store.get(FLAG)) {
+      try {
+        const row = db.prepare(
+          `SELECT password_hash FROM users WHERE id = ?`
+        ).get(DEFAULT_ADMIN_ID) as { password_hash: string | null } | undefined
+        if (row?.password_hash && bcrypt.compareSync('admin123', row.password_hash)) {
+          db.prepare(
+            `UPDATE users SET force_password_change = 1, updated_at = datetime('now') WHERE id = ?`
+          ).run(DEFAULT_ADMIN_ID)
+          console.warn(
+            '[DB] Default admin is still on the shipped password — ' +
+            'a password change is now required at next login.'
+          )
+        }
+        // Set the one-shot flag ONLY on success. The backfill block above sets
+        // its flag unconditionally, so a failure there is silently skipped
+        // forever; deliberately not repeating that here.
+        store.set(FLAG, true)
+      } catch (err) {
+        console.error('[DB] Default-admin password check failed; will retry next launch:', err)
+      }
+    }
+  }
   if (!hasColumn('stock_count_sessions', 'completed_by')) {
     db.exec(`ALTER TABLE stock_count_sessions ADD COLUMN completed_by TEXT REFERENCES users(id)`)
   }
