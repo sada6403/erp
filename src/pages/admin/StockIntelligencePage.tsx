@@ -37,7 +37,7 @@ export default function StockIntelligencePage() {
       const [branchList, summary, stockRes, moveRes] = await Promise.all([
         window.api.admin.branches.list(),
         window.api.stocks.branchSummary(),
-        branchId ? window.api.stocks.branchDetail(branchId) : Promise.resolve({ success: true, data: [] }),
+        window.api.stocks.branchDetail(branchId || 'all'),
         window.api.stocks.movements({
           branch_id: branchId || undefined,
           movement_type: movementType || undefined,

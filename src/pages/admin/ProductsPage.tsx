@@ -29,6 +29,8 @@ export default function ProductsPage() {
   const [search, setSearch]         = useState('')
   const [catFilter, setCatFilter]   = useState('')
   const [brandFilter, setBrandFilter] = useState('')
+  const [branchFilter, setBranchFilter] = useState('')
+  const [branches, setBranches]     = useState<Record<string, unknown>[]>([])
   const [showForm, setShowForm]     = useState(false)
   const [editing, setEditing]       = useState<Product | null>(null)
   const [editRequestId, setEditRequestId] = useState<string | undefined>(undefined)
@@ -66,6 +68,9 @@ export default function ProductsPage() {
   useEffect(() => {
     loadProducts() // no force — instant if already cached from a prior visit
     loadAudit()
+    window.api.admin.branches.list().then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
+      if (r.success && r.data) setBranches(r.data)
+    }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -87,10 +92,16 @@ export default function ProductsPage() {
 
   const filtered = products.filter(p => {
     const pr = p as unknown as Record<string,unknown>
+    const pBranchId = String(pr.branch_id || '')
+    const pBranchName = String(pr.branch_name || '').toLowerCase()
+    const targetBranch = branches.find(b => String(b.id) === branchFilter)
+    const targetBranchName = targetBranch ? String(targetBranch.name || '').toLowerCase() : ''
+    const matchesBranch = !branchFilter || pBranchId === branchFilter || !pBranchId || (targetBranchName && pBranchName === targetBranchName)
     return (
       (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase())) &&
       (!catFilter || p.category_id === catFilter) &&
-      (!brandFilter || pr.brand === brandFilter)
+      (!brandFilter || pr.brand === brandFilter) &&
+      matchesBranch
     )
   })
 
@@ -327,6 +338,14 @@ export default function ProductsPage() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Enter Keyword..." className="input pl-8 text-sm" />
         </div>
+        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-44 text-sm font-medium">
+          <option value="">All Branches (Stock)</option>
+          {branches.map(b => (
+            <option key={b.id as string} value={b.id as string}>
+              {b.name as string}
+            </option>
+          ))}
+        </select>
         <select value={catFilter} onChange={e => setCatFilter(e.target.value)} className="input w-44 text-sm">
           <option value="">Select product type</option>
           {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -338,7 +357,7 @@ export default function ProductsPage() {
         <button className="btn-primary btn-sm gap-1" onClick={load}>
           <Search size={13}/> Filter
         </button>
-        <button className="btn-secondary btn-sm" onClick={() => { setSearch(''); setCatFilter(''); setBrandFilter('') }}>
+        <button className="btn-secondary btn-sm" onClick={() => { setSearch(''); setCatFilter(''); setBrandFilter(''); setBranchFilter('') }}>
           Reset
         </button>
       </div>
@@ -1086,10 +1105,13 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
                 <NumberInput value={form.tax_rate} onChange={f('tax_rate')} className="input" min="0" max="100" step="0.5" />
               </div>
               <div>
-                <label className="label">Max Discount (%)</label>
-                <NumberInput value={discountPct || ''} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
-                  className="input" min="0" max="100" step="0.5" placeholder="0"
-                  title="Maximum discount % anyone — including Company Admin — can manually apply to this product at checkout. This is the only discount ceiling in the app now. Also manageable per-branch in Admin > Discounts." />
+                <label className="label">Discount Percentage (%)</label>
+                <div className="flex">
+                  <NumberInput value={discountPct || ''} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
+                    className="input rounded-r-none border-r-0" min="0" max="100" step="0.5" placeholder="e.g. 10"
+                    title="Discount percentage applied to this product." />
+                  <span className="flex items-center px-3 rounded-r-lg text-xs font-semibold" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderLeft: 'none', color: 'var(--text-2)' }}>% OFF</span>
+                </div>
               </div>
               <div>
                 <label className="label">Image</label>

@@ -1032,9 +1032,44 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   })
 
   // Branch stock with product details (low-stock items first)
-  safeHandle(ipcMain, 'stocks:branchDetail', (_e, branchId: string) => {
+  safeHandle(ipcMain, 'stocks:branchDetail', (_e, targetBranchId?: string) => {
     const db = getDb()
-      const rows = db.prepare(`
+    const user = store.get('auth_user') as Record<string, unknown>
+    const superAdmin = isSuperAdmin(user)
+
+    const isAll = !targetBranchId || targetBranchId === 'all' || (targetBranchId === '' && superAdmin)
+    const bid = isAll ? null : targetBranchId
+
+    let rows: Record<string, unknown>[]
+    if (!bid) {
+      rows = db.prepare(`
+        SELECT
+          MIN(s.id) AS id,
+          p.id AS product_id,
+          COALESCE(p.sku, p.id) AS sku,
+          SUM(COALESCE(s.quantity, 0)) AS quantity,
+          SUM(COALESCE(s.damaged_qty, 0)) AS damaged_qty,
+          p.name AS product_name, MAX(p.image_url) AS image_url, p.unit,
+          p.min_stock_level, p.selling_price, p.cost_price,
+          p.category_id, cat.name AS category_name,
+          CASE
+            WHEN SUM(COALESCE(s.quantity, 0)) = 0 THEN 'out'
+            WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 'low'
+            ELSE 'ok'
+          END AS stock_status
+        FROM products p
+        LEFT JOIN stocks s ON s.product_id = p.id
+        LEFT JOIN categories cat ON cat.id = p.category_id
+        WHERE p.is_active = 1
+        GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.unit, p.min_stock_level, p.selling_price, p.cost_price, p.category_id, cat.name
+        ORDER BY
+          CASE WHEN SUM(COALESCE(s.quantity, 0)) = 0 THEN 0
+               WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 1
+               ELSE 2 END,
+          p.name
+      `).all() as Record<string, unknown>[]
+    } else {
+      rows = db.prepare(`
         SELECT
           MIN(s.id) AS id,
           p.id AS product_id,
@@ -1062,8 +1097,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
                WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 1
                ELSE 2 END,
           p.name
-      `).all(branchId, branchId)
-      return { success: true, data: rows }
+      `).all(bid, bid) as Record<string, unknown>[]
+    }
+    return { success: true, data: rows }
   })
 
   safeHandle(ipcMain, 'stockCounts:list', () => {
