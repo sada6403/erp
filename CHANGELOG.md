@@ -2,6 +2,28 @@
 
 Internal release log. Not customer-facing.
 
+## 2.7.0 — 2026-08-29 — Stock/inventory feature work + reporting
+
+Minor version bump (not a patch) — this release folds in feature work from
+a separate session, in addition to everything already shipped through
+2.6.15:
+
+- New Product/Stock Intelligence pages and stock-management IPC handlers
+  (`electron/ipc/stocks.ts`, `electron/ipc/products.ts` extended).
+- New `AdvancedReportsPage` — multi-category data viewing with CSV/Excel/PDF
+  export.
+- `AnalyticsPage`/`InventoryPage` updates, a small local schema addition
+  (`database/schema.sql`, `electron/database.ts`), and an updated product
+  import template.
+
+**Scope note, stated plainly**: this feature work was authored in a
+different session, not this one. It was pulled in via `git pull`, and
+verified only to the extent that both `tsc --noEmit` checks (electron +
+renderer) pass cleanly after the merge — the feature logic itself has not
+been independently reviewed or manually tested here. Client-side only;
+no backend files are touched by this batch, so the already-deployed
+backend needs no changes for this release.
+
 ## 2.6.15 — 2026-08-28 — Security batch: five fixes from the full-app QA sweep (Issues 38-41, 43)
 
 Five security and correctness fixes found by a systematic QA sweep of the

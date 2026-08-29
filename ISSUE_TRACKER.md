@@ -64,6 +64,7 @@ Status legend: `PENDING` → not started · `IN PROGRESS` → current turn · `D
 - **v2.6.13** (2026-08-26) — Device authorization & remote revocation, Phase 1 (Issue 36). Ships the device build for the already-deployed backend enforcement. See `CHANGELOG.md`.
 - **v2.6.15** (2026-08-28) — Security batch from the full-app QA sweep: Issues 38-41 and 43 (four Critical). Object-key SQL injection fixed as a class across 5 handlers, bootstrap-admin password rotation forced, authorization added to the Deliveries/Expenses/Backup/Monitor IPC surfaces, and the bypassable backup path guard replaced with an identity allowlist. 95 verification checks, 0 failures. See `CHANGELOG.md` and `QA_REPORT.md`.
 - **v2.6.14** (2026-08-27) — Product sync speed + delete correctness (Issue 37): pullDeletions() no longer freezes on one FK conflict, BATCH_SIZE 10→50, new 3s watermark check for near-instant product/stock/category propagation. See `CHANGELOG.md`.
+- **v2.7.0** (2026-08-29) — Minor bump: folds in stock/inventory feature work + a new AdvancedReportsPage authored in a separate session (pulled via `git pull`, not written here). Verified only via clean `tsc --noEmit` on both electron and renderer after the merge — feature logic itself not independently reviewed or manually tested in this session. Client-side only, no backend changes needed. See `CHANGELOG.md`.
 
 ## QA Sessions
 
