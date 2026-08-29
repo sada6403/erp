@@ -56,6 +56,11 @@ function cleanRows(rows: Row[]) {
   return rows.map(row => Object.fromEntries(Object.entries(row).map(([k, v]) => [displayKey(k), v ?? ''])))
 }
 
+function isColumnNumeric(col: string, sampleValue?: unknown): boolean {
+  if (typeof sampleValue === 'number') return true
+  return /amount|total|balance|paid|tax|discount|price|profit|cogs|quantity|count|rate|bills/i.test(col)
+}
+
 function DataTable({ rows, hiddenColumns, renderActions }: {
   rows: Row[]
   hiddenColumns?: string[]
@@ -64,38 +69,41 @@ function DataTable({ rows, hiddenColumns, renderActions }: {
   const columns = (rows[0] ? Object.keys(rows[0]) : []).filter(c => !hiddenColumns?.includes(c))
   if (!rows.length) {
     return (
-      <div className="h-40 flex flex-col items-center justify-center gap-2" style={{ color: 'var(--text-3)' }}>
-        <Table2 size={28} />
-        <p className="text-sm">No records for the selected filters</p>
+      <div className="h-48 flex flex-col items-center justify-center gap-2 text-slate-400">
+        <Table2 size={32} className="opacity-50" />
+        <p className="text-sm font-medium">No records found for the selected filters</p>
       </div>
     )
   }
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[900px] text-sm">
+      <table className="w-full text-sm border-collapse">
         <thead>
-          <tr style={{ background: 'var(--bg-soft)', color: 'var(--text-3)' }}>
-            {columns.map(col => (
-              <th key={col} className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap">
-                {displayKey(col)}
-              </th>
-            ))}
-            {renderActions && <th className="px-3 py-2 text-left text-xs font-semibold whitespace-nowrap">Actions</th>}
+          <tr style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }} className="border-b border-slate-700/50">
+            {columns.map(col => {
+              const numeric = isColumnNumeric(col, rows[0]?.[col])
+              return (
+                <th key={col} className={`px-4 py-3 text-xs font-bold uppercase tracking-wider whitespace-nowrap ${numeric ? 'text-right' : 'text-left'}`}>
+                  {displayKey(col)}
+                </th>
+              )
+            })}
+            {renderActions && <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap">Actions</th>}
           </tr>
         </thead>
         <tbody>
           {rows.map((row, idx) => (
-            <tr key={idx} className="border-t" style={{ borderColor: 'var(--border)' }}>
+            <tr key={idx} className="border-b transition-colors hover:bg-slate-800/30" style={{ borderColor: 'var(--border)' }}>
               {columns.map(col => {
                 const value = row[col]
-                const numeric = typeof value === 'number' || /amount|total|balance|paid|tax|discount|price|profit|cogs|quantity|count|rate/i.test(col)
+                const numeric = isColumnNumeric(col, value)
                 return (
-                  <td key={col} className={`px-3 py-2 whitespace-nowrap ${numeric ? 'text-right tabular-nums' : ''}`} style={{ color: 'var(--text-2)' }}>
-                    {numeric ? money(value) : text(value)}
+                  <td key={col} className={`px-4 py-3 whitespace-nowrap ${numeric ? 'text-right font-mono text-xs font-semibold' : 'text-left'}`} style={{ color: 'var(--text-1)' }}>
+                    {numeric ? (typeof value === 'number' || !isNaN(Number(value)) ? money(value) : text(value)) : text(value)}
                   </td>
                 )
               })}
-              {renderActions && <td className="px-3 py-2 whitespace-nowrap">{renderActions(row)}</td>}
+              {renderActions && <td className="px-4 py-3 whitespace-nowrap">{renderActions(row)}</td>}
             </tr>
           ))}
         </tbody>
@@ -165,7 +173,7 @@ export default function AdvancedReportsPage() {
   const reportTitle = reportTabs.find(t => t.key === active)?.label || active
 
   const metadata = {
-    'Company': companyName || 'Nature Plantation',
+    'Company': companyName || 'POS ERP Enterprise',
     'Branch': authUser?.branch?.name || 'All Branches',
     'Report': reportTitle,
     'Date Range': `${filters.dateFrom || 'Start'} to ${filters.dateTo || 'Today'}`,
@@ -237,54 +245,57 @@ export default function AdvancedReportsPage() {
   }
 
   return (
-    <div className="h-full overflow-auto" style={{ background: 'var(--bg-page)' }}>
+    <div className="flex flex-col h-full overflow-hidden" style={{ background: 'var(--bg-page)' }}>
       <PageHeader title="Advanced Reports" subtitle="Sales, transactions, stock, expenses, installments, and audit-ready exports" />
 
-      <div className="p-4 lg:p-6 space-y-4">
-        <div className="rounded-lg border p-4" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-            <label className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>
-              From
-              <input type="date" value={filters.dateFrom} onChange={e => setFilters(p => ({ ...p, dateFrom: e.target.value }))} className="input mt-1 w-full" />
-            </label>
-            <label className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>
-              To
-              <input type="date" value={filters.dateTo} onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))} className="input mt-1 w-full" />
-            </label>
-            <label className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>
-              Period
-              <select value={filters.groupBy} onChange={e => setFilters(p => ({ ...p, groupBy: e.target.value }))} className="input mt-1 w-full">
+      <div className="flex-1 overflow-y-auto p-4 lg:p-6 space-y-6">
+        {/* Filters Card */}
+        <div className="rounded-xl border p-4 shadow-sm" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 items-end">
+            <div>
+              <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--text-3)' }}>From</label>
+              <input type="date" value={filters.dateFrom} onChange={e => setFilters(p => ({ ...p, dateFrom: e.target.value }))} className="input w-full py-1.5 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--text-3)' }}>To</label>
+              <input type="date" value={filters.dateTo} onChange={e => setFilters(p => ({ ...p, dateTo: e.target.value }))} className="input w-full py-1.5 text-sm" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--text-3)' }}>Period</label>
+              <select value={filters.groupBy} onChange={e => setFilters(p => ({ ...p, groupBy: e.target.value }))} className="input w-full py-1.5 text-sm">
                 <option value="daily">Daily</option>
                 <option value="weekly">Weekly</option>
                 <option value="monthly">Monthly</option>
                 <option value="yearly">Yearly</option>
               </select>
-            </label>
-            <label className="text-xs font-semibold md:col-span-2" style={{ color: 'var(--text-3)' }}>
-              Search current report
-              <div className="relative mt-1">
+            </div>
+            <div className="lg:col-span-2">
+              <label className="block text-xs font-semibold mb-1" style={{ color: 'var(--text-3)' }}>Search current report</label>
+              <div className="relative">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
-                <input value={filters.search} onChange={e => setFilters(p => ({ ...p, search: e.target.value }))} className="input w-full pl-9" placeholder="Bill no, customer, product, phone..." />
+                <input value={filters.search} onChange={e => setFilters(p => ({ ...p, search: e.target.value }))} className="input w-full pl-9 py-1.5 text-sm" placeholder="Bill no, customer, product, phone..." />
               </div>
-            </label>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2 mt-4">
-            <button onClick={load} disabled={loading} className="btn-primary gap-2">
+
+          <div className="flex flex-wrap items-center gap-2 mt-4 pt-3 border-t" style={{ borderColor: 'var(--border)' }}>
+            <button onClick={load} disabled={loading} className="btn-primary gap-2 text-sm py-1.5 px-4">
               <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Generate
             </button>
-            <button onClick={exportCsv} disabled={exporting || !filteredRows.length} className="btn-secondary gap-2">
+            <button onClick={exportCsv} disabled={exporting || !filteredRows.length} className="btn-secondary gap-2 text-sm py-1.5 px-3">
               <Download size={15} /> CSV
             </button>
-            <button onClick={exportExcel} disabled={exporting || !data} className="btn-secondary gap-2">
+            <button onClick={exportExcel} disabled={exporting || !data} className="btn-secondary gap-2 text-sm py-1.5 px-3">
               <Download size={15} /> Excel
             </button>
-            <button onClick={exportPdf} disabled={exporting || !data} className="btn-secondary gap-2">
+            <button onClick={exportPdf} disabled={exporting || !data} className="btn-secondary gap-2 text-sm py-1.5 px-3">
               <FileText size={15} /> PDF
             </button>
           </div>
         </div>
 
-        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+        {/* Stat Cards Grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           {([
             ['Bills', s.invoice_count],
             ['Sales', s.sales_total],
@@ -293,43 +304,46 @@ export default function AdvancedReportsPage() {
             ['Profit / Loss', s.profit],
             ['Expenses', s.expenses],
           ] as Array<[string, unknown]>).map(([label, value]) => (
-            <div key={String(label)} className="rounded-lg border p-3" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-              <p className="text-xs" style={{ color: 'var(--text-3)' }}>{label}</p>
-              <p className="text-lg font-bold mt-1" style={{ color: Number(value || 0) < 0 ? '#ef4444' : 'var(--text-1)' }}>
+            <div key={String(label)} className="rounded-xl border p-3.5 shadow-sm flex flex-col justify-between" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+              <p className="text-xs uppercase tracking-wider font-semibold" style={{ color: 'var(--text-3)' }}>{label}</p>
+              <p className="text-xl font-bold mt-1.5 font-mono" style={{ color: Number(value || 0) < 0 ? '#ef4444' : 'var(--text-1)' }}>
                 {label === 'Bills' ? text(value) : money(value)}
               </p>
             </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-          <div className="lg:col-span-4 rounded-lg border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-            <div className="flex gap-2 overflow-x-auto p-3 border-b" style={{ borderColor: 'var(--border)' }}>
+        {/* Main Content Layout */}
+        <div className="grid grid-cols-1 xl:grid-cols-4 gap-6 items-start">
+          {/* Table Container */}
+          <div className="xl:col-span-3 rounded-xl border overflow-hidden shadow-sm flex flex-col" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            <div className="flex gap-1.5 overflow-x-auto p-3 border-b scrollbar-thin" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
               {reportTabs.map(tab => (
                 <button
                   key={tab.key}
                   onClick={() => setActive(tab.key)}
-                  className="px-3 py-2 rounded-lg text-xs font-semibold whitespace-nowrap"
-                  style={active === tab.key
-                    ? { background: 'var(--brand-primary)', color: 'white' }
-                    : { background: 'var(--bg-soft)', color: 'var(--text-2)' }}
+                  className={`px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all ${
+                    active === tab.key
+                      ? 'bg-brand-600 text-white shadow'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/50'
+                  }`}
                 >
                   {tab.label}
                 </button>
               ))}
             </div>
-            <div className="p-3">
+            <div className="p-4 overflow-x-auto">
               <DataTable
                 rows={filteredRows}
                 hiddenColumns={active === 'refundCancelled' ? ['id'] : undefined}
                 renderActions={active === 'refundCancelled' ? (row => (
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <button onClick={() => setViewingId(String(row.id))}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-xs" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border" style={{ background: 'var(--bg-soft)', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
                       <Eye size={12} /> View
                     </button>
                     <button onClick={() => quickPrint(String(row.id))} disabled={printingId === row.id}
-                      className="flex items-center gap-1 px-2 py-1 rounded text-xs disabled:opacity-50" style={{ background: 'var(--bg-soft)', color: 'var(--text-2)' }}>
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-medium border disabled:opacity-50" style={{ background: 'var(--bg-soft)', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
                       <Printer size={12} /> {printingId === row.id ? '…' : 'Print'}
                     </button>
                   </div>
@@ -338,30 +352,33 @@ export default function AdvancedReportsPage() {
             </div>
           </div>
 
-          <div className="rounded-lg border p-4 space-y-3" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-            <div>
-              <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Installment Tracking</p>
-              <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>Customer paid, balance, due date, overdue status.</p>
+          {/* Sidebar */}
+          <div className="rounded-xl border p-4 space-y-4 shadow-sm" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            <div className="border-b pb-3" style={{ borderColor: 'var(--border)' }}>
+              <p className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>Installment Tracking</p>
+              <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Customer paid, balance, due date & overdue status.</p>
             </div>
-            {([
-              ['Contracts', installment.contract_count],
-              ['Installment Sales', installment.installment_sales_total],
-              ['Down Payments', installment.down_payment_total],
-              ['Interest', installment.interest_total],
-              ['Paid', installment.paid_total],
-              ['Pending Balance', installment.balance_total],
-              ['Overdue Customers', installment.overdue_count],
-            ] as Array<[string, unknown]>).map(([label, value]) => (
-              <div key={String(label)} className="flex justify-between gap-3 text-sm">
-                <span style={{ color: 'var(--text-3)' }}>{label}</span>
-                <strong className="text-right" style={{ color: label === 'Overdue Customers' && Number(value) > 0 ? '#ef4444' : 'var(--text-1)' }}>
-                  {label === 'Contracts' || label === 'Overdue Customers' ? text(value) : money(value)}
-                </strong>
-              </div>
-            ))}
-            <div className="pt-3 border-t text-xs space-y-2" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
-              <p>Bank transfer proof URL, receipt number, receiver, paid date, and status are included in paid installment history.</p>
-              <p>Every generated report/export is recorded in audit logs.</p>
+            <div className="space-y-2.5">
+              {([
+                ['Contracts', installment.contract_count],
+                ['Installment Sales', installment.installment_sales_total],
+                ['Down Payments', installment.down_payment_total],
+                ['Interest', installment.interest_total],
+                ['Paid', installment.paid_total],
+                ['Pending Balance', installment.balance_total],
+                ['Overdue Customers', installment.overdue_count],
+              ] as Array<[string, unknown]>).map(([label, value]) => (
+                <div key={String(label)} className="flex justify-between items-center text-xs py-1 border-b border-slate-800/30">
+                  <span className="font-medium" style={{ color: 'var(--text-3)' }}>{label}</span>
+                  <strong className="font-mono text-sm font-bold text-right" style={{ color: label === 'Overdue Customers' && Number(value) > 0 ? '#ef4444' : 'var(--text-1)' }}>
+                    {label === 'Contracts' || label === 'Overdue Customers' ? text(value) : money(value)}
+                  </strong>
+                </div>
+              ))}
+            </div>
+            <div className="pt-3 border-t text-[11px] space-y-2 leading-relaxed" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+              <p>• Bank transfer proof URL, receipt number, receiver, paid date, and status are included in paid installment history.</p>
+              <p>• Every generated report/export is recorded in audit logs.</p>
             </div>
           </div>
         </div>
