@@ -355,6 +355,19 @@ const api = {
     discardItem:  (id: string) => ipcRenderer.invoke('sync:discardItem', id),
     fixInvoices:  () => ipcRenderer.invoke('sync:fixInvoices'),
     fixOrphanedParents: () => ipcRenderer.invoke('sync:fixOrphanedParents'),
+    getPendingDeletions: () => ipcRenderer.invoke('sync:getPendingDeletions'),
+    dismissPendingDeletion: (id: string) => ipcRenderer.invoke('sync:dismissPendingDeletion', id),
+    refreshWithDeletions: () => ipcRenderer.invoke('sync:refresh'),
+    onPendingDeletions: (cb: (data: unknown) => void) => {
+      const listener = (_e: unknown, data: unknown) => cb(data)
+      ipcRenderer.on('sync:pendingDeletions', listener)
+      return () => { ipcRenderer.removeListener('sync:pendingDeletions', listener) }
+    },
+    onPendingDeletionsUpdated: (cb: () => void) => {
+      const listener = () => cb()
+      ipcRenderer.on('sync:pendingDeletionsUpdated', listener)
+      return () => { ipcRenderer.removeListener('sync:pendingDeletionsUpdated', listener) }
+    },
   },
 
   // Printer

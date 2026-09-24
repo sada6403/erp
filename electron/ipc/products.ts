@@ -292,12 +292,30 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
             .run(request.id)
         }
+        const productRow = {
+          id,
+          branch_id: branch_id ?? null,
+          category_id: (rest.category_id as string) || null,
+          supplier_id: (rest.supplier_id as string) || null,
+          sku,
+          barcode: (rest.barcode as string) || null,
+          name: (rest.name as string) || 'Unnamed Product',
+          description: (rest.description as string) || '',
+          image_url: (rest.image_url as string) || null,
+          unit: (rest.unit as string) || 'pcs',
+          cost_price: Number(rest.cost_price) || 0,
+          selling_price: Number(rest.selling_price) || 0,
+          tax_rate: Number(rest.tax_rate) || 0,
+          discount_pct: Number(rest.discount_pct) || 0,
+          min_stock_level: Number(rest.min_stock_level) || 0,
+          ...rest,
+        }
         db.prepare(`
           INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
             image_url, unit, cost_price, selling_price, tax_rate, discount_pct, min_stock_level)
           VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
             @image_url, @unit, @cost_price, @selling_price, @tax_rate, @discount_pct, @min_stock_level)
-        `).run({ id, branch_id, discount_pct: 0, ...rest, sku })
+        `).run(productRow)
       })()
 
       await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku })

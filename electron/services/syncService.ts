@@ -2,7 +2,7 @@ import { getDb } from '../database'
 import Store from 'electron-store'
 import fs from 'fs'
 import path from 'path'
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { CloudApi, CloudRateLimitError, DeviceRevokedError } from './cloudApi'
 import { CLOUD_BRANDING_KEYS, decryptSecret, pushBrandingToCloud } from '../ipc/settings'
 import { reconcileLocalDefaultRoles } from './roleReconcile'
@@ -31,6 +31,26 @@ const DEFAULT_FAILED_RETRY_MINUTES = 2
 
 function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+function notifyPendingDeletions(item: {
+  id: string
+  tableName: string
+  recordId: string
+  action: string
+  productName: string
+  productSku: string
+}) {
+  try {
+    const wins = BrowserWindow?.getAllWindows ? BrowserWindow.getAllWindows() : []
+    for (const win of wins) {
+      if (!win.isDestroyed()) {
+        win.webContents.send('sync:pendingDeletions', item)
+      }
+    }
+  } catch {
+    // In headless or test environments
+  }
 }
 
 export class SyncService {
@@ -129,6 +149,29 @@ export class SyncService {
           for (const row of data) {
             if (pendingIds.includes(String(row.id))) continue
             try {
+              if (table === 'products' && (row.is_active === 0 || row.is_active === false || row.is_active === '0')) {
+                const localProduct = db.prepare(`SELECT id, name, sku, is_active FROM products WHERE id = ?`).get(row.id) as
+                  { id: string; name: string; sku: string; is_active: number } | undefined
+                if (localProduct && localProduct.is_active === 1) {
+                  const pendingId = `deact_${row.id}`
+                  db.prepare(`
+                    INSERT OR REPLACE INTO pending_sync_deletions
+                      (id, table_name, record_id, action, record_name, record_sku, detected_at, deleted_at, status)
+                    VALUES
+                      (?, 'products', ?, 'deactivate', ?, ?, datetime('now'), ?, 'pending')
+                  `).run(pendingId, String(row.id), localProduct.name, localProduct.sku, String(row.updated_at || new Date().toISOString()))
+
+                  notifyPendingDeletions({
+                    id: pendingId,
+                    tableName: 'products',
+                    recordId: String(row.id),
+                    action: 'deactivate',
+                    productName: localProduct.name,
+                    productSku: localProduct.sku,
+                  })
+                  continue
+                }
+              }
               this.insertFiltered(db, table, row)
             } catch (err) {
               console.error(`[SyncService] Skipping row in ${table} (${row.id}) [fast path]:`, err)
@@ -607,6 +650,29 @@ export class SyncService {
             // itself never enforced) must not roll back every other row in
             // this table's batch — skip just that row and keep going.
             try {
+              if (table === 'products' && (row.is_active === 0 || row.is_active === false || row.is_active === '0')) {
+                const localProduct = db.prepare(`SELECT id, name, sku, is_active FROM products WHERE id = ?`).get(row.id) as
+                  { id: string; name: string; sku: string; is_active: number } | undefined
+                if (localProduct && localProduct.is_active === 1) {
+                  const pendingId = `deact_${row.id}`
+                  db.prepare(`
+                    INSERT OR REPLACE INTO pending_sync_deletions
+                      (id, table_name, record_id, action, product_name, product_sku, detected_at, deleted_at, status)
+                    VALUES
+                      (?, 'products', ?, 'deactivate', ?, ?, datetime('now'), ?, 'pending')
+                  `).run(pendingId, String(row.id), localProduct.name, localProduct.sku, String(row.updated_at || new Date().toISOString()))
+
+                  notifyPendingDeletions({
+                    id: pendingId,
+                    tableName: 'products',
+                    recordId: String(row.id),
+                    action: 'deactivate',
+                    productName: localProduct.name,
+                    productSku: localProduct.sku,
+                  })
+                  continue
+                }
+              }
               this.insertFiltered(db, table, row)
             } catch (err) {
               console.error(`[SyncService] Skipping row in ${table} (${row.id}):`, err)
@@ -812,6 +878,35 @@ export class SyncService {
         continue
       }
       try {
+        if (d.table_name === 'products') {
+          // Requirement 5, 7: DO NOT silently delete local products!
+          const existingProduct = db.prepare(`SELECT id, name, sku FROM products WHERE id = ?`).get(d.record_id) as
+            { id: string; name: string; sku: string } | undefined
+
+          if (existingProduct) {
+            const pendingId = `del_${d.record_id}`
+            db.prepare(`
+              INSERT OR REPLACE INTO pending_sync_deletions
+                (id, table_name, record_id, action, record_name, record_sku, detected_at, deleted_at, status)
+              VALUES
+                (?, 'products', ?, 'delete', ?, ?, datetime('now'), ?, 'pending')
+            `).run(pendingId, d.record_id, existingProduct.name, existingProduct.sku, d.deleted_at)
+
+            notifyPendingDeletions({
+              id: pendingId,
+              tableName: 'products',
+              recordId: d.record_id,
+              action: 'delete',
+              productName: existingProduct.name,
+              productSku: existingProduct.sku,
+            })
+
+            // Do not silently delete local product! Stage it into pending deletions.
+            if (!sawFailure) advanceTo = d.deleted_at
+            continue
+          }
+        }
+
         db.prepare(`DELETE FROM ${d.table_name} WHERE id = ?`).run(d.record_id)
         if (!sawFailure) advanceTo = d.deleted_at
       } catch (err) {

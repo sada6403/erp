@@ -796,21 +796,48 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     // reuse a saved preset; chits:create just no longer requires going
     // through it.) template_id stays nullable on chit_schemes either way.
     const templateId = payload.template_id ? String(payload.template_id) : null
-    const name = String(payload.name || '').trim()
-    if (!name) return { success: false, error: 'Scheme name is required' }
+    let name: string
+    let contributionAmount: number
+    let chitValue: number
+    let cycleCount: number
+    let minMembers: number
+    let memberCount: number
+
+    if (templateId) {
+      const tmpl = db.prepare('SELECT * FROM chit_scheme_templates WHERE id=?').get(templateId) as Record<string, unknown> | undefined
+      if (!tmpl) return { success: false, error: 'Scheme Master template not found' }
+      if (tmpl.status !== 'active' && !isGlobalChitAccess(perms)) {
+        return { success: false, error: 'Cannot instantiate a deactivated Scheme Master template' }
+      }
+      name = String(tmpl.scheme_name || '').trim()
+      contributionAmount = money(Number(tmpl.monthly_contribution_amount) || 0)
+      chitValue = money(Number(tmpl.product_value) || 0)
+      cycleCount = Math.trunc(Number(tmpl.duration_months) || 0)
+      minMembers = Math.trunc(Number(tmpl.minimum_members) || 0)
+
+      const requestedMemberCount = Number(payload.member_count) || minMembers
+      if (requestedMemberCount < minMembers) {
+        return { success: false, error: `Member count cannot be less than minimum members (${minMembers})` }
+      }
+      memberCount = requestedMemberCount
+    } else {
+      if (!isGlobalChitAccess(perms)) {
+        return { success: false, error: 'Scheme Master template is required to create a scheme' }
+      }
+      name = String(payload.name || '').trim()
+      if (!name) return { success: false, error: 'Scheme name is required' }
+      cycleCount = Math.trunc(Number(payload.cycle_count) || 0)
+      if (cycleCount <= 0) return { success: false, error: 'Duration (months) must be greater than 0' }
+      memberCount = Number(payload.member_count) || 0
+      if (memberCount <= 0) return { success: false, error: 'Maximum members must be greater than 0' }
+      minMembers = payload.min_members !== undefined && Number(payload.min_members) > 0 ? Math.min(Number(payload.min_members), memberCount) : memberCount
+      contributionAmount = money(Number(payload.contribution_amount) || 0)
+      if (contributionAmount <= 0) return { success: false, error: 'Contribution amount must be greater than 0' }
+      chitValue = money(Number(payload.chit_value) || 0)
+    }
 
     const branchId = String(resolveScopedBranchId(perms, caller, payload.branch_id) || defaultBranchId())
-    const cycleCount = Math.trunc(Number(payload.cycle_count) || 0)
-    if (cycleCount <= 0) return { success: false, error: 'Duration (months) must be greater than 0' }
-    const memberCount = Number(payload.member_count) || 0
-    if (memberCount <= 0) return { success: false, error: 'Maximum members must be greater than 0' }
-    // No separate "minimum to activate" input in this direct-entry flow —
-    // the scheme activates once enrollment reaches full capacity.
-    const minMembers = memberCount
     const defaults = smartBuySettings()
-    const contributionAmount = money(Number(payload.contribution_amount) || 0)
-    if (contributionAmount <= 0) return { success: false, error: 'Contribution amount must be greater than 0' }
-    const chitValue = money(Number(payload.chit_value) || 0)
     if (chitValue <= 0) return { success: false, error: 'Product value must be greater than 0' }
     const agentCommissionPct = Number(payload.agent_commission_pct) || 0
     if (agentCommissionPct < 0 || agentCommissionPct > 100) return { success: false, error: 'Agent commission % must be between 0 and 100' }

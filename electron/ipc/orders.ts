@@ -50,12 +50,9 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
       if (!perms.all && !perms.employees && !perms.pos) throw new Error('Access required to create an order')
       const id = crypto.randomUUID()
       // A non-admin can only place an order under their own branch — the
-      // client's branch_id is only trusted for admins.
+      // client's branch_id is only trusted for admins. Spoofed branch_id is ignored.
       const branchId = perms.all ? (payload.branch_id || user?.branch_id) : user?.branch_id
       if (!branchId) throw new Error('A branch is required')
-      if (!perms.all && payload.branch_id && payload.branch_id !== user?.branch_id) {
-        throw new Error('Cannot create an order for another branch')
-      }
       if (!payload.customer_name) throw new Error('Customer name is required')
       if (!Array.isArray(payload.items) || payload.items.length === 0) throw new Error('Add at least one product')
       const orderNumber = `ORD-${String(branchId).slice(0, 3).toUpperCase()}-${Date.now().toString(36).toUpperCase()}`

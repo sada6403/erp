@@ -105,12 +105,9 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
 
       // A non-admin can only raise a PO for their own branch — the client's
       // branch_id is only trusted for admins (who legitimately manage POs
-      // across branches).
+      // across branches). Spoofed branch_id from non-admin is ignored.
       const branchId = perms.all ? (payload.branch_id || user?.branch_id as string) : (user?.branch_id as string)
       if (!branchId) throw new Error('Branch is required')
-      if (!perms.all && payload.branch_id && payload.branch_id !== user?.branch_id) {
-        throw new Error('Cannot raise a purchase order for another branch')
-      }
       const id = crypto.randomUUID()
       const po_number = getNextPONumber(branchId)
 

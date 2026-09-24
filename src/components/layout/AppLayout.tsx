@@ -15,6 +15,7 @@ import { setSystemTheme } from '@/lib/systemTheme'
 import ThemeToggle from '@/components/shared/ThemeToggle'
 import { getHomeLabel, getLandingRoute, getSessionProfile, type SessionRoleKind } from '@/lib/sessionRouting'
 import { resolveImageSrc } from '@/lib/imageUrl'
+import ProductSyncModal from '@/components/shared/ProductSyncModal'
 
 const MASKED_SECRET = '********'
 
@@ -879,6 +880,9 @@ export default function AppLayout() {
           </div>
         </div>
       )}
+
+      {/* ── Product Sync Online Deletion / Deactivation Modal ── */}
+      <ProductSyncModal />
     </div>
   )
 }

@@ -13,5 +13,5 @@
     "noEmit": false
   },
   "include": ["electron/**/*.ts"],
-  "exclude": ["node_modules", "dist", "dist-electron"]
+  "exclude": ["node_modules", "dist", "dist-electron", "electron/__qa__", "electron/**/*.test.ts"]
 }
