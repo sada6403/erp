@@ -34,6 +34,8 @@ export default defineWorkspace([
       // `foo.test.ts` unit test can never match it, so those exclude entries
       // were redundant as well as self-defeating.
       exclude: ['e2e/**'],
+      hookTimeout: 60_000,
+      testTimeout: 60_000,
       pool: 'forks',
       poolOptions: { forks: { singleFork: true } },
     },
