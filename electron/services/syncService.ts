@@ -504,9 +504,10 @@ export class SyncService {
         }
       }
 
+      const effectiveOp = (item.table_name === 'stocks' && item.operation === 'UPDATE') ? 'INSERT' : item.operation
       await cloud.push({
         table: item.table_name,
-        operation: item.operation,
+        operation: effectiveOp,
         recordId: item.record_id,
         record: normalizeForCloud(payload),
       })

@@ -236,7 +236,7 @@ let isRefreshing = false
       if (!url || !key) throw new Error('Cloud API URL/key is missing')
       const health = await withTimeout(
         new CloudApi({ baseUrl: url, apiKey: key, deviceId }).health(),
-        5000,
+        10000,
         'Cloud API'
       )
       networkOk = health.status === 'ok' && health.database === 'connected'
@@ -261,7 +261,7 @@ let isRefreshing = false
             'categories',
             '1970-01-01T00:00:00.000Z'
           ),
-          5000,
+          12000,
           'Cloud query'
         )
         queryOk = true
