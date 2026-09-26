@@ -234,6 +234,7 @@ export class SyncService {
       await this.pullChanges(cloud)
       await this.syncBranding(cloud)
       await this.reconcileSupportSession(cloud)
+      store.set('last_successful_sync_at', new Date().toISOString())
     } catch (err) {
       if (err instanceof CloudRateLimitError) {
         this.backoffUntil = Date.now() + err.retryAfterSeconds * 1000

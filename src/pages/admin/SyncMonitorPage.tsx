@@ -200,7 +200,12 @@ export default function SyncMonitorPage() {
             <h3 className="font-semibold text-sm mb-4" style={{ color: 'var(--text-1)' }}>Sync Information</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <InfoRow label="Connection Status" value={status.online ? 'Online' : 'Offline'} valueClass={status.online ? 'text-green-400' : 'text-red-400'} />
-              <InfoRow label="Last Successful Sync" value={status.last_sync ? new Date(status.last_sync).toLocaleString() : 'Never'} />
+              <InfoRow label="Last Successful Sync" value={status.last_sync ? (() => {
+                const s = status.last_sync.trim()
+                const iso = s.includes('T') ? (s.endsWith('Z') ? s : s + 'Z') : s.replace(' ', 'T') + 'Z'
+                const d = new Date(iso)
+                return isNaN(d.getTime()) ? 'Never' : d.toLocaleString()
+              })() : 'Never'} />
               <InfoRow label="Pending Items" value={String(status.pending)} valueClass={status.pending > 0 ? 'text-yellow-400' : 'text-green-400'} />
               <InfoRow label="Failed Items" value={String(status.failed)} valueClass={status.failed > 0 ? 'text-red-400' : 'text-green-400'} />
             </div>

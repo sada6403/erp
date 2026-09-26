@@ -19,13 +19,40 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export function registerSyncHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'sync:status', () => {
-    {
-      const db = getDb()
-      const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
-      const failed = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='failed'").get() as { c: number }).c
-      const last = db.prepare("SELECT synced_at FROM sync_queue WHERE status='synced' ORDER BY synced_at DESC LIMIT 1").get() as { synced_at: string } | undefined
-      return { success: true, data: { pending, failed, last_sync: last?.synced_at } }
+    const db = getDb()
+    const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
+    const failed = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='failed'").get() as { c: number }).c
+    const last = db.prepare("SELECT synced_at FROM sync_queue WHERE status='synced' ORDER BY synced_at DESC LIMIT 1").get() as { synced_at: string } | undefined
+
+    const parseToIso = (val?: string | null): string | undefined => {
+      if (!val) return undefined
+      const trimmed = val.trim()
+      if (!trimmed) return undefined
+      if (trimmed.includes('T')) {
+        const withZ = trimmed.endsWith('Z') ? trimmed : trimmed + 'Z'
+        const d = new Date(withZ)
+        return isNaN(d.getTime()) ? undefined : d.toISOString()
+      }
+      // SQLite datetime('now') is UTC string 'YYYY-MM-DD HH:MM:SS'. Appending Z avoids local timezone skew.
+      const withZ = trimmed.replace(' ', 'T') + 'Z'
+      const d = new Date(withZ)
+      return isNaN(d.getTime()) ? undefined : d.toISOString()
     }
+
+    const queueSyncIso = parseToIso(last?.synced_at)
+    const pullSyncIso = parseToIso(store.get('last_pull_timestamp') as string | undefined)
+    const cycleSyncIso = parseToIso(store.get('last_successful_sync_at') as string | undefined)
+
+    let latestIso = queueSyncIso
+    for (const cand of [pullSyncIso, cycleSyncIso]) {
+      if (cand) {
+        if (!latestIso || new Date(cand).getTime() > new Date(latestIso).getTime()) {
+          latestIso = cand
+        }
+      }
+    }
+
+    return { success: true, data: { pending, failed, last_sync: latestIso } }
   })
 
   safeHandle(ipcMain, 'sync:queueCount', () => {
@@ -41,6 +68,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
       const { getSyncService } = await import('../services/syncService')
       const service = getSyncService()
       await service.runOnce()
+      store.set('last_successful_sync_at', new Date().toISOString())
       return { success: true }
     }
   })
