@@ -24,13 +24,19 @@ type CatalogAudit = {
   nonNormalizedCategories: number
 }
 
+interface BranchItem {
+  id: string
+  name: string
+  code?: string
+}
+
 export default function ProductsPage() {
   const { products, categories, suppliers, loading, load: loadProducts } = useProductsStore()
   const [search, setSearch]         = useState('')
   const [catFilter, setCatFilter]   = useState('')
   const [brandFilter, setBrandFilter] = useState('')
   const [branchFilter, setBranchFilter] = useState('')
-  const [branches, setBranches]     = useState<Record<string, unknown>[]>([])
+  const [branches, setBranches]     = useState<BranchItem[]>([])
   const [showForm, setShowForm]     = useState(false)
   const [editing, setEditing]       = useState<Product | null>(null)
   const [editRequestId, setEditRequestId] = useState<string | undefined>(undefined)
@@ -68,8 +74,8 @@ export default function ProductsPage() {
   useEffect(() => {
     loadProducts() // no force — instant if already cached from a prior visit
     loadAudit()
-    window.api.admin.branches.list().then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
-      if (r.success && r.data) setBranches(r.data)
+    window.api.admin.branches.list().then((r: { success: boolean; data?: unknown[] }) => {
+      if (r.success && r.data) setBranches(r.data as BranchItem[])
     }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -88,20 +94,25 @@ export default function ProductsPage() {
     return chain.join(' > ')
   }
 
+  useEffect(() => {
+    // When branchFilter changes, fetch products with the target branch so stock reflects that branch!
+    window.api.products.list({ branch_id: branchFilter || undefined, category_id: catFilter || undefined, is_active: true })
+      .then((res: { success: boolean; data?: Product[]; error?: string }) => {
+        if (res.success && res.data) {
+          useProductsStore.setState({ products: res.data })
+        }
+      })
+      .catch((err: unknown) => console.error('Failed to load branch stock:', err))
+  }, [branchFilter, catFilter])
+
   const brands = [...new Set(products.map(p => (p as unknown as Record<string,unknown>).brand as string).filter(Boolean))]
 
   const filtered = products.filter(p => {
     const pr = p as unknown as Record<string,unknown>
-    const pBranchId = String(pr.branch_id || '')
-    const pBranchName = String(pr.branch_name || '').toLowerCase()
-    const targetBranch = branches.find(b => String(b.id) === branchFilter)
-    const targetBranchName = targetBranch ? String(targetBranch.name || '').toLowerCase() : ''
-    const matchesBranch = !branchFilter || pBranchId === branchFilter || !pBranchId || (targetBranchName && pBranchName === targetBranchName)
     return (
       (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase())) &&
       (!catFilter || p.category_id === catFilter) &&
-      (!brandFilter || pr.brand === brandFilter) &&
-      matchesBranch
+      (!brandFilter || pr.brand === brandFilter)
     )
   })
 
@@ -341,8 +352,8 @@ export default function ProductsPage() {
         <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-44 text-sm font-medium">
           <option value="">All Branches (Stock)</option>
           {branches.map(b => (
-            <option key={b.id as string} value={b.id as string}>
-              {b.name as string}
+            <option key={b.id} value={b.id}>
+              {b.name}
             </option>
           ))}
         </select>
@@ -373,7 +384,9 @@ export default function ProductsPage() {
                     className="cursor-pointer" title="Select all visible" />
                 </th>
               )}
-              {['Image', 'SKU', 'Product', 'Location', 'Unit Cost(Rs.)', 'Unit Price(Rs.)', 'Discount (%)', 'Wholesale(Rs.)', 'Quantity', 'Action'].map(h => (
+              {['Image', 'SKU', 'Product', 'Location', 'Unit Cost(Rs.)', 'Unit Price(Rs.)', 'Discount (%)', 'Wholesale(Rs.)',
+                branchFilter ? `Stock (${branches.find(b => String(b.id) === branchFilter)?.name || 'Branch'})` : 'Stock (Total)',
+                'Action'].map(h => (
                 <th key={h} className="table-header px-3 py-3 text-left text-xs">{h}</th>
               ))}
             </tr>
@@ -431,6 +444,11 @@ export default function ProductsPage() {
                       ${(p.stock ?? 0) <= 0 ? 'bg-red-600' : (p.stock ?? 0) <= p.min_stock_level ? 'bg-yellow-600' : 'bg-green-700'}`}>
                       {p.stock ?? 0} ITEMS
                     </span>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {branchFilter
+                        ? (branches.find(b => String(b.id) === branchFilter)?.name || 'Branch')
+                        : 'All Branches (Total)'}
+                    </p>
                   </td>
                   <td className="table-cell px-3">
                     <div className="flex gap-1">

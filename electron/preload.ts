@@ -355,6 +355,19 @@ const api = {
     discardItem:  (id: string) => ipcRenderer.invoke('sync:discardItem', id),
     fixInvoices:  () => ipcRenderer.invoke('sync:fixInvoices'),
     fixOrphanedParents: () => ipcRenderer.invoke('sync:fixOrphanedParents'),
+    getPendingDeletions: () => ipcRenderer.invoke('sync:getPendingDeletions'),
+    dismissPendingDeletion: (id: string) => ipcRenderer.invoke('sync:dismissPendingDeletion', id),
+    refreshWithDeletions: () => ipcRenderer.invoke('sync:refresh'),
+    onPendingDeletions: (cb: (data: unknown) => void) => {
+      const listener = (_e: unknown, data: unknown) => cb(data)
+      ipcRenderer.on('sync:pendingDeletions', listener)
+      return () => { ipcRenderer.removeListener('sync:pendingDeletions', listener) }
+    },
+    onPendingDeletionsUpdated: (cb: () => void) => {
+      const listener = () => cb()
+      ipcRenderer.on('sync:pendingDeletionsUpdated', listener)
+      return () => { ipcRenderer.removeListener('sync:pendingDeletionsUpdated', listener) }
+    },
   },
 
   // Printer
@@ -385,11 +398,12 @@ const api = {
 
   // Purchase Orders
   purchases: {
-    list:         (filters?: unknown)                               => ipcRenderer.invoke('purchases:list', filters),
-    get:          (id: string)                                      => ipcRenderer.invoke('purchases:get', id),
-    create:       (payload: unknown)                                => ipcRenderer.invoke('purchases:create', payload),
-    update:       (id: string, payload: unknown)                    => ipcRenderer.invoke('purchases:update', id, payload),
-    updateStatus: (id: string, status: string, payload?: unknown)   => ipcRenderer.invoke('purchases:updateStatus', id, status, payload),
+    list:           (filters?: unknown)                             => ipcRenderer.invoke('purchases:list', filters),
+    get:            (id: string)                                    => ipcRenderer.invoke('purchases:get', id),
+    create:         (payload: unknown)                              => ipcRenderer.invoke('purchases:create', payload),
+    update:         (id: string, payload: unknown)                  => ipcRenderer.invoke('purchases:update', id, payload),
+    updateStatus:   (id: string, status: string, payload?: unknown) => ipcRenderer.invoke('purchases:updateStatus', id, status, payload),
+    notifySupplier: (id: string, options?: unknown)                 => ipcRenderer.invoke('purchases:notifySupplier', id, options),
   },
 
   // Returns / Refunds

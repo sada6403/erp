@@ -169,37 +169,40 @@ export function registerProductHandlers(ipcMain: IpcMain) {
     return { success: true, data: rows }
   })
 
-  safeHandle(ipcMain, 'products:list', (_e, filters: { category_id?: string; is_active?: boolean } = {}) => {
+  safeHandle(ipcMain, 'products:list', (_e, filters: { category_id?: string; is_active?: boolean; branch_id?: string } = {}) => {
       const db = getDb()
       const authUser = getAuthUser()
       const superAdmin = isSuperAdmin(authUser)
-      const branchId = authUser?.branch_id as string | undefined
+      const userBranchId = authUser?.branch_id as string | undefined
 
-      // Super admin / no-branch users: sum stock across ALL branches
-      // Branch users: stock for their specific branch only
-      const stockJoin = (superAdmin || !branchId)
-        ? `LEFT JOIN (
+      // If an explicit branch_id is requested via filters (or user is branch-scoped without filter),
+      // join stock for that exact branch. Otherwise sum across all branches.
+      const targetBranchId = filters.branch_id || (!superAdmin ? userBranchId : undefined)
+
+      const stockJoin = targetBranchId
+        ? `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
+        : `LEFT JOIN (
              SELECT product_id, SUM(quantity) AS quantity
              FROM stocks GROUP BY product_id
            ) s ON s.product_id = p.id`
-        : `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
 
       let sql = `
         SELECT p.*, c.name as category_name,
-               COALESCE(s.quantity, 0) as stock
+               COALESCE(s.quantity, 0) as stock,
+               b.name as branch_name
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
+        LEFT JOIN branches b ON b.id = p.branch_id
         ${stockJoin}
         WHERE 1=1
       `
       const params: unknown[] = []
-      // Branch-scoped users pass branchId as first param for the stock JOIN
-      if (!superAdmin && branchId) params.push(branchId)
+      if (targetBranchId) params.push(targetBranchId)
 
-      // Branch users see only their branch products + global (NULL branch) products
-      if (!superAdmin && branchId) {
+      // Only restrict branch visibility if branch-scoped user and no explicit branch filter
+      if (!superAdmin && userBranchId && !filters.branch_id) {
         sql += ' AND (p.branch_id = ? OR p.branch_id IS NULL)'
-        params.push(branchId)
+        params.push(userBranchId)
       }
 
       if (filters.category_id) { sql += ' AND p.category_id = ?'; params.push(filters.category_id) }
@@ -292,12 +295,30 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
             .run(request.id)
         }
+        const productRow = {
+          id,
+          branch_id: branch_id ?? null,
+          category_id: (rest.category_id as string) || null,
+          supplier_id: (rest.supplier_id as string) || null,
+          sku,
+          barcode: (rest.barcode as string) || null,
+          name: (rest.name as string) || 'Unnamed Product',
+          description: (rest.description as string) || '',
+          image_url: (rest.image_url as string) || null,
+          unit: (rest.unit as string) || 'pcs',
+          cost_price: Number(rest.cost_price) || 0,
+          selling_price: Number(rest.selling_price) || 0,
+          tax_rate: Number(rest.tax_rate) || 0,
+          discount_pct: Number(rest.discount_pct) || 0,
+          min_stock_level: Number(rest.min_stock_level) || 0,
+          ...rest,
+        }
         db.prepare(`
           INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
             image_url, unit, cost_price, selling_price, tax_rate, discount_pct, min_stock_level)
           VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
             @image_url, @unit, @cost_price, @selling_price, @tax_rate, @discount_pct, @min_stock_level)
-        `).run({ id, branch_id, discount_pct: 0, ...rest, sku })
+        `).run(productRow)
       })()
 
       await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku })

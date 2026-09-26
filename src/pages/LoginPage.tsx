@@ -56,7 +56,11 @@ function StatusBar({ online, pending, lastSync, licenseOk, version }: {
 }) {
   const fmtSync = () => {
     if (!lastSync) return 'Never'
-    const diff = Math.floor((Date.now() - new Date(lastSync).getTime()) / 1000)
+    const s = lastSync.trim()
+    const iso = s.includes('T') ? (s.endsWith('Z') ? s : s + 'Z') : s.replace(' ', 'T') + 'Z'
+    const syncTime = new Date(iso).getTime()
+    if (isNaN(syncTime)) return 'Never'
+    const diff = Math.max(0, Math.floor((Date.now() - syncTime) / 1000))
     if (diff < 10) return 'Just now'
     if (diff < 60) return `${diff}s ago`
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`

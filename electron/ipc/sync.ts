@@ -19,13 +19,40 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
 
 export function registerSyncHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'sync:status', () => {
-    {
-      const db = getDb()
-      const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
-      const failed = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='failed'").get() as { c: number }).c
-      const last = db.prepare("SELECT synced_at FROM sync_queue WHERE status='synced' ORDER BY synced_at DESC LIMIT 1").get() as { synced_at: string } | undefined
-      return { success: true, data: { pending, failed, last_sync: last?.synced_at } }
+    const db = getDb()
+    const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
+    const failed = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='failed'").get() as { c: number }).c
+    const last = db.prepare("SELECT synced_at FROM sync_queue WHERE status='synced' ORDER BY synced_at DESC LIMIT 1").get() as { synced_at: string } | undefined
+
+    const parseToIso = (val?: string | null): string | undefined => {
+      if (!val) return undefined
+      const trimmed = val.trim()
+      if (!trimmed) return undefined
+      if (trimmed.includes('T')) {
+        const withZ = trimmed.endsWith('Z') ? trimmed : trimmed + 'Z'
+        const d = new Date(withZ)
+        return isNaN(d.getTime()) ? undefined : d.toISOString()
+      }
+      // SQLite datetime('now') is UTC string 'YYYY-MM-DD HH:MM:SS'. Appending Z avoids local timezone skew.
+      const withZ = trimmed.replace(' ', 'T') + 'Z'
+      const d = new Date(withZ)
+      return isNaN(d.getTime()) ? undefined : d.toISOString()
     }
+
+    const queueSyncIso = parseToIso(last?.synced_at)
+    const pullSyncIso = parseToIso(store.get('last_pull_timestamp') as string | undefined)
+    const cycleSyncIso = parseToIso(store.get('last_successful_sync_at') as string | undefined)
+
+    let latestIso = queueSyncIso
+    for (const cand of [pullSyncIso, cycleSyncIso]) {
+      if (cand) {
+        if (!latestIso || new Date(cand).getTime() > new Date(latestIso).getTime()) {
+          latestIso = cand
+        }
+      }
+    }
+
+    return { success: true, data: { pending, failed, last_sync: latestIso } }
   })
 
   safeHandle(ipcMain, 'sync:queueCount', () => {
@@ -41,7 +68,141 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
       const { getSyncService } = await import('../services/syncService')
       const service = getSyncService()
       await service.runOnce()
+      store.set('last_successful_sync_at', new Date().toISOString())
       return { success: true }
+    }
+  })
+
+  safeHandle(ipcMain, 'sync:getPendingDeletions', () => {
+    const db = getDb()
+    const rows = db.prepare(`
+      SELECT * FROM pending_sync_deletions
+      WHERE status = 'pending'
+      ORDER BY detected_at DESC
+    `).all()
+    return { success: true, data: rows }
+  })
+
+  safeHandle(ipcMain, 'sync:dismissPendingDeletion', (_e, id: string) => {
+    const db = getDb()
+    db.prepare(`
+      UPDATE pending_sync_deletions
+      SET status = 'dismissed'
+      WHERE id = ?
+    `).run(id)
+    return { success: true }
+  })
+
+let isRefreshing = false
+
+  safeHandle(ipcMain, 'sync:refresh', async () => {
+    if (isRefreshing) {
+      return { success: false, error: 'Synchronization is already in progress.' }
+    }
+    isRefreshing = true
+
+    try {
+      const db = getDb()
+      const { getSyncService } = await import('../services/syncService')
+      const service = getSyncService()
+
+      // 1. Verify user session
+      const caller = store.get('auth_user') as Record<string, unknown> | undefined
+      if (!caller) {
+        return { success: false, error: 'Authentication required. Please log in.' }
+      }
+
+      // 2. Verify server connectivity
+      const settings = store.get('app_settings') as Record<string, unknown> | undefined
+      const url = String(settings?.cloud_api_url || '').trim()
+      const key = decryptSecret(settings?.cloud_api_key).trim()
+      if (!url || !key) {
+        return { success: false, error: 'Cloud API is not configured.' }
+      }
+
+      const deviceId = (store.get('device_id') as string | undefined) ?? null
+      const cloud = new CloudApi({ baseUrl: url, apiKey: key, deviceId })
+      try {
+        const health = await withTimeout(cloud.health(), 5000, 'Cloud health check')
+        if (health.status !== 'ok') {
+          return { success: false, error: 'Server health check failed. Please check network connectivity.' }
+        }
+      } catch (err) {
+        return { success: false, error: 'Cannot connect to server. Please check your internet connection and try again.' }
+      }
+
+      // 3. Trigger full sync cycle to push offline items and pull latest updates
+      await service.runOnce()
+
+      // 4. Apply all pending deletions and deactivations
+      const pending = db.prepare(`
+        SELECT * FROM pending_sync_deletions WHERE status = 'pending'
+      `).all() as { id: string; table_name: string; record_id: string; action: string; deleted_at: string }[]
+
+      let appliedCount = 0
+      let latestDeletedAt = store.get('last_deletion_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
+
+      db.transaction(() => {
+        for (const item of pending) {
+          if (item.table_name === 'products') {
+            // Check historical invoice references — Requirement 10, 19, 36:
+            // Deleting/deactivating a product must NOT destroy historical invoices!
+            const hasInvoices = (db.prepare(`
+              SELECT COUNT(*) as cnt FROM invoice_items WHERE product_id = ?
+            `).get(item.record_id) as { cnt: number })?.cnt > 0
+
+            const hasChits = (db.prepare(`
+              SELECT COUNT(*) as cnt FROM chit_schemes WHERE product_id = ?
+            `).get(item.record_id) as { cnt: number })?.cnt > 0
+
+            if (hasInvoices || hasChits || item.action === 'deactivate') {
+              // Soft-deactivate to protect financial integrity
+              db.prepare(`
+                UPDATE products
+                SET is_active = 0, updated_at = datetime('now')
+                WHERE id = ?
+              `).run(item.record_id)
+            } else {
+              // No invoices or references: safe to delete stocks and product
+              db.prepare('DELETE FROM stocks WHERE product_id = ?').run(item.record_id)
+              db.prepare('DELETE FROM products WHERE id = ?').run(item.record_id)
+            }
+
+            db.prepare(`
+              UPDATE pending_sync_deletions
+              SET status = 'applied'
+              WHERE id = ?
+            `).run(item.id)
+
+            appliedCount++
+            if (item.deleted_at > latestDeletedAt) {
+              latestDeletedAt = item.deleted_at
+            }
+          }
+        }
+      })()
+
+      store.set('last_deletion_pull_timestamp', latestDeletedAt)
+
+      try {
+        const { BrowserWindow } = await import('electron')
+        const wins = BrowserWindow?.getAllWindows ? BrowserWindow.getAllWindows() : []
+        for (const win of wins) {
+          if (!win.isDestroyed()) {
+            win.webContents.send('sync:pendingDeletionsUpdated')
+          }
+        }
+      } catch {
+        // test/headless
+      }
+
+      return {
+        success: true,
+        message: 'Synchronization successful. Latest data applied.',
+        appliedCount,
+      }
+    } finally {
+      isRefreshing = false
     }
   })
 
@@ -75,7 +236,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
       if (!url || !key) throw new Error('Cloud API URL/key is missing')
       const health = await withTimeout(
         new CloudApi({ baseUrl: url, apiKey: key, deviceId }).health(),
-        5000,
+        10000,
         'Cloud API'
       )
       networkOk = health.status === 'ok' && health.database === 'connected'
@@ -100,7 +261,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
             'categories',
             '1970-01-01T00:00:00.000Z'
           ),
-          5000,
+          12000,
           'Cloud query'
         )
         queryOk = true

@@ -565,6 +565,23 @@ CREATE TABLE IF NOT EXISTS sync_queue (
 CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON sync_queue(status);
 CREATE INDEX IF NOT EXISTS idx_sync_queue_table  ON sync_queue(table_name, record_id);
 
+-- ─── PENDING SYNC DELETIONS ────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS pending_sync_deletions (
+  id            TEXT PRIMARY KEY,
+  table_name    TEXT NOT NULL,
+  record_id     TEXT NOT NULL,
+  record_name   TEXT,
+  record_sku    TEXT,
+  action        TEXT NOT NULL DEFAULT 'delete', -- 'delete' | 'deactivate' | 'conflict'
+  deleted_at    TEXT NOT NULL,
+  detected_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  status        TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'applied' | 'dismissed'
+  conflict_note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_pending_sync_deletions_status ON pending_sync_deletions(status);
+CREATE INDEX IF NOT EXISTS idx_pending_sync_deletions_record ON pending_sync_deletions(table_name, record_id);
+
 -- ─── AUDIT LOGS ────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS audit_logs (
   id         TEXT PRIMARY KEY,

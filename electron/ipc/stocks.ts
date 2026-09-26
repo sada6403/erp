@@ -20,6 +20,35 @@ function isSuperAdmin(user: Record<string, unknown> | undefined): boolean {
   return Boolean(perms.all) || String(role?.name || '').toLowerCase() === 'admin' || String(role?.name || '').toLowerCase() === 'super admin'
 }
 
+function isMainBranchManagerOrAdmin(user: Record<string, unknown> | undefined): boolean {
+  if (!user) return false
+  if (isSuperAdmin(user)) return true
+  const role = user.role as Record<string, unknown> | undefined
+  const roleName = String(role?.name || '').toLowerCase()
+  const perms = (role?.permissions || {}) as Record<string, unknown>
+  const userBranchId = String(user.branch_id || '')
+
+  let isMain = !user.branch_id || userBranchId === 'b1111111-1111-4111-8111-111111111111'
+  if (!isMain && userBranchId) {
+    try {
+      const db = getDb()
+      const branch = db.prepare('SELECT code, name FROM branches WHERE id=?').get(userBranchId) as { code: string; name: string } | undefined
+      if (branch) {
+        const bCode = (branch.code || '').toUpperCase()
+        const bName = (branch.name || '').toLowerCase()
+        if (bCode === 'MAIN' || bCode === 'CMB' || bName.includes('main') || bName.includes('colombo') || bName.includes('hq') || bName.includes('head')) {
+          isMain = true
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const isMgrOrAdmin = roleName.includes('admin') || roleName.includes('manager') || Boolean(perms.all) || Boolean(perms.inventory)
+  return Boolean(isMain && isMgrOrAdmin)
+}
+
 function currentBranchId(): string {
   const user = store.get('auth_user') as Record<string, unknown> | undefined
   return (user?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111'
@@ -210,7 +239,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       // with.
       {
         const perms = currentPerms()
-        if (!perms.all && user?.branch_id && branch_id !== user.branch_id) {
+        const isPrivileged = perms.all || isMainBranchManagerOrAdmin(user)
+        if (!isPrivileged && user?.branch_id && branch_id !== user.branch_id) {
           return { success: false, error: 'Cannot adjust stock for another branch' }
         }
       }
@@ -267,7 +297,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
-      const isAdmin = Boolean(currentPerms().all)
+      const isAdmin = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
 
       if (!isAdmin && !payload.edit_request_id) {
         return { success: false, error: 'No approved edit request found — please request approval first' }
@@ -1104,7 +1134,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'stockCounts:list', () => {
     const db = getDb()
-      const isGlobal = Boolean(currentPerms().all)
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const isGlobal = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
       const branchId = currentBranchId()
       const rows = isGlobal
         ? db.prepare(`
@@ -1137,11 +1168,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const perms = currentPerms()
-      if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory access required' }
-      const isGlobal = Boolean(perms.all)
-      // Non-admins are always scoped to their own branch — an explicit
-      // branch_id from a non-admin caller is ignored. Admins may target
-      // any branch, defaulting to their own if none is given.
+      const isPrivileged = Boolean(perms.all) || isMainBranchManagerOrAdmin(user)
+      if (!isPrivileged && !perms.inventory) return { success: false, error: 'Inventory access required' }
+      const isGlobal = isPrivileged
+      // Main branch managers/admins and company admins can target any branch
       const branchId = isGlobal && payload.branch_id ? String(payload.branch_id) : currentBranchId()
       const id = crypto.randomUUID()
       db.transaction(() => {
@@ -1205,7 +1235,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const session = db.prepare('SELECT branch_id FROM stock_count_sessions WHERE id=?').get(sessionId) as { branch_id: unknown } | undefined
       if (!session) return { success: false, error: 'Stock count not found' }
-      if (!currentPerms().all && user?.branch_id && session.branch_id !== user.branch_id) {
+      const isPrivileged = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
+      if (!isPrivileged && user?.branch_id && session.branch_id !== user.branch_id) {
         return { success: false, error: 'Cannot update a stock count from another branch' }
       }
       db.prepare(`
@@ -1224,8 +1255,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (session.status === 'completed') return { success: false, error: 'Stock count already completed' }
       {
         const perms = currentPerms()
-        if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory access required to finalize a stock count' }
-        if (!perms.all && user?.branch_id && session.branch_id !== user.branch_id) {
+        const isPrivileged = Boolean(perms.all) || isMainBranchManagerOrAdmin(user)
+        if (!isPrivileged && !perms.inventory) return { success: false, error: 'Inventory access required to finalize a stock count' }
+        if (!isPrivileged && user?.branch_id && session.branch_id !== user.branch_id) {
           return { success: false, error: 'Cannot finalize a stock count from another branch' }
         }
       }

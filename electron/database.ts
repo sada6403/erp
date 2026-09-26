@@ -263,6 +263,21 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_product ON stock_transfer_history(product_id);
     CREATE INDEX IF NOT EXISTS idx_stock_transfer_history_branches ON stock_transfer_history(from_branch_id, to_branch_id);
 
+    CREATE TABLE IF NOT EXISTS pending_sync_deletions (
+      id            TEXT PRIMARY KEY,
+      table_name    TEXT NOT NULL,
+      record_id     TEXT NOT NULL,
+      record_name   TEXT,
+      record_sku    TEXT,
+      action        TEXT NOT NULL DEFAULT 'delete',
+      deleted_at    TEXT NOT NULL,
+      detected_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      status        TEXT NOT NULL DEFAULT 'pending',
+      conflict_note TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_pending_sync_deletions_status ON pending_sync_deletions(status);
+    CREATE INDEX IF NOT EXISTS idx_pending_sync_deletions_record ON pending_sync_deletions(table_name, record_id);
+
     CREATE TABLE IF NOT EXISTS stock_transfer_print_logs (
       id             TEXT PRIMARY KEY,
       transfer_id    TEXT NOT NULL REFERENCES stock_transfers(id) ON DELETE CASCADE,
