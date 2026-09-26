@@ -398,11 +398,12 @@ const api = {
 
   // Purchase Orders
   purchases: {
-    list:         (filters?: unknown)                               => ipcRenderer.invoke('purchases:list', filters),
-    get:          (id: string)                                      => ipcRenderer.invoke('purchases:get', id),
-    create:       (payload: unknown)                                => ipcRenderer.invoke('purchases:create', payload),
-    update:       (id: string, payload: unknown)                    => ipcRenderer.invoke('purchases:update', id, payload),
-    updateStatus: (id: string, status: string, payload?: unknown)   => ipcRenderer.invoke('purchases:updateStatus', id, status, payload),
+    list:           (filters?: unknown)                             => ipcRenderer.invoke('purchases:list', filters),
+    get:            (id: string)                                    => ipcRenderer.invoke('purchases:get', id),
+    create:         (payload: unknown)                              => ipcRenderer.invoke('purchases:create', payload),
+    update:         (id: string, payload: unknown)                  => ipcRenderer.invoke('purchases:update', id, payload),
+    updateStatus:   (id: string, status: string, payload?: unknown) => ipcRenderer.invoke('purchases:updateStatus', id, status, payload),
+    notifySupplier: (id: string, options?: unknown)                 => ipcRenderer.invoke('purchases:notifySupplier', id, options),
   },
 
   // Returns / Refunds

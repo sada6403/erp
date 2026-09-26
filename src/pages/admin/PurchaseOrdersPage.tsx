@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Eye, Send, PackageCheck, XCircle } from 'lucide-react'
+import { Plus, RefreshCw, Eye, Send, PackageCheck, XCircle, MessageSquare, Mail, Phone } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
@@ -68,6 +68,27 @@ export default function PurchaseOrdersPage() {
     }
   }
 
+  const notifySupplier = async (poId: string, options?: { openWhatsApp?: boolean; sendEmail?: boolean }) => {
+    try {
+      const res = await window.api.purchases.notifySupplier(poId, options)
+      if (res.success) {
+        const notif = res.data as { whatsapp?: { phone?: string }; email?: { to?: string; result?: { success?: boolean; error?: string } } } | undefined
+        if (options?.sendEmail && notif?.email?.result?.success) {
+          toast.success(`Email sent to ${notif.email.to}`)
+        } else if (options?.sendEmail && notif?.email?.result?.error) {
+          toast(`Email status: ${notif.email.result.error}`, { icon: 'ℹ️' })
+        }
+        if (options?.openWhatsApp) {
+          toast.success(`WhatsApp prepared for ${notif?.whatsapp?.phone || 'supplier'}`)
+        }
+      } else {
+        toast.error(res.error || 'Failed to notify supplier')
+      }
+    } catch (err) {
+      toast.error('Failed to notify supplier: ' + String(err))
+    }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
@@ -120,10 +141,22 @@ export default function PurchaseOrdersPage() {
                 </td>
                 <td className="table-cell">{statusBadge(String(po.status))}</td>
                 <td className="table-cell">
-                  <div className="flex gap-2">
+                  <div className="flex gap-1.5 flex-wrap">
                     <button className="btn-ghost btn-sm gap-1"
                       onClick={() => { loadDetail(String(po.id)) }}>
                       <Eye size={12} /> View
+                    </button>
+                    <button
+                      className="btn-ghost btn-sm text-emerald-400 hover:text-emerald-300 gap-1"
+                      title="Send via WhatsApp"
+                      onClick={() => notifySupplier(String(po.id), { openWhatsApp: true, sendEmail: false })}>
+                      <MessageSquare size={12} /> WhatsApp
+                    </button>
+                    <button
+                      className="btn-ghost btn-sm text-sky-400 hover:text-sky-300 gap-1"
+                      title="Send via Email"
+                      onClick={() => notifySupplier(String(po.id), { openWhatsApp: false, sendEmail: true })}>
+                      <Mail size={12} /> Email
                     </button>
                     {po.status === 'DRAFT' && (
                       <button className="btn-secondary btn-sm gap-1"
@@ -170,6 +203,7 @@ export default function PurchaseOrdersPage() {
           onReceive={() => setShowReceive(true)}
           onSend={() => updateStatus(viewPO, 'SENT')}
           onCancel={() => updateStatus(viewPO, 'CANCELLED')}
+          onNotify={(opts) => notifySupplier(String(viewPO.id), opts)}
         />
       )}
 
@@ -190,8 +224,8 @@ export default function PurchaseOrdersPage() {
   )
 }
 
-function PODetailModal({ po, onClose, onReceive, onSend, onCancel }:
-  { po: PO & { items?: POItem[] }; onClose: () => void; onReceive: () => void; onSend: () => void; onCancel: () => void }) {
+function PODetailModal({ po, onClose, onReceive, onSend, onCancel, onNotify }:
+  { po: PO & { items?: POItem[] }; onClose: () => void; onReceive: () => void; onSend: () => void; onCancel: () => void; onNotify: (opts: { openWhatsApp?: boolean; sendEmail?: boolean }) => void }) {
   return (
     <Modal title={`PO — ${po.po_number}`} onClose={onClose}>
       <div className="space-y-4">
@@ -202,6 +236,20 @@ function PODetailModal({ po, onClose, onReceive, onSend, onCancel }:
           <div><p className="text-slate-500">Total</p><p className="font-bold text-brand-400">Rs.{Number(po.total_amount || 0).toLocaleString()}</p></div>
           <div><p className="text-slate-500">Expected</p><p>{po.expected_date ? new Date(String(po.expected_date)).toLocaleDateString() : '—'}</p></div>
           <div><p className="text-slate-500">Notes</p><p className="text-xs">{String(po.notes || '—')}</p></div>
+        </div>
+
+        <div className="bg-surface-800/60 border border-slate-700/60 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="text-slate-400">Direct Supplier Communication:</span>
+          <div className="flex gap-2">
+            <button className="btn-ghost btn-sm text-emerald-400 hover:text-emerald-300 gap-1"
+              onClick={() => onNotify({ openWhatsApp: true, sendEmail: false })}>
+              <MessageSquare size={12}/> Send WhatsApp
+            </button>
+            <button className="btn-ghost btn-sm text-sky-400 hover:text-sky-300 gap-1"
+              onClick={() => onNotify({ openWhatsApp: false, sendEmail: true })}>
+              <Mail size={12}/> Send Email
+            </button>
+          </div>
         </div>
 
         <div>
@@ -342,11 +390,15 @@ function ReceivePOModal({ po, onClose, onDone }:
 function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
   const [suppliers, setSuppliers] = useState<Record<string, unknown>[]>([])
   const [products, setProducts]   = useState<Record<string, unknown>[]>([])
+  const [sendWhatsApp, setSendWhatsApp] = useState(true)
+  const [sendEmail, setSendEmail]       = useState(true)
   const [form, setForm] = useState({
     supplier_id: '', expected_date: '', notes: '',
     items: [{ product_id: '', quantity: 1, unit_cost: 0 }]
   })
   const [saving, setSaving] = useState(false)
+
+  const selectedSupplier = suppliers.find(s => String(s.id) === form.supplier_id)
 
   useEffect(() => {
     window.api.admin.suppliers.list().then((r: { success: boolean; data: unknown; error?: string }) => {
@@ -383,9 +435,17 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
     if (form.items.some(i => !i.product_id)) { toast.error('All items need a product'); return }
     setSaving(true)
     try {
-      const res = await window.api.purchases.create(form)
+      const res = await window.api.purchases.create({
+        ...form,
+        open_whatsapp: sendWhatsApp,
+        send_email: sendEmail,
+      })
       if (res.success) {
-        toast.success(`PO ${(res.data as Record<string, unknown>).po_number} created`)
+        const poNum = (res.data as Record<string, unknown>)?.po_number
+        let msg = `PO ${poNum} created successfully!`
+        if (sendWhatsApp) msg += ' 📱 WhatsApp initiated.'
+        if (sendEmail) msg += ' ✉️ Email notification triggered.'
+        toast.success(msg)
         onDone()
       } else {
         toast.error(String(res.error))
@@ -425,6 +485,24 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
               onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
           </div>
         </div>
+
+        {selectedSupplier && (
+          <div className="bg-surface-800/80 border border-slate-700/70 rounded-lg p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span className="text-slate-400">Supplier: </span>
+              <span className="font-semibold text-white">{String(selectedSupplier.business_name || selectedSupplier.name)}</span>
+              {selectedSupplier.city ? <span className="text-slate-400"> ({String(selectedSupplier.city)})</span> : null}
+            </div>
+            <div className="flex gap-4">
+              <span className="text-emerald-400 flex items-center gap-1 font-medium">
+                📱 {String(selectedSupplier.mobile_number || selectedSupplier.phone || 'No Phone')}
+              </span>
+              <span className="text-sky-400 flex items-center gap-1 font-medium">
+                ✉️ {String(selectedSupplier.email || 'No Email')}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div>
           <label className="label">Notes</label>
@@ -485,10 +563,38 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
           </div>
         </div>
 
+        <div className="bg-surface-800/80 border border-slate-700/60 rounded-lg p-3 space-y-2">
+          <p className="text-xs font-semibold text-slate-300">Direct Supplier Notification on Order Creation</p>
+          <div className="flex flex-wrap gap-4 text-xs">
+            <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white select-none">
+              <input
+                type="checkbox"
+                checked={sendWhatsApp}
+                onChange={e => setSendWhatsApp(e.target.checked)}
+                className="rounded text-emerald-500 focus:ring-emerald-400 bg-surface-900 border-slate-700"
+              />
+              <span className="flex items-center gap-1 text-emerald-400 font-medium">
+                📱 Send via WhatsApp (Direct chat / web)
+              </span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white select-none">
+              <input
+                type="checkbox"
+                checked={sendEmail}
+                onChange={e => setSendEmail(e.target.checked)}
+                className="rounded text-sky-500 focus:ring-sky-400 bg-surface-900 border-slate-700"
+              />
+              <span className="flex items-center gap-1 text-sky-400 font-medium">
+                ✉️ Send via Email (Branded HTML PO)
+              </span>
+            </label>
+          </div>
+        </div>
+
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-700">
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn-primary gap-1" onClick={save} disabled={saving}>
-            {saving ? 'Creating...' : 'Create Purchase Order'}
+            {saving ? 'Creating & Sending...' : 'Create Purchase Order'}
           </button>
         </div>
       </div>
