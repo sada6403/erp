@@ -19,14 +19,16 @@ const MAX_ATTEMPTS = 5
 const REQUEST_DELAY_MS = 300
 const STALE_PROCESSING_MINUTES = 3
 const SYNC_INTERVAL_MS = 60_000
-const STARTUP_SYNC_DELAY_MS = 2_000
+const STARTUP_SYNC_DELAY_MS = 4_000
 const DRAIN_RETRY_MS = 1_500
 // Issue 37 (36c) — near-instant propagation for the tables that matter most
 // for a cashier's day-to-day experience (products/pricing, stock counts,
-// categories) without shortening the full 59-table cycle (would just move
-// the ~25s bottleneck, not remove it). A cheap watermark check every 3s,
+// categories) without shortening the full-table cycle. A lightweight
+// watermark check every 10s is fast enough for another till to see changes
+// while avoiding a permanent network request loop on low-powered devices.
 // escalating to a targeted 3-table pull only when it actually changed.
-const WATERMARK_INTERVAL_MS = 3_000
+const WATERMARK_INTERVAL_MS = 10_000
+const WATERMARK_STARTUP_DELAY_MS = 15_000
 const WATERMARK_TABLES = ['products', 'stocks', 'categories']
 const DEFAULT_FAILED_RETRY_MINUTES = 2
 
@@ -59,6 +61,7 @@ export class SyncService {
   private startupTimer: ReturnType<typeof setTimeout> | null = null
   private drainTimer: ReturnType<typeof setTimeout> | null = null
   private watermarkTimer: ReturnType<typeof setInterval> | null = null
+  private watermarkStartupTimer: ReturnType<typeof setTimeout> | null = null
   private watermarkChecking = false
   private running = false
   private colCache = new Map<string, Set<string>>()
@@ -85,8 +88,14 @@ export class SyncService {
       this.startupTimer = null
       this.runOnce()
     }, STARTUP_SYNC_DELAY_MS)
-    if (!this.watermarkTimer) {
-      this.watermarkTimer = setInterval(() => this.checkWatermark(), WATERMARK_INTERVAL_MS)
+    if (!this.watermarkTimer && !this.watermarkStartupTimer) {
+      // The first full sync already covers these tables. Start the quick
+      // watermark watcher only after startup work has settled.
+      this.watermarkStartupTimer = setTimeout(() => {
+        this.watermarkStartupTimer = null
+        void this.checkWatermark()
+        this.watermarkTimer = setInterval(() => this.checkWatermark(), WATERMARK_INTERVAL_MS)
+      }, WATERMARK_STARTUP_DELAY_MS)
     }
   }
 
@@ -95,10 +104,12 @@ export class SyncService {
     if (this.startupTimer) clearTimeout(this.startupTimer)
     if (this.drainTimer) clearTimeout(this.drainTimer)
     if (this.watermarkTimer) clearInterval(this.watermarkTimer)
+    if (this.watermarkStartupTimer) clearTimeout(this.watermarkStartupTimer)
     this.timer = null
     this.startupTimer = null
     this.drainTimer = null
     this.watermarkTimer = null
+    this.watermarkStartupTimer = null
   }
 
   isBusy(): boolean {

@@ -179,7 +179,6 @@ export default function LoginPage() {
   useEffect(() => {
     if (!window.api) return
     const loadBranding = async () => {
-      await window.api.settings.refreshBranding?.().catch(() => undefined)
       const res = await window.api.settings.get() as { success: boolean; data?: unknown }
       if (res.success && res.data) {
         const d = res.data as Record<string, unknown>
@@ -205,10 +204,15 @@ export default function LoginPage() {
       if (r?.deviceId) setDeviceId(r.deviceId.slice(0, 12).toUpperCase())
     }).catch(() => {})
     window.api.app?.getVersion?.().then((v: string) => setVersion(v)).catch(() => {})
-    const brandingTimer = window.setInterval(() => { loadBranding().catch(() => undefined) }, 30_000)
     const offSettingsUpdated = window.api.on?.('settings:updated', () => { loadBranding().catch(() => undefined) })
+    // Paint from the local cache immediately. Refresh company branding only
+    // after the login screen is interactive, so a slow/offline cloud endpoint
+    // cannot hold up the first useful render.
+    const brandingRefreshTimer = window.setTimeout(() => {
+      window.api.settings.refreshBranding?.().catch(() => undefined)
+    }, 2_000)
     return () => {
-      window.clearInterval(brandingTimer)
+      window.clearTimeout(brandingRefreshTimer)
       offSettingsUpdated?.()
     }
   }, [])
@@ -225,7 +229,6 @@ export default function LoginPage() {
       setUpdateState('idle')
       setUpdateInfo(null)
     })
-    window.api.updater?.check?.().catch(() => undefined)
     return () => { off1?.(); off2?.(); off3?.(); off4?.() }
   }, [])
 

@@ -147,7 +147,9 @@ html.dark {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
-    backdrop-filter: blur(16px);
+    /* Dozens of cards with backdrop blur create a compositor layer each and
+       can stall integrated GPUs. The panel already has an opaque-enough fill. */
+    backdrop-filter: none;
   }
 
   .enterprise-panel {
@@ -155,7 +157,7 @@ html.dark {
     background: var(--bg-elevated);
     border-color: var(--border);
     box-shadow: var(--shadow-lg);
-    backdrop-filter: blur(18px);
+    backdrop-filter: none;
   }
 
   .label {
@@ -229,7 +231,7 @@ html.dark .pos-shell {
 .pos-toolbar {
   background: var(--pos-toolbar);
   border-bottom: 1px solid var(--border);
-  backdrop-filter: blur(14px);
+  backdrop-filter: none;
 }
 
 .pos-segment,

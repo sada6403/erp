@@ -446,7 +446,6 @@ export default function AppLayout() {
     }
 
     const loadBranding = async () => {
-      await window.api.settings.refreshBranding?.().catch(() => undefined)
       const res = await window.api.settings.get() as { success: boolean; data?: unknown }
       if (res.success && res.data) {
         const d = res.data as Record<string, unknown>
@@ -514,7 +513,6 @@ export default function AppLayout() {
     }
 
     loadBranding()
-    const brandingTimer = window.setInterval(() => { loadBranding().catch(() => undefined) }, 30_000)
     // Load cached license immediately for module gating (before async brand fetch)
     window.api.license.status().then((r: { success: boolean; data: { is_locked?: boolean; modules?: string[] } | null }) => {
       if (r.success && r.data) {
@@ -524,8 +522,13 @@ export default function AppLayout() {
     })
     window.addEventListener('themechange', loadBranding)
     const offSettingsUpdated = window.api.on?.('settings:updated', () => { loadBranding().catch(() => undefined) })
+    // Cached branding is enough for first paint. Do one delayed refresh for
+    // cross-device changes without a permanent 30-second network poll.
+    const brandingRefreshTimer = window.setTimeout(() => {
+      window.api.settings.refreshBranding?.().catch(() => undefined)
+    }, 2_000)
     return () => {
-      window.clearInterval(brandingTimer)
+      window.clearTimeout(brandingRefreshTimer)
       window.removeEventListener('themechange', loadBranding)
       offSettingsUpdated?.()
     }
@@ -562,7 +565,6 @@ export default function AppLayout() {
     const off2 = window.api.on('update:progress',   (p: unknown)    => { setUpdateState('downloading'); setDownloadPct(Math.round((p as { percent: number }).percent)) })
     const off3 = window.api.on('update:downloaded', ()              => setUpdateState('ready'))
     const off4 = window.api.on('update:error',      ()              => { setUpdateState('idle'); setUpdateInfo(null) })
-    window.api.updater?.check?.().catch(() => undefined)
     return () => { off1?.(); off2?.(); off3?.(); off4?.() }
   }, [])
 

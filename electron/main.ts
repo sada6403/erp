@@ -58,8 +58,13 @@ if (!isDev && !app.requestSingleInstanceLock()) {
     }
   })
 
-  // Fix blank screen on some Windows GPUs
-  app.disableHardwareAcceleration()
+  // Hardware acceleration is essential for the dense POS grids, charts and
+  // scrolling views. Software rendering made the renderer saturate the CPU and
+  // could stall the whole laptop. Keep an explicit escape hatch for the rare
+  // machine whose graphics driver cannot render Electron correctly.
+  if (process.argv.includes('--disable-gpu') || process.env.POS_DISABLE_GPU === '1') {
+    app.disableHardwareAcceleration()
+  }
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.enterprise.pos-erp')
 }

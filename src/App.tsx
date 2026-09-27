@@ -1,76 +1,82 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import LoginPage from '@/pages/LoginPage'
 import AppLayout from '@/components/layout/AppLayout'
 import RequireModule from '@/components/shared/RequireModule'
-import POSPage from '@/pages/pos/POSPage'
-import AdminDashboard from '@/pages/admin/AdminDashboard'
-import ProductsPage from '@/pages/admin/ProductsPage'
-import CustomersPage from '@/pages/admin/CustomersPage'
-import StockIntelligencePage from '@/pages/admin/StockIntelligencePage'
-import BranchesPage from '@/pages/admin/BranchesPage'
-import BranchInspectPage from '@/pages/admin/BranchInspectPage'
-import BranchInspectDetailPage from '@/pages/admin/BranchInspectDetailPage'
-import UsersPage from '@/pages/admin/UsersPage'
-import RegionsPage from '@/pages/admin/RegionsPage'
-import ZonesPage from '@/pages/admin/ZonesPage'
-import SuppliersPage from '@/pages/admin/SuppliersPage'
-import AnalyticsPage from '@/pages/admin/AnalyticsPage'
-import DeliveriesPage from '@/pages/admin/DeliveriesPage'
-import InstallmentsPage from '@/pages/admin/InstallmentsPage'
-import ChitSchemesPage from '@/pages/admin/ChitSchemesPage'
-import ChitCustomersPage from '@/pages/admin/ChitCustomersPage'
-import ChitSchemeDetailPage from '@/pages/admin/ChitSchemeDetailPage'
-import SmartBuyAgentsPage from '@/pages/admin/SmartBuyAgentsPage'
-import SmartBuyDashboardPage from '@/pages/admin/SmartBuyDashboardPage'
-import CommissionRulesPage from '@/pages/admin/CommissionRulesPage'
-import SmartBuyReportsPage from '@/pages/admin/SmartBuyReportsPage'
-import PaymentRemindersPage from '@/pages/admin/PaymentRemindersPage'
-import SmartBuyBankTransfersPage from '@/pages/admin/SmartBuyBankTransfersPage'
-import SmartBuySettingsPage from '@/pages/admin/SmartBuySettingsPage'
-import SchemeMasterPage from '@/pages/admin/SchemeMasterPage'
-import SmartBuyAwardWizardPage from '@/pages/admin/SmartBuyAwardWizardPage'
-import SmartBuySchemeCalculatorPage from '@/pages/admin/SmartBuySchemeCalculatorPage'
-import AuditLogsPage from '@/pages/admin/AuditLogsPage'
-import EditRequestsPage from '@/pages/admin/EditRequestsPage'
-import OperationsHubPage from '@/pages/admin/OperationsHubPage'
-import SettingsPage from '@/pages/admin/SettingsPage'
-import InvoiceDesignerPage from '@/pages/admin/InvoiceDesignerPage'
-import SyncMonitorPage from '@/pages/admin/SyncMonitorPage'
-import CategoriesPage from '@/pages/admin/CategoriesPage'
-import StockCountPage from '@/pages/admin/StockCountPage'
-import OrdersPage from '@/pages/admin/OrdersPage'
-import StockLookupPage from '@/pages/admin/StockLookupPage'
-import QuotationsPage from '@/pages/admin/QuotationsPage'
-import BillsPage from '@/pages/admin/BillsPage'
-import CreditBillsPage from '@/pages/admin/CreditBillsPage'
-import PurchaseOrdersPage from '@/pages/admin/PurchaseOrdersPage'
-import ExpensesPage from '@/pages/admin/ExpensesPage'
-import RolesPage from '@/pages/admin/RolesPage'
-import ReturnsPage from '@/pages/admin/ReturnsPage'
-import CashRegisterPage from '@/pages/admin/CashRegisterPage'
-import StockRequestsPage from '@/pages/admin/StockRequestsPage'
-import StockTransfersPage from '@/pages/admin/StockTransfersPage'
-import TrackTransferPage from '@/pages/admin/TrackTransferPage'
-import BranchTransfersPage from '@/pages/admin/BranchTransfersPage'
-import BranchTransferForm from '@/pages/admin/BranchTransferForm'
-import BranchTransferView from '@/pages/admin/BranchTransferView'
-import BatchesPage from '@/pages/admin/BatchesPage'
-import CouponsPage from '@/pages/admin/CouponsPage'
-import DiscountsPage from '@/pages/admin/DiscountsPage'
-import CouponReportsPage from '@/pages/admin/CouponReportsPage'
-import BackupPage from '@/pages/admin/BackupPage'
-import SecurityPage from '@/pages/admin/SecurityPage'
-import SystemHealthPage from '@/pages/admin/SystemHealthPage'
-import TransactionReportPage from '@/pages/admin/TransactionReportPage'
-import AdvancedReportsPage from '@/pages/admin/AdvancedReportsPage'
 import ActivationPage from '@/pages/ActivationPage'
 import DataClearedLockScreen from '@/pages/DataClearedLockScreen'
 import DeviceLockedScreen from '@/pages/DeviceLockedScreen'
 import SetupWizardPage from '@/pages/SetupWizardPage'
 import { loadAndApplySystemTheme } from '@/lib/systemTheme'
 import { getLandingRoute } from '@/lib/sessionRouting'
+
+// Keep the boot/login shell small. Loading every admin, reporting, Smart Buy,
+// spreadsheet and chart module up front made Chromium parse the entire ERP
+// before it could show the first usable screen. Each page is fetched only when
+// its route is opened; Vite caches the chunk after that first visit.
+const POSPage = lazy(() => import('@/pages/pos/POSPage'))
+const adminPage = (name: string) => lazy(() => import(`./pages/admin/${name}.tsx`))
+const AdminDashboard = adminPage('AdminDashboard')
+const ProductsPage = adminPage('ProductsPage')
+const CustomersPage = adminPage('CustomersPage')
+const StockIntelligencePage = adminPage('StockIntelligencePage')
+const BranchesPage = adminPage('BranchesPage')
+const BranchInspectPage = adminPage('BranchInspectPage')
+const BranchInspectDetailPage = adminPage('BranchInspectDetailPage')
+const UsersPage = adminPage('UsersPage')
+const RegionsPage = adminPage('RegionsPage')
+const ZonesPage = adminPage('ZonesPage')
+const SuppliersPage = adminPage('SuppliersPage')
+const AnalyticsPage = adminPage('AnalyticsPage')
+const DeliveriesPage = adminPage('DeliveriesPage')
+const InstallmentsPage = adminPage('InstallmentsPage')
+const ChitSchemesPage = adminPage('ChitSchemesPage')
+const ChitCustomersPage = adminPage('ChitCustomersPage')
+const ChitSchemeDetailPage = adminPage('ChitSchemeDetailPage')
+const SmartBuyAgentsPage = adminPage('SmartBuyAgentsPage')
+const SmartBuyDashboardPage = adminPage('SmartBuyDashboardPage')
+const CommissionRulesPage = adminPage('CommissionRulesPage')
+const SmartBuyReportsPage = adminPage('SmartBuyReportsPage')
+const PaymentRemindersPage = adminPage('PaymentRemindersPage')
+const SmartBuyBankTransfersPage = adminPage('SmartBuyBankTransfersPage')
+const SmartBuySettingsPage = adminPage('SmartBuySettingsPage')
+const SchemeMasterPage = adminPage('SchemeMasterPage')
+const SmartBuyAwardWizardPage = adminPage('SmartBuyAwardWizardPage')
+const SmartBuySchemeCalculatorPage = adminPage('SmartBuySchemeCalculatorPage')
+const AuditLogsPage = adminPage('AuditLogsPage')
+const EditRequestsPage = adminPage('EditRequestsPage')
+const OperationsHubPage = adminPage('OperationsHubPage')
+const SettingsPage = adminPage('SettingsPage')
+const InvoiceDesignerPage = adminPage('InvoiceDesignerPage')
+const SyncMonitorPage = adminPage('SyncMonitorPage')
+const CategoriesPage = adminPage('CategoriesPage')
+const StockCountPage = adminPage('StockCountPage')
+const OrdersPage = adminPage('OrdersPage')
+const StockLookupPage = adminPage('StockLookupPage')
+const QuotationsPage = adminPage('QuotationsPage')
+const BillsPage = adminPage('BillsPage')
+const CreditBillsPage = adminPage('CreditBillsPage')
+const PurchaseOrdersPage = adminPage('PurchaseOrdersPage')
+const ExpensesPage = adminPage('ExpensesPage')
+const RolesPage = adminPage('RolesPage')
+const ReturnsPage = adminPage('ReturnsPage')
+const CashRegisterPage = adminPage('CashRegisterPage')
+const StockRequestsPage = adminPage('StockRequestsPage')
+const StockTransfersPage = adminPage('StockTransfersPage')
+const TrackTransferPage = adminPage('TrackTransferPage')
+const BranchTransfersPage = adminPage('BranchTransfersPage')
+const BranchTransferForm = adminPage('BranchTransferForm')
+const BranchTransferView = adminPage('BranchTransferView')
+const BatchesPage = adminPage('BatchesPage')
+const CouponsPage = adminPage('CouponsPage')
+const DiscountsPage = adminPage('DiscountsPage')
+const CouponReportsPage = adminPage('CouponReportsPage')
+const BackupPage = adminPage('BackupPage')
+const SecurityPage = adminPage('SecurityPage')
+const SystemHealthPage = adminPage('SystemHealthPage')
+const TransactionReportPage = adminPage('TransactionReportPage')
+const AdvancedReportsPage = adminPage('AdvancedReportsPage')
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuthStore()
@@ -238,6 +244,7 @@ export default function App() {
   }
 
   return (
+    <Suspense fallback={<LoadingScreen />}>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/setup" element={<SetupWizardPage />} />
@@ -314,5 +321,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
+    </Suspense>
   )
 }
