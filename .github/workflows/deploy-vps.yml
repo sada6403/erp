@@ -10,14 +10,6 @@ jobs:
   deploy:
     runs-on: self-hosted
     steps:
-      - name: Refresh deployment checkout
-        run: |
-          sudo git -C /var/www/pos-backend fetch origin main
-          sudo git -C /var/www/pos-backend reset --hard origin/main
-
-      - name: Back up control and tenant databases
-        run: sudo bash /var/www/pos-backend/backend/scripts/pos-backup-mysql.sh
-
       - name: Deploy on VPS
         run: |
           sudo /usr/local/bin/pos-deploy
