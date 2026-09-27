@@ -4,11 +4,12 @@ import { ensureSyncSchema } from '../../backend/lib/syncSchema'
 import { ALLOWED_TABLES } from '../../backend/lib/sync'
 import { duplicateStockGroups, identicalStockBalances } from '../../backend/lib/stockIdentity'
 
-function client(options: { existing?: boolean; stocks?: object[]; deleteFails?: boolean } = {}) {
+function client(options: { existing?: boolean; stocks?: object[]; movements?: object[]; deleteFails?: boolean } = {}) {
   return { release: vi.fn(), query: vi.fn(async (sql: string, values?: unknown[]) => {
     if (sql.includes('information_schema.COLUMNS')) return { rows: ['id','name','quantity','damaged_qty','product_id','branch_id','warehouse_id','updated_at'].map(COLUMN_NAME => ({ COLUMN_NAME })) }
     if (sql.includes('GET_LOCK')) return { rows: [{ acquired: 1 }] }
     if (sql.includes('FROM stocks') && sql.includes('FOR UPDATE')) return { rows: options.stocks || [] }
+    if (sql.includes('FROM stock_movements') && sql.includes('FOR UPDATE')) return { rows: options.movements || [] }
     if (sql.startsWith('SELECT id')) return { rows: options.existing ? [{ id: 'row' }] : [] }
     if (sql.startsWith('DELETE') && options.deleteFails) throw new Error('foreign key blocked')
     return { rows: [] }
@@ -54,6 +55,17 @@ describe('Backend sync write contract', () => {
     } })
     const insert = db.query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO `stocks`'))!
     expect(insert[1]).toContain(7)
+  })
+  it('repairs a legacy sale from unapplied cloud movement rows', async () => {
+    const db = client({
+      stocks: [{ id: 'canonical', quantity: 8, damaged_qty: 0, updated_at: '2026-09-27 02:43:06' }],
+      movements: [{ movement_type: 'SALE', quantity: 2, from_branch_id: 'b', to_branch_id: null }],
+    })
+    await applySyncOperation(db as any, { table: 'stocks', operation: 'INSERT', recordId: 'p', record: {
+      product_id: 'p', branch_id: 'b', quantity: 7,
+    } })
+    const insert = db.query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO `stocks`'))!
+    expect(insert[1]).toContain(6)
   })
   it('rejects a concurrent stock merge that would create a negative balance', async () => {
     const db = client({ stocks: [{ id: 'canonical', quantity: 2, damaged_qty: 0 }] })

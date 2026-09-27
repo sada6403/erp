@@ -244,8 +244,8 @@ async function applyOperation(
 
   if (input.table === 'stocks' && operation !== 'DELETE') {
     // MySQL NULL-safe equals: <=>
-    const existing = await client.query<{ id: string; quantity: number; damaged_qty: number }>(
-      `SELECT id, quantity, damaged_qty FROM stocks
+    const existing = await client.query<{ id: string; quantity: number; damaged_qty: number; updated_at: string }>(
+      `SELECT id, quantity, damaged_qty, updated_at FROM stocks
         WHERE product_id = ? AND branch_id = ? AND warehouse_id <=> ?
         FOR UPDATE`,
       [record.product_id, record.branch_id, record.warehouse_id ?? null]
@@ -266,9 +266,47 @@ async function applyOperation(
         const baseQuantity = Number(base?.quantity)
         const baseDamaged = Number(base?.damaged_qty ?? 0)
         if (!base || !Number.isFinite(baseQuantity) || !Number.isFinite(baseDamaged)) {
-          throw new Error('Stock conflict: this older device did not provide a merge baseline')
-        }
-        if (baseQuantity !== currentQuantity || baseDamaged !== currentDamaged) {
+          // Builds released before stock baselines existed can still have sale
+          // rows in their durable outbox. Their movement audit rows are pushed
+          // immediately before the resulting stock row, so movements newer than
+          // the locked stock balance are the exact unapplied delta. This lets an
+          // upgraded device drain those legacy sales without replacing newer
+          // stock changes made by another device.
+          if (record.warehouse_id != null || incomingDamaged !== currentDamaged) {
+            throw new Error('Stock conflict: this older device did not provide a merge baseline')
+          }
+          const movements = await client.query<{
+            movement_type: string; quantity: number; from_branch_id: string | null; to_branch_id: string | null
+          }>(
+            `SELECT movement_type, quantity, from_branch_id, to_branch_id
+               FROM stock_movements
+              WHERE product_id = ? AND created_at > ?
+                AND (from_branch_id = ? OR to_branch_id = ?)
+              ORDER BY created_at, id
+              FOR UPDATE`,
+            [record.product_id, current.updated_at, record.branch_id, record.branch_id]
+          )
+          if (!movements.rows.length || movements.rows.some(row => !['SALE', 'RECEIVE', 'TRANSFER'].includes(row.movement_type))) {
+            throw new Error('Stock conflict: this older device did not provide a merge baseline')
+          }
+          let delta = 0
+          for (const movement of movements.rows) {
+            const quantity = Number(movement.quantity)
+            if (!Number.isFinite(quantity) || quantity < 0) throw new Error('Stock conflict: invalid movement quantity')
+            if (movement.movement_type === 'SALE' && movement.from_branch_id === record.branch_id) delta -= quantity
+            if (movement.movement_type === 'RECEIVE' && movement.to_branch_id === record.branch_id) delta += quantity
+            if (movement.movement_type === 'TRANSFER') {
+              if (movement.from_branch_id === record.branch_id) delta -= quantity
+              if (movement.to_branch_id === record.branch_id) delta += quantity
+            }
+          }
+          const repairedQuantity = Number((currentQuantity + delta).toFixed(6))
+          if (!delta || repairedQuantity < 0) {
+            throw new Error('Stock conflict: legacy movement repair requires manual review')
+          }
+          record.quantity = repairedQuantity
+          record.damaged_qty = currentDamaged
+        } else if (baseQuantity !== currentQuantity || baseDamaged !== currentDamaged) {
           // The device changed stock from its last cloud baseline while another
           // device changed the same business key. Preserve both operations by
           // applying only this event's delta to the locked current balance.
