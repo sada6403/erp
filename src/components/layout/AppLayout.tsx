@@ -683,8 +683,10 @@ export default function AppLayout() {
         <ThemeToggle />
 
         {isAdmin ? (
-          <button onClick={triggerSync} className="relative p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors" title={`Sync - ${status.pending} pending`} style={{ color: 'var(--text-3)' }}>
-            {status.online ? <Wifi size={16} className="text-green-500" /> : <WifiOff size={16} className="text-red-400" />}
+          <button onClick={() => { if (!status.running) void triggerSync() }} disabled={status.running}
+            className="relative p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors disabled:cursor-wait"
+            title={status.running ? 'Synchronization in progress' : `Sync - ${status.pending} pending`} style={{ color: 'var(--text-3)' }}>
+            {status.online ? <Wifi size={16} className={`text-green-500 ${status.running ? 'animate-pulse' : ''}`} /> : <WifiOff size={16} className="text-red-400" />}
             {(status.failed > 0 || status.error) && <AlertCircle size={12} className="absolute right-0 top-0 text-yellow-400" />}
           </button>
         ) : (

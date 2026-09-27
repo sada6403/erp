@@ -62,8 +62,13 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     {
       const { getSyncService } = await import('../services/syncService')
       const service = getSyncService()
+      // Clicking the header sync button while the scheduled cycle is active
+      // is a harmless duplicate request. Report the existing work as active
+      // instead of showing a red failure toast.
+      if (service.isBusy()) return { success: true, data: { inProgress: true } }
       const complete = await service.runOnce()
-      return complete ? { success: true } : { success: false, error: String(store.get('sync_cycle_error') || 'Sync is already running, paused, or device locked') }
+      if (complete || service.isBusy()) return { success: true, data: { inProgress: !complete } }
+      return { success: false, error: String(store.get('sync_cycle_error') || 'Synchronization could not start; retry shortly') }
     }
   })
 

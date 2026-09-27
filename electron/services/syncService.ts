@@ -89,6 +89,10 @@ export class SyncService {
     this.watermarkTimer = null
   }
 
+  isBusy(): boolean {
+    return this.running || this.watermarkChecking
+  }
+
   // Issue 37 (36c) — the fast path. Skips entirely while a full runOnce()
   // cycle is already in flight (it will cover these same 3 tables anyway as
   // part of its normal sweep) or while the device is locked/offline, so

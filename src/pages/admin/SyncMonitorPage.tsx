@@ -171,9 +171,9 @@ export default function SyncMonitorPage() {
                   <FlaskConical size={14} className={diagnosing ? 'animate-pulse' : ''} />
                   {diagnosing ? 'Diagnosing...' : 'Diagnose'}
                 </button>
-                <button onClick={handleSync} disabled={syncing} className="btn-primary btn-sm gap-1.5">
-                  <RefreshCw size={14} className={syncing ? 'animate-spin' : ''} />
-                  {syncing ? 'Syncing...' : 'Sync Now'}
+                <button onClick={handleSync} disabled={syncing || status.running} className="btn-primary btn-sm gap-1.5">
+                  <RefreshCw size={14} className={syncing || status.running ? 'animate-spin' : ''} />
+                  {syncing || status.running ? 'Syncing...' : 'Sync Now'}
                 </button>
               </>
             ) : (
