@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuthStore } from '@/store/authStore'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { resolveImageSrc } from '@/lib/imageUrl'
+import { canManageAllBranchStock, isMainBranchRecord } from '@/lib/branchAccess'
 
 type Transfer = Record<string, unknown>
 type StockItem = Record<string, unknown>
@@ -48,9 +49,7 @@ const fmt = (n: unknown) => `Rs.${Number(n || 0).toLocaleString()}`
 
 export default function StockRequestsPage() {
   const { user } = useAuthStore()
-  const isAdmin = Boolean(
-    ((user?.role as unknown as Record<string,unknown>)?.permissions as Record<string,unknown> || {})?.all
-  )
+  const isAdmin = canManageAllBranchStock(user)
   const userBranchId: string = (user?.branch?.id || (user as unknown as Record<string,unknown>)?.branch_id as string) ?? ''
 
   const [tab, setTab] = useState<'my-stock' | 'requests' | 'branches'>('my-stock')
@@ -67,25 +66,35 @@ export default function StockRequestsPage() {
   const [drillStock, setDrillStock]   = useState<StockItem[]>([])
   const [selectedTf, setSelectedTf]   = useState<Transfer | null>(null)
   const [showNewRequest, setShowNewRequest] = useState(false)
+  const stockLoadRunning = useRef(false)
 
-  const loadMyStock = useCallback(async () => {
+  const loadMyStock = useCallback(async (showSpinner = true) => {
     if (!userBranchId) return
-    setLoading(true)
+    if (stockLoadRunning.current) return
+    stockLoadRunning.current = true
+    if (showSpinner) setLoading(true)
     try {
       const res = await window.api.stocks.branchDetail(userBranchId)
-      if (res.success) setMyStock(res.data as StockItem[])
+      if (res.success) {
+        const next = res.data as StockItem[]
+        setMyStock(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+      }
       else toast.error(res.error || 'Failed to load branch stock')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load branch stock')
     } finally {
-      setLoading(false)
+      stockLoadRunning.current = false
+      if (showSpinner) setLoading(false)
     }
   }, [userBranchId])
 
   const loadTransfers = useCallback(async () => {
     try {
       const res = await window.api.stocks.listTransfers(tfFilter ? { status: tfFilter } : {})
-      if (res.success) setTransfers(res.data as Transfer[])
+      if (res.success) {
+        const next = res.data as Transfer[]
+        setTransfers(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+      }
       else toast.error(res.error || 'Failed to load transfers')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load transfers')
@@ -95,7 +104,10 @@ export default function StockRequestsPage() {
   const loadBranchStats = useCallback(async () => {
     try {
       const res = await window.api.stocks.branchSummary()
-      if (res.success) setBranchStats(res.data as BranchStat[])
+      if (res.success) {
+        const next = res.data as BranchStat[]
+        setBranchStats(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+      }
       else toast.error(res.error || 'Failed to load branch summary')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load branch summary')
@@ -105,7 +117,9 @@ export default function StockRequestsPage() {
   const loadBranches = useCallback(async () => {
     try {
       const res = await window.api.admin.branches.list()
-      if (res.success) setBranches((res.data as Record<string,unknown>[]).map(b => ({ id: String(b.id), name: String(b.name) })))
+      if (res.success) setBranches((res.data as Record<string,unknown>[]).map(b => ({
+        id: String(b.id), name: String(b.name), code: String(b.code || ''),
+      })))
       else toast.error(res.error || 'Failed to load branches')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load branches')
@@ -113,22 +127,21 @@ export default function StockRequestsPage() {
   }, [])
 
   useEffect(() => {
-    loadBranches()
-    if (tab === 'my-stock') loadMyStock()
-    if (tab === 'requests') loadTransfers()
-    if (tab === 'branches') loadBranchStats()
-  }, [tab, loadMyStock, loadTransfers, loadBranchStats, loadBranches])
+    void loadBranches()
+  }, [loadBranches])
 
   useEffect(() => {
-    if (tab === 'requests') loadTransfers()
-  }, [tfFilter, tab, loadTransfers])
+    if (tab === 'my-stock') void loadMyStock(true)
+    if (tab === 'requests') void loadTransfers()
+    if (tab === 'branches') void loadBranchStats()
+  }, [tab, loadMyStock, loadTransfers, loadBranchStats])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (tab === 'my-stock') loadMyStock()
-      if (tab === 'requests') loadTransfers()
-      if (tab === 'branches') loadBranchStats()
-    }, 12000)
+      if (tab === 'my-stock') void loadMyStock(false)
+      if (tab === 'requests') void loadTransfers()
+      if (tab === 'branches') void loadBranchStats()
+    }, 60000)
     return () => window.clearInterval(timer)
   }, [tab, loadMyStock, loadTransfers, loadBranchStats])
 
@@ -173,7 +186,8 @@ export default function StockRequestsPage() {
 
   const lowCount = myStock.filter(s => s.stock_status === 'low').length
   const outCount = myStock.filter(s => s.stock_status === 'out').length
-  const pendingCount = transfers.filter(t => t.status === 'pending_approval' && String(t.to_branch_id) === userBranchId).length
+  const pendingCount = transfers.filter(t => t.status === 'pending_approval' &&
+    (String(t.to_branch_id) === userBranchId || String(t.from_branch_id) === userBranchId)).length
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -226,7 +240,7 @@ export default function StockRequestsPage() {
                 {f === 'out' ? 'Out of Stock' : f === 'low' ? 'Low Stock' : 'All'}
               </button>
             ))}
-            <button onClick={loadMyStock} className="btn-ghost btn-sm gap-1">
+            <button onClick={() => { void loadMyStock(true) }} className="btn-ghost btn-sm gap-1">
               <RefreshCw size={13} /> Refresh
             </button>
           </div>
@@ -324,6 +338,11 @@ export default function StockRequestsPage() {
                   const meta = getPipelineMeta(String(tf.status))
                   const next = nextStatus(String(tf.status))
                   const isMyRequest = String(tf.to_branch_id) === userBranchId || String(tf.from_branch_id) === userBranchId
+                  const isSourceBranch = String(tf.from_branch_id) === userBranchId
+                  const isDestinationBranch = String(tf.to_branch_id) === userBranchId
+                  const canAdvance = Boolean(next) && (isAdmin ||
+                    (['approved', 'dispatched', 'in_transit'].includes(String(next)) && isSourceBranch) ||
+                    (['received', 'partially_received', 'discrepancy'].includes(String(next)) && isDestinationBranch))
                   return (
                     <tr key={String(tf.id)} className={`table-row ${isMyRequest ? 'bg-blue-500/3' : ''}`}>
                       <td className="table-cell font-mono text-xs text-blue-400">{String(tf.transfer_number)}</td>
@@ -355,7 +374,7 @@ export default function StockRequestsPage() {
                           <button onClick={() => setSelectedTf(tf)} className="btn-ghost btn-sm gap-1">
                             <Eye size={12} /> View
                           </button>
-                          {next && (isAdmin || (next === 'received' && String(tf.to_branch_id) === userBranchId)) && (
+                          {next && canAdvance && (
                             <button
                               onClick={() => {
                                 if (next === 'dispatched' || next === 'received' || next === 'partially_received' || next === 'discrepancy') {
@@ -371,7 +390,7 @@ export default function StockRequestsPage() {
                                next.replace(/_/g, ' ')}
                             </button>
                           )}
-                          {String(tf.status) === 'pending_approval' && isAdmin && (
+                          {String(tf.status) === 'pending_approval' && (isAdmin || isSourceBranch) && (
                             <button
                               onClick={() => {
                                 const reason = prompt('Reject reason:')
@@ -514,8 +533,9 @@ export default function StockRequestsPage() {
         <StockRequestModal
           item={requestItem}
           branches={branches}
+          canChooseDestination={isAdmin}
           defaultToBranchId={String(requestItem?._toBranchId || userBranchId)}
-          defaultFromBranchId={branches.find(b => b.id !== userBranchId)?.id || ''}
+          defaultFromBranchId={branches.find(b => b.id !== userBranchId && isMainBranchRecord(b))?.id || ''}
           onClose={() => { setRequestItem(null); setShowNewRequest(false) }}
           onDone={() => {
             setRequestItem(null); setShowNewRequest(false)
@@ -558,9 +578,10 @@ function Chip({ icon, label, value, color, onClick, active }: {
 }
 
 // ─── Stock Request Modal ─────────────────────────────────────────────────────
-function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranchId, onClose, onDone }: {
+function StockRequestModal({ item, branches, canChooseDestination, defaultToBranchId, defaultFromBranchId, onClose, onDone }: {
   item: StockItem | null
   branches: Record<string, string>[]
+  canChooseDestination: boolean
   defaultToBranchId: string
   defaultFromBranchId: string
   onClose: () => void
@@ -588,10 +609,19 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
   useEffect(() => {
     if (!productId) { setAvailability([]); return }
     window.api.stocks.availability(productId).then((r: {success:boolean;data:unknown;error?:string}) => {
-      if (r.success) setAvailability(r.data as Record<string, unknown>[])
+      if (r.success) {
+        const rows = r.data as Record<string, unknown>[]
+        setAvailability(rows)
+        setFromBranch(current => {
+          const currentRow = rows.find(a => String(a.branch_id) === current)
+          if (currentRow && Number(currentRow.available_quantity) > 0) return current
+          const eligible = rows.filter(a => String(a.branch_id) !== toBranch && Number(a.available_quantity) > 0)
+          return String(eligible.find(a => isMainBranchRecord({ id: a.branch_id, name: a.branch_name }))?.branch_id || eligible[0]?.branch_id || current)
+        })
+      }
       else toast.error(r.error || 'Failed to load stock availability')
     }).catch((e: any) => toast.error(e?.message || 'Failed to load stock availability'))
-  }, [productId])
+  }, [productId, toBranch])
 
   const sourceStock = availability.find(a => String(a.branch_id) === fromBranch)
   const available = Number(sourceStock?.available_quantity || 0)
@@ -677,7 +707,7 @@ function StockRequestModal({ item, branches, defaultToBranchId, defaultFromBranc
           </div>
           <div>
             <label className="label">Send To (Destination) *</label>
-            <select value={toBranch} onChange={e => setToBranch(e.target.value)} className="input">
+            <select value={toBranch} onChange={e => setToBranch(e.target.value)} className="input" disabled={!canChooseDestination}>
               <option value="">Select destination…</option>
               {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
@@ -798,7 +828,7 @@ function TransferDetailModal({ tf, isAdmin, userBranchId, onClose, onAction }: {
         </div>
 
         {/* Action forms */}
-        {status === 'pending_approval' && isAdmin && (
+        {status === 'pending_approval' && (isAdmin || isFromBranch) && (
           <div className="rounded-xl p-4 border border-green-500/30 bg-green-500/5 space-y-3">
             <p className="font-semibold text-sm text-green-400">Approve this request?</p>
             <div className="flex gap-2">

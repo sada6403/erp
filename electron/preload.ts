@@ -255,7 +255,7 @@ const api = {
   // Stocks
   stocks: {
     list:         (branchId?: string)  => ipcRenderer.invoke('stocks:list', branchId),
-    get:          (productId: string)  => ipcRenderer.invoke('stocks:get', productId),
+    get:          (productId: string, branchId?: string)  => ipcRenderer.invoke('stocks:get', productId, branchId),
     transfer:     (payload: unknown)   => ipcRenderer.invoke('stocks:transfer', payload),
     adjustCorrection: (payload: unknown) => ipcRenderer.invoke('stocks:adjustCorrection', payload),
     listTransfers:(filters?: unknown)  => ipcRenderer.invoke('stocks:listTransfers', filters),

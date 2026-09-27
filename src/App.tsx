@@ -10,6 +10,7 @@ import DeviceLockedScreen from '@/pages/DeviceLockedScreen'
 import SetupWizardPage from '@/pages/SetupWizardPage'
 import { loadAndApplySystemTheme } from '@/lib/systemTheme'
 import { getLandingRoute } from '@/lib/sessionRouting'
+import { canManageProcurement } from '@/lib/branchAccess'
 
 // Keep the boot/login shell small. Loading every admin, reporting, Smart Buy,
 // spreadsheet and chart module up front made Chromium parse the entire ERP
@@ -110,6 +111,14 @@ function RequireSmartBuyAccess({ children }: { children: React.ReactNode }) {
   if (!permissions.all && !permissions.chits) {
     return <Navigate to={getLandingRoute(user)} replace />
   }
+  return <>{children}</>
+}
+
+function RequireMainBranch({ children }: { children: React.ReactNode }) {
+  const { user, isLoading } = useAuthStore()
+  if (isLoading) return <LoadingScreen />
+  if (!user) return <Navigate to="/login" replace />
+  if (!canManageProcurement(user)) return <Navigate to={getLandingRoute(user)} replace />
   return <>{children}</>
 }
 
@@ -262,7 +271,7 @@ export default function App() {
         <Route path="/admin/orders" element={<OrdersPage />} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
-        <Route path="/admin/purchase-orders" element={<RequireModule module="purchase_orders"><PurchaseOrdersPage /></RequireModule>} />
+        <Route path="/admin/purchase-orders" element={<RequireMainBranch><RequireModule module="purchase_orders"><PurchaseOrdersPage /></RequireModule></RequireMainBranch>} />
         <Route path="/admin/expenses" element={<RequireModule module="expenses"><ExpensesPage /></RequireModule>} />
         <Route path="/admin/branches" element={<RequireSuperAdmin><BranchesPage /></RequireSuperAdmin>} />
         <Route path="/admin/branch-inspect" element={<RequireSuperAdmin><BranchInspectPage /></RequireSuperAdmin>} />
@@ -274,7 +283,7 @@ export default function App() {
         <Route path="/admin/regions" element={<RegionsPage />} />
         <Route path="/admin/zones" element={<ZonesPage />} />
         <Route path="/admin/categories" element={<CategoriesPage />} />
-        <Route path="/admin/suppliers" element={<SuppliersPage />} />
+        <Route path="/admin/suppliers" element={<RequireMainBranch><SuppliersPage /></RequireMainBranch>} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
         <Route path="/admin/deliveries" element={<RequireModule module="deliveries"><DeliveriesPage /></RequireModule>} />
         <Route path="/admin/installments" element={<RequireModule module="installments"><InstallmentsPage /></RequireModule>} />

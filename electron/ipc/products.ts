@@ -14,6 +14,7 @@ import type { S3Config } from '../services/s3Service'
 import { decryptSecret } from './settings'
 import { buildSku, categoryCodeFromName, normalizeCategoryPath, titleCase } from '../lib/catalog'
 import { safeHandle } from './ipcHandler'
+import { canManageAllBranchStock } from '../services/branchAccess'
 
 const store = new Store()
 
@@ -172,12 +173,16 @@ export function registerProductHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'products:list', (_e, filters: { category_id?: string; is_active?: boolean; branch_id?: string } = {}) => {
       const db = getDb()
       const authUser = getAuthUser()
-      const superAdmin = isSuperAdmin(authUser)
+      const canManageAllBranches = canManageAllBranchStock(db, authUser)
       const userBranchId = authUser?.branch_id as string | undefined
+
+      if (filters.branch_id && !canManageAllBranches && (!userBranchId || filters.branch_id !== userBranchId)) {
+        return { success: false, error: 'Cannot view product stock for another branch' }
+      }
 
       // If an explicit branch_id is requested via filters (or user is branch-scoped without filter),
       // join stock for that exact branch. Otherwise sum across all branches.
-      const targetBranchId = filters.branch_id || (!superAdmin ? userBranchId : undefined)
+      const targetBranchId = filters.branch_id || (!canManageAllBranches ? userBranchId : undefined)
 
       const stockJoin = targetBranchId
         ? `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
@@ -200,7 +205,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       if (targetBranchId) params.push(targetBranchId)
 
       // Only restrict branch visibility if branch-scoped user and no explicit branch filter
-      if (!superAdmin && userBranchId && !filters.branch_id) {
+      if (!canManageAllBranches && userBranchId && !filters.branch_id) {
         sql += ' AND (p.branch_id = ? OR p.branch_id IS NULL)'
         params.push(userBranchId)
       }

@@ -11,6 +11,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 import { useProductsStore } from '@/store/productsStore'
 import { resolveImageSrc } from '@/lib/imageUrl'
+import { canManageAllBranchStock, DEFAULT_MAIN_BRANCH_ID, isCompanyAdmin as hasCompanyAdminAccess } from '@/lib/branchAccess'
 
 type UOMRow = { id?: string; uom_name: string; conversion_factor: number; is_base: boolean; wastage: number }
 type CatalogAudit = {
@@ -32,10 +33,14 @@ interface BranchItem {
 
 export default function ProductsPage() {
   const { products, categories, suppliers, loading, load: loadProducts } = useProductsStore()
+  const { user: currentUser } = useAuthStore()
+  const isCompanyAdmin = hasCompanyAdminAccess(currentUser)
+  const canManageAllBranches = canManageAllBranchStock(currentUser)
+  const ownBranchId = String(currentUser?.branch?.id || currentUser?.branch_id || '')
   const [search, setSearch]         = useState('')
   const [catFilter, setCatFilter]   = useState('')
   const [brandFilter, setBrandFilter] = useState('')
-  const [branchFilter, setBranchFilter] = useState('')
+  const [branchFilter, setBranchFilter] = useState(() => canManageAllBranches ? '' : ownBranchId)
   const [branches, setBranches]     = useState<BranchItem[]>([])
   const [showForm, setShowForm]     = useState(false)
   const [editing, setEditing]       = useState<Product | null>(null)
@@ -51,12 +56,18 @@ export default function ProductsPage() {
   const [normalizing, setNormalizing] = useState(false)
   const [audit, setAudit] = useState<CatalogAudit | null>(null)
   const [auditLoading, setAuditLoading] = useState(false)
-  const { user: currentUser } = useAuthStore()
-  const isCompanyAdmin = Boolean((currentUser?.role?.permissions as Record<string,boolean>)?.all)
 
   // Post-mutation refresh (create/update/delete/import/normalize) always
   // forces a real refetch — only the initial mount below uses the cache.
-  const load = () => loadProducts(true)
+  const load = async () => {
+    await loadProducts(true)
+    const res = await window.api.products.list({
+      branch_id: branchFilter || undefined,
+      category_id: catFilter || undefined,
+      is_active: true,
+    }) as { success: boolean; data?: Product[]; error?: string }
+    if (res.success && res.data) useProductsStore.setState({ products: res.data })
+  }
 
   const loadAudit = async () => {
     setAuditLoading(true)
@@ -349,8 +360,8 @@ export default function ProductsPage() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Enter Keyword..." className="input pl-8 text-sm" />
         </div>
-        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-44 text-sm font-medium">
-          <option value="">All Branches (Stock)</option>
+        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input w-44 text-sm font-medium" disabled={!canManageAllBranches}>
+          {canManageAllBranches && <option value="">All Branches (Stock)</option>}
           {branches.map(b => (
             <option key={b.id} value={b.id}>
               {b.name}
@@ -368,7 +379,7 @@ export default function ProductsPage() {
         <button className="btn-primary btn-sm gap-1" onClick={load}>
           <Search size={13}/> Filter
         </button>
-        <button className="btn-secondary btn-sm" onClick={() => { setSearch(''); setCatFilter(''); setBrandFilter(''); setBranchFilter('') }}>
+        <button className="btn-secondary btn-sm" onClick={() => { setSearch(''); setCatFilter(''); setBrandFilter(''); setBranchFilter(canManageAllBranches ? '' : ownBranchId) }}>
           Reset
         </button>
       </div>
@@ -486,6 +497,10 @@ export default function ProductsPage() {
           product={editing}
           categories={categories}
           suppliers={suppliers}
+          stockBranchId={editing && !branchFilter ? undefined : (branchFilter || ownBranchId || DEFAULT_MAIN_BRANCH_ID)}
+          stockScopeLabel={branchFilter
+            ? (branches.find(b => b.id === branchFilter)?.name || 'Selected Branch')
+            : editing ? 'All Branches (calculated total)' : (currentUser?.branch?.name || 'Main Branch')}
           editRequestId={editRequestId}
           onClose={() => { setShowForm(false); setEditRequestId(undefined) }}
           onSave={() => { setShowForm(false); setEditRequestId(undefined); load() }}
@@ -858,10 +873,12 @@ function AddProductBtn({ isAdmin, onAdd }: {
 }
 
 // ─── Main Product Form ───────────────────────────────────────────────────────
-function ProductForm({ product, categories, suppliers, editRequestId, onClose, onSave, onCategoryCreated }: {
+function ProductForm({ product, categories, suppliers, stockBranchId, stockScopeLabel, editRequestId, onClose, onSave, onCategoryCreated }: {
   product: Product | null
   categories: Category[]
   suppliers: Supplier[]
+  stockBranchId?: string
+  stockScopeLabel: string
   editRequestId?: string
   onClose: () => void
   onSave: () => void
@@ -877,7 +894,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
     brand:              (product as Record<string,unknown> | null)?.brand as string || '',
     description:        product?.description      || '',
     rack_no:            (product as Record<string,unknown> | null)?.rack_no as string || '',
-    alert_qty:          Number((product as Record<string,unknown> | null)?.alert_qty ?? 5),
+    alert_qty:          Number((product as Record<string,unknown> | null)?.alert_qty ?? product?.min_stock_level ?? 5),
     weight:             Number((product as Record<string,unknown> | null)?.weight    ?? 0),
     cost_price:         product?.cost_price       ?? 0,
     selling_price:      product?.selling_price    ?? 0,
@@ -900,7 +917,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
   })
 
   const [uoms, setUoms] = useState<UOMRow[]>([{ uom_name: '', conversion_factor: 1, is_base: true, wastage: 0 }])
-  const [stockQty, setStockQty]       = useState(0)
+  const [stockQty, setStockQty]       = useState(Number(product?.stock ?? 0))
   // Quick per-product discount % — a shortcut that creates/updates a
   // scope:'product', global-branch rule via the same Discounts module used
   // by Admin > Discounts, instead of a separate storage mechanism.
@@ -911,16 +928,21 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [localCategories, setLocalCategories] = useState(categories)
   const user = useAuthStore(s => s.user)
+  const stockIsAggregate = Boolean(product && !stockBranchId)
 
   useEffect(() => { setLocalCategories(categories) }, [categories])
 
   useEffect(() => {
     if (product) {
       if (product.discount_pct !== undefined) setDiscountPct(product.discount_pct)
-      window.api.stocks.get(product.id).then((res: { success: boolean; data?: unknown; error?: string }) => {
-        if (res.success && res.data) setStockQty((res.data as { quantity: number }).quantity)
-        else if (!res.success) toast.error(res.error || 'Failed to load stock quantity')
-      }).catch((err: unknown) => toast.error('Failed to load stock quantity: ' + String(err)))
+      if (stockBranchId) {
+        window.api.stocks.get(product.id, stockBranchId).then((res: { success: boolean; data?: unknown; error?: string }) => {
+          if (res.success) setStockQty(Number((res.data as { quantity?: number } | undefined)?.quantity || 0))
+          else toast.error(res.error || 'Failed to load stock quantity')
+        }).catch((err: unknown) => toast.error('Failed to load stock quantity: ' + String(err)))
+      } else {
+        setStockQty(Number(product.stock || 0))
+      }
       window.api.admin.productUom.list(product.id).then((res: { success: boolean; data?: unknown; error?: string }) => {
         if (res.success && res.data) {
           const rows = res.data as UOMRow[]
@@ -933,7 +955,7 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
         if (rule) { setExistingDiscountId(String(rule.id)); setDiscountPct(Number(rule.value) || 0) }
       }).catch(() => {})
     }
-  }, [product])
+  }, [product, stockBranchId])
 
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
     setForm(p => ({ ...p, [k]: e.target.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value }))
@@ -967,9 +989,10 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
     if (!form.name) { toast.error('Product name is required'); return }
     setSaving(true)
     try {
-      const branchId = user?.branch?.id || 'b1111111-1111-4111-8111-111111111111'
+      const branchId = stockBranchId || user?.branch?.id || user?.branch_id || DEFAULT_MAIN_BRANCH_ID
       const payload = {
         ...form,
+        min_stock_level:        form.alert_qty,
         discount_pct:           discountPct,
         not_for_sale:           form.not_for_sale ? 1 : 0,
         enable_emi:             form.enable_emi ? 1 : 0,
@@ -990,9 +1013,13 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
         productId = (res.data as { id: string }).id
         toast.success('Product created')
       }
-      // Save stock and UOMs in parallel
+      // Aggregate stock is calculated from every branch and must never be
+      // written back into one branch. A branch-specific edit may adjust it.
+      const stockPromise = stockIsAggregate
+        ? Promise.resolve({ success: true } as { success: boolean; error?: string })
+        : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: stockQty, reason: 'Product form update' }) as Promise<{ success: boolean; error?: string }>
       const [stockRes, uomRes] = await Promise.all([
-        window.api.stocks.adjust({ product_id: productId, branch_id: branchId, quantity: stockQty, reason: 'Product form update' }) as Promise<{ success: boolean; error?: string }>,
+        stockPromise,
         window.api.admin.productUom.save(productId, uoms.filter(u => u.uom_name.trim())) as Promise<{ success: boolean; error?: string }>,
       ])
       if (!stockRes.success) toast.error(stockRes.error || 'Failed to update stock quantity')
@@ -1295,9 +1322,18 @@ function ProductForm({ product, categories, suppliers, editRequestId, onClose, o
 
           {/* ── Stock ─────────────────────────────────────────────────── */}
           <div>
-            <label className="label">{product ? 'Current Stock Qty' : 'Initial Stock Qty'}</label>
-            <NumberInput value={stockQty} onChange={e => setStockQty(parseInt(e.target.value)||0)}
-              className="input w-40" min="0" />
+            <label className="label">{product ? 'Current Stock Qty' : 'Initial Stock Qty'} — {stockScopeLabel}</label>
+            {stockIsAggregate ? (
+              <div className="rounded-lg border px-3 py-2 w-fit" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
+                <span className="text-lg font-bold" style={{ color: 'var(--text-1)' }}>{stockQty}</span>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                  Calculated from all branches. Select a branch before editing its stock.
+                </p>
+              </div>
+            ) : (
+              <NumberInput value={stockQty} onChange={e => setStockQty(parseInt(e.target.value)||0)}
+                className="input w-40" min="0" />
+            )}
           </div>
 
         </div>

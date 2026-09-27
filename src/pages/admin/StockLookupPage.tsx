@@ -4,8 +4,11 @@ import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { canManageAllBranchStock } from '@/lib/branchAccess'
 
 export default function StockLookupPage() {
+  const { user } = useAuthStore()
+  const myBranchId = String(user?.branch?.id || user?.branch_id || '')
   const [products, setProducts] = useState<Record<string, unknown>[]>([])
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<Record<string, unknown> | null>(null)
@@ -57,8 +60,14 @@ export default function StockLookupPage() {
                   <p className="text-xs text-slate-500 mt-1">Estimated transfer: 1–3 business days</p></div>
                 <div className="text-right"><p className={`text-xl font-bold ${Number(a.available_quantity) ? 'text-green-400' : 'text-red-400'}`}>{Number(a.available_quantity)}</p>
                   <p className="text-xs text-slate-500">available</p>
-                  <button className="btn-primary btn-sm mt-2" onClick={() => setTransferFrom(a)}>
-                    <ArrowRightLeft size={12} /> Request</button></div>
+                  {String(a.branch_id) === myBranchId ? (
+                    <span className="badge-blue mt-2 inline-block">Your branch</span>
+                  ) : Number(a.available_quantity) > 0 ? (
+                    <button className="btn-primary btn-sm mt-2" onClick={() => setTransferFrom(a)}>
+                      <ArrowRightLeft size={12} /> Request</button>
+                  ) : (
+                    <span className="badge-red mt-2 inline-block">Out of stock</span>
+                  )}</div>
               </div>)}
             </div>
           </>}
@@ -71,7 +80,8 @@ export default function StockLookupPage() {
 
 function QuickTransfer({ product, source, onClose, onDone }: any) {
   const { user } = useAuthStore()
-  const myBranchId = (user as any)?.branch_id ?? ''
+  const myBranchId = String(user?.branch?.id || user?.branch_id || '')
+  const canChooseDestination = canManageAllBranchStock(user)
   const [branches, setBranches] = useState<any[]>([])
   const [to, setTo] = useState(myBranchId)   // default to current user's branch
   const [qty, setQty] = useState(1)
@@ -113,7 +123,7 @@ function QuickTransfer({ product, source, onClose, onDone }: any) {
         </div>
         <div>
           <label className="text-xs text-slate-400">Destination branch</label>
-          <select className="input mt-1" value={to} onChange={e => setTo(e.target.value)}>
+          <select className="input mt-1" value={to} onChange={e => setTo(e.target.value)} disabled={!canChooseDestination}>
             <option value="">Select branch</option>
             {branches
               .filter(b => b.id !== source.branch_id)

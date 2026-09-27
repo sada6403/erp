@@ -8,13 +8,17 @@ import { syncStockRow } from '../services/stockSync'
 import { safeHandleModule } from './ipcHandler'
 import { sendEmail } from '../services/emailService'
 import { sendWhatsApp } from '../services/whatsappService'
+import { canManageProcurement, resolveMainBranchId } from '../services/branchAccess'
 
 const store = new Store()
 
-function currentPerms(): Record<string, unknown> {
-  const caller = (store.get('auth_user') as Record<string, unknown> | undefined) || {}
-  return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
-    || (caller.permissions as Record<string, unknown>) || {}
+function requireMainBranchProcurement(): { user: Record<string, unknown>; mainBranchId: string } {
+  const db = getDb()
+  const user = (store.get('auth_user') as Record<string, unknown> | undefined) || {}
+  if (!canManageProcurement(db, user)) {
+    throw new Error('Purchase orders and supplier procurement are available only at the main branch')
+  }
+  return { user, mainBranchId: resolveMainBranchId(db) }
 }
 
 type POStatus = 'DRAFT' | 'SENT' | 'PARTIAL' | 'RECEIVED' | 'CANCELLED'
@@ -257,6 +261,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   // List POs with optional filters
   safeHandleModule(ipcMain, 'purchases:list', 'purchase_orders', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
+      const { mainBranchId } = requireMainBranchProcurement()
       let sql = `
         SELECT po.*, s.name as supplier_name, b.name as branch_name,
                u.name as created_by_name,
@@ -265,8 +270,8 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
         LEFT JOIN suppliers s ON s.id = po.supplier_id
         LEFT JOIN branches b  ON b.id  = po.branch_id
         LEFT JOIN users u     ON u.id  = po.created_by
-        WHERE 1=1`
-      const params: unknown[] = []
+        WHERE po.branch_id=?`
+      const params: unknown[] = [mainBranchId]
       if (filters.status)    { sql += ' AND po.status=?';    params.push(filters.status) }
       if (filters.branch_id) { sql += ' AND po.branch_id=?'; params.push(filters.branch_id) }
       if (filters.supplier_id) { sql += ' AND po.supplier_id=?'; params.push(filters.supplier_id) }
@@ -277,12 +282,13 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   // Get single PO with items
   safeHandleModule(ipcMain, 'purchases:get', 'purchase_orders', (_e, id: string) => {
     const db = getDb()
+      const { mainBranchId } = requireMainBranchProcurement()
       const po = db.prepare(`
         SELECT po.*, s.name as supplier_name, b.name as branch_name
         FROM purchase_orders po
         LEFT JOIN suppliers s ON s.id = po.supplier_id
         LEFT JOIN branches b  ON b.id  = po.branch_id
-        WHERE po.id=?`).get(id)
+        WHERE po.id=? AND po.branch_id=?`).get(id, mainBranchId)
       if (!po) throw new Error('Purchase order not found')
       // pack_uom_name/pack_conversion_factor: see the identical pattern (and
       // comment) on stockCounts:get in electron/ipc/stocks.ts — lets Receive
@@ -304,18 +310,13 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   // Create PO (starts as DRAFT)
   safeHandleModule(ipcMain, 'purchases:create', 'purchase_orders', async (_e, payload) => {
     const db = getDb()
-      const user = store.get('auth_user') as Record<string, unknown>
-      const perms = currentPerms()
-      if (!perms.all && !perms.inventory) throw new Error('Inventory access required')
+      const { user, mainBranchId } = requireMainBranchProcurement()
       if (!payload.supplier_id)       throw new Error('Supplier is required')
       if (!payload.items?.length)     throw new Error('At least one item is required')
-      if (!payload.branch_id && !user?.branch_id) throw new Error('Branch is required')
 
-      // A non-admin can only raise a PO for their own branch — the client's
-      // branch_id is only trusted for admins (who legitimately manage POs
-      // across branches). Spoofed branch_id from non-admin is ignored.
-      const branchId = perms.all ? (payload.branch_id || user?.branch_id as string) : (user?.branch_id as string)
-      if (!branchId) throw new Error('Branch is required')
+      // Supplier purchases always enter the main branch. Sub branches obtain
+      // that stock through the branch transfer workflow.
+      const branchId = mainBranchId
       const id = crypto.randomUUID()
       const po_number = getNextPONumber(branchId)
 
@@ -392,28 +393,18 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   // Update PO status (DRAFT→SENT→PARTIAL/RECEIVED/CANCELLED)
   safeHandleModule(ipcMain, 'purchases:updateStatus', 'purchase_orders', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
     const db = getDb()
-      const user = store.get('auth_user') as Record<string, unknown>
-      const perms = currentPerms()
+      const { user, mainBranchId } = requireMainBranchProcurement()
       const po = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!po) throw new Error('Purchase order not found')
 
-      if (!perms.all && !perms.inventory) throw new Error('Inventory access required')
-      if (!perms.all && user?.branch_id && po.branch_id !== user.branch_id) {
-        throw new Error('Cannot update a purchase order from another branch')
-      }
+      if (String(po.branch_id) !== mainBranchId) throw new Error('Only main-branch purchase orders can be managed here')
 
       const allowed = PO_TRANSITIONS[String(po.status)]
       if (!allowed?.includes(status)) {
         throw new Error(`Cannot move PO from '${po.status}' to '${status}'`)
       }
 
-      // Only a Company Admin can mark stock as received — this is the point
-      // new stock actually enters the company (PARTIAL also increments stock
-      // and can auto-promote to RECEIVED below, so it's gated too).
-      if ((status === 'RECEIVED' || status === 'PARTIAL') && !perms.all) {
-        throw new Error('Only a Company Admin can mark a purchase order as received.')
-      }
-
+      // Receiving a PO adds stock only to the main branch.
       const now = new Date().toISOString()
       const patch: Record<string, unknown> = { status }
 
@@ -513,14 +504,10 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   // Update draft PO (add/remove/edit items before sending)
   safeHandleModule(ipcMain, 'purchases:update', 'purchase_orders', async (_e, id: string, payload: Record<string, unknown>) => {
     const db = getDb()
-      const user = store.get('auth_user') as Record<string, unknown>
-      const perms = currentPerms()
+      const { user, mainBranchId } = requireMainBranchProcurement()
       const po = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!po) throw new Error('Purchase order not found')
-      if (!perms.all && !perms.inventory) throw new Error('Inventory access required')
-      if (!perms.all && user?.branch_id && po.branch_id !== user.branch_id) {
-        throw new Error('Cannot edit a purchase order from another branch')
-      }
+      if (String(po.branch_id) !== mainBranchId) throw new Error('Only main-branch purchase orders can be managed here')
       if (po.status !== 'DRAFT') throw new Error('Only DRAFT purchase orders can be edited')
 
       if (payload.items) {
@@ -577,6 +564,9 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
 
   // Manually trigger WhatsApp/Email notification to supplier for any PO
   safeHandleModule(ipcMain, 'purchases:notifySupplier', 'purchase_orders', async (_e, id: string, options: Record<string, unknown> = {}) => {
+    const { mainBranchId } = requireMainBranchProcurement()
+    const po = getDb().prepare('SELECT branch_id FROM purchase_orders WHERE id=?').get(id) as { branch_id?: string } | undefined
+    if (!po || String(po.branch_id) !== mainBranchId) throw new Error('Main-branch purchase order not found')
     const notification = await sendSupplierOrderNotification(id, {
       openWhatsApp: options.openWhatsApp !== false,
       sendEmail: options.sendEmail !== false,

@@ -137,9 +137,13 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'stocks:list', (_e, targetBranchId?: string) => {
     const db = getDb()
     const user = store.get('auth_user') as Record<string, unknown>
-    const superAdmin = isSuperAdmin(user)
+    const privileged = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
+    const userBranchId = String(user?.branch_id || '')
+    if (!privileged && targetBranchId && targetBranchId !== userBranchId) {
+      return { success: false, error: 'Cannot view stock for another branch' }
+    }
 
-    const isAll = targetBranchId === 'all' || (targetBranchId === '' && superAdmin) || (!targetBranchId && superAdmin && !user?.branch_id)
+    const isAll = privileged && (targetBranchId === 'all' || targetBranchId === '' || !targetBranchId)
     const bid = isAll ? null : (targetBranchId || (user?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111')
 
     let rows: Record<string, unknown>[]
@@ -195,6 +199,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'stocks:lowStock', (_e, branchId?: string) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
+      const privileged = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
+      if (!privileged && branchId && branchId !== user?.branch_id) {
+        return { success: false, error: 'Cannot view stock for another branch' }
+      }
       const bid = branchId || user?.branch_id || 'b1111111-1111-4111-8111-111111111111'
       const rows = db.prepare(`
         SELECT
@@ -219,12 +227,18 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       return { success: true, data: rows }
   })
 
-  safeHandle(ipcMain, 'stocks:get', (_e, productId: string) => {
+  safeHandle(ipcMain, 'stocks:get', (_e, productId: string, targetBranchId?: string) => {
     const db = getDb()
     const user = store.get('auth_user') as Record<string, unknown>
+    const userBranchId = String(user?.branch_id || '')
+    const privileged = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
+    const branchId = targetBranchId || userBranchId || 'b1111111-1111-4111-8111-111111111111'
+    if (!privileged && userBranchId && branchId !== userBranchId) {
+      return { success: false, error: 'Cannot view stock for another branch' }
+    }
     const row = db.prepare(`
       SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
-    `).get(productId, user?.branch_id || 'b1111111-1111-4111-8111-111111111111')
+    `).get(productId, branchId)
     return { success: true, data: row }
   })
 
@@ -232,6 +246,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
+      if (!product_id || !branch_id) throw new Error('Product and branch are required')
+      if (!Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
+        throw new Error('Stock quantity must be zero or greater')
+      }
       // Deliberately no permission gate (see comment below) since this also
       // fires on every product-form save — but it must still stay inside
       // the caller's own branch, or a direct IPC call from any session
@@ -372,8 +390,13 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       }
       if (payload.from_branch_id === payload.to_branch_id) throw new Error('Branches must be different')
       if (Number(payload.quantity) <= 0) throw new Error('Quantity must be greater than zero')
-      if (!currentPerms().all && user?.branch_id && payload.from_branch_id !== user.branch_id) {
-        throw new Error('You can only request a transfer out of your own branch')
+      const privileged = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
+      if (!privileged) {
+        const userBranchId = String(user?.branch_id || '')
+        if (!userBranchId) throw new Error('Your account must be assigned to a branch before requesting stock')
+        if (String(payload.to_branch_id) !== userBranchId) {
+          throw new Error('You can only request stock to your own branch')
+        }
       }
       const record = {
         id, transfer_number: transferNumber, product_id: payload.product_id,
@@ -415,6 +438,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'stocks:listTransfers', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const privileged = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
       let sql = `
         SELECT st.*, p.name as product_name, p.sku,
                p.barcode, p.unit,
@@ -431,9 +456,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         WHERE 1=1`
       const params: unknown[] = []
       if (filters.status) { sql += ' AND st.status=?'; params.push(filters.status) }
-      if (filters.branch_id) {
+      const scopedBranchId = privileged ? filters.branch_id : user?.branch_id
+      if (scopedBranchId) {
         sql += ' AND (st.from_branch_id = ? OR st.to_branch_id = ?)'
-        params.push(filters.branch_id, filters.branch_id)
+        params.push(scopedBranchId, scopedBranchId)
       }
       sql += ' ORDER BY st.initiated_at DESC LIMIT 200'
       const rows = db.prepare(sql).all(...params)
@@ -565,7 +591,17 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           ON s.branch_id = b.id
          AND s.product_id = p.id
         WHERE p.id = ? AND b.is_active = 1
-        ORDER BY available_quantity DESC, b.name
+        ORDER BY
+          CASE
+            WHEN b.id = 'b1111111-1111-4111-8111-111111111111'
+              OR UPPER(COALESCE(b.code, '')) IN ('MAIN', 'CMB')
+              OR LOWER(b.name) LIKE '%main%'
+              OR LOWER(b.name) LIKE '%colombo%'
+              OR LOWER(b.name) LIKE '%head office%'
+              OR LOWER(b.name) LIKE '%hq%'
+            THEN 0 ELSE 1
+          END,
+          available_quantity DESC, b.name
       `).all(productId)
       return { success: true, data: rows }
   })
@@ -593,8 +629,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       //    -> dispatched -> received (dest credited).
       // The receive handler deducts the source first if it wasn't already.
       const transitions: Record<string, string[]> = {
-        pending:            ['approved', 'rejected', 'cancelled', 'received', 'partially_received'],
-        pending_approval:   ['approved', 'rejected', 'cancelled', 'received', 'partially_received'],
+        pending:            ['approved', 'rejected', 'cancelled'],
+        pending_approval:   ['approved', 'rejected', 'cancelled'],
         approved:           ['ready_for_dispatch', 'dispatched', 'received', 'partially_received', 'cancelled'],
         ready_for_dispatch: ['dispatched', 'received', 'partially_received', 'cancelled'],
         dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy', 'mismatch_reported'],
@@ -607,6 +643,24 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         throw new Error(`Cannot move transfer from '${transfer.status}' to '${status}'`)
       }
 
+      const callerBranch = String(user?.branch_id || '')
+      const isPrivileged = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
+      const isSourceBranch = callerBranch === String(transfer.from_branch_id)
+      const isDestinationBranch = callerBranch === String(transfer.to_branch_id)
+      if (!isPrivileged) {
+        const sourceActions = ['approved', 'rejected', 'ready_for_dispatch', 'dispatched', 'in_transit']
+        const destinationActions = ['received', 'partially_received', 'discrepancy', 'mismatch_reported']
+        if (sourceActions.includes(status) && !isSourceBranch) {
+          throw new Error('Only the source branch can approve or dispatch this transfer')
+        }
+        if (destinationActions.includes(status) && !isDestinationBranch) {
+          throw new Error('Only the destination branch can receive this transfer')
+        }
+        if (status === 'under_admin_review' || status === 'corrected') {
+          throw new Error('Only an administrator can review transfer discrepancies')
+        }
+      }
+
       // Only a Branch Manager or Admin may APPROVE a request — including the
       // dashboard quick-accept (pending -> received). Cashiers cannot approve.
       const isApprovalAction = status === 'approved' ||
@@ -615,7 +669,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (isApprovalAction) {
         const cperms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
           || (user?.permissions as Record<string, unknown>) || {}
-        if (!cperms.all && !cperms.employees) {
+        if (!cperms.all && !cperms.employees && !cperms.inventory) {
           throw new Error('Only a Branch Manager or Admin can approve transfer requests')
         }
       }
@@ -650,9 +704,6 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const patch: Record<string, unknown> = { status: effectiveStatus }
       const movementRecords: Record<string, unknown>[] = []
       const qty = Number(transfer.quantity)
-
-      // Has the source branch already been deducted? (goods left source on approve)
-      const sourceDeducted = ['approved', 'ready_for_dispatch', 'dispatched', 'in_transit'].includes(String(transfer.status))
 
       if (status === 'approved') {
         patch.approved_by = user?.id || null
@@ -703,10 +754,6 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         patch.mismatch_reason_category = payload.reason_category || null
         patch.mismatch_details = payload.detailed_reason || null
       }
-
-      // Does this step credit the destination branch? (goods arrive)
-      const creditsDestination = status === 'received' || status === 'partially_received' ||
-        (status === 'discrepancy' && patch.received_quantity !== undefined)
 
       db.transaction(() => {
         // Dispatch reserves stock in transit by deducting source branch only.
@@ -781,7 +828,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         }
 
         // 3. CANCEL after source was deducted → return goods to source.
-        if (status === 'cancelled' && sourceDeducted) {
+        if (status === 'cancelled' && alreadyDeducted) {
           const src = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
             .get(transfer.product_id, transfer.from_branch_id) as { id: string } | undefined
           if (src) db.prepare(`UPDATE stocks SET quantity=quantity+?, updated_at=datetime('now') WHERE id=?`).run(qty, src.id)
@@ -821,7 +868,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           .run({ id, ...patch })
 
         const historyLabel: Record<string, string> = {
-          approved:           'Approved & dispatched from source',
+          approved:           'Approved by source branch',
           rejected:           'Rejected',
           ready_for_dispatch: 'Ready for dispatch',
           dispatched:         'Dispatched — in transit',
@@ -992,7 +1039,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   // Multi-branch summary for admin overview
   safeHandle(ipcMain, 'stocks:branchSummary', () => {
     const db = getDb()
-      const rows = db.prepare(`
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const isGlobal = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
+      const sql = `
         SELECT
           b.id, b.name, b.code, b.address, b.is_active,
           (
@@ -1025,7 +1074,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           ) AS total_value,
           (
             SELECT COUNT(DISTINCT CASE
-              WHEN COALESCE(s.quantity, 0) BETWEEN 1 AND 5
+              WHEN COALESCE(s.quantity, 0) > 0
+               AND COALESCE(s.quantity, 0) <= COALESCE(p.min_stock_level, 5)
               THEN p.id
             END)
             FROM products p
@@ -1051,13 +1101,14 @@ export function registerStockHandlers(ipcMain: IpcMain) {
               AND (p.branch_id IS NULL OR p.branch_id = b.id)
           ) AS out_of_stock_count,
           (SELECT COUNT(*) FROM stock_transfers st
-           WHERE st.to_branch_id = b.id AND st.status = 'pending_approval') AS pending_requests,
+           WHERE st.from_branch_id = b.id AND st.status = 'pending_approval') AS pending_requests,
           (SELECT COUNT(*) FROM stock_transfers st
            WHERE st.to_branch_id = b.id AND st.status IN ('approved','dispatched','in_transit')) AS in_transit_count
         FROM branches b
-        WHERE b.is_active = 1
+        WHERE b.is_active = 1 ${isGlobal ? '' : 'AND b.id = ?'}
         ORDER BY b.name
-      `).all()
+      `
+      const rows = isGlobal ? db.prepare(sql).all() : db.prepare(sql).all(String(user?.branch_id || ''))
       return { success: true, data: rows }
   })
 
@@ -1065,10 +1116,15 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'stocks:branchDetail', (_e, targetBranchId?: string) => {
     const db = getDb()
     const user = store.get('auth_user') as Record<string, unknown>
-    const superAdmin = isSuperAdmin(user)
+    const privileged = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
+    const userBranchId = String(user?.branch_id || '')
+    if (!privileged && targetBranchId && targetBranchId !== userBranchId) {
+      return { success: false, error: 'Cannot view stock for another branch' }
+    }
 
-    const isAll = !targetBranchId || targetBranchId === 'all' || (targetBranchId === '' && superAdmin)
-    const bid = isAll ? null : targetBranchId
+    const isAll = privileged && (!targetBranchId || targetBranchId === 'all' || targetBranchId === '')
+    const effectiveTarget = targetBranchId || userBranchId
+    const bid = isAll ? null : effectiveTarget
 
     let rows: Record<string, unknown>[]
     if (!bid) {
@@ -1084,7 +1140,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           p.category_id, cat.name AS category_name,
           CASE
             WHEN SUM(COALESCE(s.quantity, 0)) = 0 THEN 'out'
-            WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 'low'
+            WHEN SUM(COALESCE(s.quantity, 0)) <= COALESCE(p.min_stock_level, 5) THEN 'low'
             ELSE 'ok'
           END AS stock_status
         FROM products p
@@ -1094,7 +1150,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.unit, p.min_stock_level, p.selling_price, p.cost_price, p.category_id, cat.name
         ORDER BY
           CASE WHEN SUM(COALESCE(s.quantity, 0)) = 0 THEN 0
-               WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 1
+               WHEN SUM(COALESCE(s.quantity, 0)) <= COALESCE(p.min_stock_level, 5) THEN 1
                ELSE 2 END,
           p.name
       `).all() as Record<string, unknown>[]
@@ -1111,7 +1167,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           p.category_id, cat.name AS category_name,
           CASE
             WHEN SUM(COALESCE(s.quantity, 0)) = 0 THEN 'out'
-            WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 'low'
+            WHEN SUM(COALESCE(s.quantity, 0)) <= COALESCE(p.min_stock_level, 5) THEN 'low'
             ELSE 'ok'
           END AS stock_status
         FROM products p
@@ -1124,7 +1180,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         GROUP BY p.id, COALESCE(p.sku, p.id), p.name, p.unit, p.min_stock_level, p.selling_price, p.cost_price, p.category_id, cat.name
         ORDER BY
           CASE WHEN SUM(COALESCE(s.quantity, 0)) = 0 THEN 0
-               WHEN SUM(COALESCE(s.quantity, 0)) BETWEEN 1 AND 5 THEN 1
+               WHEN SUM(COALESCE(s.quantity, 0)) <= COALESCE(p.min_stock_level, 5) THEN 1
                ELSE 2 END,
           p.name
       `).all(bid, bid) as Record<string, unknown>[]
@@ -1209,6 +1265,11 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         WHERE scs.id = ?
       `).get(id) as Record<string, unknown> | undefined
       if (!session) return { success: false, error: 'Stock count not found' }
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const isPrivileged = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
+      if (!isPrivileged && String(session.branch_id) !== String(user?.branch_id || '')) {
+        return { success: false, error: 'Cannot view a stock count from another branch' }
+      }
       // pack_uom_name/pack_conversion_factor: the product's own configured
       // box/pack unit (product_uom, is_base=0), if any — lets the count
       // screen accept "N boxes + M pcs" instead of forcing everything into
@@ -1316,7 +1377,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const user = store.get('auth_user') as Record<string, unknown> | undefined
     const session = db.prepare('SELECT branch_id FROM stock_count_sessions WHERE id=?').get(id) as { branch_id: unknown } | undefined
     if (!session) return { success: false, error: 'Stock count not found' }
-    if (!currentPerms().all && user?.branch_id && session.branch_id !== user.branch_id) {
+    const isPrivileged = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
+    if (!isPrivileged && user?.branch_id && session.branch_id !== user.branch_id) {
       return { success: false, error: 'Cannot cancel a stock count from another branch' }
     }
     db.prepare(`UPDATE stock_count_sessions SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)

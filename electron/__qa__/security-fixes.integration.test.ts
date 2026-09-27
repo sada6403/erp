@@ -91,6 +91,7 @@ beforeAll(async () => {
   const { registerBatchHandlers } = await import('../ipc/batches')
   const { registerProductHandlers } = await import('../ipc/products')
   const { registerPurchaseHandlers } = await import('../ipc/purchases')
+  const { registerStockHandlers } = await import('../ipc/stocks')
   const { registerOrderHandlers } = await import('../ipc/orders')
   const { registerChitHandlers } = await import('../ipc/chits')
   const { registerCommissionHandlers } = await import('../ipc/commissions')
@@ -101,6 +102,7 @@ beforeAll(async () => {
   registerBatchHandlers()
   registerProductHandlers(fakeIpcMain)
   registerPurchaseHandlers(fakeIpcMain)
+  registerStockHandlers(fakeIpcMain)
   registerOrderHandlers(fakeIpcMain)
   registerChitHandlers(fakeIpcMain)
   registerCommissionHandlers(fakeIpcMain)
@@ -199,16 +201,27 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
 
   let poId: string
 
-  it('purchases:create ignores a spoofed branch_id from a non-admin and ties the PO to their own branch', async () => {
+  it('purchases:create rejects supplier procurement from a sub branch', async () => {
     setSession(mgrA)
     const res = await call('purchases:create', {
       supplier_id: SUPPLIER1, branch_id: BR_B,
       items: [{ product_id: PROD1, quantity: 5, unit_cost: 100 }],
     })
+    expect(res.success).toBe(false)
+  })
+
+  it('purchases:create always receives supplier stock into the main branch', async () => {
+    setSession(admin)
+    const res = await call('purchases:create', {
+      supplier_id: SUPPLIER1, branch_id: BR_B,
+      items: [{ product_id: PROD1, quantity: 5, unit_cost: 100 }],
+      open_whatsapp: false,
+      send_email: false,
+    })
     expect(res.success).toBe(true)
     poId = res.data.id
     const row = db.prepare('SELECT branch_id FROM purchase_orders WHERE id=?').get(poId) as { branch_id: string }
-    expect(row.branch_id).toBe(BR_A)
+    expect(row.branch_id).toBe('b1111111-1111-4111-8111-111111111111')
   })
 
   it('purchases:updateStatus rejects a Branch B caller acting on a Branch A PO', async () => {
@@ -218,9 +231,79 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
   })
 
   it('purchases:update rejects a draft PO edit with zero/negative quantity or cost', async () => {
-    setSession(mgrA)
+    setSession(admin)
     const res = await call('purchases:update', poId, { items: [{ product_id: PROD1, quantity: 0, unit_cost: 100 }] })
     expect(res.success).toBe(false)
+  })
+
+  let transferId: string
+
+  it('stocks:transfer lets a destination branch request stock from another branch', async () => {
+    db.prepare('INSERT OR REPLACE INTO stocks (id, product_id, branch_id, quantity, damaged_qty) VALUES (?,?,?,?,0)')
+      .run('sec-stock-a', PROD1, BR_A, 0)
+    db.prepare('INSERT OR REPLACE INTO stocks (id, product_id, branch_id, quantity, damaged_qty) VALUES (?,?,?,?,0)')
+      .run('sec-stock-b', PROD1, BR_B, 10)
+    setSession(mgrA)
+    const res = await call('stocks:transfer', {
+      product_id: PROD1,
+      from_branch_id: BR_B,
+      to_branch_id: BR_A,
+      quantity: 2,
+    })
+    expect(res.success).toBe(true)
+    transferId = res.data.id
+  })
+
+  it('stocks:transfer rejects a sub branch requesting stock for a different destination', async () => {
+    setSession(mgrA)
+    const res = await call('stocks:transfer', {
+      product_id: PROD1,
+      from_branch_id: BR_A,
+      to_branch_id: BR_B,
+      quantity: 1,
+    })
+    expect(res.success).toBe(false)
+  })
+
+  it('stocks:updateTransfer requires the source branch to approve', async () => {
+    setSession(mgrA)
+    const destinationAttempt = await call('stocks:updateTransfer', transferId, 'approved', {})
+    expect(destinationAttempt.success).toBe(false)
+
+    setSession(mgrB)
+    const sourceApproval = await call('stocks:updateTransfer', transferId, 'approved', {})
+    expect(sourceApproval.success).toBe(true)
+  })
+
+  it('stocks:updateTransfer lets only the destination receive and updates both branch balances', async () => {
+    setSession(mgrB)
+    const sourceReceiveAttempt = await call('stocks:updateTransfer', transferId, 'received', {})
+    expect(sourceReceiveAttempt.success).toBe(false)
+
+    setSession(mgrA)
+    const destinationReceive = await call('stocks:updateTransfer', transferId, 'received', {})
+    expect(destinationReceive.success).toBe(true)
+    const source = db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_B) as { quantity: number }
+    const destination = db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_A) as { quantity: number }
+    expect(source.quantity).toBe(8)
+    expect(destination.quantity).toBe(2)
+  })
+
+  it('cancelling an approved but undispatched transfer does not inflate source stock', async () => {
+    setSession(mgrA)
+    const created = await call('stocks:transfer', {
+      product_id: PROD1,
+      from_branch_id: BR_B,
+      to_branch_id: BR_A,
+      quantity: 1,
+    })
+    expect(created.success).toBe(true)
+    setSession(mgrB)
+    expect((await call('stocks:updateTransfer', created.data.id, 'approved', {})).success).toBe(true)
+    setSession(mgrA)
+    expect((await call('stocks:updateTransfer', created.data.id, 'cancelled', {})).success).toBe(true)
+    const source = db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_B) as { quantity: number }
+    expect(source.quantity).toBe(8)
   })
 
   let orderId: string

@@ -5,13 +5,17 @@ import Modal from '@/components/shared/Modal'
 import { AlertCircle, ArrowRightLeft, Plus, Lock, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { canManageAllBranchStock } from '@/lib/branchAccess'
 
 export default function InventoryPage() {
+  const { user } = useAuthStore()
+  const canManageAllBranches = canManageAllBranchStock(user)
+  const ownBranchId = String(user?.branch?.id || user?.branch_id || '')
   const [stocks, setStocks]       = useState<Record<string, unknown>[]>([])
   const [branchSummary, setBranchSummary] = useState<Record<string, unknown>[]>([])
   const [branches, setBranches] = useState<Record<string, unknown>[]>([])
   const [catalogTotalProducts, setCatalogTotalProducts] = useState(0)
-  const [branchId, setBranchId] = useState('')
+  const [branchId, setBranchId] = useState(() => canManageAllBranches ? '' : ownBranchId)
   const [transfers, setTransfers] = useState<Record<string, unknown>[]>([])
   const [movements, setMovements] = useState<Record<string, unknown>[]>([])
   const [tab, setTab]             = useState<'stock' | 'transfers' | 'movements'>('stock')
@@ -51,17 +55,16 @@ export default function InventoryPage() {
     }
   }
 
-  useEffect(() => { load() }, [movementType])
-  useEffect(() => { load() }, [branchId])
+  useEffect(() => { load() }, [movementType, branchId])
 
   const lowStock = stocks.filter(s => {
     const qty = Number(s.quantity || 0)
-    return qty >= 1 && qty <= 5
+    return qty >= 1 && qty <= Number(s.min_stock_level ?? 5)
   })
   const outOfStockRows = stocks.filter(s => Number(s.quantity || 0) === 0)
   const activeSummary = branchId
     ? branchSummary.find(b => String(b.id) === branchId)
-    : branchSummary.find(b => String(b.code || '').toUpperCase() === 'MAIN') || branchSummary[0]
+    : undefined
   const summaryProductCount = activeSummary ? Number(activeSummary.product_count || 0) : 0
   const summaryLowStockCount = activeSummary ? Number(activeSummary.low_stock_count || 0) : lowStock.length
   const summaryOutOfStock = activeSummary ? Number(activeSummary.out_of_stock_count || 0) : outOfStockRows.length
@@ -102,8 +105,8 @@ export default function InventoryPage() {
             <div className="w-72">
             <label className="block text-xs font-medium mb-1.5 text-slate-400">Branch</label>
             <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input">
-              <option value="">All Branches</option>
-              {branches.map(b => (
+              {canManageAllBranches && <option value="">All Branches</option>}
+              {branches.filter(b => canManageAllBranches || String(b.id) === ownBranchId).map(b => (
                 <option key={b.id as string} value={b.id as string}>
                   {b.name as string}
                 </option>
@@ -111,13 +114,13 @@ export default function InventoryPage() {
             </select>
             </div>
             <div className="flex flex-wrap gap-2 flex-1">
-              <button
+              {canManageAllBranches && <button
                 onClick={() => setBranchId('')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium border transition-all ${branchId === '' ? 'bg-brand-600 text-white border-brand-500' : 'bg-surface-800 text-slate-300 border-slate-700 hover:border-slate-500'}`}
               >
                 All Branches
-              </button>
-              {branches.map((b: any) => (
+              </button>}
+              {branches.filter(b => canManageAllBranches || String(b.id) === ownBranchId).map((b: any) => (
                 <button
                   key={`branch-btn-${String(b.id)}`}
                   onClick={() => setBranchId(String(b.id))}
@@ -142,9 +145,9 @@ export default function InventoryPage() {
             ))}
           </div>
         </div>
-        {activeSummary && (
+        {(activeSummary || !branchId) && (
           <p className="text-xs" style={{ color: 'var(--text-3)' }}>
-            Showing summary for <strong style={{ color: 'var(--text-2)' }}>{String(activeSummary.name || 'Main Branch')}</strong>
+            Showing summary for <strong style={{ color: 'var(--text-2)' }}>{activeSummary ? String(activeSummary.name) : 'All Branches (calculated total)'}</strong>
           </p>
         )}
       </div>
@@ -152,7 +155,7 @@ export default function InventoryPage() {
       {lowStock.length > 0 && (
         <div className="mx-6 my-3 flex items-center gap-2 bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-2.5">
           <AlertCircle size={14} className="text-red-400 flex-shrink-0" />
-          <p className="text-sm text-red-400"><strong>{lowStock.length}</strong> items are low stock (1 to 5 units)</p>
+          <p className="text-sm text-red-400"><strong>{lowStock.length}</strong> items are below their configured minimum stock level</p>
         </div>
       )}
 
@@ -185,29 +188,32 @@ export default function InventoryPage() {
                     <td className="table-cell font-mono text-xs text-slate-400">{s.sku as string}</td>
                     <td className="table-cell text-slate-400">{s.warehouse_name as string || 'Main'}</td>
                     <td className="table-cell">
-                      <span className={`font-bold ${Number(s.quantity || 0) === 0 ? 'text-red-400' : Number(s.quantity || 0) <= 5 ? 'text-yellow-400' : 'text-green-400'}`}>
+                      <span className={`font-bold ${Number(s.quantity || 0) === 0 ? 'text-red-400' : Number(s.quantity || 0) <= Number(s.min_stock_level ?? 5) ? 'text-yellow-400' : 'text-green-400'}`}>
                         {s.quantity as number}
                       </span>
                     </td>
                     <td className="table-cell text-slate-400">{s.damaged_qty as number}</td>
                     <td className="table-cell">
                       {Number(s.quantity || 0) <= 0 ? <span className="badge-red">Out of Stock</span>
-                      : Number(s.quantity || 0) <= 5 ? <span className="badge-yellow">Low Stock</span>
+                      : Number(s.quantity || 0) <= Number(s.min_stock_level ?? 5) ? <span className="badge-yellow">Low Stock</span>
                       : <span className="badge-green">In Stock</span>}
                     </td>
                     <td className="table-cell">
-                      <AdjustBtn stockId={s.id as string} productId={s.product_id as string} branchId={s.branch_id as string} current={s.quantity as number} onDone={load} />
+                      {branchId ? (
+                        <AdjustBtn stockId={s.id as string} productId={s.product_id as string} branchId={branchId} current={s.quantity as number} onDone={load} />
+                      ) : (
+                        <span className="text-xs" style={{ color: 'var(--text-3)' }}>Calculated total</span>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
             <div className="px-6 pb-6 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-              {branchSummary.map((b: any) => {
-                const isMain = String(b.code || '').toUpperCase() === 'MAIN'
-                const low = isMain ? summaryLowStockCount : Number(b.low_stock_count || 0)
-                const out = isMain ? summaryOutOfStock : Number(b.out_of_stock_count || 0)
-                const products = isMain ? totalProducts : Number(b.product_count || 0)
+              {branchSummary.filter((b: any) => canManageAllBranches || String(b.id) === ownBranchId).map((b: any) => {
+                const low = Number(b.low_stock_count || 0)
+                const out = Number(b.out_of_stock_count || 0)
+                const products = Number(b.product_count || 0)
                 return (
                   <div key={String(b.id)} className="rounded-xl border p-4" style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
                     <div className="flex items-start justify-between gap-3">
@@ -330,7 +336,7 @@ export default function InventoryPage() {
 
 function AdjustBtn({ stockId: _stockId, productId, branchId, current, onDone }: { stockId: string; productId: string; branchId: string; current: number; onDone: () => void }) {
   const { user } = useAuthStore()
-  const isAdmin = Boolean(((user?.role as unknown as Record<string, unknown>)?.permissions as Record<string, unknown> || {})?.all)
+  const isAdmin = canManageAllBranchStock(user)
   const targetRecordId = `${productId}-${branchId}`
 
   const [open, setOpen] = useState(false)
@@ -426,9 +432,12 @@ function AdjustBtn({ stockId: _stockId, productId, branchId, current, onDone }: 
 }
 
 function TransferModal({ onClose, onSave }: { onClose: () => void; onSave: () => void }) {
+  const { user } = useAuthStore()
+  const canChooseDestination = canManageAllBranchStock(user)
+  const ownBranchId = String(user?.branch?.id || user?.branch_id || '')
   const [products, setProducts] = useState<Record<string,unknown>[]>([])
   const [branches, setBranches] = useState<Record<string,unknown>[]>([])
-  const [form, setForm] = useState({ product_id: '', from_branch_id: '', to_branch_id: '', quantity: 1, notes: '' })
+  const [form, setForm] = useState({ product_id: '', from_branch_id: '', to_branch_id: ownBranchId, quantity: 1, notes: '' })
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
@@ -473,7 +482,7 @@ function TransferModal({ onClose, onSave }: { onClose: () => void; onSave: () =>
             </select>
           </div>
           <div><label className="block text-xs font-medium text-slate-400 mb-1">To Branch</label>
-            <select value={form.to_branch_id} onChange={e => setForm(p => ({...p, to_branch_id: e.target.value}))} className="input">
+            <select value={form.to_branch_id} onChange={e => setForm(p => ({...p, to_branch_id: e.target.value}))} className="input" disabled={!canChooseDestination}>
               <option value="">Select...</option>
               {branches.map(b => <option key={b.id as string} value={b.id as string}>{b.name as string}</option>)}
             </select>

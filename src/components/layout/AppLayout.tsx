@@ -16,6 +16,7 @@ import ThemeToggle from '@/components/shared/ThemeToggle'
 import { getHomeLabel, getLandingRoute, getSessionProfile, type SessionRoleKind } from '@/lib/sessionRouting'
 import { resolveImageSrc } from '@/lib/imageUrl'
 import ProductSyncModal from '@/components/shared/ProductSyncModal'
+import { canManageProcurement } from '@/lib/branchAccess'
 
 const MASKED_SECRET = '********'
 
@@ -423,6 +424,7 @@ export default function AppLayout() {
   const homeLabel = getHomeLabel(profile.kind)
   const roleName = user?.role?.name || 'System User'
   const userBranchId = (user?.branch?.id || (user as unknown as Record<string, unknown>)?.branch_id as string) ?? ''
+  const procurementAllowed = canManageProcurement(user)
 
   useEffect(() => {
     if (!userBranchId) return
@@ -431,7 +433,7 @@ export default function AppLayout() {
       try {
         const res = await window.api.stocks.listTransfers({ status: 'pending_approval' }) as { success: boolean; data?: Record<string, unknown>[] }
         if (cancelled || !res.success || !res.data) return
-        setHasPendingStockRequests(res.data.some(t => String(t.to_branch_id) === userBranchId))
+        setHasPendingStockRequests(res.data.some(t => String(t.from_branch_id) === userBranchId))
       } catch { /* offline — leave last known state */ }
     }
     checkPending()
@@ -749,7 +751,9 @@ export default function AppLayout() {
                 collapsed={!sidebarOpen}
               />
             )}
-            {NAV_GROUPS.map(group => (
+            {NAV_GROUPS
+              .filter(group => procurementAllowed || !['Purchase Orders', 'Supplier Management'].includes(group.label))
+              .map(group => (
               <SidebarGroup
                 key={group.label}
                 group={group}

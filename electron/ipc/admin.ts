@@ -12,6 +12,7 @@ import { syncStockRow } from '../services/stockSync'
 import { validatePin, isAdminTypeRole } from '../services/pinPolicy'
 import Store from 'electron-store'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
+import { canManageProcurement } from '../services/branchAccess'
 
 /**
  * Builds a safe `SET` clause from a caller-supplied payload.
@@ -999,8 +1000,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: getDb().prepare('SELECT * FROM suppliers ORDER BY name').all() }
   })
   safeHandle(ipcMain, 'admin:suppliers:create', async (_e, p) => {
-    const perms = currentPerms()
-    if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
+    if (!canManageProcurement(getDb(), authUser())) return { success: false, error: 'Supplier management is available only at the main branch' }
     const name = String(p.name || '').trim()
     if (!name) return { success: false, error: 'Supplier name is required' }
     const dup = getDb().prepare('SELECT id FROM suppliers WHERE LOWER(name) = LOWER(?)').get(name) as { id: string } | undefined
@@ -1014,9 +1014,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     return { success: true, data: { id } }
   })
   safeHandle(ipcMain, 'admin:suppliers:update', async (_e, id: string, p) => {
-    const perms = currentPerms()
-    if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
     const db = getDb()
+    if (!canManageProcurement(db, authUser())) return { success: false, error: 'Supplier management is available only at the main branch' }
     const { fields, values } = safeUpdateFields(db, 'suppliers', p)
     if (fields) db.prepare(`UPDATE suppliers SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({ ...values, id })
     await enqueuSync('suppliers', id, 'UPDATE', { id, ...values })
@@ -1028,9 +1027,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
   // branches:delete uses; deactivating is the safe, reversible action and
   // matches this table's existing is_active column/convention.
   safeHandle(ipcMain, 'admin:suppliers:delete', async (_e, id: string) => {
-    const perms = currentPerms()
-    if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory management access required' }
     const db = getDb()
+    if (!canManageProcurement(db, authUser())) return { success: false, error: 'Supplier management is available only at the main branch' }
     const supplier = db.prepare('SELECT id, name, is_active FROM suppliers WHERE id=?').get(id) as { id: string; name: string; is_active: number } | undefined
     if (!supplier) return { success: false, error: 'Supplier not found' }
     if (!supplier.is_active) return { success: false, error: 'This supplier is already deleted' }

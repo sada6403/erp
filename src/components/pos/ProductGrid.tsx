@@ -26,7 +26,8 @@ function CrossBranchModal({
 }) {
   const { user } = useAuthStore()
   const u = user as unknown as Record<string, unknown>
-  const myBranchId = String(u?.branch_id ?? '')
+  const nestedBranch = u?.branch as { id?: unknown } | undefined
+  const myBranchId = String(nestedBranch?.id || u?.branch_id || '')
 
   const [branches, setBranches]   = useState<BranchStock[]>([])
   const [loading, setLoading]     = useState(true)

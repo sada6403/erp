@@ -4,16 +4,11 @@ import Modal from '@/components/shared/Modal'
 import { Plus, ArrowLeft, CheckCircle, XCircle, ClipboardList, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
+import { canManageAllBranchStock } from '@/lib/branchAccess'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 
 type Session = Record<string, unknown>
 type CountItem = Record<string, unknown>
-
-function getPerms(u: unknown): Record<string, unknown> {
-  const user = u as Record<string, unknown>
-  return (user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>
-    || user?.permissions as Record<string, unknown> || {}
-}
 
 export default function StockCountPage() {
   const [sessions, setSessions]       = useState<Session[]>([])
@@ -400,10 +395,8 @@ function StatusBadge({ status }: { status: string }) {
 
 function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => void }) {
   const { user } = useAuthStore()
-  const perms = getPerms(user)
-  const isAdmin = Boolean(perms.all)
-  const u = user as unknown as Record<string, unknown>
-  const myBranchId = String(u?.branch_id ?? '')
+  const isAdmin = canManageAllBranchStock(user)
+  const myBranchId = String(user?.branch?.id || user?.branch_id || '')
 
   const [notes, setNotes] = useState('')
   const [branches, setBranches] = useState<Record<string, unknown>[]>([])
@@ -420,7 +413,7 @@ function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => v
         toast.error('Failed to load branches')
       }
     }).catch((err: Error) => toast.error(err.message || 'Failed to load branches'))
-  }, [isAdmin])
+  }, [isAdmin, myBranchId])
 
   const myBranchName = String((user as unknown as { branch?: { name?: string } })?.branch?.name || 'your branch')
 
