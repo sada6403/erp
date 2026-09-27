@@ -29,7 +29,11 @@ mysqlSuite('Sync contract against disposable MySQL database', () => {
         ? ',product_id VARCHAR(191),branch_id VARCHAR(191),warehouse_id VARCHAR(191),quantity DECIMAL(12,2),damaged_qty DECIMAL(12,2) DEFAULT 0'
         : table === 'products' ? ',name VARCHAR(255)'
         : table === 'branches' ? ',name VARCHAR(255),code VARCHAR(50) UNIQUE,is_active BOOLEAN DEFAULT 1'
-        : table === 'users' ? ',branch_id VARCHAR(191)'
+        : table === 'roles' ? ',name VARCHAR(255) UNIQUE,permissions JSON,is_system BOOLEAN DEFAULT 0'
+        : table === 'users' ? ',branch_id VARCHAR(191),role_id VARCHAR(191),name VARCHAR(255),email VARCHAR(255) UNIQUE,password_hash VARCHAR(255),is_active BOOLEAN DEFAULT 1'
+        : table === 'invoices' ? ',branch_id VARCHAR(191),cashier_id VARCHAR(191),approved_by VARCHAR(191)'
+        : table === 'payments' ? ',invoice_id VARCHAR(191),received_by VARCHAR(191)'
+        : table === 'audit_logs' ? ',user_id VARCHAR(191),branch_id VARCHAR(191)'
         : ''
       await connection.query(`CREATE TABLE \`${table}\` (id VARCHAR(191) PRIMARY KEY${fields})`)
     }
@@ -69,6 +73,21 @@ mysqlSuite('Sync contract against disposable MySQL database', () => {
     expect(stock).toHaveLength(0)
     expect(archive[0].reason).toContain('product and branch')
     expect(tombstone).toHaveLength(1)
+  })
+  it('restores inactive historical actors and branches required by financial/audit records', async () => {
+    await connection.query("INSERT INTO invoices(id,branch_id,cashier_id) VALUES ('historical-invoice','deleted-branch','deleted-user')")
+    await connection.query("INSERT INTO payments(id,invoice_id,received_by) VALUES ('historical-payment','historical-invoice','deleted-user')")
+    await connection.query("INSERT INTO audit_logs(id,user_id,branch_id) VALUES ('historical-audit','other-deleted-user','deleted-audit-branch')")
+    await repairOrphanedSyncData(client)
+    await repairOrphanedSyncData(client)
+    const [users] = await connection.query("SELECT id,is_active,password_hash FROM users WHERE id IN ('deleted-user','other-deleted-user') ORDER BY id")
+    const [branches] = await connection.query("SELECT id,is_active FROM branches WHERE id IN ('deleted-branch','deleted-audit-branch') ORDER BY id")
+    const [role] = await connection.query("SELECT permissions FROM roles WHERE name='Recovered Historical User'")
+    expect(users).toHaveLength(2)
+    expect(users.every((user: any) => Number(user.is_active) === 0 && user.password_hash === '')).toBe(true)
+    expect(branches).toHaveLength(2)
+    expect(branches.every((branch: any) => Number(branch.is_active) === 0)).toBe(true)
+    expect(role).toHaveLength(1)
   })
   it('archives equal duplicates and enforces uniqueness even for NULL warehouses', async () => {
     await connection.query("INSERT INTO stocks(id,product_id,branch_id,quantity) VALUES ('s1','p','b',10),('s2','p','b',10)")

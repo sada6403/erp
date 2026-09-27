@@ -17,16 +17,56 @@ export async function repairOrphanedSyncData(client: QueryClient): Promise<void>
 
   await client.query('START TRANSACTION')
   try {
+    const ensureHistoricalBranch = async (branchId: string) => {
+      const suffix = createHash('sha256').update(branchId).digest('hex').slice(0, 12).toUpperCase()
+      await client.query(`INSERT INTO branches(id,name,code,is_active)
+        VALUES (?,?,?,0) ON DUPLICATE KEY UPDATE id=VALUES(id)`, [
+        branchId, `Recovered historical branch (${branchId})`, `RECOVERED-${suffix}`,
+      ])
+    }
+
     const { rows: missingBranches } = await client.query<{ branch_id: string }>(`
       SELECT DISTINCT u.branch_id
       FROM users u LEFT JOIN branches b ON b.id=u.branch_id
       WHERE u.branch_id IS NOT NULL AND b.id IS NULL
       FOR UPDATE`)
     for (const { branch_id: branchId } of missingBranches) {
-      const suffix = createHash('sha256').update(branchId).digest('hex').slice(0, 12).toUpperCase()
-      await client.query(`INSERT INTO branches(id,name,code,is_active)
-        VALUES (?,? ,?,0) ON DUPLICATE KEY UPDATE id=VALUES(id)`, [
-        branchId, `Recovered historical branch (${branchId})`, `RECOVERED-${suffix}`,
+      await ensureHistoricalBranch(branchId)
+    }
+
+    // Audit and financial records must retain their original actor/branch IDs.
+    // Restore inactive, no-permission placeholders instead of dropping the FK,
+    // reassigning history to a live account, or inventing credentials.
+    const { rows: referencedBranches } = await client.query<{ branch_id: string }>(`
+      SELECT DISTINCT refs.branch_id FROM (
+        SELECT branch_id FROM audit_logs WHERE branch_id IS NOT NULL
+        UNION ALL SELECT branch_id FROM invoices WHERE branch_id IS NOT NULL
+      ) refs LEFT JOIN branches b ON b.id=refs.branch_id
+      WHERE b.id IS NULL`)
+    for (const { branch_id: branchId } of referencedBranches) {
+      await ensureHistoricalBranch(branchId)
+    }
+
+    const historicalRoleId = '00000000-0000-4000-8000-000000000001'
+    await client.query(`INSERT INTO roles(id,name,permissions,is_system)
+      VALUES (?,'Recovered Historical User',JSON_OBJECT(),1)
+      ON DUPLICATE KEY UPDATE id=VALUES(id)`, [historicalRoleId])
+    const { rows: referencedUsers } = await client.query<{ user_id: string; branch_id: string | null }>(`
+      SELECT refs.user_id, MAX(refs.branch_id) AS branch_id FROM (
+        SELECT cashier_id AS user_id, branch_id FROM invoices WHERE cashier_id IS NOT NULL
+        UNION ALL SELECT approved_by, branch_id FROM invoices WHERE approved_by IS NOT NULL
+        UNION ALL SELECT p.received_by, i.branch_id FROM payments p
+          LEFT JOIN invoices i ON i.id=p.invoice_id WHERE p.received_by IS NOT NULL
+        UNION ALL SELECT user_id, branch_id FROM audit_logs WHERE user_id IS NOT NULL
+      ) refs LEFT JOIN users u ON u.id=refs.user_id
+      WHERE u.id IS NULL GROUP BY refs.user_id`)
+    for (const { user_id: userId, branch_id: branchId } of referencedUsers) {
+      const suffix = createHash('sha256').update(userId).digest('hex').slice(0, 24)
+      await client.query(`INSERT IGNORE INTO users
+        (id,branch_id,role_id,name,email,password_hash,is_active)
+        VALUES (?,?,?,?,?,'',0)`, [
+        userId, branchId, historicalRoleId,
+        `Recovered historical user (${userId})`, `recovered-${suffix}@invalid.local`,
       ])
     }
 
