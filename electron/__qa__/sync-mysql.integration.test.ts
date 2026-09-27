@@ -100,13 +100,13 @@ mysqlSuite('Sync contract against disposable MySQL database', () => {
     expect(archive).toHaveLength(2)
     await expect(connection.query("INSERT INTO stocks(id,product_id,branch_id,quantity) VALUES ('s3','p','b',10)")).rejects.toThrow()
   })
-  it('updates the canonical stock row and rejects a stale second-device balance', async () => {
+  it('updates the canonical stock row and merges a stale second-device delta', async () => {
     await applySyncOperation(client, { table: 'stocks', operation: 'INSERT', recordId: 'device-stock', record: { id: 'device-stock', product_id: 'p', branch_id: 'b', quantity: 9, _base_stock: { quantity: 10 } } })
-    await expect(applySyncOperation(client, { table: 'stocks', operation: 'INSERT', recordId: 'other-device', record: { id: 'other-device', product_id: 'p', branch_id: 'b', quantity: 8, _base_stock: { quantity: 10 } } })).rejects.toThrow('cloud balance changed')
+    await applySyncOperation(client, { table: 'stocks', operation: 'INSERT', recordId: 'other-device', record: { id: 'other-device', product_id: 'p', branch_id: 'b', quantity: 8, _base_stock: { quantity: 10 } } })
     const [rows] = await connection.query('SELECT id,quantity FROM stocks')
     expect(rows).toHaveLength(1)
     expect(rows[0].id).toBe('s1')
-    expect(Number(rows[0].quantity)).toBe(9)
+    expect(Number(rows[0].quantity)).toBe(7)
   })
   it('does not publish a deletion tombstone for a rolled-back foreign-key failure', async () => {
     const [before] = await connection.query('SELECT id FROM sync_deletions')

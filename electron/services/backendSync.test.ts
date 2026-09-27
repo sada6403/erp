@@ -47,11 +47,19 @@ describe('Backend sync write contract', () => {
     expect(insert[1]).not.toContain('device-id')
     expect(db.query.mock.calls.at(-1)?.[0]).toContain('RELEASE_LOCK')
   })
-  it('refuses stale stock overwrites from another branch device', async () => {
+  it('merges a stale device stock delta without overwriting another device balance', async () => {
     const db = client({ stocks: [{ id: 'canonical', quantity: 8, damaged_qty: 0 }] })
-    await expect(applySyncOperation(db as any, { table: 'stocks', operation: 'INSERT', recordId: 'p', record: {
+    await applySyncOperation(db as any, { table: 'stocks', operation: 'INSERT', recordId: 'p', record: {
       product_id: 'p', branch_id: 'b', quantity: 9, _base_stock: { quantity: 10 },
-    } })).rejects.toThrow('cloud balance changed')
+    } })
+    const insert = db.query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO `stocks`'))!
+    expect(insert[1]).toContain(7)
+  })
+  it('rejects a concurrent stock merge that would create a negative balance', async () => {
+    const db = client({ stocks: [{ id: 'canonical', quantity: 2, damaged_qty: 0 }] })
+    await expect(applySyncOperation(db as any, { table: 'stocks', operation: 'INSERT', recordId: 'p', record: {
+      product_id: 'p', branch_id: 'b', quantity: 4, _base_stock: { quantity: 10 },
+    } })).rejects.toThrow('would be negative')
     expect(db.query.mock.calls.some(([sql]) => sql.startsWith('INSERT INTO `stocks`'))).toBe(false)
   })
   it('refuses to pick one duplicate stock balance arbitrarily', async () => {

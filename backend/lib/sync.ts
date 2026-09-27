@@ -253,12 +253,34 @@ async function applyOperation(
     if (existing.rows.length > 1) throw new Error('Stock conflict: duplicate cloud balances require reconciliation')
     const current = existing.rows[0]
     if (current && operation !== 'DELETE') {
-      const same = Number(record.quantity) === Number(current.quantity)
-        && Number(record.damaged_qty ?? 0) === Number(current.damaged_qty ?? 0)
+      const incomingQuantity = Number(record.quantity)
+      const incomingDamaged = Number(record.damaged_qty ?? 0)
+      const currentQuantity = Number(current.quantity)
+      const currentDamaged = Number(current.damaged_qty ?? 0)
+      if (![incomingQuantity, incomingDamaged, currentQuantity, currentDamaged].every(Number.isFinite)) {
+        throw new Error('Stock conflict: invalid quantity supplied')
+      }
+      const same = incomingQuantity === currentQuantity && incomingDamaged === currentDamaged
       const base = input.record._base_stock as { quantity?: number; damaged_qty?: number } | undefined
-      if (!same && (!base || Number(base.quantity) !== Number(current.quantity)
-        || Number(base.damaged_qty ?? 0) !== Number(current.damaged_qty ?? 0))) {
-        throw new Error('Stock conflict: cloud balance changed; review local and cloud quantities before retrying')
+      if (!same) {
+        const baseQuantity = Number(base?.quantity)
+        const baseDamaged = Number(base?.damaged_qty ?? 0)
+        if (!base || !Number.isFinite(baseQuantity) || !Number.isFinite(baseDamaged)) {
+          throw new Error('Stock conflict: this older device did not provide a merge baseline')
+        }
+        if (baseQuantity !== currentQuantity || baseDamaged !== currentDamaged) {
+          // The device changed stock from its last cloud baseline while another
+          // device changed the same business key. Preserve both operations by
+          // applying only this event's delta to the locked current balance.
+          // The surrounding event receipt transaction makes retries idempotent.
+          const mergedQuantity = Number((currentQuantity + incomingQuantity - baseQuantity).toFixed(6))
+          const mergedDamaged = Number((currentDamaged + incomingDamaged - baseDamaged).toFixed(6))
+          if (mergedQuantity < 0 || mergedDamaged < 0) {
+            throw new Error('Stock conflict: merged balance would be negative; manual review required')
+          }
+          record.quantity = mergedQuantity
+          record.damaged_qty = mergedDamaged
+        }
       }
     }
     record.id = current?.id || record.id || randomUUID()
