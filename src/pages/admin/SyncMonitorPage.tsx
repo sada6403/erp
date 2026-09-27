@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import { useSyncStatus } from '@/hooks/useSyncStatus'
 import { RefreshCw, Wifi, WifiOff, CheckCircle2, AlertCircle, Clock, FlaskConical, Trash2, Activity } from 'lucide-react'
@@ -27,35 +27,38 @@ export default function SyncMonitorPage() {
   const [diagnosing, setDiagnosing] = useState(false)
   const [diagSteps, setDiagSteps] = useState<DiagStep[]>([])
   const [queue, setQueue] = useState<QueueItem[]>([])
+  const queueRefreshRunning = useRef(false)
 
   const loadQueue = useCallback(async () => {
+    if (queueRefreshRunning.current) return
+    queueRefreshRunning.current = true
     try {
       const res = await window.api.sync.queue()
-      if (res.success) setQueue(res.data as QueueItem[])
+      if (res.success) {
+        const next = res.data as QueueItem[]
+        setQueue(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+      }
       else toast.error(res.error || 'Failed to load sync queue')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load sync queue')
+    } finally {
+      queueRefreshRunning.current = false
     }
   }, [])
 
-  // Reload the queue table and the status card together, on the same tick —
-  // previously this page ran its own independent 10s setInterval calling
-  // only loadQueue(), while useSyncStatus() polled the summary counts on a
-  // second, unsynchronized 10s timer. A queue-changing event landing between
-  // the two ticks made the status card and the table transiently disagree
-  // (e.g. "0 pending" card next to a table still showing 1 row) for up to
-  // ~10s. useSyncStatus's own internal timer keeps running too (other
-  // consumers like AppLayout's indicator depend on it), so this is
-  // deliberately an extra, page-local refresh, not a replacement for it.
+  // Action handlers reload the queue table and status card together so their
+  // values stay aligned.
+  // The periodic timer below only reloads queue rows because useSyncStatus
+  // already owns the summary polling interval.
   const refreshAll = useCallback(async () => {
     await Promise.all([loadQueue(), refreshStatus()])
   }, [loadQueue, refreshStatus])
 
   useEffect(() => {
-    refreshAll()
-    const interval = setInterval(refreshAll, 10_000)
+    void loadQueue()
+    const interval = setInterval(() => { void loadQueue() }, 15_000)
     return () => clearInterval(interval)
-  }, [refreshAll])
+  }, [loadQueue])
 
   const handleSync = async () => {
     setSyncing(true)

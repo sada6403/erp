@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import toast from 'react-hot-toast'
 
 interface SyncStatus {
@@ -16,7 +16,10 @@ let lastOnlineSyncAt = 0
 export function useSyncStatus() {
   const [status, setStatus] = useState<SyncStatus>({ pending: 0, failed: 0, online: navigator.onLine })
 
-  const refresh = async () => {
+  // Keep this callback stable. Consumers use it in effect dependencies; a new
+  // function on every render can turn refresh -> setState -> render into an
+  // unbounded IPC loop (the Sync Monitor page hit exactly that path).
+  const refresh = useCallback(async () => {
     try {
       const res = await window.api.sync.status()
       if (!res.success) return
@@ -28,18 +31,19 @@ export function useSyncStatus() {
         return keys.every(k => next[k] === s[k]) ? s : next
       })
     } catch {}
-  }
+  }, [])
 
   useEffect(() => {
-    refresh()
+    void refresh()
     const interval = setInterval(refresh, 10_000)
+    let onlineRefreshTimer: ReturnType<typeof setTimeout> | null = null
     const onOnline  = () => {
       setStatus(s => ({ ...s, online: true }))
       const now = Date.now()
       if (now - lastOnlineSyncAt > 15_000) {
         lastOnlineSyncAt = now
         window.api.sync.trigger().catch(() => undefined)
-        setTimeout(refresh, 1500)
+        onlineRefreshTimer = setTimeout(() => { void refresh() }, 1500)
       }
     }
     const onOffline = () => setStatus(s => ({ ...s, online: false }))
@@ -47,17 +51,18 @@ export function useSyncStatus() {
     window.addEventListener('offline', onOffline)
     return () => {
       clearInterval(interval)
+      if (onlineRefreshTimer) clearTimeout(onlineRefreshTimer)
       window.removeEventListener('online',  onOnline)
       window.removeEventListener('offline', onOffline)
     }
-  }, [])
+  }, [refresh])
 
-  const triggerSync = async () => {
+  const triggerSync = useCallback(async () => {
     const result = await window.api.sync.trigger()
     if (!result.success) toast.error(result.error || 'Synchronization incomplete')
     await refresh()
     return result.success
-  }
+  }, [refresh])
 
   // Exposed so a page showing the full queue (SyncMonitorPage) can refresh
   // this status card at the exact same moment it reloads its own queue table
