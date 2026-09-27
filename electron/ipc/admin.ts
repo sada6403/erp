@@ -1872,6 +1872,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const clearEventId = crypto.randomUUID()
     try {
       await cloud.push({
+        eventId: `clear-${clearEventId}`,
         table: 'data_clear_events',
         operation: 'INSERT',
         recordId: clearEventId,
@@ -1899,6 +1900,11 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     store.delete('auth_user')
     store.delete('auth_token')
     store.delete('last_pull_timestamp')
+    store.delete('sync_table_cursors_v2')
+    store.delete('sync_pull_errors')
+    store.delete('last_successful_sync_v2_at')
+    store.delete('sync_cycle_error')
+    store.delete('last_seen_watermark')
 
     return { success: true }
   })
@@ -1989,6 +1995,11 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     store.delete('auth_user')
     store.delete('auth_token')
     store.delete('last_pull_timestamp')
+    store.delete('sync_table_cursors_v2')
+    store.delete('sync_pull_errors')
+    store.delete('last_successful_sync_v2_at')
+    store.delete('sync_cycle_error')
+    store.delete('last_seen_watermark')
     return { success: true }
   })
 

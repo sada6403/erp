@@ -685,12 +685,12 @@ export default function AppLayout() {
         {isAdmin ? (
           <button onClick={triggerSync} className="relative p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors" title={`Sync - ${status.pending} pending`} style={{ color: 'var(--text-3)' }}>
             {status.online ? <Wifi size={16} className="text-green-500" /> : <WifiOff size={16} className="text-red-400" />}
-            {status.failed > 0 && <AlertCircle size={12} className="absolute right-0 top-0 text-yellow-400" />}
+            {(status.failed > 0 || status.error) && <AlertCircle size={12} className="absolute right-0 top-0 text-yellow-400" />}
           </button>
         ) : (
           <span className="relative p-2 rounded-lg" title={`Auto sync - ${status.pending} pending`} style={{ color: 'var(--text-3)' }}>
             {status.online ? <Wifi size={16} className="text-green-500" /> : <WifiOff size={16} className="text-red-400" />}
-            {status.pending > 0 && <span className="absolute right-0 top-0 h-2 w-2 rounded-full bg-yellow-400" />}
+            {(status.pending > 0 || status.error) && <span className="absolute right-0 top-0 h-2 w-2 rounded-full bg-yellow-400" />}
           </span>
         )}
 

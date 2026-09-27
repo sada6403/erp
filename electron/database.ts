@@ -39,6 +39,9 @@ export async function initDatabase(): Promise<void> {
   // schema.sql), so a fresh install silently ended up missing columns that
   // sync and login code assume exist. Every statement here is guarded by
   // hasColumn()/hasTable(), so re-running on an already-migrated DB is a no-op.
+  db.exec(`CREATE TABLE IF NOT EXISTS sync_stock_baselines (
+    record_id TEXT PRIMARY KEY, quantity REAL NOT NULL, damaged_qty REAL NOT NULL DEFAULT 0
+  )`)
   runMigrations()
 
   console.log('[DB] SQLite initialized at', dbPath)

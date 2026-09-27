@@ -46,11 +46,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'A valid since timestamp is required' }, { status: 400 })
     }
 
-    const { rows: data } = await company.tp.query(
-      `SELECT * FROM ${quoteIdentifier(table)} WHERE updated_at > ? ORDER BY updated_at ASC LIMIT 5000`,
-      [since]
+    const afterId = request.nextUrl.searchParams.get('afterId')
+    const sqlTime = new Date(since).toISOString().slice(0, 23).replace('T', ' ')
+    const { rows: data } = await company.tp.query<Record<string, unknown>>(
+      `SELECT * FROM ${quoteIdentifier(table)} WHERE ${afterId === null ? 'updated_at > ?' : '(updated_at > ? OR (updated_at = ? AND id > ?))'} ORDER BY updated_at ASC, id ASC LIMIT 5000`,
+      afterId === null ? [sqlTime] : [sqlTime, sqlTime, afterId]
     )
-    return NextResponse.json({ data })
+    const last = data[data.length - 1]
+    return NextResponse.json({ data, nextCursor: data.length === 5000 && last
+      ? { since: last.updated_at, afterId: String(last.id) } : null })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Change query failed'
     return NextResponse.json({ error: message }, { status: 400 })

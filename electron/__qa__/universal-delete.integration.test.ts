@@ -139,9 +139,11 @@ describe('Universal Delete — Suppliers (new soft-delete handler)', () => {
     expect(audit).toBeTruthy()
   })
 
-  it('enqueues the deletion for cloud sync (soft delete → UPDATE op carrying is_active:0, so the row itself is not tombstoned/lost)', async () => {
+  it('preserves the unsent INSERT while carrying is_active:0, so another device receives the deactivated row', async () => {
     const row = db.prepare(`SELECT operation, payload FROM sync_queue WHERE table_name='suppliers' AND record_id=? ORDER BY created_at DESC LIMIT 1`).get(supplierId) as { operation: string; payload: string }
-    expect(row.operation).toBe('UPDATE')
+    // The create and deactivation happened before the create reached cloud.
+    // Coalescing them into UPDATE would affect zero rows and lose the record.
+    expect(row.operation).toBe('INSERT')
     expect(JSON.parse(row.payload).is_active).toBe(0)
   })
 

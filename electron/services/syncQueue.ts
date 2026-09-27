@@ -37,14 +37,25 @@ export async function enqueuSync(
 ): Promise<void> {
   try {
     const db = getDb()
+    if (table === 'stocks' && operation !== 'DELETE' && !payload._base_stock) {
+      const baseline = db.prepare('SELECT quantity, damaged_qty FROM sync_stock_baselines WHERE record_id=?').get(recordId)
+      if (baseline) payload = { ...payload, _base_stock: baseline }
+    }
     const existing = db.prepare(`
-      SELECT id FROM sync_queue
+      SELECT id, operation, payload, status FROM sync_queue
       WHERE table_name = ? AND record_id = ? AND status IN ('pending','processing','failed')
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 1
-    `).get(table, recordId) as { id: string } | undefined
+    `).get(table, recordId) as { id: string; operation: string; payload: string; status: string } | undefined
 
+    // Preserve an unsent create and all fields when an offline edit coalesces.
+    // A processing event is immutable: its acknowledgement must not consume a newer edit.
     if (existing) {
+      payload = { ...JSON.parse(existing.payload), ...payload }
+      if (existing.operation === 'INSERT' && operation !== 'DELETE') operation = 'INSERT'
+    }
+
+    if (existing && existing.status !== 'processing') {
       db.prepare(`
         UPDATE sync_queue
         SET operation = ?,
@@ -63,7 +74,8 @@ export async function enqueuSync(
       VALUES (?, ?, ?, ?, ?)
     `).run(randomUUID(), table, recordId, operation, JSON.stringify(payload))
     wakeSyncService()
-  } catch {
-    // Non-blocking: sync queue failure shouldn't interrupt main flow
+  } catch (error) {
+    console.error('[SyncQueue] Failed to persist change', { table, recordId, operation, error })
+    throw error
   }
 }

@@ -1,6 +1,9 @@
 import { timingSafeEqual } from 'crypto'
 import type { NextRequest } from 'next/server'
 import { pool, tenantPool } from './db'
+import { ensureSyncSchema } from './syncSchema'
+import { repairIdenticalStocks } from './stockIdentity'
+import { repairOrphanedSyncData } from './syncDataRepair'
 
 export type CompanyContext = {
   id:          string
@@ -11,14 +14,29 @@ export type CompanyContext = {
   tp:          ReturnType<typeof tenantPool>
 }
 
-declare global { var _posErpTenantCompatibility: Set<string> | undefined }
+declare global {
+  var _posErpTenantCompatibility: Set<string> | undefined
+  var _posErpTenantCompatibilityInFlight: Map<string, Promise<void>> | undefined
+}
 
 const migratedTenantSchemas = global._posErpTenantCompatibility ?? new Set<string>()
 global._posErpTenantCompatibility = migratedTenantSchemas
+const tenantCompatibilityInFlight = global._posErpTenantCompatibilityInFlight ?? new Map<string, Promise<void>>()
+global._posErpTenantCompatibilityInFlight = tenantCompatibilityInFlight
 
 export async function ensureTenantCompatibility(dbSchema: string) {
   if (migratedTenantSchemas.has(dbSchema)) return
+  const existing = tenantCompatibilityInFlight.get(dbSchema)
+  if (existing) return existing
 
+  const task = runTenantCompatibility(dbSchema).finally(() => {
+    tenantCompatibilityInFlight.delete(dbSchema)
+  })
+  tenantCompatibilityInFlight.set(dbSchema, task)
+  return task
+}
+
+async function runTenantCompatibility(dbSchema: string) {
   const tp = tenantPool(dbSchema)
   const statements = [
     `ALTER TABLE categories ADD COLUMN description TEXT NULL`,
@@ -1357,6 +1375,14 @@ export async function ensureTenantCompatibility(dbSchema: string) {
     }
   }
 
+  await ensureSyncSchema(tp)
+  const syncConnection = await tp.connect()
+  try {
+    await repairOrphanedSyncData(syncConnection)
+    await repairIdenticalStocks(syncConnection)
+  } finally {
+    syncConnection.release()
+  }
   migratedTenantSchemas.add(dbSchema)
 }
 

@@ -1,4 +1,4 @@
-import { randomUUID } from 'crypto'
+import { randomUUID, createHash } from 'crypto'
 import type { QueryClient } from './db'
 
 export const ALLOWED_TABLES = new Set([
@@ -151,6 +151,49 @@ async function resolveRoleId(client: QueryClient, record: Record<string, unknown
 
 export async function applySyncOperation(
   client: QueryClient,
+  input: { table: string; operation: string; recordId: string; record: Record<string, unknown>; eventId?: string }
+): Promise<void> {
+  let lock: string | undefined
+  try {
+    if (input.table === 'stocks' && input.operation !== 'DELETE') {
+      const { product_id, branch_id, warehouse_id } = input.record
+      if (!product_id || !branch_id) throw new Error('Stock identity is required')
+      lock = 'stock:' + createHash('sha256').update(JSON.stringify([product_id, branch_id, warehouse_id ?? null])).digest('hex').slice(0, 56)
+      const { rows } = await client.query<{ acquired: number }>('SELECT GET_LOCK(?, 10) AS acquired', [lock])
+      if (Number(rows[0]?.acquired) !== 1) throw new Error('Stock is busy; retry shortly')
+    }
+    await client.query('START TRANSACTION')
+    if (input.eventId) {
+      const { rows } = await client.query<{ table_name: string; record_id: string }>(
+        'SELECT table_name,record_id FROM sync_push_receipts WHERE event_id=? FOR UPDATE',
+        [input.eventId]
+      )
+      if (rows.length) {
+        if (rows[0].table_name !== input.table || rows[0].record_id !== input.recordId) {
+          throw new Error('Sync event identity mismatch')
+        }
+        await client.query('COMMIT')
+        return
+      }
+    }
+    await applyOperation(client, input)
+    if (input.eventId) {
+      await client.query(
+        'INSERT INTO sync_push_receipts(event_id,table_name,record_id) VALUES (?,?,?)',
+        [input.eventId, input.table, input.recordId]
+      )
+    }
+    await client.query('COMMIT')
+  } catch (error) {
+    await client.query('ROLLBACK')
+    throw error
+  } finally {
+    if (lock) await client.query('SELECT RELEASE_LOCK(?)', [lock])
+  }
+}
+
+async function applyOperation(
+  client: QueryClient,
   input: {
     table: string
     operation: string
@@ -163,7 +206,7 @@ export async function applySyncOperation(
   let operation = input.operation
   const record = Object.fromEntries(
     Object.entries(input.record)
-      .filter(([key]) => columns.has(key))
+      .filter(([key]) => columns.has(key) && key !== 'sync_warehouse_key')
       .map(([key, value]) => [key, normalizeValue(value)])
   )
 
@@ -199,17 +242,32 @@ export async function applySyncOperation(
     await resolveRoleId(client, record, String(record.id || input.recordId))
   }
 
-  if (input.table === 'stocks' && !record.id) {
+  if (input.table === 'stocks' && operation !== 'DELETE') {
     // MySQL NULL-safe equals: <=>
-    const existing = await client.query<{ id: string }>(
-      `SELECT id FROM stocks
+    const existing = await client.query<{ id: string; quantity: number; damaged_qty: number }>(
+      `SELECT id, quantity, damaged_qty FROM stocks
         WHERE product_id = ? AND branch_id = ? AND warehouse_id <=> ?
-        LIMIT 1`,
+        FOR UPDATE`,
       [record.product_id, record.branch_id, record.warehouse_id ?? null]
     )
-    record.id = existing.rows[0]?.id || randomUUID()
+    if (existing.rows.length > 1) throw new Error('Stock conflict: duplicate cloud balances require reconciliation')
+    const current = existing.rows[0]
+    if (current && operation !== 'DELETE') {
+      const same = Number(record.quantity) === Number(current.quantity)
+        && Number(record.damaged_qty ?? 0) === Number(current.damaged_qty ?? 0)
+      const base = input.record._base_stock as { quantity?: number; damaged_qty?: number } | undefined
+      if (!same && (!base || Number(base.quantity) !== Number(current.quantity)
+        || Number(base.damaged_qty ?? 0) !== Number(current.damaged_qty ?? 0))) {
+        throw new Error('Stock conflict: cloud balance changed; review local and cloud quantities before retrying')
+      }
+    }
+    record.id = current?.id || record.id || randomUUID()
     if (!existing.rows[0] && operation === 'UPDATE') operation = 'INSERT'
   }
+
+  // A client-created timestamp cannot describe when an offline change arrived.
+  // The SQL below assigns updated_at from the database clock on every write.
+  if (columns.has('updated_at')) record.updated_at = null
 
   if (operation === 'DELETE') {
     // Record a tombstone BEFORE deleting so every other device's next pull
@@ -232,7 +290,7 @@ export async function applySyncOperation(
   if (keys.length === 0) throw new Error('No valid columns were supplied')
 
   if (operation === 'INSERT') {
-    const values = keys.map(key => record[key])
+    const values = keys.filter(key => key !== 'updated_at').map(key => record[key])
     // On upsert of an existing user, an empty credential must not replace a real one.
     const updateKeys = keys.filter(key =>
       key !== 'id' && key !== 'created_at'
@@ -247,7 +305,7 @@ export async function applySyncOperation(
     await client.query(
       `INSERT INTO ${quoteIdentifier(input.table)}
          (${keys.map(quoteIdentifier).join(', ')})
-       VALUES (${keys.map(() => '?').join(', ')})
+       VALUES (${keys.map(key => key === 'updated_at' ? 'CURRENT_TIMESTAMP' : '?').join(', ')})
        ON DUPLICATE KEY UPDATE ${updateSql}`,
       values
     )
@@ -255,13 +313,15 @@ export async function applySyncOperation(
   }
 
   if (operation === 'UPDATE') {
+    const targetId = String(record.id || input.recordId)
+    const existing = await client.query<{ id: string }>(`SELECT id FROM ${quoteIdentifier(input.table)} WHERE id = ? LIMIT 1`, [targetId])
+    if (!existing.rows.length) throw new Error('Sync target is missing; resend the complete record as INSERT')
     const updateKeys = keys.filter(key => key !== 'id' && key !== 'created_at')
     if (updateKeys.length === 0) return
-    const values = updateKeys.map(key => record[key])
-    const targetId = String(record.id || input.recordId)
+    const values = updateKeys.filter(key => key !== 'updated_at').map(key => record[key])
     await client.query(
       `UPDATE ${quoteIdentifier(input.table)}
-          SET ${updateKeys.map(key => `${quoteIdentifier(key)} = ?`).join(', ')}
+          SET ${updateKeys.map(key => `${quoteIdentifier(key)} = ${key === 'updated_at' ? 'CURRENT_TIMESTAMP' : '?'}`).join(', ')}
         WHERE id = ?`,
       [...values, targetId]
     )

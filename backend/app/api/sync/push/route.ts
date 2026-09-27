@@ -41,12 +41,13 @@ export async function POST(request: NextRequest) {
 
   try {
     const body = await request.json() as {
-      table?: unknown; operation?: unknown; recordId?: unknown; record?: unknown
+      table?: unknown; operation?: unknown; recordId?: unknown; record?: unknown; eventId?: unknown
     }
     if (
       typeof body.table !== 'string' || typeof body.operation !== 'string' ||
       typeof body.recordId !== 'string' || !body.record ||
-      typeof body.record !== 'object' || Array.isArray(body.record)
+      typeof body.record !== 'object' || Array.isArray(body.record) ||
+      (body.eventId !== undefined && typeof body.eventId !== 'string')
     ) {
       return NextResponse.json({ error: 'Invalid sync payload' }, { status: 400 })
     }
@@ -68,6 +69,7 @@ export async function POST(request: NextRequest) {
         operation: body.operation as string,
         recordId:  body.recordId as string,
         record:    body.record as Record<string, unknown>,
+        eventId:   body.eventId as string | undefined,
       })
     } finally {
       conn.release()

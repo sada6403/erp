@@ -39,20 +39,15 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
       return isNaN(d.getTime()) ? undefined : d.toISOString()
     }
 
-    const queueSyncIso = parseToIso(last?.synced_at)
-    const pullSyncIso = parseToIso(store.get('last_pull_timestamp') as string | undefined)
-    const cycleSyncIso = parseToIso(store.get('last_successful_sync_at') as string | undefined)
+    const latestIso = parseToIso(store.get('last_successful_sync_v2_at') as string | undefined)
+    const pullErrors = (store.get('sync_pull_errors') || {}) as Record<string, string>
+    return { success: true, data: {
+      pending, failed, last_sync: latestIso,
+      running: Boolean(store.get('sync_running')),
+      error: store.get('sync_cycle_error') || null,
+      pull_errors: pullErrors,
+    } }
 
-    let latestIso = queueSyncIso
-    for (const cand of [pullSyncIso, cycleSyncIso]) {
-      if (cand) {
-        if (!latestIso || new Date(cand).getTime() > new Date(latestIso).getTime()) {
-          latestIso = cand
-        }
-      }
-    }
-
-    return { success: true, data: { pending, failed, last_sync: latestIso } }
   })
 
   safeHandle(ipcMain, 'sync:queueCount', () => {
@@ -67,9 +62,8 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     {
       const { getSyncService } = await import('../services/syncService')
       const service = getSyncService()
-      await service.runOnce()
-      store.set('last_successful_sync_at', new Date().toISOString())
-      return { success: true }
+      const complete = await service.runOnce()
+      return complete ? { success: true } : { success: false, error: String(store.get('sync_cycle_error') || 'Sync is already running, paused, or device locked') }
     }
   })
 
@@ -132,7 +126,8 @@ let isRefreshing = false
       }
 
       // 3. Trigger full sync cycle to push offline items and pull latest updates
-      await service.runOnce()
+      const complete = await service.runOnce()
+      if (!complete) return { success: false, error: String(store.get('sync_cycle_error') || 'Sync is already running or paused; try again shortly') }
 
       // 4. Apply all pending deletions and deactivations
       const pending = db.prepare(`
@@ -182,7 +177,7 @@ let isRefreshing = false
         }
       })()
 
-      store.set('last_deletion_pull_timestamp', latestDeletedAt)
+      // Applying staged deletions must not skip unrelated failed tombstones.
 
       try {
         const { BrowserWindow } = await import('electron')

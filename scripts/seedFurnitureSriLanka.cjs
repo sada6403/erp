@@ -5,6 +5,7 @@ const os = require('os');
 const dbPath = path.join(os.homedir(), 'AppData', 'Roaming', 'pos-erp', 'pos-erp.db');
 console.log('Connecting to SQLite Database at:', dbPath);
 const db = new Database(dbPath);
+const finishMaintenance = require('./lib/maintenance-outbox.cjs').beginMaintenance(db, ['branches', 'categories', 'suppliers', 'products', 'stocks', 'customers']);
 
 // 1. SRI LANKAN DISTRICT BRANCHES
 const mainBranchId = 'b1111111-1111-4111-8111-111111111111';
@@ -1117,3 +1118,6 @@ console.log('\n--- ALL SRI LANKAN DISTRICT BRANCHES IN DB ---');
 console.log(db.prepare('SELECT id, name, code, phone, address FROM branches').all());
 
 console.log('\n--- SEEDING OF SRI LANKAN FURNITURE COMPANY COMPLETED SUCCESSFULLY ---');
+
+finishMaintenance();
+db.close();

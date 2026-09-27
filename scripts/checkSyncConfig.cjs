@@ -22,6 +22,7 @@ async function testPush() {
   console.log('Testing push of product to cloud:', prod.name);
   try {
     await cloud.push({
+      eventId: `manual-check-${prod.id}-${Date.now()}`,
       table: 'products',
       operation: 'INSERT',
       recordId: prod.id,

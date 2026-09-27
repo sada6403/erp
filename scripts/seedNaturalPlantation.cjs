@@ -15,6 +15,7 @@ if (!fs.existsSync(dbPath)) {
 const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+const finishMaintenance = require('./lib/maintenance-outbox.cjs').beginMaintenance(db, ['branches', 'categories', 'suppliers', 'products', 'stocks', 'customers']);
 
 // 1. Ensure Plantation Branches
 const branches = [
@@ -920,4 +921,5 @@ for (const c of customers) {
 console.log('Customers seeded:', customers.length);
 
 console.log('--- ALL NATURAL PLANTATION DATA SEEDED SUCCESSFULLY ---');
+finishMaintenance();
 db.close();

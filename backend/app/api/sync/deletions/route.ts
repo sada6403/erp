@@ -50,11 +50,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'A valid since timestamp is required' }, { status: 400 })
     }
 
-    const { rows: data } = await company.tp.query(
-      `SELECT table_name, record_id, deleted_at FROM sync_deletions WHERE deleted_at > ? ORDER BY deleted_at ASC LIMIT 5000`,
-      [since]
+    const afterId = request.nextUrl.searchParams.get('afterId')
+    const sqlTime = new Date(since).toISOString().slice(0, 23).replace('T', ' ')
+    const { rows: data } = await company.tp.query<Record<string, unknown>>(
+      `SELECT id, table_name, record_id, deleted_at FROM sync_deletions WHERE ${afterId === null ? 'deleted_at > ?' : '(deleted_at > ? OR (deleted_at = ? AND id > ?))'} ORDER BY deleted_at ASC, id ASC LIMIT 5000`,
+      afterId === null ? [sqlTime] : [sqlTime, sqlTime, afterId]
     )
-    return NextResponse.json({ data })
+    const last = data[data.length - 1]
+    return NextResponse.json({ data, nextCursor: data.length === 5000 && last
+      ? { since: last.deleted_at, afterId: String(last.id) } : null })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Deletion query failed'
     return NextResponse.json({ error: message }, { status: 400 })

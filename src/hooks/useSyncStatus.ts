@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react'
+import toast from 'react-hot-toast'
 
 interface SyncStatus {
   pending: number
   failed: number
   last_sync?: string
   online: boolean
+  running?: boolean
+  error?: string | null
+  pull_errors?: Record<string, string>
 }
 
 let lastOnlineSyncAt = 0
@@ -49,8 +53,10 @@ export function useSyncStatus() {
   }, [])
 
   const triggerSync = async () => {
-    await window.api.sync.trigger()
+    const result = await window.api.sync.trigger()
+    if (!result.success) toast.error(result.error || 'Synchronization incomplete')
     await refresh()
+    return result.success
   }
 
   // Exposed so a page showing the full queue (SyncMonitorPage) can refresh

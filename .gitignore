@@ -7,3 +7,6 @@ release/
 *.db-wal
 .env
 .env.local
+.local-backups/
+.local-audit/
+.next/

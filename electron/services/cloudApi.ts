@@ -52,6 +52,7 @@ export class CloudApi {
     operation: string
     recordId: string
     record: Record<string, unknown>
+    eventId: string
   }): Promise<void> {
     await this.request('/api/sync/push', {
       method: 'POST',
@@ -67,47 +68,29 @@ export class CloudApi {
   private static readonly CHANGES_PAGE_SIZE = 5000
   private static readonly CHANGES_MAX_PAGES = 200
 
-  async changes(table: string, since: string): Promise<Record<string, unknown>[]> {
-    const all: Record<string, unknown>[] = []
-    let cursor = since
+  private async pages<T>(endpoint: string, since: string, table?: string): Promise<T[]> {
+    const all: T[] = []
+    let cursor: { since: string; afterId?: string } = { since }
     for (let page = 0; page < CloudApi.CHANGES_MAX_PAGES; page++) {
-      const query = new URLSearchParams({ table, since: cursor })
-      const result = await this.request<{ data: Record<string, unknown>[] }>(
-        `/api/sync/changes?${query.toString()}`
-      )
-      const data = result.data
-      all.push(...data)
-      if (data.length < CloudApi.CHANGES_PAGE_SIZE) break
-      const lastUpdatedAt = data[data.length - 1]?.updated_at
-      if (!lastUpdatedAt || typeof lastUpdatedAt !== 'string') break
-      cursor = lastUpdatedAt
+      const query = new URLSearchParams({ ...cursor, ...(table ? { table } : {}) })
+      const result = await this.request<{ data: T[]; nextCursor?: { since: string; afterId: string } | null }>(
+        `${endpoint}?${query.toString()}`)
+      all.push(...result.data)
+      if (result.nextCursor === null || result.data.length < CloudApi.CHANGES_PAGE_SIZE) return all
+      if (!result.nextCursor) throw new Error('Cloud pagination upgrade required; refusing to skip equal-timestamp records')
+      if (JSON.stringify(cursor) === JSON.stringify(result.nextCursor)) throw new Error('Cloud pagination cursor did not advance')
+      cursor = result.nextCursor
       await new Promise(resolve => setTimeout(resolve, 300))
     }
-    return all
+    throw new Error('Cloud pagination safety limit reached; checkpoint was not advanced')
   }
 
-  // Deletion tombstones (see backend/app/api/sync/deletions/route.ts) — the
-  // `changes` endpoint can only ever report rows that still exist, so a
-  // device that already pulled a since-deleted row (e.g. a deleted branch)
-  // would keep it forever without this. Same paging shape as `changes`,
-  // keyed on `deleted_at` instead of `updated_at`.
+  async changes(table: string, since: string): Promise<Record<string, unknown>[]> {
+    return this.pages('/api/sync/changes', since, table)
+  }
+
   async deletions(since: string): Promise<Array<{ table_name: string; record_id: string; deleted_at: string }>> {
-    const all: Array<{ table_name: string; record_id: string; deleted_at: string }> = []
-    let cursor = since
-    for (let page = 0; page < CloudApi.CHANGES_MAX_PAGES; page++) {
-      const query = new URLSearchParams({ since: cursor })
-      const result = await this.request<{ data: Array<{ table_name: string; record_id: string; deleted_at: string }> }>(
-        `/api/sync/deletions?${query.toString()}`
-      )
-      const data = result.data
-      all.push(...data)
-      if (data.length < CloudApi.CHANGES_PAGE_SIZE) break
-      const lastDeletedAt = data[data.length - 1]?.deleted_at
-      if (!lastDeletedAt) break
-      cursor = lastDeletedAt
-      await new Promise(resolve => setTimeout(resolve, 300))
-    }
-    return all
+    return this.pages('/api/sync/deletions', since)
   }
 
   async related(table: string, foreignKey: string, ids: string[]): Promise<Record<string, unknown>[]> {

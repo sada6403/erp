@@ -86,9 +86,9 @@ export default function SyncMonitorPage() {
         toast.error(res.error || 'Failed to fix invoices')
         return
       }
-      await triggerSync()
+      const completed = await triggerSync()
       await refreshAll()
-      toast.success('Fixed and synced')
+      if (completed) toast.success('Fixed and synced')
     } catch (e: any) {
       toast.error(e?.message || 'Failed to fix and sync')
     } finally {
@@ -110,8 +110,9 @@ export default function SyncMonitorPage() {
         return
       }
       const { parentsRepaired, childrenRequeued } = res.data as { parentsRepaired: number; childrenRequeued: number }
-      await triggerSync()
+      const completed = await triggerSync()
       await refreshAll()
+      if (!completed) return
       toast.success(childrenRequeued > 0
         ? `Repaired ${parentsRepaired} missing record(s), requeued ${childrenRequeued} item(s) — syncing`
         : 'No orphaned-parent errors found in the failed queue')
@@ -183,12 +184,21 @@ export default function SyncMonitorPage() {
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {(status.error || Object.keys(status.pull_errors || {}).length > 0) && (
+          <div className="card border border-red-400/40 text-sm" role="alert">
+            <p className="text-red-400 font-semibold">Synchronization incomplete</p>
+            {status.error && <p>{status.error}</p>}
+            {Object.entries(status.pull_errors || {}).map(([table, error]) => (
+              <p key={table} className="mt-1"><strong>{table}:</strong> {error}</p>
+            ))}
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <StatusCard
             icon={status.online ? Wifi : WifiOff}
             tone={status.online ? 'green' : 'red'}
             value={status.online ? 'Online' : 'Offline'}
-            label={status.online ? 'Connected to cloud' : 'Working locally'}
+            label={status.online ? 'Network available' : 'Working locally'}
           />
           <StatusCard icon={Clock} tone={status.pending > 0 ? 'yellow' : 'green'} value={status.pending} label="Pending sync items" />
           <StatusCard icon={status.failed > 0 ? AlertCircle : CheckCircle2} tone={status.failed > 0 ? 'red' : 'green'} value={status.failed} label="Failed sync items" />

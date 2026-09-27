@@ -30,7 +30,8 @@ export function rateLimit(config: RateLimitConfig) {
       req.headers.get('x-real-ip') ||
       'unknown'
     const apiKey = req.headers.get('x-api-key') || ''
-    const identity = apiKey ? `key:${apiKey}` : `ip:${ip}`
+    const deviceId = keyPrefix === 'sync' ? req.headers.get('x-device-id') : null
+    const identity = apiKey ? `key:${apiKey}${deviceId ? `:device:${deviceId}` : ''}` : `ip:${ip}`
     const key = `${keyPrefix}:${identity}`
 
     const now = Date.now()

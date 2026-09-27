@@ -151,6 +151,11 @@ export function registerActivationHandlers() {
     // handler below), rather than a delta from a cursor that no longer
     // matches reality after a wipe.
     store.set('last_pull_timestamp', '1970-01-01T00:00:00.000Z')
+    store.delete('sync_table_cursors_v2')
+    store.delete('sync_pull_errors')
+    store.delete('last_successful_sync_v2_at')
+    store.delete('sync_cycle_error')
+    store.delete('last_seen_watermark')
     try {
       const { getSyncService } = await import('../services/syncService')
       getSyncService().runSoon()
@@ -265,6 +270,11 @@ export function registerActivationHandlers() {
     // data/cursor this device already had — matters most for the
     // re-activation case (a previously revoked device coming back).
     store.delete('last_pull_timestamp')
+    store.delete('sync_table_cursors_v2')
+    store.delete('sync_pull_errors')
+    store.delete('last_successful_sync_v2_at')
+    store.delete('sync_cycle_error')
+    store.delete('last_seen_watermark')
 
     // Auto-save api_key + branding into app_settings
     const current = (store.get('app_settings') as Record<string, unknown>) ?? {}

@@ -37,7 +37,12 @@ export default defineWorkspace([
       hookTimeout: 60_000,
       testTimeout: 60_000,
       pool: 'forks',
-      poolOptions: { forks: { singleFork: true } },
+      // Each integration file defines its own Electron/electron-store mocks
+      // and temp database. Run files sequentially, but in separate forked
+      // workers so a hoisted Electron mock cannot leak into the next file.
+      isolate: true,
+      fileParallelism: false,
+      poolOptions: { forks: { singleFork: false, isolate: true } },
     },
   },
 ])

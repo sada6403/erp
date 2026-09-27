@@ -4,6 +4,7 @@ const os = require('os');
 
 const dbPath = path.join(os.homedir(), 'AppData', 'Roaming', 'pos-erp', 'pos-erp.db');
 const db = new Database(dbPath);
+const finishMaintenance = require('./lib/maintenance-outbox.cjs').beginMaintenance(db, ['products', 'customers']);
 
 // Deactivate any remaining non-furniture products created previously
 db.prepare("UPDATE products SET is_active=0 WHERE id LIKE 'prod_%' AND id NOT LIKE 'prod_furn_%'").run();
@@ -26,3 +27,6 @@ console.log(`Total Furniture Products: ${products.length}`);
 products.forEach((p, idx) => {
   console.log(`${idx + 1}. [${p.category_name}] ${p.name} | SKU: ${p.sku} | Price: LKR ${p.selling_price.toLocaleString()} | Stock: ${p.stock}`);
 });
+
+finishMaintenance();
+db.close();

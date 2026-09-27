@@ -95,6 +95,7 @@ export class SyncService {
   // this never does redundant or unauthorized work.
   private async checkWatermark(): Promise<void> {
     if (this.watermarkChecking || this.running) return
+    if (Date.now() < this.backoffUntil) return
     if (isDeviceLocked()) return
     const cloud = this.getCloudApi()
     if (!cloud) return
@@ -105,11 +106,11 @@ export class SyncService {
       if (!watermark) return
       const lastSeen = store.get('last_seen_watermark') as string | undefined
       if (lastSeen === watermark) return
-      store.set('last_seen_watermark', watermark)
       // First-ever check on a device (no lastSeen yet) — nothing to react
       // to, the normal bootstrap/full-cycle pull already covers it.
-      if (!lastSeen) return
+
       await this.pullWatermarkTables(cloud)
+      store.set('last_seen_watermark', watermark)
     } catch (err) {
       if (err instanceof DeviceRevokedError) { reportDeviceRevoked(err.message); return }
       if (err instanceof CloudRateLimitError) return // let the main cycle's backoff handle it
@@ -124,66 +125,7 @@ export class SyncService {
   // guarantees, just scoped to 3 tables instead of 59 and on its own cursor
   // so it never interacts with pullChanges()'s own cursor bookkeeping.
   private async pullWatermarkTables(cloud: CloudApi): Promise<void> {
-    const db = getDb()
-    const lastPull = store.get('last_watermark_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
-    const newPullTime = new Date().toISOString()
-
-    for (const table of WATERMARK_TABLES) {
-      let data: Record<string, unknown>[] = []
-      try {
-        data = await cloud.changes(table, lastPull)
-      } catch (err) {
-        if (err instanceof CloudRateLimitError) throw err
-        console.error('[SyncService] Fast-path pull failed for table:', table, err)
-        continue
-      }
-      if (data.length === 0) continue
-
-      const pendingIds = (db.prepare(`
-        SELECT record_id FROM sync_queue
-        WHERE table_name = ? AND status IN ('pending', 'processing')
-      `).all(table) as { record_id: string }[]).map(row => row.record_id)
-
-      try {
-        db.transaction(() => {
-          for (const row of data) {
-            if (pendingIds.includes(String(row.id))) continue
-            try {
-              if (table === 'products' && (row.is_active === 0 || row.is_active === false || row.is_active === '0')) {
-                const localProduct = db.prepare(`SELECT id, name, sku, is_active FROM products WHERE id = ?`).get(row.id) as
-                  { id: string; name: string; sku: string; is_active: number } | undefined
-                if (localProduct && localProduct.is_active === 1) {
-                  const pendingId = `deact_${row.id}`
-                  db.prepare(`
-                    INSERT OR REPLACE INTO pending_sync_deletions
-                      (id, table_name, record_id, action, record_name, record_sku, detected_at, deleted_at, status)
-                    VALUES
-                      (?, 'products', ?, 'deactivate', ?, ?, datetime('now'), ?, 'pending')
-                  `).run(pendingId, String(row.id), localProduct.name, localProduct.sku, String(row.updated_at || new Date().toISOString()))
-
-                  notifyPendingDeletions({
-                    id: pendingId,
-                    tableName: 'products',
-                    recordId: String(row.id),
-                    action: 'deactivate',
-                    productName: localProduct.name,
-                    productSku: localProduct.sku,
-                  })
-                  continue
-                }
-              }
-              this.insertFiltered(db, table, row)
-            } catch (err) {
-              console.error(`[SyncService] Skipping row in ${table} (${row.id}) [fast path]:`, err)
-            }
-          }
-        })()
-      } catch (err) {
-        console.error(`[SyncService] Fast-path transaction failed for table ${table}:`, err)
-      }
-    }
-
-    store.set('last_watermark_pull_timestamp', newPullTime)
+    await this.pullTables(cloud, ['categories', 'products', 'stocks'])
   }
 
   private getCloudApi(): CloudApi | null {
@@ -196,19 +138,20 @@ export class SyncService {
     return new CloudApi({ baseUrl, apiKey, deviceId })
   }
 
-  async runOnce(): Promise<void> {
-    if (this.running) return
-    if (Date.now() < this.backoffUntil) return
+  async runOnce(): Promise<boolean> {
+    if (this.running || this.watermarkChecking) return false
+    if (Date.now() < this.backoffUntil) return false
     // Phase 1 device-authorization work — a locked device must not push or
     // pull anything, even if it somehow still has connectivity (defense in
     // depth alongside the UI-level lock screen in App.tsx).
-    if (isDeviceLocked()) return
+    if (isDeviceLocked()) return false
     this.running = true
+    store.set('sync_running', true)
 
     try {
       const cloud = this.getCloudApi()
-      if (!cloud) return
-      if (!await this.checkOnline(cloud)) return
+      if (!cloud) throw new Error('Cloud API is not configured')
+      if (!await this.checkOnline(cloud)) throw new Error('Cloud server is unavailable')
 
       this.resetStaleProcessing()
       this.resetFailedForAutoRetry()
@@ -221,7 +164,6 @@ export class SyncService {
         this.ensureLocalSystemRoles()
         await this.reconcileDefaultRolesFromCloud(cloud)
         store.delete('last_pull_timestamp')
-        await this.pullChanges(cloud)
       }
       await this.processBatch(cloud)
       // Previously gated the ENTIRE pull (every table) on the local outbox
@@ -234,20 +176,27 @@ export class SyncService {
       await this.pullChanges(cloud)
       await this.syncBranding(cloud)
       await this.reconcileSupportSession(cloud)
-      store.set('last_successful_sync_at', new Date().toISOString())
+      const unfinished = getDb().prepare("SELECT COUNT(*) AS n FROM sync_queue WHERE status != 'synced'").get() as { n: number }
+      if (unfinished.n) throw new Error(`${unfinished.n} upload(s) still pending or failed`)
+      store.delete('sync_cycle_error')
+      store.set('last_successful_sync_v2_at', new Date().toISOString())
+      return true
     } catch (err) {
+      store.set('sync_cycle_error', err instanceof Error ? err.message : String(err))
       if (err instanceof CloudRateLimitError) {
         this.backoffUntil = Date.now() + err.retryAfterSeconds * 1000
         console.warn(`[SyncService] Rate limited. Retrying after ${err.retryAfterSeconds}s`)
-        return
+        return false
       }
       if (err instanceof DeviceRevokedError) {
         reportDeviceRevoked(err.message)
-        return
+        return false
       }
       console.error('[SyncService]', err)
+      return false
     } finally {
       this.running = false
+      store.set('sync_running', false)
       if (Date.now() >= this.backoffUntil && this.safeHasPendingPushes()) {
         this.scheduleSoon(DRAIN_RETRY_MS)
       }
@@ -271,17 +220,20 @@ export class SyncService {
     const items = db.prepare(`
       SELECT * FROM sync_queue
       WHERE status = 'pending' AND attempts < ?
-      ORDER BY created_at ASC
+      ORDER BY created_at ASC, rowid ASC
       LIMIT ?
     `).all(MAX_ATTEMPTS, BATCH_SIZE) as SyncItem[]
 
     if (items.length === 0) return
 
-    const ids = items.map(item => item.id)
-    db.prepare(`UPDATE sync_queue SET status='processing' WHERE id IN (${ids.map(() => '?').join(',')})`)
-      .run(...ids)
-
     for (const item of items) {
+      const predecessor = db.prepare(`SELECT 1 FROM sync_queue WHERE table_name=? AND record_id=?
+        AND status IN ('pending','processing','failed') AND rowid < (SELECT rowid FROM sync_queue WHERE id=?) LIMIT 1`)
+        .get(item.table_name, item.record_id, item.id)
+      if (predecessor) continue
+      const claim = db.prepare(`UPDATE sync_queue SET status='processing'
+        WHERE id=? AND status='pending' AND payload=? AND operation=?`).run(item.id, item.payload, item.operation)
+      if (!claim.changes) continue
       await this.syncItem(cloud, item, db)
       await sleep(REQUEST_DELAY_MS)
     }
@@ -505,12 +457,30 @@ export class SyncService {
       }
 
       const effectiveOp = (item.table_name === 'stocks' && item.operation === 'UPDATE') ? 'INSERT' : item.operation
-      await cloud.push({
-        table: item.table_name,
-        operation: effectiveOp,
-        recordId: item.record_id,
-        record: normalizeForCloud(payload),
-      })
+      try {
+        await cloud.push({
+          table: item.table_name, operation: effectiveOp,
+          recordId: item.record_id, record: normalizeForCloud(payload), eventId: item.id,
+        })
+      } catch (error) {
+        // Recover UPDATE-only events left by older queue coalescing code.
+        if (effectiveOp !== 'UPDATE' || !(error instanceof Error) || !error.message.includes('Sync target is missing')
+          || !/^[a-z][a-z0-9_]*$/.test(item.table_name)) throw error
+        const full = db.prepare(`SELECT * FROM ${item.table_name} WHERE id=?`).get(item.record_id) as Record<string, unknown> | undefined
+        if (!full) throw error
+        await cloud.push({ table: item.table_name, operation: 'INSERT', recordId: item.record_id, eventId: item.id,
+          record: normalizeForCloud({ ...full, ...payload }) })
+      }
+
+      if (item.table_name === 'stocks' && item.operation !== 'DELETE') {
+        const baseline = { quantity: Number(payload.quantity), damaged_qty: Number(payload.damaged_qty ?? 0) }
+        db.prepare('INSERT OR REPLACE INTO sync_stock_baselines (record_id,quantity,damaged_qty) VALUES (?,?,?)')
+          .run(item.record_id, baseline.quantity, baseline.damaged_qty)
+        const newer = db.prepare("SELECT id,payload FROM sync_queue WHERE table_name='stocks' AND record_id=? AND status='pending'")
+          .all(item.record_id) as { id: string; payload: string }[]
+        for (const event of newer) db.prepare('UPDATE sync_queue SET payload=? WHERE id=?')
+          .run(JSON.stringify({ ...JSON.parse(event.payload), _base_stock: baseline }), event.id)
+      }
 
       db.prepare(`UPDATE sync_queue SET status='synced', synced_at=datetime('now') WHERE id=?`)
         .run(item.id)
@@ -529,299 +499,121 @@ export class SyncService {
   }
 
   private async pullChanges(cloud: CloudApi): Promise<void> {
+    let failure: unknown
+    try { await this.pullTables(cloud, ['branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers', 'products', 'stocks', 'customers', 'agents', 'positions', 'regions', 'zones', 'invoices', 'invoice_items', 'payments', 'installment_plans', 'installments', 'installment_payments', 'returns', 'return_items', 'chit_scheme_templates', 'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions', 'chit_scheme_branches', 'withdrawal_requests', 'stock_transfers', 'stock_movements', 'deliveries', 'purchase_orders', 'purchase_items', 'installment_schedule', 'installment_reminders', 'customer_orders', 'customer_order_items', 'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches', 'branch_transfer_logs', 'branch_transfer_prints', 'coupons', 'coupon_redemptions', 'expense_categories', 'expenses', 'cash_sessions', 'loyalty_config', 'loyalty_transactions', 'product_uom', 'product_batches', 'audit_logs', 'edit_requests', 'credit_ledger', 'stock_count_sessions', 'stock_count_items', 'discounts', 'agent_remittances', 'smartbuy_wallet', 'smartbuy_wallet_transactions', 'smartbuy_transfer_history', 'commission_rules', 'commission_ledger', 'commission_payouts', 'commission_approval_logs', 'commission_statement_history', 'commission_rule_history', 'chit_payment_reminders', 'held_carts', 'data_clear_events']) } catch (error) { failure = error }
+    try { await this.pullDeletions(cloud, getDb()) } catch (error) { failure = failure || error }
+    if (failure) throw failure
+  }
+
+  private async pullTables(cloud: CloudApi, tables: string[]): Promise<void> {
     const db = getDb()
-    const lastPull = store.get('last_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
-    const newPullTime = new Date().toISOString()
-
-    const globalTables = [
-      'branches', 'roles', 'users', 'categories', 'suppliers',
-      'products', 'stocks', 'stock_transfers', 'stock_movements', 'customers', 'deliveries',
-      'purchase_orders', 'purchase_items',
-      'installments', 'installment_plans', 'installment_schedule',
-      'installment_reminders', 'customer_orders', 'customer_order_items',
-      'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches',
-      'branch_transfer_logs', 'branch_transfer_prints',
-      'coupons', 'coupon_redemptions',
-      // Phase 2 additions
-      'agents', 'expense_categories', 'expenses',
-      'returns', 'cash_sessions', 'loyalty_config', 'loyalty_transactions',
-      'product_uom', 'product_batches', 'audit_logs',
-      // Chit Fund
-      'chit_schemes',
-      // Smart Buy centralized Scheme Master — a template created by Super
-      // Admin on one device must reach every other branch's device so it
-      // "immediately appears in the Manager dropdown" there too. Pulled
-      // directly (like chit_schemes itself), not via the scheme-related-ids
-      // dance below, since it's a company-wide catalog, not scheme-scoped.
-      'chit_scheme_templates',
-      // Edit requests
-      'edit_requests',
-      // credit_ledger is pushed from invoices.ts but was missing here, so it
-      // never pulled down to other devices. Stock counts/discounts were also
-      // missing (in addition to being missing from the backend allowlist).
-      'credit_ledger', 'stock_count_sessions', 'stock_count_items', 'discounts',
-      // Smart Buy agent cash remittance/settlement — standalone (keyed by
-      // agent_id, not scheme_id), so it's pulled directly, not via the
-      // chit_schemes-related-ids dance below.
-      'agent_remittances',
-      // Smart Buy Product Redemption Policy — wallet is customer-keyed
-      // (not scheme-scoped at all), transfer history is member-keyed, not
-      // scheme_id-keyed, so both are pulled directly like agent_remittances.
-      'smartbuy_wallet', 'smartbuy_wallet_transactions', 'smartbuy_transfer_history',
-      // Smart Buy Enterprise Commission Engine — pulled directly (not via
-      // the chit_schemes-related-ids dance) since commission_rules can be
-      // global/company-wide (not scheme-specific) and agents/reports need
-      // full ledger visibility regardless of which schemes were recently
-      // pulled on this device.
-      'commission_rules', 'commission_ledger',
-      // Commission payout batches — agent-keyed like agent_remittances, not
-      // scheme-keyed, so pulled directly here too.
-      'commission_payouts',
-      // Multi-level commission approval — audit trail, statement downloads,
-      // rate history. Same direct-pull treatment (not scheme-keyed).
-      'commission_approval_logs', 'commission_statement_history', 'commission_rule_history',
-      // Cycle payment reminder history — member-keyed, pulled directly.
-      'chit_payment_reminders',
-      // POS cart "Hold" — branch-scoped, no special reconciliation needed
-      // (recall deletes the row, same as any other delete-on-consume table).
-      'held_carts',
-      // Staff/Agent positions — company-wide lookup list, pulled directly.
-      'positions',
-      // Agent Management location grouping — company-wide lookup lists,
-      // pulled directly, same treatment as positions/branches. Previously
-      // missing here (and from the backend allowlist), so every push for
-      // these two tables permanently failed with "Unsupported sync table".
-      'regions', 'zones',
-      // Multi-device forced-lock signal (Issue 30) — rides this same pull
-      // cycle for free, no new polling mechanism. See the special-case
-      // handling right after this loop fetches each table's rows below.
-      'data_clear_events',
-    ]
-
-    let pulledInstallmentIds: string[] = []
-    let pulledReturnIds: string[] = []
-    let pulledChitSchemeIds: string[] = []
-
-    for (const table of globalTables) {
-      let data: Record<string, unknown>[] = []
+    // Derive parent-first order from the actual migrated SQLite schema.
+    const remainingTables = new Set(tables)
+    const orderedTables: string[] = []
+    while (remainingTables.size) {
+      const ready = [...remainingTables].filter(table =>
+        (db.prepare(`PRAGMA foreign_key_list(${table})`).all() as { table: string }[])
+          .every(fk => fk.table === table || !remainingTables.has(fk.table)))
+      if (!ready.length) { orderedTables.push(...remainingTables); break }
+      for (const table of ready) { orderedTables.push(table); remainingTables.delete(table) }
+    }
+    // v2 intentionally starts at epoch: the old global cursor skipped failed rows.
+    const cursors = (store.get('sync_table_cursors_v2') || {}) as Record<string, string>
+    const errors = { ...((store.get('sync_pull_errors') || {}) as Record<string, string>) }
+    const failures: string[] = []
+    for (const table of orderedTables) {
+      const since = cursors[table] || '1970-01-01T00:00:00.000Z'
       try {
-        data = await cloud.changes(table, lastPull)
-        await sleep(REQUEST_DELAY_MS)
-      } catch (err) {
-        if (err instanceof CloudRateLimitError) throw err
-        console.error('[SyncService] Failed to pull table:', table, err)
-        continue
-      }
-      if (data.length === 0) continue
-
-      // Capture installment/return IDs now; reuse below, no duplicate fetch.
-      if (table === 'installments') {
-        pulledInstallmentIds = data.map(row => String(row.id))
-      }
-      if (table === 'returns') {
-        pulledReturnIds = data.map(row => String(row.id))
-      }
-      if (table === 'chit_schemes') {
-        pulledChitSchemeIds = data.map(row => String(row.id))
-      }
-      // Multi-device forced-lock signal (Issue 30) — the latest event by
-      // cleared_at is what matters (handled by event id, not a boolean, so
-      // a second clear while one is still unacknowledged just supersedes
-      // which id is pending). Skip if it's the exact event THIS device
-      // already acknowledged (either because it originated it, or because
-      // Refresh already ran for it).
-      if (table === 'data_clear_events') {
-        const latest = data.reduce((a, b) => (String(a.cleared_at) > String(b.cleared_at) ? a : b))
-        const latestId = String(latest.id)
-        const acknowledged = store.get('last_acknowledged_clear_event_id') as string | null
-        if (latestId !== acknowledged) {
-          store.set('pending_clear_event_id', latestId)
+        let rows = await cloud.changes(table, since)
+        if (table === 'data_clear_events' && rows.length) {
+          rows = [rows.reduce((latest, row) => String(row.cleared_at) > String(latest.cleared_at) ? row : latest)]
         }
-      }
-
-      const pendingIds = (db.prepare(`
-        SELECT record_id FROM sync_queue
-        WHERE table_name = ? AND status IN ('pending', 'processing')
-      `).all(table) as { record_id: string }[]).map(row => row.record_id)
-
-      try {
-        db.transaction(() => {
-          for (const row of data) {
-            if (pendingIds.includes(String(row.id))) continue
-            // One row with bad/dangling data (e.g. a foreign key the cloud
-            // itself never enforced) must not roll back every other row in
-            // this table's batch — skip just that row and keep going.
+        const stockBalances = new Map<string, string>()
+        const stockConflicts = new Set<string>()
+        if (table === 'stocks') for (const row of rows) {
+          const key = JSON.stringify([row.product_id, row.branch_id, row.warehouse_id ?? null])
+          const balance = JSON.stringify([Number(row.quantity), Number(row.damaged_qty ?? 0)])
+          if (stockBalances.has(key) && stockBalances.get(key) !== balance) stockConflicts.add(key)
+          stockBalances.set(key, balance)
+        }
+        const pending = new Set((db.prepare(`SELECT record_id FROM sync_queue
+          WHERE table_name=? AND status IN ('pending','processing','failed')`).all(table) as
+          { record_id: string }[]).map(r => r.record_id))
+        let blocked = 0
+        let latest = Date.parse(since)
+        const rowErrors = new Set<string>()
+        // Retry once after inserting the other parents in a self-referencing table.
+        let remaining = rows
+        for (let pass = 0; pass < 2; pass++) {
+          const retry: Record<string, unknown>[] = []
+          for (const row of remaining) {
+            if (pending.has(String(row.id))) {
+              if (pass === 0) blocked++
+              continue
+            }
             try {
-              if (table === 'products' && (row.is_active === 0 || row.is_active === false || row.is_active === '0')) {
-                const localProduct = db.prepare(`SELECT id, name, sku, is_active FROM products WHERE id = ?`).get(row.id) as
-                  { id: string; name: string; sku: string; is_active: number } | undefined
-                if (localProduct && localProduct.is_active === 1) {
-                  const pendingId = `deact_${row.id}`
-                  db.prepare(`
-                    INSERT OR REPLACE INTO pending_sync_deletions
-                      (id, table_name, record_id, action, product_name, product_sku, detected_at, deleted_at, status)
-                    VALUES
-                      (?, 'products', ?, 'deactivate', ?, ?, datetime('now'), ?, 'pending')
-                  `).run(pendingId, String(row.id), localProduct.name, localProduct.sku, String(row.updated_at || new Date().toISOString()))
-
-                  notifyPendingDeletions({
-                    id: pendingId,
-                    tableName: 'products',
-                    recordId: String(row.id),
-                    action: 'deactivate',
-                    productName: localProduct.name,
-                    productSku: localProduct.sku,
-                  })
+              if (table === 'stocks') {
+                const key = JSON.stringify([row.product_id, row.branch_id, row.warehouse_id ?? null])
+                if (stockConflicts.has(key)) throw new Error('Conflicting duplicate stock balances need reconciliation')
+                const local = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS ?')
+                  .get(row.product_id, row.branch_id, row.warehouse_id ?? null) as { id: string } | undefined
+                if (local && pending.has(local.id)) throw new Error('Local stock upload pending')
+              }
+              if (table === 'data_clear_events') {
+                if (String(row.id) !== store.get('last_acknowledged_clear_event_id')) {
+                  store.set('pending_clear_event_id', String(row.id))
+                }
+              }
+              if (table === 'products' && [0, false, '0'].includes(row.is_active as never)) {
+                const product = db.prepare('SELECT name, sku, is_active FROM products WHERE id=?').get(row.id) as
+                  { name: string; sku: string; is_active: number } | undefined
+                if (product?.is_active === 1) {
+                  db.prepare(`INSERT INTO pending_sync_deletions
+                    (id,table_name,record_id,action,record_name,record_sku,deleted_at,status)
+                    VALUES (?,'products',?,'deactivate',?,?,?,'pending')
+                    ON CONFLICT(id) DO UPDATE SET deleted_at=excluded.deleted_at`).run(
+                    `deact_${row.id}`, String(row.id), product.name, product.sku, String(row.updated_at))
                   continue
                 }
               }
               this.insertFiltered(db, table, row)
-            } catch (err) {
-              console.error(`[SyncService] Skipping row in ${table} (${row.id}):`, err)
+              if (table === 'stocks') {
+                const local = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS ?')
+                  .get(row.product_id, row.branch_id, row.warehouse_id ?? null) as { id: string }
+                db.prepare('INSERT OR REPLACE INTO sync_stock_baselines (record_id,quantity,damaged_qty) VALUES (?,?,?)')
+                  .run(local.id, Number(row.quantity), Number(row.damaged_qty ?? 0))
+              }
+            } catch (error) {
+              retry.push(row)
+              if (pass === 1) rowErrors.add(error instanceof Error ? error.message : String(error))
             }
           }
-        })()
-      } catch (err) {
-        console.error(`[SyncService] Transaction execution failed for table ${table}:`, err)
-      }
-    }
-
-    // Pull invoices + child records
-    try {
-      const invoices = await cloud.changes('invoices', lastPull)
-      if (invoices.length > 0) {
-        const pendingIds = (db.prepare(`
-          SELECT record_id FROM sync_queue
-          WHERE table_name = 'invoices' AND status IN ('pending', 'processing')
-        `).all() as { record_id: string }[]).map(row => row.record_id)
-        const pulledInvoiceIds: string[] = []
-
-        db.transaction(() => {
-          for (const invoice of invoices) {
-            if (pendingIds.includes(String(invoice.id))) continue
-            pulledInvoiceIds.push(String(invoice.id))
-            try {
-              this.insertFiltered(db, 'invoices', invoice)
-            } catch (err) {
-              console.error(`[SyncService] Skipping invoice (${invoice.id}):`, err)
-            }
-          }
-        })()
-
-        for (let index = 0; index < pulledInvoiceIds.length; index += 50) {
-          const ids = pulledInvoiceIds.slice(index, index + 50)
-          const items = await cloud.related('invoice_items', 'invoice_id', ids)
-          await sleep(REQUEST_DELAY_MS)
-          const payments = await cloud.related('payments', 'invoice_id', ids)
-          await sleep(REQUEST_DELAY_MS)
-          db.transaction(() => {
-            for (const item of items) {
-              try { this.insertFiltered(db, 'invoice_items', item) }
-              catch (err) { console.error(`[SyncService] Skipping invoice_item (${item.id}):`, err) }
-            }
-            for (const payment of payments) {
-              try { this.insertFiltered(db, 'payments', payment) }
-              catch (err) { console.error(`[SyncService] Skipping payment (${payment.id}):`, err) }
-            }
-          })()
+          remaining = retry
+          if (!retry.length) break
+        }
+        blocked += remaining.length
+        if (blocked) throw new Error(`${blocked} record(s) awaiting upload or repair${rowErrors.size ? ': ' + [...rowErrors].join('; ') : ''}`)
+        for (const row of rows) {
+          const timestamp = Date.parse(String(row.updated_at))
+          if (!Number.isFinite(timestamp)) throw new Error('Cloud row missing a valid updated_at')
+          latest = Math.max(latest, timestamp)
+        }
+        // Overlap the boundary second. Never use the device clock as a cloud cursor.
+        if (rows.length) cursors[table] = new Date(Math.max(Date.parse(since), latest - 1000)).toISOString()
+        store.set('sync_table_cursors_v2', cursors)
+        delete errors[table]
+      } catch (error) {
+        errors[table] = error instanceof Error ? error.message : String(error)
+        failures.push(table)
+        if (error instanceof CloudRateLimitError || error instanceof DeviceRevokedError) {
+          store.set('sync_pull_errors', errors)
+          throw error
         }
       }
-    } catch (err) {
-      if (err instanceof CloudRateLimitError) throw err
-      console.error('[SyncService] Failed to pull invoices:', err)
+      store.set('sync_pull_errors', errors)
+      await sleep(REQUEST_DELAY_MS)
     }
-
-    // Pull installment_payments using IDs already fetched above — no duplicate API call
-    if (pulledInstallmentIds.length > 0) {
-      try {
-        for (let index = 0; index < pulledInstallmentIds.length; index += 50) {
-          const payments = await cloud.related(
-            'installment_payments', 'installment_id',
-            pulledInstallmentIds.slice(index, index + 50)
-          )
-          await sleep(REQUEST_DELAY_MS)
-          db.transaction(() => {
-            for (const payment of payments) {
-              try { this.insertFiltered(db, 'installment_payments', payment) }
-              catch (err) { console.error(`[SyncService] Skipping installment_payment (${payment.id}):`, err) }
-            }
-          })()
-        }
-      } catch (err) {
-        if (err instanceof CloudRateLimitError) throw err
-        console.error('[SyncService] Failed to pull installment payments:', err)
-      }
-    }
-
-    // Pull return_items using IDs already fetched above — no duplicate API call
-    if (pulledReturnIds.length > 0) {
-      try {
-        for (let index = 0; index < pulledReturnIds.length; index += 50) {
-          const items = await cloud.related(
-            'return_items', 'return_id',
-            pulledReturnIds.slice(index, index + 50)
-          )
-          await sleep(REQUEST_DELAY_MS)
-          db.transaction(() => {
-            for (const item of items) {
-              try { this.insertFiltered(db, 'return_items', item) }
-              catch (err) { console.error(`[SyncService] Skipping return_item (${item.id}):`, err) }
-            }
-          })()
-        }
-      } catch (err) {
-        if (err instanceof CloudRateLimitError) throw err
-        console.error('[SyncService] Failed to pull return items:', err)
-      }
-    }
-
-    // Pull chit_members/chit_draws/chit_contributions using scheme IDs already fetched above
-    if (pulledChitSchemeIds.length > 0) {
-      try {
-        for (let index = 0; index < pulledChitSchemeIds.length; index += 50) {
-          const ids = pulledChitSchemeIds.slice(index, index + 50)
-          const members = await cloud.related('chit_members', 'scheme_id', ids)
-          await sleep(REQUEST_DELAY_MS)
-          const draws = await cloud.related('chit_draws', 'scheme_id', ids)
-          await sleep(REQUEST_DELAY_MS)
-          const contributions = await cloud.related('chit_contributions', 'scheme_id', ids)
-          await sleep(REQUEST_DELAY_MS)
-          const schemeBranches = await cloud.related('chit_scheme_branches', 'scheme_id', ids)
-          await sleep(REQUEST_DELAY_MS)
-          const withdrawals = await cloud.related('withdrawal_requests', 'scheme_id', ids)
-          await sleep(REQUEST_DELAY_MS)
-          db.transaction(() => {
-            for (const member of members) {
-              try { this.insertFiltered(db, 'chit_members', member) }
-              catch (err) { console.error(`[SyncService] Skipping chit_member (${member.id}):`, err) }
-            }
-            for (const draw of draws) {
-              try { this.insertFiltered(db, 'chit_draws', draw) }
-              catch (err) { console.error(`[SyncService] Skipping chit_draw (${draw.id}):`, err) }
-            }
-            for (const contribution of contributions) {
-              try { this.insertFiltered(db, 'chit_contributions', contribution) }
-              catch (err) { console.error(`[SyncService] Skipping chit_contribution (${contribution.id}):`, err) }
-            }
-            for (const schemeBranch of schemeBranches) {
-              try { this.insertFiltered(db, 'chit_scheme_branches', schemeBranch) }
-              catch (err) { console.error(`[SyncService] Skipping chit_scheme_branch (${schemeBranch.id}):`, err) }
-            }
-            for (const withdrawal of withdrawals) {
-              try { this.insertFiltered(db, 'withdrawal_requests', withdrawal) }
-              catch (err) { console.error(`[SyncService] Skipping withdrawal_request (${withdrawal.id}):`, err) }
-            }
-          })()
-        }
-      } catch (err) {
-        if (err instanceof CloudRateLimitError) throw err
-        console.error('[SyncService] Failed to pull chit fund child records:', err)
-      }
-    }
-
-    store.set('last_pull_timestamp', newPullTime)
-
-    await this.pullDeletions(cloud, db)
+    if (failures.length) throw new Error(`Cloud sync incomplete: ${failures.join(', ')}`)
   }
 
   // Applies deletion tombstones (see backend/app/api/sync/deletions/route.ts)
@@ -861,8 +653,7 @@ export class SyncService {
       deletions = await cloud.deletions(lastPull)
     } catch (err) {
       if (err instanceof CloudRateLimitError) throw err
-      console.error('[SyncService] Failed to pull deletions:', err)
-      return
+      throw err
     }
     if (deletions.length === 0) return
 
@@ -888,10 +679,13 @@ export class SyncService {
           if (existingProduct) {
             const pendingId = `del_${d.record_id}`
             db.prepare(`
-              INSERT OR REPLACE INTO pending_sync_deletions
+              INSERT INTO pending_sync_deletions
                 (id, table_name, record_id, action, record_name, record_sku, detected_at, deleted_at, status)
               VALUES
                 (?, 'products', ?, 'delete', ?, ?, datetime('now'), ?, 'pending')
+              ON CONFLICT(id) DO UPDATE SET
+                status=CASE WHEN excluded.deleted_at > pending_sync_deletions.deleted_at THEN 'pending' ELSE pending_sync_deletions.status END,
+                deleted_at=MAX(pending_sync_deletions.deleted_at,excluded.deleted_at)
             `).run(pendingId, d.record_id, existingProduct.name, existingProduct.sku, d.deleted_at)
 
             notifyPendingDeletions({
@@ -916,7 +710,8 @@ export class SyncService {
         sawFailure = true
       }
     }
-    store.set('last_deletion_pull_timestamp', advanceTo)
+    if (sawFailure) throw new Error('Some cloud deletions await local reference repair')
+    store.set('last_deletion_pull_timestamp', new Date(Math.max(Date.parse(lastPull), Date.parse(advanceTo) - 1000)).toISOString())
   }
 
   // Company branding: retry a pending local push first, otherwise pull the
@@ -1036,7 +831,7 @@ export class SyncService {
     if (table === 'categories' && localRow.parent_id) {
       const parentId = String(localRow.parent_id)
       const exists = db.prepare(`SELECT id FROM categories WHERE id = ? LIMIT 1`).get(parentId)
-      if (!exists) localRow.parent_id = null
+      if (!exists) throw new Error('Category parent has not arrived yet')
     }
 
     // Stocks: NULL warehouse_id defeats the UNIQUE(product_id,branch_id,warehouse_id)
@@ -1121,26 +916,8 @@ export class SyncService {
           localRow.role_id = existingLocal?.role_id ?? null
         }
       }
-      if (localRow.branch_id) {
-        const branchId = String(localRow.branch_id)
-        const exists = db.prepare(`SELECT id FROM branches WHERE id = ? LIMIT 1`).get(branchId)
-        if (!exists) {
-          const fallback = db.prepare(`
-            SELECT id
-            FROM branches
-            WHERE is_active = 1
-            ORDER BY
-              CASE
-                WHEN code = 'MAIN' THEN 0
-                WHEN lower(name) LIKE '%main%' THEN 1
-                WHEN lower(name) LIKE '%head%' THEN 2
-                ELSE 3
-              END,
-              created_at ASC
-            LIMIT 1
-          `).get() as { id?: string } | undefined
-          localRow.branch_id = fallback?.id ?? null
-        }
+      if (localRow.branch_id && !db.prepare('SELECT id FROM branches WHERE id=?').get(String(localRow.branch_id))) {
+        throw new Error('User references a missing cloud branch; restore the branch before importing this user')
       }
       // A blank credential from the cloud must never overwrite a real local hash
       // (protects against records damaged by the old password-wipe bug).
@@ -1172,20 +949,21 @@ export class SyncService {
 
     try {
       db.prepare(
-        `INSERT OR REPLACE INTO ${table} (${keys.join(',')})
-         VALUES (${keys.map(() => '?').join(',')})`
+        `INSERT INTO ${table} (${keys.join(',')})
+         VALUES (${keys.map(() => '?').join(',')})
+         ON CONFLICT(id) DO UPDATE SET ${keys.filter(k => k !== 'id').map(k => `${k}=excluded.${k}`).join(',') || 'id=excluded.id'}`
       ).run(...keys.map(key => localRow[key]))
     } catch (err) {
-      console.error(`[SyncService] Insert Error in table ${table}:`, err)
-      console.error(`[SyncService] Problematic row:`, localRow)
+      // pullTables persists one actionable summary per table instead of
+      // flooding logs with the same historical constraint failure each cycle.
       throw err
     }
   }
 
   private async checkOnline(cloud: CloudApi): Promise<boolean> {
     try {
-      await cloud.health()
-      return true
+      const health = await cloud.health()
+      return health.status === 'ok' && health.database === 'connected'
     } catch {
       return false
     }
