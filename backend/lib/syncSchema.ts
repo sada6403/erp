@@ -19,6 +19,8 @@ export async function ensureSyncSchema(client: Pick<QueryClient, 'query'>): Prom
     synced_at DATETIME NULL)`)
   const { rows } = await client.query<{ TABLE_NAME: string; COLUMN_NAME: string }>(
     'SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()')
+  const { rows: indexes } = await client.query<{ TABLE_NAME: string; COLUMN_NAME: string }>(
+    'SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE()')
   for (const table of ALLOWED_TABLES) {
     const columns = rows.filter(r => r.TABLE_NAME === table).map(r => r.COLUMN_NAME)
     if (!columns.length) throw new Error(`Sync schema incomplete: missing ${table}`)
@@ -27,6 +29,13 @@ export async function ensureSyncSchema(client: Pick<QueryClient, 'query'>): Prom
         await client.query(`ALTER TABLE ${quoteIdentifier(table)} ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`)
       } catch (error) {
         if (!/Duplicate column name/i.test(String(error))) throw error
+      }
+    }
+    if (!indexes.some(index => index.TABLE_NAME === table && index.COLUMN_NAME === 'updated_at')) {
+      try {
+        await client.query(`CREATE INDEX ${quoteIdentifier(`idx_sync_${table}_updated`)} ON ${quoteIdentifier(table)} (updated_at)`)
+      } catch (error) {
+        if (!/Duplicate key name/i.test(String(error))) throw error
       }
     }
   }

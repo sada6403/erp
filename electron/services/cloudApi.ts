@@ -89,6 +89,25 @@ export class CloudApi {
     return this.pages('/api/sync/changes', since, table)
   }
 
+  async batchChanges(requests: Array<{ table: string; since: string }>): Promise<Record<string, {
+    data?: Record<string, unknown>[]
+    checkpoint?: string
+    truncated?: boolean
+    error?: string
+  }>> {
+    const result = await this.request<{ tables: Record<string, {
+      data?: Record<string, unknown>[]
+      checkpoint?: string
+      truncated?: boolean
+      error?: string
+    }> }>('/api/sync/changes/batch', {
+      method: 'POST',
+      body: JSON.stringify({ requests }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    return result.tables
+  }
+
   async deletions(since: string): Promise<Array<{ table_name: string; record_id: string; deleted_at: string }>> {
     return this.pages('/api/sync/deletions', since)
   }

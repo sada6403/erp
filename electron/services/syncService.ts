@@ -18,7 +18,8 @@ const BATCH_SIZE = 50
 const MAX_ATTEMPTS = 5
 const REQUEST_DELAY_MS = 300
 const STALE_PROCESSING_MINUTES = 3
-const SYNC_INTERVAL_MS = 15_000
+const SYNC_INTERVAL_MS = 60_000
+const STARTUP_SYNC_DELAY_MS = 2_000
 const DRAIN_RETRY_MS = 1_500
 // Issue 37 (36c) — near-instant propagation for the tables that matter most
 // for a cashier's day-to-day experience (products/pricing, stock counts,
@@ -55,6 +56,7 @@ function notifyPendingDeletions(item: {
 
 export class SyncService {
   private timer: ReturnType<typeof setInterval> | null = null
+  private startupTimer: ReturnType<typeof setTimeout> | null = null
   private drainTimer: ReturnType<typeof setTimeout> | null = null
   private watermarkTimer: ReturnType<typeof setInterval> | null = null
   private watermarkChecking = false
@@ -73,8 +75,16 @@ export class SyncService {
 
   start() {
     if (this.timer) return
+    // A hard shutdown can leave the persisted display flag set even though no
+    // sync exists in this new process.
+    store.set('sync_running', false)
     this.timer = setInterval(() => this.runOnce(), SYNC_INTERVAL_MS)
-    this.runOnce()
+    // Let the renderer become interactive before the first comprehensive
+    // cloud reconciliation starts. Outbox writes still call runSoon().
+    this.startupTimer = setTimeout(() => {
+      this.startupTimer = null
+      this.runOnce()
+    }, STARTUP_SYNC_DELAY_MS)
     if (!this.watermarkTimer) {
       this.watermarkTimer = setInterval(() => this.checkWatermark(), WATERMARK_INTERVAL_MS)
     }
@@ -82,9 +92,11 @@ export class SyncService {
 
   stop() {
     if (this.timer) clearInterval(this.timer)
+    if (this.startupTimer) clearTimeout(this.startupTimer)
     if (this.drainTimer) clearTimeout(this.drainTimer)
     if (this.watermarkTimer) clearInterval(this.watermarkTimer)
     this.timer = null
+    this.startupTimer = null
     this.drainTimer = null
     this.watermarkTimer = null
   }
@@ -525,10 +537,24 @@ export class SyncService {
     const cursors = (store.get('sync_table_cursors_v2') || {}) as Record<string, string>
     const errors = { ...((store.get('sync_pull_errors') || {}) as Record<string, string>) }
     const failures: string[] = []
+    let batch: Awaited<ReturnType<CloudApi['batchChanges']>> | undefined
+    try {
+      batch = await cloud.batchChanges(orderedTables.map(table => ({
+        table, since: cursors[table] || '1970-01-01T00:00:00.000Z',
+      })))
+    } catch {
+      // Rolling-deploy compatibility: an updated desktop may briefly reach an
+      // older backend. Fall back to the existing per-table endpoint.
+    }
     for (const table of orderedTables) {
       const since = cursors[table] || '1970-01-01T00:00:00.000Z'
       try {
-        let rows = await cloud.changes(table, since)
+        const batched = batch?.[table]
+        if (batched?.error) throw new Error(batched.error)
+        let rows = batched?.data ?? await cloud.changes(table, since)
+        // Preserve the existing complete pagination path for unusually large
+        // tables instead of accepting a truncated batch page.
+        if (batched?.truncated) rows = await cloud.changes(table, since)
         if (table === 'data_clear_events' && rows.length) {
           rows = [rows.reduce((latest, row) => String(row.cleared_at) > String(latest.cleared_at) ? row : latest)]
         }
@@ -604,6 +630,7 @@ export class SyncService {
         }
         // Overlap the boundary second. Never use the device clock as a cloud cursor.
         if (rows.length) cursors[table] = new Date(Math.max(Date.parse(since), latest - 1000)).toISOString()
+        else if (batched?.checkpoint) cursors[table] = new Date(batched.checkpoint).toISOString()
         store.set('sync_table_cursors_v2', cursors)
         delete errors[table]
       } catch (error) {
@@ -615,7 +642,6 @@ export class SyncService {
         }
       }
       store.set('sync_pull_errors', errors)
-      await sleep(REQUEST_DELAY_MS)
     }
     if (failures.length) throw new Error(`Cloud sync incomplete: ${failures.join(', ')}`)
   }

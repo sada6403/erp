@@ -78,6 +78,20 @@ describe('Sync recovery and durable outbox', () => {
     expect(state.data.sync_pull_errors).toEqual({})
   })
 
+  it('advances empty tables using the server batch checkpoint', async () => {
+    const checkpoint = '2026-09-27T09:00:00.000Z'
+    const cloud = {
+      batchChanges: vi.fn().mockResolvedValue({ customers: { data: [], checkpoint, truncated: false } }),
+      changes: vi.fn().mockRejectedValue(new Error('per-table fallback should not run')),
+    }
+    await service.pullTables(cloud, ['customers'])
+    expect(cloud.batchChanges).toHaveBeenCalledWith([
+      { table: 'customers', since: '1970-01-01T00:00:00.000Z' },
+    ])
+    expect(cloud.changes).not.toHaveBeenCalled()
+    expect(state.data.sync_table_cursors_v2.customers).toBe(checkpoint)
+  })
+
   it('keeps a failed row retryable while applying unrelated valid rows', async () => {
     const cloud = { changes: vi.fn().mockResolvedValue([
       { id: 'bad-parent', name: 'Deferred', branch_id: 'branch-not-present', updated_at: date },
