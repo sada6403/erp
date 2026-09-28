@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts'
 import { ShoppingBag, TrendingUp, AlertCircle, Package, CreditCard, Truck, RefreshCw, Building2, ShieldCheck, Warehouse, Wifi, ArrowRightLeft, Check, X } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
@@ -15,6 +15,10 @@ interface PendingTransfer {
   id: string; transfer_number: string; product_name: string; sku: string
   from_branch_name: string; to_branch_name: string; quantity: number
   initiated_by_name: string; initiated_at: string
+}
+interface IncomingBranchTransfer {
+  id: string; transfer_number: string; from_branch_name: string; to_branch_name: string
+  status: string; created_at: string; is_incoming_to_device?: boolean
 }
 
 function useBrandColor() {
@@ -59,6 +63,7 @@ export default function AdminDashboard() {
   const [lowStock, setLowStock]           = useState<Record<string,unknown>[]>([])
   const [loading, setLoading]             = useState(true)
   const [pendingTx, setPendingTx]         = useState<PendingTransfer[]>([])
+  const [incomingBranchTx, setIncomingBranchTx] = useState<IncomingBranchTransfer[]>([])
   const [rejectId, setRejectId]           = useState<string | null>(null)
   const [rejectReason, setRejectReason]   = useState('')
   const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -66,13 +71,23 @@ export default function AdminDashboard() {
 
   const loadTransfers = async () => {
     try {
-      const res = await window.api.stocks.listTransfers({ status: 'pending_approval' })
+      const [res, branchRes] = await Promise.all([
+        window.api.stocks.listTransfers({ status: 'pending_approval' }),
+        window.api.branchTransfers.list(),
+      ])
       if (res.success) {
         const all = res.data as (PendingTransfer & { from_branch_id: string })[]
         const mine = isAdmin ? all : all.filter(t => t.from_branch_id === myBranchId)
         setPendingTx(mine)
       } else {
         toast.error(res.error || 'Failed to load transfer requests')
+      }
+      if (branchRes.success) {
+        const awaiting = new Set(['dispatched', 'in_transit', 'partially_received'])
+        setIncomingBranchTx((branchRes.data as IncomingBranchTransfer[])
+          .filter(t => t.is_incoming_to_device && awaiting.has(t.status)))
+      } else {
+        toast.error(branchRes.error || 'Failed to load incoming branch transfers')
       }
     } catch (err) {
       toast.error((err as Error)?.message || 'Failed to load transfer requests')
@@ -295,6 +310,30 @@ export default function AdminDashboard() {
             </div>
           )}
         </div>
+
+        {!isCashier && incomingBranchTx.length > 0 && (
+          <div className="card border-amber-500/40">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-sm flex items-center gap-2" style={{ color: 'var(--text-1)' }}>
+                <Truck size={15} className="text-amber-400" />
+                Incoming Products — Awaiting Receipt
+                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-400">{incomingBranchTx.length}</span>
+              </h3>
+              <Link to="/admin/branch-transfers" className="text-xs text-brand-400 hover:text-brand-300">View all</Link>
+            </div>
+            <div className="space-y-2">
+              {incomingBranchTx.slice(0, 5).map(t => (
+                <Link key={t.id} to={`/admin/branch-transfers/${t.id}`} className="flex items-center justify-between gap-3 rounded-lg border p-3 hover:border-brand-500 transition-colors" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{t.transfer_number}</p>
+                    <p className="text-xs truncate" style={{ color: 'var(--text-3)' }}>From {t.from_branch_name} — click to print note and receive</p>
+                  </div>
+                  <span className="text-xs font-semibold text-amber-400 uppercase">{t.status.replace(/_/g, ' ')}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* ── Pending Transfer Requests ─────────────────────────────────────── */}
         {!isCashier && (pendingTx.length > 0 || isAdmin) && (

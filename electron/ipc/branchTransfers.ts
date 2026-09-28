@@ -303,7 +303,19 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         ORDER BY p.created_at DESC
       `).all(id)
 
-      return { success: true, data: { ...transfer, items, mismatches, logs, prints } }
+      const deviceBranchId = currentBranchId()
+      const isSourceDevice = Boolean(deviceBranchId && deviceBranchId === String(transfer.from_branch_id))
+      const isDestinationDevice = Boolean(deviceBranchId && deviceBranchId === String(transfer.to_branch_id))
+      return {
+        success: true,
+        data: {
+          ...transfer, items, mismatches, logs, prints,
+          is_source_device: isSourceDevice,
+          is_destination_device: isDestinationDevice,
+          can_receive: isDestinationDevice && ['dispatched', 'in_transit', 'partially_received'].includes(String(transfer.status)),
+          can_print_delivery_note: isDestinationDevice && !['draft', 'approved'].includes(String(transfer.status)),
+        },
+      }
     }
   })
 
@@ -324,9 +336,8 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         if (branchErr) return { success: false, error: branchErr }
       }
       const caller = authUser()
-      const privileged = Boolean(currentPerms(caller).all)
       const callerBranch = currentBranchId(caller)
-      if (!privileged && callerBranch !== String(transfer.from_branch_id)) {
+      if (callerBranch !== String(transfer.from_branch_id)) {
         return { success: false, error: 'Only the source branch can approve or dispatch this transfer' }
       }
 
@@ -446,9 +457,10 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       if (!['dispatched', 'in_transit', 'partially_received'].includes(String(transfer.status))) {
         throw new Error('Transfer must be dispatched before it can be received')
       }
-      {
-        const branchErr = requireBranch(transfer.to_branch_id)
-        if (branchErr) return { success: false, error: branchErr }
+      // Receipt is a physical destination-branch action. Global admin rights
+      // must not let the source/HQ device confirm its own dispatch.
+      if (currentBranchId() !== String(transfer.to_branch_id)) {
+        return { success: false, error: 'Only the destination branch device can receive this transfer' }
       }
 
       const { items, received_by_name, received_designation, notes } = payload
@@ -642,6 +654,14 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   safeHandleModule(ipcMain, 'branchTransfers:logPrint', 'stock_transfers', async (_e, id: string) => {
     {
       const db = getDb()
+      const transfer = db.prepare('SELECT to_branch_id, status FROM branch_transfers WHERE id=?').get(id) as { to_branch_id: string; status: string } | undefined
+      if (!transfer) throw new Error('Transfer not found')
+      if (currentBranchId() !== String(transfer.to_branch_id)) {
+        return { success: false, error: 'Only the destination branch device can print the delivery note' }
+      }
+      if (['draft', 'approved'].includes(String(transfer.status))) {
+        return { success: false, error: 'Delivery note is available after dispatch' }
+      }
       const logId = crypto.randomUUID()
       const log = {
         id: logId,

@@ -152,9 +152,9 @@ export default function BranchTransferView() {
     return <div className="p-6 text-slate-400">Transfer not found</div>
   }
 
-  const isSender = user?.branch?.id === transfer.from_branch_id
-  const isReceiver = user?.branch?.id === transfer.to_branch_id
-  const isAdmin = user?.role?.permissions?.all
+  const isSender = Boolean(transfer.is_source_device)
+  const isReceiver = Boolean(transfer.is_destination_device)
+  const isAdmin = Boolean(user?.role?.permissions?.all)
 
   return (
     <div className="p-6 max-w-5xl mx-auto space-y-6">
@@ -180,15 +180,17 @@ export default function BranchTransferView() {
         </div>
         
         <div className="flex gap-3">
-          <button 
-            onClick={handlePrint}
-            disabled={printing}
-            className="flex items-center gap-2 bg-surface-700 hover:bg-surface-600 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <Printer className="w-4 h-4" /> {printing ? 'Printing...' : 'Print Delivery Note'}
-          </button>
+          {transfer.can_print_delivery_note && (
+            <button 
+              onClick={handlePrint}
+              disabled={printing}
+              className="flex items-center gap-2 bg-surface-700 hover:bg-surface-600 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Printer className="w-4 h-4" /> {printing ? 'Printing...' : 'Print Delivery Note'}
+            </button>
+          )}
           
-          {(isAdmin || isSender) && transfer.status === 'draft' && (
+          {isSender && transfer.status === 'draft' && (
             <button 
               onClick={handleApprove}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm"
@@ -197,7 +199,7 @@ export default function BranchTransferView() {
             </button>
           )}
 
-          {(isAdmin || isSender) && transfer.status === 'approved' && (
+          {isSender && transfer.status === 'approved' && (
             <button 
               onClick={handleDispatch}
               className="flex items-center gap-2 bg-brand-600 hover:bg-brand-500 text-white px-4 py-2 rounded-lg transition-colors font-medium text-sm"
@@ -206,7 +208,7 @@ export default function BranchTransferView() {
             </button>
           )}
 
-          {(isAdmin || isReceiver) && transfer.status === 'dispatched' && (
+          {transfer.can_receive && (
             <button 
               onClick={() => {
                 setAuthorized(false)
@@ -243,6 +245,7 @@ export default function BranchTransferView() {
                   <th className="p-4 font-medium text-slate-400 text-center">Received</th>
                   <th className="p-4 font-medium text-slate-400 text-center">Damaged</th>
                   <th className="p-4 font-medium text-slate-400 text-center">Missing</th>
+                  <th className="p-4 font-medium text-slate-400 text-center">Quality</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-700">
@@ -256,6 +259,15 @@ export default function BranchTransferView() {
                     <td className="p-4 text-center text-emerald-400">{item.received_qty > 0 ? Number(item.received_qty) : '-'}</td>
                     <td className="p-4 text-center text-rose-400">{item.damaged_qty > 0 ? Number(item.damaged_qty) : '-'}</td>
                     <td className="p-4 text-center text-amber-400">{item.missing_qty > 0 ? Number(item.missing_qty) : '-'}</td>
+                    <td className="p-4 text-center">
+                      {Number(item.received_qty || 0) === 0 && Number(item.damaged_qty || 0) === 0 && Number(item.missing_qty || 0) === 0 ? (
+                        <span className="text-slate-500">Pending</span>
+                      ) : Number(item.damaged_qty || 0) > 0 || Number(item.missing_qty || 0) > 0 ? (
+                        <span className="text-rose-400 font-medium">Mismatch</span>
+                      ) : (
+                        <span className="text-emerald-400 font-medium">Good / Correct</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
