@@ -33,6 +33,12 @@ function currentPerms(caller: Record<string, unknown> = authUser()): Record<stri
     || {}
 }
 
+function currentBranchId(caller: Record<string, unknown> = authUser()): string {
+  const scope = caller.scope as { branchId?: string | null } | undefined
+  const branch = caller.branch as { id?: string | null } | undefined
+  return String(caller.branch_id || scope?.branchId || branch?.id || '')
+}
+
 // This whole module previously had ZERO access control — any authenticated
 // renderer call could move real stock between branches. `requireBranch`
 // checks the caller has inventory access and (unless global) belongs to one
@@ -42,7 +48,7 @@ function requireBranch(...branchIds: Array<string | null | undefined>): string |
   const perms = currentPerms(caller)
   if (!perms.all && !perms.inventory) return 'Inventory access required'
   if (perms.all) return null
-  const callerBranch = String(caller.branch_id || '')
+  const callerBranch = currentBranchId(caller)
   if (!callerBranch || !branchIds.some(b => String(b || '') === callerBranch)) {
     return 'You do not have access to this branch transfer'
   }
@@ -227,7 +233,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         params.push(filters.status)
       }
       
-      const scopedBranchId = privileged ? filters.branch_id : caller.branch_id
+      const scopedBranchId = privileged ? filters.branch_id : currentBranchId(caller)
       if (!privileged && !scopedBranchId) return { success: false, error: 'Your account must be assigned to a branch' }
       if (scopedBranchId) {
         sql += ' AND (bt.from_branch_id = ? OR bt.to_branch_id = ?)'
@@ -314,7 +320,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
       const caller = authUser()
       const privileged = Boolean(currentPerms(caller).all)
-      const callerBranch = String(caller.branch_id || '')
+      const callerBranch = currentBranchId(caller)
       if (!privileged && callerBranch !== String(transfer.from_branch_id)) {
         return { success: false, error: 'Only the source branch can approve or dispatch this transfer' }
       }

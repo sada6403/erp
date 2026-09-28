@@ -187,6 +187,18 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(stock.quantity).toBe(7)
   })
 
+  it('branchTransfers:list scopes a destination user with nested branch identity', async () => {
+    setSession({
+      id: 'u-sec-mgr-b',
+      branch: { id: BR_B },
+      role: { permissions: { inventory: true } },
+      scope: { level: 'branch', branchId: BR_B },
+    })
+    const res = await call('branchTransfers:list')
+    expect(res.success, res.error).toBe(true)
+    expect(res.data.some((transfer: { to_branch_id: string }) => transfer.to_branch_id === BR_B)).toBe(true)
+  })
+
   it('admin:suppliers:payDue records an auditable partial payment and blocks overpayment', async () => {
     setSession(admin)
     db.prepare('UPDATE suppliers SET due_balance=12500 WHERE id=?').run(SUPPLIER1)

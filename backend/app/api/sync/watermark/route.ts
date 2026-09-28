@@ -45,25 +45,20 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // A plain GREATEST(MAX(a), MAX(b), MAX(c)) returns NULL in MySQL the
-    // moment any single table is empty (NULL propagates through GREATEST)
-    // — wrapping each MAX in its own row and re-aggregating avoids that.
-    const { rows } = await company.tp.query(
-      `SELECT MAX(ts) as watermark FROM (
-         SELECT MAX(updated_at) as ts FROM products
-         UNION ALL
-         SELECT MAX(updated_at) as ts FROM stocks
-         UNION ALL
-         SELECT MAX(updated_at) as ts FROM categories
-         UNION ALL
-         SELECT MAX(updated_at) as ts FROM stock_transfers
-         UNION ALL
-         SELECT MAX(updated_at) as ts FROM branch_transfers
-         UNION ALL
-         SELECT MAX(updated_at) as ts FROM branch_transfer_items
-       ) x`
+    // Return a stable component for every tracked table, including empty ones.
+    const { rows } = await company.tp.query<Record<string, unknown>>(
+      `SELECT
+         (SELECT MAX(updated_at) FROM products) AS products,
+         (SELECT MAX(updated_at) FROM stocks) AS stocks,
+         (SELECT MAX(updated_at) FROM categories) AS categories,
+         (SELECT MAX(updated_at) FROM stock_transfers) AS stock_transfers,
+         (SELECT MAX(updated_at) FROM branch_transfers) AS branch_transfers,
+         (SELECT MAX(updated_at) FROM branch_transfer_items) AS branch_transfer_items`
     )
-    const watermark = (rows[0] as { watermark: string | null } | undefined)?.watermark ?? null
+    // A global MAX can be held ahead by one table (or a future-dated row),
+    // hiding later changes in every other table. Keep each table's maximum
+    // in the opaque watermark so any transfer change triggers a client pull.
+    const watermark = rows[0] ? JSON.stringify(rows[0]) : null
     return NextResponse.json({ watermark })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Watermark query failed'

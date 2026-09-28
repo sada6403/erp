@@ -19,18 +19,23 @@ export default function BranchTransfersPage() {
 
   useEffect(() => {
     loadTransfers()
+    const unsubscribe = window.api.on('sync:dataChanged', () => {
+      void loadTransfers(false)
+    })
+    return unsubscribe
   }, [])
 
-  async function loadTransfers() {
+  async function loadTransfers(showLoading = true) {
     try {
-      setLoading(true)
+      if (showLoading) setLoading(true)
+      setError(null)
       const res = await window.api.branchTransfers.list()
       if (!res.success) throw new Error(res.error)
       setTransfers(res.data)
     } catch (err: any) {
       setError(err.message)
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }
 
