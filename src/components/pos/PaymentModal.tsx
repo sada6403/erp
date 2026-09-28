@@ -512,8 +512,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
           )}
 
           {isQuotation && (
-            <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4 my-4 text-left">
-              <p className="text-blue-400 text-sm font-semibold mb-1">Quotation Valid Until</p>
+            <div className="bg-brand-500/10 border border-brand-500/30 rounded-xl p-4 my-4 text-left">
+              <p className="text-brand-400 text-sm font-semibold mb-1">Quotation Valid Until</p>
               <p className="text-sm" style={{ color: 'var(--text-1)' }}>{validUntil}</p>
             </div>
           )}
@@ -615,7 +615,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               </p>
             )}
             {couponApplied > 0 && (
-              <p className="text-xs mt-1 text-indigo-400">
+              <p className="text-xs mt-1 text-brand-400">
                 Rs.{couponApplied.toFixed(2)} paid by coupon {String(couponInfo?.code || '')}
               </p>
             )}
@@ -723,9 +723,9 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
 
           {/* Gift Coupon redemption (balance-type, scan or type CPN-…) */}
           {isRetail && couponEligible && (
-            <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)', background: 'color-mix(in srgb, #6366f1 6%, transparent)' }}>
+            <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)', background: 'rgb(var(--brand-rgb) / 0.06)' }}>
               <div className="flex items-center gap-2 mb-2">
-                <Ticket size={15} className="text-indigo-400" />
+                <Ticket size={15} className="text-brand-400" />
                 <p className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>Gift Coupon</p>
                 {couponInfo && (
                   <button onClick={clearCoupon} className="text-xs text-red-400 underline ml-auto">Remove</button>
@@ -792,7 +792,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                       of Rs.{couponBalance.toFixed(2)} balance — applying Rs.{couponApplied.toFixed(2)}
                     </span>
                     <button onClick={() => setCouponAmount(String(Math.min(couponBalance, totalAfterLoyalty).toFixed(2)))}
-                      className="text-xs text-indigo-400 underline ml-auto">Max</button>
+                      className="text-xs text-brand-400 underline ml-auto">Max</button>
                   </div>
                 </div>
               )}
@@ -992,7 +992,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                         onClick={() => { setReceived(String(Math.ceil(cart.total / v) * v)); receivedRef.current?.focus() }}
                         tabIndex={0}
                         className={`btn-secondary btn-sm text-center ${
-                          Number(received) === Math.ceil(cart.total / v) * v ? 'ring-1 ring-blue-500' : ''
+                          Number(received) === Math.ceil(cart.total / v) * v ? 'ring-1 ring-brand-500' : ''
                         }`}
                       >
                         {v >= 1000 ? `${v/1000}k` : v}

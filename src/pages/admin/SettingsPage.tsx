@@ -366,7 +366,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-1.5 text-xs" style={{ color: 'var(--text-2)' }}>
                     <span className="text-green-400 flex-shrink-0">✓</span> User Accounts, Roles & Branches
                   </div>
-                  <div className="mt-3 rounded p-2 text-xs" style={{ background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)' }}>
+                  <div className="mt-3 rounded p-2 text-xs" style={{ background: 'rgb(var(--brand-rgb) / 0.1)', border: '1px solid rgb(var(--brand-rgb) / 0.2)' }}>
                     <p className="text-blue-400 font-semibold mb-1">After clearing:</p>
                     <p style={{ color: 'var(--text-2)' }}>You'll be logged out and returned to the login screen. Your existing staff accounts and their passwords/PINs are unaffected — log back in as usual.</p>
                   </div>
@@ -665,7 +665,7 @@ function BrandingSettings({ form, f }: { form: Record<string, any>; f: (k: strin
     <div className="space-y-6 max-w-3xl">
       <Section title="Brand Assets">
         <div className="rounded-lg px-4 py-3 text-sm mb-2"
-          style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#818cf8' }}>
+          style={{ background: 'rgb(var(--brand-rgb) / 0.08)', border: '1px solid rgb(var(--brand-rgb) / 0.2)', color: 'rgb(var(--brand-400-rgb))' }}>
           Upload a logo file from your computer, or paste a URL (https://...).
           Uploaded files are stored locally and sync to cloud automatically.
         </div>
@@ -913,7 +913,7 @@ function InvoiceDesigner({ form, f, check }: { form: Record<string, any>; f: (k:
                 className={`rounded-lg border p-3 text-left transition-colors ${design === item.id ? 'border-blue-500 bg-blue-500/10' : 'hover:bg-[var(--bg-soft)]'}`}
                 style={{ borderColor: design === item.id ? undefined : 'var(--border)' }}
               >
-                <p className="text-sm font-semibold" style={{ color: design === item.id ? '#60a5fa' : 'var(--text-1)' }}>{item.label}</p>
+                <p className="text-sm font-semibold" style={{ color: design === item.id ? 'rgb(var(--brand-400-rgb))' : 'var(--text-1)' }}>{item.label}</p>
                 <p className="text-[11px] mt-1" style={{ color: 'var(--text-3)' }}>{item.description}</p>
               </button>
             ))}
@@ -1944,7 +1944,7 @@ function NotificationsSettings({
           <button onClick={clearAll} className="btn-secondary btn-sm gap-1.5">
             Clear All
           </button>
-          <span className="ml-auto text-xs px-2 py-1 rounded-full" style={{ background: 'rgba(59,130,246,0.12)', color: 'var(--brand-primary)' }}>
+          <span className="ml-auto text-xs px-2 py-1 rounded-full" style={{ background: 'rgb(var(--brand-rgb) / 0.12)', color: 'var(--brand-primary)' }}>
             {unreadCount} unread
           </span>
         </div>

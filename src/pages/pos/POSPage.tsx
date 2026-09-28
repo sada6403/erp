@@ -24,13 +24,13 @@ const BILL_TYPES: { value: BillType; label: string; icon: React.ReactNode; key: 
 ]
 
 const TYPE_COLORS: Record<BillType, string> = {
-  RETAIL:    'bg-blue-600 text-white border-blue-500 shadow-blue-950/30',
+  RETAIL:    'bg-brand-600 text-white border-brand-500 shadow-brand-950/30',
   QUOTATION: 'bg-amber-600 text-white border-amber-500 shadow-amber-950/30',
   CREDIT:    'bg-rose-600 text-white border-rose-500 shadow-rose-950/30',
 }
 
 const TYPE_META: Record<BillType, { label: string; accent: string; action: string }> = {
-  RETAIL:    { label: 'Retail',    accent: 'text-blue-400',  action: 'Payment'   },
+  RETAIL:    { label: 'Retail',    accent: 'text-brand-400', action: 'Payment'   },
   QUOTATION: { label: 'Quotation', accent: 'text-amber-400', action: 'Save Quote'},
   CREDIT:    { label: 'Credit',    accent: 'text-rose-400',  action: 'Credit Bill'},
 }
@@ -403,7 +403,7 @@ export default function POSPage() {
               : 'pos-chip hover:bg-[var(--pos-hover)]'
           }`}
         >
-          <User size={14} className={cart.billType === 'CREDIT' ? 'text-rose-400' : 'text-blue-400'} />
+          <User size={14} className={cart.billType === 'CREDIT' ? 'text-rose-400' : 'text-brand-400'} />
           <span className="max-w-32 truncate whitespace-nowrap">
             {cart.customer?.name || (cart.billType === 'CREDIT' ? 'Select Customer' : 'Walk-in')}
           </span>
@@ -493,7 +493,7 @@ export default function POSPage() {
                   onClick={() => setSelectedCategory(cat.id || null)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all border ${
                     (selectedCategory === cat.id || (!selectedCategory && !cat.id))
-                      ? 'bg-blue-600 text-white border-blue-500'
+                      ? 'bg-brand-600 text-white border-brand-500'
                       : 'pos-category-inactive'
                   }`}
                 >
@@ -695,7 +695,7 @@ function KeyboardHelpOverlay({ onClose }: { onClose: () => void }) {
       >
         <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-2">
-            <Keyboard size={18} className="text-blue-400" />
+            <Keyboard size={18} className="text-brand-400" />
             <h2 className="font-bold text-lg" style={{ color: 'var(--text-1)' }}>Keyboard Shortcuts</h2>
           </div>
           <div className="flex items-center gap-3">

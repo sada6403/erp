@@ -73,7 +73,7 @@ export default function SmartBuyDashboardPage() {
             <button onClick={() => navigate('/admin/chits')}
               className="flex items-center gap-3 rounded-xl border p-4 text-left transition-colors hover:border-[var(--brand-primary)]"
               style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
-              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(99,102,241,0.12)' }}><Layers size={18} className="text-indigo-400" /></div>
+              <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0" style={{ background: 'rgb(var(--brand-rgb) / 0.12)' }}><Layers size={18} className="text-brand-400" /></div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>View Schemes</p>
                 <p className="text-xs" style={{ color: 'var(--text-3)' }}>Add members, collect payments, pick a winner</p>
@@ -252,7 +252,7 @@ export default function SmartBuyDashboardPage() {
                 <XAxis dataKey="month" stroke="var(--text-3)" tick={{ fontSize: 10 }} />
                 <YAxis stroke="var(--text-3)" tick={{ fontSize: 10 }} tickFormatter={v => `${(Number(v) / 1000).toFixed(0)}k`} />
                 <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`Rs.${money(v)}`, 'Collected']} />
-                <Bar dataKey="total" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="total" fill="var(--brand-primary)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -276,7 +276,7 @@ export default function SmartBuyDashboardPage() {
                 <XAxis type="number" stroke="var(--text-3)" tick={{ fontSize: 10 }} tickFormatter={v => `${(Number(v) / 1000).toFixed(0)}k`} />
                 <YAxis dataKey="branch_name" type="category" stroke="var(--text-3)" tick={{ fontSize: 10 }} width={90} />
                 <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`Rs.${money(v)}`, 'Collected']} />
-                <Bar dataKey="collected" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="collected" fill="var(--brand-primary)" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -324,7 +324,7 @@ export default function SmartBuyDashboardPage() {
                 <XAxis dataKey="month" stroke="var(--text-3)" tick={{ fontSize: 10 }} />
                 <YAxis stroke="var(--text-3)" tick={{ fontSize: 10 }} allowDecimals={false} />
                 <Tooltip contentStyle={tooltipStyle} formatter={(v) => [v, 'Registrations']} />
-                <Bar dataKey="total" fill="#6366f1" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="total" fill="var(--brand-primary)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

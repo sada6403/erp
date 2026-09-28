@@ -26,7 +26,11 @@ function useBrandColor() {
     }
     update()
     window.addEventListener('themechange', update)
-    return () => window.removeEventListener('themechange', update)
+    window.addEventListener('brandchange', update)
+    return () => {
+      window.removeEventListener('themechange', update)
+      window.removeEventListener('brandchange', update)
+    }
   }, [])
   return color
 }

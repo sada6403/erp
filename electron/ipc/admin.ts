@@ -1002,6 +1002,96 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     }
     return { success: true, data: getDb().prepare('SELECT * FROM suppliers ORDER BY name').all() }
   })
+  safeHandle(ipcMain, 'admin:suppliers:payments', (_e, supplierId: string) => {
+    const db = getDb()
+    if (!canManageProcurement(db, authUser())) {
+      return { success: false, error: 'Supplier management is available only at the main branch' }
+    }
+    const supplier = db.prepare('SELECT id FROM suppliers WHERE id=?').get(supplierId)
+    if (!supplier) return { success: false, error: 'Supplier not found' }
+    const payments = db.prepare(`
+      SELECT sp.*, u.name AS paid_by_name, b.name AS branch_name
+      FROM supplier_payments sp
+      LEFT JOIN users u ON u.id = sp.paid_by
+      LEFT JOIN branches b ON b.id = sp.branch_id
+      WHERE sp.supplier_id = ?
+      ORDER BY sp.payment_date DESC, sp.created_at DESC
+      LIMIT 200
+    `).all(supplierId)
+    return { success: true, data: payments }
+  })
+  safeHandle(ipcMain, 'admin:suppliers:payDue', async (_e, supplierId: string, p: Record<string, unknown>) => {
+    const db = getDb()
+    const caller = authUser()
+    if (!canManageProcurement(db, caller)) {
+      return { success: false, error: 'Supplier payments are available only at the main branch' }
+    }
+
+    const supplier = db.prepare('SELECT id, name, due_balance FROM suppliers WHERE id=? AND is_active=1')
+      .get(supplierId) as { id: string; name: string; due_balance: number } | undefined
+    if (!supplier) return { success: false, error: 'Active supplier not found' }
+
+    const amount = Number(p.amount)
+    const balanceBefore = Math.max(0, Number(supplier.due_balance || 0))
+    if (!Number.isFinite(amount) || amount <= 0) return { success: false, error: 'Payment amount must be greater than zero' }
+    if (amount > balanceBefore) return { success: false, error: `Payment cannot exceed the due balance of Rs.${balanceBefore.toLocaleString()}` }
+
+    const allowedMethods = new Set(['cash', 'card', 'bank_transfer', 'cheque', 'other'])
+    const paymentMethod = String(p.payment_method || '').trim()
+    if (!allowedMethods.has(paymentMethod)) return { success: false, error: 'Select a valid payment method' }
+    const paymentDate = String(p.payment_date || new Date().toISOString())
+    const parsedPaymentDate = new Date(paymentDate)
+    if (Number.isNaN(parsedPaymentDate.getTime())) return { success: false, error: 'Enter a valid payment date' }
+    const tomorrow = new Date()
+    tomorrow.setHours(24, 0, 0, 0)
+    if (parsedPaymentDate >= tomorrow) return { success: false, error: 'Supplier payment date cannot be in the future' }
+
+    const id = crypto.randomUUID()
+    const balanceAfter = Math.max(0, Number((balanceBefore - amount).toFixed(2)))
+    const record = {
+      id,
+      supplier_id: supplierId,
+      branch_id: (caller.branch_id as string) || null,
+      amount,
+      payment_method: paymentMethod,
+      reference_no: String(p.reference_no || '').trim() || null,
+      payment_date: paymentDate,
+      notes: String(p.notes || '').trim() || null,
+      balance_before: balanceBefore,
+      balance_after: balanceAfter,
+      paid_by: (caller.id as string) || null,
+    }
+
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO supplier_payments (
+          id, supplier_id, branch_id, amount, payment_method, reference_no,
+          payment_date, notes, balance_before, balance_after, paid_by
+        ) VALUES (
+          @id, @supplier_id, @branch_id, @amount, @payment_method, @reference_no,
+          @payment_date, @notes, @balance_before, @balance_after, @paid_by
+        )
+      `).run(record)
+      const changed = db.prepare(`
+        UPDATE suppliers SET due_balance=?, updated_at=datetime('now')
+        WHERE id=? AND due_balance=?
+      `).run(balanceAfter, supplierId, balanceBefore)
+      if (!changed.changes) throw new Error('Supplier balance changed. Refresh and try again.')
+      logAudit(db, {
+        userId: (caller.id as string) || null,
+        branchId: (caller.branch_id as string) || null,
+        action: 'SUPPLIER_DUE_PAYMENT',
+        tableName: 'supplier_payments',
+        recordId: id,
+        newValues: { supplier_id: supplierId, supplier_name: supplier.name, amount, payment_method: paymentMethod, balance_before: balanceBefore, balance_after: balanceAfter },
+      })
+    })()
+
+    const savedPayment = db.prepare('SELECT * FROM supplier_payments WHERE id=?').get(id) as Record<string, unknown>
+    await enqueuSync('supplier_payments', id, 'INSERT', savedPayment)
+    await enqueuSync('suppliers', supplierId, 'UPDATE', { id: supplierId, due_balance: balanceAfter })
+    return { success: true, data: { id, balance_after: balanceAfter } }
+  })
   safeHandle(ipcMain, 'admin:suppliers:create', async (_e, p) => {
     if (!canManageProcurement(getDb(), authUser())) return { success: false, error: 'Supplier management is available only at the main branch' }
     const name = String(p.name || '').trim()
@@ -1040,6 +1130,26 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     logAudit(db, {
       userId: (authUser().id as string) || null, branchId: null,
       action: 'SUPPLIER_DELETED', tableName: 'suppliers', recordId: id, oldValues: { name: supplier.name },
+    })
+    return { success: true }
+  })
+  safeHandle(ipcMain, 'admin:suppliers:restore', async (_e, id: string) => {
+    const db = getDb()
+    const caller = authUser()
+    if (!canManageProcurement(db, caller)) return { success: false, error: 'Supplier management is available only at the main branch' }
+    const supplier = db.prepare('SELECT id, name, is_active FROM suppliers WHERE id=?').get(id) as { id: string; name: string; is_active: number } | undefined
+    if (!supplier) return { success: false, error: 'Supplier not found' }
+    if (supplier.is_active) return { success: false, error: 'This supplier is already active' }
+    db.prepare(`UPDATE suppliers SET is_active=1, updated_at=datetime('now') WHERE id=?`).run(id)
+    await enqueuSync('suppliers', id, 'UPDATE', { id, is_active: 1 })
+    logAudit(db, {
+      userId: (caller.id as string) || null,
+      branchId: (caller.branch_id as string) || null,
+      action: 'SUPPLIER_REACTIVATED',
+      tableName: 'suppliers',
+      recordId: id,
+      oldValues: { name: supplier.name, is_active: 0 },
+      newValues: { name: supplier.name, is_active: 1 },
     })
     return { success: true }
   })
@@ -1960,7 +2070,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       'order_items', 'orders', 'invoice_items', 'payments', 'invoices',
       'stock_count_items', 'stock_counts', 'stock_transfer_items', 'stock_transfers',
       'stock_movements', 'batches', 'stocks', 'purchase_order_items', 'purchase_orders',
-      'expenses', 'customers', 'products', 'notifications', 'categories', 'suppliers',
+      'expenses', 'supplier_payments', 'customers', 'products', 'notifications', 'categories', 'suppliers',
     ]
     db.transaction(() => {
       try { db.prepare(`UPDATE users SET branch_id = NULL, role_id = NULL`).run() } catch { /* ok */ }

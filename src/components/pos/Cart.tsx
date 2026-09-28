@@ -127,14 +127,14 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
               onClick={() => onFocusIdx?.(idx)}
               className={`pos-cart-item rounded-lg p-3 border transition-all cursor-pointer
                 ${discountExceedsLimit ? 'border-amber-600/60' : ''}
-                ${isFocused ? 'ring-2 ring-blue-500/60 border-blue-500/40' : ''}`}
+                ${isFocused ? 'ring-2 ring-brand-500/60 border-brand-500/40' : ''}`}
             >
               {/* Row 1: name + focus indicator + remove */}
               <div className="flex items-start gap-2">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5">
                     {isFocused && (
-                      <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                      <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
                     )}
                     <p className="text-sm font-medium leading-tight truncate" style={{ color: 'var(--text-1)' }}>
                       {item.product.name}
@@ -308,7 +308,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
           )}
           <div className="flex justify-between text-lg font-bold pt-2 border-t" style={{ color: 'var(--text-1)', borderColor: 'var(--border)' }}>
             <span>TOTAL</span>
-            <span className="text-blue-400">
+            <span className="text-brand-400">
               Rs.{cart.total.toLocaleString(undefined, { maximumFractionDigits: 2 })}
             </span>
           </div>

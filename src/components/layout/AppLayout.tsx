@@ -17,6 +17,7 @@ import { getHomeLabel, getLandingRoute, getSessionProfile, type SessionRoleKind 
 import { resolveImageSrc } from '@/lib/imageUrl'
 import ProductSyncModal from '@/components/shared/ProductSyncModal'
 import { canManageProcurement } from '@/lib/branchAccess'
+import { applyBrandTheme } from '@/lib/brandTheme'
 
 const MASKED_SECRET = '********'
 
@@ -442,11 +443,6 @@ export default function AppLayout() {
   }, [userBranchId])
 
   useEffect(() => {
-    const applyColor = (color: string) => {
-      document.documentElement.style.setProperty('--brand-primary', color)
-      document.documentElement.style.setProperty('--brand-primary-hover', color)
-    }
-
     const loadBranding = async () => {
       const res = await window.api.settings.get() as { success: boolean; data?: unknown }
       if (res.success && res.data) {
@@ -461,7 +457,7 @@ export default function AppLayout() {
             : d
         )
         const cached = (d.brand_color as string) || '#2563eb'
-        applyColor(cached)
+        applyBrandTheme(cached)
 
         // Fetch fresh brand from backend so superadmin color changes take effect
         const apiUrl = d.cloud_api_url as string
@@ -487,7 +483,7 @@ export default function AppLayout() {
             }
             const brand = await resp.json()
             if (brand?.brand_color) {
-              applyColor(brand.brand_color)
+              applyBrandTheme(brand.brand_color)
               setBranding(prev => ({ ...prev, brand_color: brand.brand_color, company_logo_url: brand.brand_logo_url ?? prev.company_logo_url }))
             }
             // This branch runs every 30s on every poll tick — only commit a
@@ -675,7 +671,7 @@ export default function AppLayout() {
             to="/pos"
             className={({ isActive }) =>
               `inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold text-white transition-colors ${
-                isActive ? 'bg-blue-500' : 'bg-blue-600 hover:bg-blue-700'
+                isActive ? 'bg-brand-500' : 'bg-brand-600 hover:bg-brand-700'
               }`
             }
           >
@@ -798,15 +794,15 @@ export default function AppLayout() {
           {/* Update notification banner */}
           {updateInfo && updateState !== 'idle' && (
             <div className="flex items-center gap-3 px-4 py-2 text-sm shrink-0"
-              style={{ background: updateState === 'ready' ? 'rgba(34,197,94,0.12)' : 'rgba(99,102,241,0.12)', borderBottom: '1px solid var(--border)' }}>
+              style={{ background: updateState === 'ready' ? 'rgba(34,197,94,0.12)' : 'rgb(var(--brand-600-rgb) / 0.12)', borderBottom: '1px solid var(--border)' }}>
               {updateState === 'downloading' ? (
                 <>
-                  <RefreshCw size={14} className="animate-spin text-indigo-400 shrink-0" />
+                  <RefreshCw size={14} className="animate-spin text-brand-400 shrink-0" />
                   <span style={{ color: 'var(--text-2)' }}>
                     Downloading update v{updateInfo.version}… <strong>{downloadPct}%</strong>
                   </span>
                   <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
-                    <div className="h-full rounded-full bg-indigo-500 transition-all" style={{ width: `${downloadPct}%` }} />
+                    <div className="h-full rounded-full bg-brand-500 transition-all" style={{ width: `${downloadPct}%` }} />
                   </div>
                 </>
               ) : (
@@ -830,14 +826,14 @@ export default function AppLayout() {
 
           {updateInfo && updateState === 'idle' && (
             <div className="flex items-center gap-3 px-4 py-2 text-sm shrink-0"
-              style={{ background: 'rgba(99,102,241,0.10)', borderBottom: '1px solid var(--border)' }}>
-              <Download size={14} className="text-indigo-400 shrink-0" />
+              style={{ background: 'rgb(var(--brand-600-rgb) / 0.10)', borderBottom: '1px solid var(--border)' }}>
+              <Download size={14} className="text-brand-400 shrink-0" />
               <span style={{ color: 'var(--text-2)' }}>
                 Update v{updateInfo.version} available
               </span>
               <button
                 onClick={() => { setUpdateState('downloading'); window.api.updater?.download() }}
-                className="ml-auto px-3 py-1 rounded-lg text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500"
+                className="ml-auto px-3 py-1 rounded-lg text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500"
               >
                 Download Update
               </button>

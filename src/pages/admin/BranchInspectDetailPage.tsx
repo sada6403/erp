@@ -105,7 +105,7 @@ export default function BranchInspectDetailPage() {
                 <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
                 <YAxis stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={v => `${(v / 1000).toFixed(0)}k`} />
                 <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} formatter={(v) => [`Rs.${Number(v).toLocaleString()}`, 'Revenue']} />
-                <Line type="monotone" dataKey="total_revenue" stroke="#2563eb" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="total_revenue" stroke="var(--brand-primary)" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -117,7 +117,7 @@ export default function BranchInspectDetailPage() {
                 <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 11 }} tickFormatter={d => d.slice(5)} />
                 <YAxis stroke="#64748b" tick={{ fontSize: 11 }} />
                 <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} />
-                <Bar dataKey="total_invoices" fill="#2563eb" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="total_invoices" fill="var(--brand-primary)" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

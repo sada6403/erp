@@ -173,11 +173,31 @@ async function runTenantCompatibility(dbSchema: string) {
        email      VARCHAR(255) NULL,
        address    TEXT         NULL,
        tax_number VARCHAR(100) NULL,
+       due_balance DECIMAL(14,2) NOT NULL DEFAULT 0,
        is_active  BOOLEAN      NOT NULL DEFAULT 1,
        created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
        updated_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
        synced_at  DATETIME     NULL,
        INDEX idx_suppliers_updated (updated_at)
+     )`,
+    `CREATE TABLE IF NOT EXISTS supplier_payments (
+       id             CHAR(36)      NOT NULL PRIMARY KEY,
+       supplier_id    CHAR(36)      NOT NULL,
+       branch_id      CHAR(36)      NULL,
+       amount         DECIMAL(14,2) NOT NULL,
+       payment_method VARCHAR(32)   NOT NULL,
+       reference_no   VARCHAR(255)  NULL,
+       payment_date   DATETIME      NOT NULL,
+       notes          TEXT          NULL,
+       balance_before DECIMAL(14,2) NOT NULL,
+       balance_after  DECIMAL(14,2) NOT NULL,
+       paid_by        CHAR(36)      NULL,
+       created_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at      DATETIME      NULL,
+       INDEX idx_supplier_payments_supplier (supplier_id),
+       INDEX idx_supplier_payments_date (payment_date),
+       INDEX idx_supplier_payments_updated (updated_at)
      )`,
     `CREATE TABLE IF NOT EXISTS stocks (
        id           CHAR(36)      NOT NULL PRIMARY KEY,
@@ -1346,6 +1366,8 @@ async function runTenantCompatibility(dbSchema: string) {
     `ALTER TABLE chit_schemes ADD COLUMN projected_early_winners INT NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_schemes ADD COLUMN avg_product_cost DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_schemes ADD COLUMN other_expenses DECIMAL(14,2) NOT NULL DEFAULT 0`,
+
+    `ALTER TABLE suppliers ADD COLUMN due_balance DECIMAL(14,2) NOT NULL DEFAULT 0`,
 
     // Multi-item branch transfers use branch_transfers, not the legacy
     // single-item stock_transfers table referenced by reference_transfer_id.

@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLandingRoute } from '@/lib/sessionRouting'
+import { applyBrandTheme } from '@/lib/brandTheme'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function redirectBySession(u: unknown) {
@@ -70,9 +71,9 @@ function StatusBar({ online, pending, lastSync, licenseOk, version }: {
     <div className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-4 py-1.5"
       style={{ background: 'rgba(10,12,20,0.95)', borderBottom: '1px solid rgba(255,255,255,0.06)', backdropFilter: 'blur(12px)' }}>
       <div className="flex items-center gap-1.5 px-2 py-0.5 rounded"
-        style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.25)' }}>
-        <Zap size={9} style={{ color: '#818cf8' }} />
-        <span className="text-xs font-bold" style={{ color: '#818cf8' }}>v{version}</span>
+        style={{ background: 'rgb(var(--brand-rgb) / 0.15)', border: '1px solid rgb(var(--brand-rgb) / 0.25)' }}>
+        <Zap size={9} style={{ color: 'rgb(var(--brand-400-rgb))' }} />
+        <span className="text-xs font-bold" style={{ color: 'rgb(var(--brand-400-rgb))' }}>v{version}</span>
       </div>
       <div className="flex items-center gap-3">
         <LiveClock />
@@ -194,6 +195,7 @@ export default function LoginPage() {
             ? prev
             : d
         )
+        applyBrandTheme(d.brand_color)
       }
     }
     loadBranding().catch(() => undefined)
@@ -518,13 +520,13 @@ export default function LoginPage() {
   const pinDotStyle = (i: number) => {
     if (pinSuccess && i < pin.length) return { background: '#10b981', border: '2px solid #10b981' }
     if (loginState === 'error' && i < pin.length) return { background: '#ef4444', border: '2px solid #ef4444' }
-    if (i < pin.length) return { background: '#4f46e5', border: '2px solid #6366f1', boxShadow: '0 0 0 3px rgba(99,102,241,0.25)' }
+    if (i < pin.length) return { background: 'var(--brand-primary)', border: '2px solid rgb(var(--brand-500-rgb))', boxShadow: '0 0 0 3px rgb(var(--brand-rgb) / 0.25)' }
     return { background: '#0f1623', border: '2px solid #1e2d45' }
   }
 
   const padStyle = (d: string): React.CSSProperties => {
     if (d === 'C')  return { background: 'rgba(239,68,68,0.1)',  color: '#f87171', border: '1px solid rgba(239,68,68,0.2)' }
-    if (d === '⌫') return { background: 'rgba(99,102,241,0.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.2)' }
+    if (d === '⌫') return { background: 'rgb(var(--brand-rgb) / 0.1)', color: 'rgb(var(--brand-400-rgb))', border: '1px solid rgb(var(--brand-rgb) / 0.2)' }
     return { background: '#111827', color: '#f1f5f9', border: '1px solid #1e293b' }
   }
 
@@ -532,7 +534,7 @@ export default function LoginPage() {
     if (loginState === 'success') return { background: '#059669' }
     if (loginState === 'error')   return { background: '#dc2626' }
     if (pin.length < 1 && mode === 'pin') return { background: '#0d1117', color: '#334155', border: '1px solid #1e293b', cursor: 'not-allowed' }
-    return { background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }
+    return { background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))' }
   }
   const loginBtnLabel = () => {
     if (loginState === 'loading') return <><RefreshCw size={13} className="inline mr-1.5 animate-spin" />Signing in…</>
@@ -551,7 +553,7 @@ export default function LoginPage() {
       />
       {updateInfo && (
         <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-xl border px-4 py-2 shadow-xl"
-          style={{ background: '#111827', borderColor: '#3730a3', color: '#e0e7ff' }}>
+          style={{ background: '#111827', borderColor: 'rgb(var(--brand-800-rgb))', color: 'rgb(var(--brand-100-rgb))' }}>
           <span className="text-sm font-semibold">
             {updateState === 'ready'
               ? `Update v${updateInfo.version} ready`
@@ -584,7 +586,7 @@ export default function LoginPage() {
           {/* ── Company header ── */}
           <div className="flex items-center gap-3 pb-3" style={{ borderBottom: '1px solid #0f1623' }}>
             <div className="w-9 h-9 rounded-xl flex items-center justify-center overflow-hidden flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
+              style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))' }}>
               {brandLogo && !logoFailed
                 ? <img src={brandLogo} alt="" className="w-full h-full object-cover" onError={() => setLogoFailed(true)} />
                 : <ShoppingBag size={17} className="text-white" />}
@@ -628,13 +630,13 @@ export default function LoginPage() {
                   />
                   <button onClick={confirmBranchCode} disabled={branchSearching || !branchCode.trim()}
                     className="px-3.5 py-2.5 rounded-xl text-white font-bold disabled:opacity-40 flex-shrink-0"
-                    style={{ background: 'linear-gradient(135deg, #4f46e5, #6d28d9)' }}>
+                    style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))' }}>
                     {branchSearching ? <RefreshCw size={14} className="animate-spin" /> : <ArrowRight size={14} />}
                   </button>
                   <button onClick={loadBranchList}
                     disabled={branchListLoading}
                     className="px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 flex-shrink-0"
-                    style={{ background: '#0d1117', color: '#c7d2fe', border: '1px solid #1e293b', opacity: branchListLoading ? 0.7 : 1 }}>
+                    style={{ background: '#0d1117', color: 'rgb(var(--brand-200-rgb))', border: '1px solid #1e293b', opacity: branchListLoading ? 0.7 : 1 }}>
                     <GitBranch size={13} />
                     {branchListLoading ? 'Loading…' : 'Browse'}
                   </button>
@@ -646,13 +648,13 @@ export default function LoginPage() {
                 </div>
               ) : (
                 <div className="flex items-center justify-between px-3 py-2 rounded-xl"
-                  style={{ background: '#0d1117', border: `1px solid ${terminalBranch ? 'rgba(99,102,241,0.3)' : 'rgba(239,68,68,0.25)'}` }}>
+                  style={{ background: '#0d1117', border: `1px solid ${terminalBranch ? 'rgb(var(--brand-rgb) / 0.3)' : 'rgba(239,68,68,0.25)'}` }}>
                   <div className="flex items-center gap-2 min-w-0">
-                    <GitBranch size={12} style={{ color: terminalBranch ? '#818cf8' : '#ef4444', flexShrink: 0 }} />
+                    <GitBranch size={12} style={{ color: terminalBranch ? 'rgb(var(--brand-400-rgb))' : '#ef4444', flexShrink: 0 }} />
                     {terminalBranch ? (
                       <span className="text-sm text-white truncate">
                         <span className="font-mono text-xs font-bold mr-1.5 px-1.5 py-0.5 rounded"
-                          style={{ background: 'rgba(99,102,241,0.2)', color: '#818cf8' }}>{terminalBranch.code}</span>
+                          style={{ background: 'rgb(var(--brand-rgb) / 0.2)', color: 'rgb(var(--brand-400-rgb))' }}>{terminalBranch.code}</span>
                         {terminalBranch.name}
                       </span>
                     ) : (
@@ -663,9 +665,9 @@ export default function LoginPage() {
                     <button onClick={() => setShowBranchInput(true)}
                       className="text-xs font-semibold px-2 py-1 rounded-lg"
                       style={{
-                        background: terminalBranch ? 'rgba(99,102,241,0.12)' : 'rgba(239,68,68,0.12)',
-                        color:      terminalBranch ? '#818cf8' : '#f87171',
-                        border:     `1px solid ${terminalBranch ? 'rgba(99,102,241,0.2)' : 'rgba(239,68,68,0.25)'}`,
+                        background: terminalBranch ? 'rgb(var(--brand-rgb) / 0.12)' : 'rgba(239,68,68,0.12)',
+                        color:      terminalBranch ? 'rgb(var(--brand-400-rgb))' : '#f87171',
+                        border:     `1px solid ${terminalBranch ? 'rgb(var(--brand-rgb) / 0.2)' : 'rgba(239,68,68,0.25)'}`,
                       }}>
                       {terminalBranch ? 'Change' : 'Set Branch'}
                     </button>
@@ -682,10 +684,10 @@ export default function LoginPage() {
               {showBranchList && (
                 <div className="fixed inset-0 z-[70] flex items-center justify-center px-4" style={{ background: 'rgba(2,6,23,0.72)' }}>
                   <div className="w-full max-w-md rounded-2xl overflow-hidden shadow-2xl"
-                    style={{ border: '1px solid rgba(99,102,241,0.3)', background: '#0a0e18' }}>
+                    style={{ border: '1px solid rgb(var(--brand-rgb) / 0.3)', background: '#0a0e18' }}>
                     <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: '1px solid #0f1623' }}>
                       <div>
-                        <p className="text-sm font-semibold" style={{ color: '#e0e7ff' }}>Select Branch</p>
+                        <p className="text-sm font-semibold" style={{ color: 'rgb(var(--brand-100-rgb))' }}>Select Branch</p>
                         <p className="text-xs" style={{ color: '#64748b' }}>Choose a branch to continue login</p>
                       </div>
                       <button onClick={() => setShowBranchList(false)} style={{ color: '#334155' }}>
@@ -713,14 +715,14 @@ export default function LoginPage() {
                         <button key={b.id} onClick={() => pickBranchFromList(b)}
                           className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-indigo-600/10"
                           style={{ borderBottom: '1px solid #0f1623' }}>
-                          <GitBranch size={12} style={{ color: '#4f46e5', flexShrink: 0 }} />
+                          <GitBranch size={12} style={{ color: 'var(--brand-primary)', flexShrink: 0 }} />
                           <div className="min-w-0 flex-1">
                             <span className="block text-sm text-white truncate">{b.name}</span>
                             <span className="block text-[11px] text-slate-500 font-mono truncate">{b.id}</span>
                           </div>
                           {b.code && (
                             <span className="text-xs font-mono px-1.5 py-0.5 rounded flex-shrink-0"
-                              style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{b.code}</span>
+                              style={{ background: 'rgb(var(--brand-rgb) / 0.15)', color: 'rgb(var(--brand-400-rgb))' }}>{b.code}</span>
                           )}
                         </button>
                       ))}
@@ -777,9 +779,9 @@ export default function LoginPage() {
                 </div>
               ) : (
                 <div className="relative text-center py-4 rounded-xl"
-                  style={{ background: 'rgba(99,102,241,0.05)', border: '1px dashed rgba(99,102,241,0.2)' }}>
-                  <GitBranch size={18} className="mx-auto mb-1.5" style={{ color: '#4f46e5' }} />
-                  <p className="text-xs font-semibold" style={{ color: '#818cf8' }}>Select your branch first</p>
+                  style={{ background: 'rgb(var(--brand-rgb) / 0.05)', border: '1px dashed rgb(var(--brand-rgb) / 0.2)' }}>
+                  <GitBranch size={18} className="mx-auto mb-1.5" style={{ color: 'var(--brand-primary)' }} />
+                  <p className="text-xs font-semibold" style={{ color: 'rgb(var(--brand-400-rgb))' }}>Select your branch first</p>
                   <p className="text-xs mt-0.5 mb-2.5" style={{ color: '#475569' }}>
                     Enter your branch code or PIN above
                   </p>
@@ -788,7 +790,7 @@ export default function LoginPage() {
                       onClick={loadBranchList}
                       disabled={branchListLoading}
                       className="text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors inline-flex items-center gap-1.5"
-                      style={{ background: 'rgba(99,102,241,0.15)', color: '#818cf8', border: '1px solid rgba(99,102,241,0.25)', opacity: branchListLoading ? 0.7 : 1 }}>
+                      style={{ background: 'rgb(var(--brand-rgb) / 0.15)', color: 'rgb(var(--brand-400-rgb))', border: '1px solid rgb(var(--brand-rgb) / 0.25)', opacity: branchListLoading ? 0.7 : 1 }}>
                       <GitBranch size={12} />
                       {branchListLoading ? 'Loading…' : 'Browse all branches'}
                     </button>
@@ -817,7 +819,7 @@ export default function LoginPage() {
                     <Shield size={10} /> Support Access
                   </button>
                   <button onClick={() => { setMode('email'); setLoginState('idle') }}
-                    className="flex items-center gap-1 text-xs font-semibold" style={{ color: '#818cf8' }}>
+                    className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'rgb(var(--brand-400-rgb))' }}>
                     <Mail size={10} /> Admin
                   </button>
                 </div>
@@ -828,7 +830,7 @@ export default function LoginPage() {
                   <p className="text-[11px] font-semibold mb-1.5" style={{ color: '#94a3b8' }}>Need help or password reset?</p>
                   <div className="flex flex-wrap gap-2 text-xs">
                     {supportPhone && (
-                      <a href={`tel:${supportPhone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(99,102,241,0.12)', color: '#c7d2fe' }}>
+                      <a href={`tel:${supportPhone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgb(var(--brand-rgb) / 0.12)', color: 'rgb(var(--brand-200-rgb))' }}>
                         <Phone size={11} /> {supportPhone}
                       </a>
                     )}
@@ -850,7 +852,7 @@ export default function LoginPage() {
           {mode === 'email' && forgotStep === 'off' && !requires2FA && !requiresPwChange && (
             <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: '#818cf8' }}>
+                <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'rgb(var(--brand-400-rgb))' }}>
                   <Mail size={13} /> Admin Login
                 </div>
                 <button onClick={() => { setMode('pin'); setPin(''); setLoginState('idle'); resetForgot() }}
@@ -865,7 +867,7 @@ export default function LoginPage() {
                   <input ref={emailRef} type="email" value={email} onChange={e => setEmail(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none"
                     style={{ background: '#0d1117', border: '1px solid #1e293b' }}
-                    onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                     onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
                     placeholder="Email address" required />
                 </div>
@@ -875,7 +877,7 @@ export default function LoginPage() {
                     onChange={e => { setPassword(e.target.value); setIsAccountLocked(false) }}
                     className="w-full pl-10 pr-10 py-2.5 rounded-xl text-sm text-white outline-none"
                     style={{ background: '#0d1117', border: '1px solid #1e293b' }}
-                    onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                     onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
                     placeholder="Password" required />
                   <button type="button" onClick={() => setShowPassword(p => !p)}
@@ -886,7 +888,7 @@ export default function LoginPage() {
 
                 <button type="submit" disabled={loading || loginState === 'success'}
                   className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
-                  style={loginState === 'success' ? { background: '#059669' } : loginState === 'error' ? { background: '#dc2626' } : { background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
+                  style={loginState === 'success' ? { background: '#059669' } : loginState === 'error' ? { background: '#dc2626' } : { background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))' }}>
                   {loginBtnLabel()}
                 </button>
 
@@ -901,7 +903,7 @@ export default function LoginPage() {
 
                 <div className="flex justify-end">
                   <button type="button" onClick={() => { setForgotEmail(email); setForgotStep('email') }}
-                    className="text-xs font-medium" style={{ color: '#6366f1' }}>
+                    className="text-xs font-medium" style={{ color: 'rgb(var(--brand-500-rgb))' }}>
                     Forgot Password?
                   </button>
                 </div>
@@ -917,7 +919,7 @@ export default function LoginPage() {
                   <CheckCircle size={32} className="mx-auto text-emerald-400" />
                   <p className="font-bold text-white">Password Reset!</p>
                   <button onClick={resetForgot} className="w-full py-2.5 rounded-xl text-white font-bold text-sm"
-                    style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
+                    style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))' }}>
                     Back to Login
                   </button>
                 </div>
@@ -940,13 +942,13 @@ export default function LoginPage() {
                     <input type="email" value={forgotEmail} required autoFocus onChange={e => setForgotEmail(e.target.value)}
                       className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none"
                       style={{ background: '#0d1117', border: '1px solid #1e293b' }}
-                      onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                      onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                       onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
                       placeholder="Your email address" />
                   </div>
                   <button type="submit" disabled={forgotLoading || !forgotEmail.trim()}
                     className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
-                    style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', opacity: !forgotEmail.trim() ? 0.5 : 1 }}>
+                    style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))', opacity: !forgotEmail.trim() ? 0.5 : 1 }}>
                     {forgotLoading ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Sending…</> : 'Send Reset Code'}
                   </button>
                 </form>
@@ -962,7 +964,7 @@ export default function LoginPage() {
                     onChange={e => setForgotOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     className="w-full px-4 py-2.5 rounded-xl text-center text-xl font-mono tracking-[0.4em] text-white outline-none border"
                     style={{ background: '#0d1117', borderColor: '#1e293b' }}
-                    onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                     onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
                     placeholder="000000" />
                   <div className="relative">
@@ -971,7 +973,7 @@ export default function LoginPage() {
                       onChange={e => setForgotNewPw(e.target.value)}
                       className="w-full pl-10 pr-10 py-2.5 rounded-xl text-sm text-white outline-none"
                       style={{ background: '#0d1117', border: '1px solid #1e293b' }}
-                      onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                      onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                       onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
                       placeholder="New password (min 8 chars)" />
                     <button type="button" onClick={() => setShowNewPw(p => !p)}
@@ -990,7 +992,7 @@ export default function LoginPage() {
                   <button type="submit"
                     disabled={forgotLoading || forgotOtp.length < 4 || forgotNewPw.length < 8 || forgotNewPw !== forgotConfirm}
                     className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
-                    style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', opacity: (forgotOtp.length < 4 || forgotNewPw.length < 8 || forgotNewPw !== forgotConfirm) ? 0.5 : 1 }}>
+                    style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))', opacity: (forgotOtp.length < 4 || forgotNewPw.length < 8 || forgotNewPw !== forgotConfirm) ? 0.5 : 1 }}>
                     {forgotLoading
                       ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Resetting…</>
                       : <><CheckCircle size={13} className="mr-1.5" />Reset Password</>}
@@ -1025,13 +1027,13 @@ export default function LoginPage() {
                     onChange={e => { setSupportToken(e.target.value); setSupportState('idle') }}
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none font-mono"
                     style={{ background: '#0d1117', border: `1px solid ${supportState === 'error' ? '#ef4444' : '#1e293b'}` }}
-                    onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                    onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                     onBlur={e => { e.currentTarget.style.borderColor = supportState === 'error' ? '#ef4444' : '#1e293b' }}
                     placeholder="Paste support token" required />
                 </div>
                 <button type="submit" disabled={supportLoading || !supportToken.trim()}
                   className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
-                  style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', opacity: !supportToken.trim() ? 0.5 : 1 }}>
+                  style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))', opacity: !supportToken.trim() ? 0.5 : 1 }}>
                   {supportLoading ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Verifying…</> : 'Redeem Token'}
                 </button>
               </form>
@@ -1043,8 +1045,8 @@ export default function LoginPage() {
             <form onSubmit={handleOtpSubmit} className="space-y-3">
               <div className="text-center py-2">
                 <div className="w-12 h-12 mx-auto rounded-2xl flex items-center justify-center mb-2"
-                  style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}>
-                  <Lock size={22} style={{ color: '#818cf8' }} />
+                  style={{ background: 'rgb(var(--brand-rgb) / 0.15)', border: '1px solid rgb(var(--brand-rgb) / 0.3)' }}>
+                  <Lock size={22} style={{ color: 'rgb(var(--brand-400-rgb))' }} />
                 </div>
                 <p className="font-bold text-white text-sm">Two-Factor Auth</p>
                 <p className="text-xs mt-0.5" style={{ color: '#475569' }}>Enter the 6-digit code from your authenticator app</p>
@@ -1053,12 +1055,12 @@ export default function LoginPage() {
                 value={otpCode} onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                 className="w-full px-4 py-3 rounded-xl text-center text-2xl font-mono tracking-[0.5em] text-white outline-none border"
                 style={{ background: '#0d1117', borderColor: '#1e293b' }}
-                onFocus={e => { e.currentTarget.style.borderColor = '#4f46e5' }}
+                onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                 onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
                 placeholder="000000" autoFocus />
               <button type="submit" disabled={loading || otpCode.length !== 6}
                 className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
-                style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', opacity: otpCode.length !== 6 ? 0.45 : 1 }}>
+                style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))', opacity: otpCode.length !== 6 ? 0.45 : 1 }}>
                 {loading ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Verifying…</> : <><CheckCircle size={13} className="mr-1.5" />Verify Code</>}
               </button>
               <button type="button" onClick={() => { setRequires2FA(false); setOtpCode('') }}

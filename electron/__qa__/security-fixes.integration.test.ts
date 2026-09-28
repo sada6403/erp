@@ -26,7 +26,10 @@ const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'security-qa-'))
 // a parameter (products.ts, purchases.ts, orders.ts, chits.ts,
 // commissions.ts) — both paths must land in the same map or `call()` won't
 // find handlers registered via the direct-import style.
-const hoisted = vi.hoisted(() => ({ registry: new Map<string, (...args: unknown[]) => unknown>() }))
+const hoisted = vi.hoisted(() => ({
+  registry: new Map<string, (...args: unknown[]) => unknown>(),
+  openedUrls: [] as string[],
+}))
 
 vi.mock('electron', () => {
   return {
@@ -42,7 +45,7 @@ vi.mock('electron', () => {
     net: { request: () => ({ on: () => {}, write: () => {}, end: () => {}, setHeader: () => {} }) },
     safeStorage: { isEncryptionAvailable: () => false, encryptString: (s: string) => Buffer.from(s), decryptString: (b: Buffer) => b.toString() },
     BrowserWindow: class {},
-    shell: { openExternal: async () => {} },
+    shell: { openExternal: async (url: string) => { hoisted.openedUrls.push(url) } },
     protocol: { registerFileProtocol: () => {}, handle: () => {} },
     Menu: { setApplicationMenu: () => {}, buildFromTemplate: () => ({}) },
   }
@@ -180,6 +183,47 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(stock.quantity).toBe(7)
   })
 
+  it('admin:suppliers:payDue records an auditable partial payment and blocks overpayment', async () => {
+    setSession(admin)
+    db.prepare('UPDATE suppliers SET due_balance=12500 WHERE id=?').run(SUPPLIER1)
+
+    const paid = await call('admin:suppliers:payDue', SUPPLIER1, {
+      amount: 5000,
+      payment_method: 'bank_transfer',
+      payment_date: new Date().toISOString().split('T')[0],
+      reference_no: 'QA-BANK-001',
+    })
+    expect(paid.success).toBe(true)
+    expect(paid.data.balance_after).toBe(7500)
+    const supplier = db.prepare('SELECT due_balance FROM suppliers WHERE id=?').get(SUPPLIER1) as { due_balance: number }
+    expect(supplier.due_balance).toBe(7500)
+    const payment = db.prepare('SELECT * FROM supplier_payments WHERE id=?').get(paid.data.id) as Record<string, unknown>
+    expect(payment.amount).toBe(5000)
+    expect(payment.balance_before).toBe(12500)
+    expect(payment.balance_after).toBe(7500)
+
+    const overpayment = await call('admin:suppliers:payDue', SUPPLIER1, {
+      amount: 8000,
+      payment_method: 'cash',
+      payment_date: new Date().toISOString().split('T')[0],
+    })
+    expect(overpayment.success).toBe(false)
+    expect((db.prepare('SELECT due_balance FROM suppliers WHERE id=?').get(SUPPLIER1) as { due_balance: number }).due_balance).toBe(7500)
+  })
+
+  it('admin:suppliers:restore reactivates a soft-deleted supplier', async () => {
+    setSession(admin)
+    const supplierId = 'sec-supplier-restore'
+    seedSupplier(supplierId)
+    const deleted = await call('admin:suppliers:delete', supplierId)
+    expect(deleted.success).toBe(true)
+    expect((db.prepare('SELECT is_active FROM suppliers WHERE id=?').get(supplierId) as { is_active: number }).is_active).toBe(0)
+
+    const restored = await call('admin:suppliers:restore', supplierId)
+    expect(restored.success).toBe(true)
+    expect((db.prepare('SELECT is_active FROM suppliers WHERE id=?').get(supplierId) as { is_active: number }).is_active).toBe(1)
+  })
+
   let batchId: string
 
   it('batches:create tags a non-admin caller\'s own branch, ignoring a spoofed branch_id', async () => {
@@ -257,6 +301,22 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     poId = res.data.id
     const row = db.prepare('SELECT branch_id FROM purchase_orders WHERE id=?').get(poId) as { branch_id: string }
     expect(row.branch_id).toBe('b1111111-1111-4111-8111-111111111111')
+  })
+
+  it('purchases:notifySupplier opens the exact WhatsApp chat with full PO details pre-filled', async () => {
+    setSession(admin)
+    db.prepare('UPDATE suppliers SET mobile_number=? WHERE id=?').run('+94771234567', SUPPLIER1)
+    hoisted.openedUrls.length = 0
+
+    const res = await call('purchases:notifySupplier', poId, { openWhatsApp: true, sendEmail: false })
+    expect(res.success).toBe(true)
+    const composeUrl = hoisted.openedUrls.at(-1) || ''
+    expect(composeUrl.startsWith('whatsapp://send?phone=94771234567&text=')).toBe(true)
+    const message = decodeURIComponent(composeUrl.split('&text=')[1] || '')
+    expect(message).toContain(String(res.data.po_number))
+    expect(message).toContain('sec-prod-1')
+    expect(message).toContain('Qty: *5 pcs*')
+    expect(message).toContain('NET TOTAL ORDER VALUE:* Rs.500')
   })
 
   it('purchases:updateStatus rejects a Branch B caller acting on a Branch A PO', async () => {

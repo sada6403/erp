@@ -2,7 +2,7 @@ import { randomUUID, createHash } from 'crypto'
 import type { QueryClient } from './db'
 
 export const ALLOWED_TABLES = new Set([
-  'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers',
+  'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers', 'supplier_payments',
   'products', 'stocks', 'stock_movements', 'stock_transfers', 'customers',
   'purchase_orders', 'purchase_items',
   'invoices', 'invoice_items', 'payments', 'credit_ledger',

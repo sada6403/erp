@@ -54,7 +54,7 @@ function getNextPONumber(branchId: string): string {
 
 export async function sendSupplierOrderNotification(
   poId: string,
-  options?: { openWhatsApp?: boolean; sendEmail?: boolean }
+  options?: { openWhatsApp?: boolean; sendEmail?: boolean; sendWhatsAppApi?: boolean }
 ) {
   const db = getDb()
   const po = db.prepare(`
@@ -97,8 +97,8 @@ export async function sendSupplierOrderNotification(
     const pName = String(it.product_name || 'Item')
     const sku = it.sku ? ` (${it.sku})` : ''
     const qty = `${it.quantity} ${it.unit || 'units'}`
-    const rate = `₹${Number(it.unit_cost || 0).toLocaleString('en-IN')}`
-    const total = `₹${Number(it.line_total || 0).toLocaleString('en-IN')}`
+    const rate = `Rs.${Number(it.unit_cost || 0).toLocaleString('en-LK')}`
+    const total = `Rs.${Number(it.line_total || 0).toLocaleString('en-LK')}`
     return `${idx + 1}. *${pName}*${sku}\n   📦 Qty: *${qty}* | Rate: ${rate} | Total: *${total}*`
   }).join('\n\n')
 
@@ -113,13 +113,15 @@ ${expectedDate ? `⏳ *Expected Delivery:* ${expectedDate}\n` : ''}────�
 *ORDERED ITEMS:*
 ${itemsText}
 ────────────────────────────
-💰 *NET TOTAL ORDER VALUE:* ₹${totalAmount.toLocaleString('en-IN')}
+💰 *NET TOTAL ORDER VALUE:* Rs.${totalAmount.toLocaleString('en-LK')}
 ${po.notes ? `📝 *Notes/Instructions:* ${po.notes}\n` : ''}
 Please confirm order acceptance and dispatch schedule at your earliest convenience.
 Thank you for your partnership!
 *Natural Plantation & Bio-Harvest Co.*`
 
-  const whatsappUrl = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(waText)}` : ''
+  const encodedWhatsAppText = encodeURIComponent(waText)
+  const whatsappAppUrl = cleanPhone ? `whatsapp://send?phone=${cleanPhone}&text=${encodedWhatsAppText}` : ''
+  const whatsappUrl = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodedWhatsAppText}` : ''
 
   // Email HTML template
   const emailHtml = `
@@ -219,8 +221,12 @@ Thank you for your partnership!
     }
   }
 
-  let waApiResult: { success: boolean; error?: string } = { success: false, error: 'No mobile number for supplier' }
-  if (cleanPhone) {
+  let waApiResult: { success: boolean; error?: string } = { success: false, error: 'Business API delivery not requested' }
+  // The normal PO WhatsApp action is a manual compose flow: open the exact
+  // supplier chat with this message pre-filled, leaving only the Send button
+  // for the user. Business API delivery is opt-in and never happens merely
+  // because the WhatsApp button was clicked.
+  if (cleanPhone && options?.sendWhatsAppApi) {
     try {
       waApiResult = await sendWhatsApp({
         to: cleanPhone,
@@ -231,13 +237,26 @@ Thank you for your partnership!
     }
   }
 
+  let openedInWhatsApp = false
+  if (options?.openWhatsApp && !cleanPhone) {
+    throw new Error('This supplier does not have a mobile number')
+  }
   if (whatsappUrl && options?.openWhatsApp) {
     try {
       if (typeof shell !== 'undefined' && shell && typeof shell.openExternal === 'function') {
-        await shell.openExternal(whatsappUrl)
+        try {
+          // Prefer the installed WhatsApp Desktop app on Windows.
+          await shell.openExternal(whatsappAppUrl)
+        } catch {
+          // If the protocol is unavailable, WhatsApp Web preserves the same
+          // phone + pre-filled message compose behavior.
+          await shell.openExternal(whatsappUrl)
+        }
+        openedInWhatsApp = true
       }
     } catch (e) {
-      console.warn('[WhatsApp] Failed to open external URL:', e)
+      console.warn('[WhatsApp] Failed to open compose URL:', e)
+      throw new Error('Unable to open WhatsApp Desktop or WhatsApp Web')
     }
   }
 
@@ -247,8 +266,10 @@ Thank you for your partnership!
     whatsapp: {
       phone: cleanPhone,
       url: whatsappUrl,
+      appUrl: whatsappAppUrl,
+      message: waText,
       apiResult: waApiResult,
-      openedInBrowser: Boolean(whatsappUrl && options?.openWhatsApp),
+      openedInBrowser: openedInWhatsApp,
     },
     email: {
       to: supplierEmail,

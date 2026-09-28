@@ -766,7 +766,7 @@ function MemberAvatar({ name }: { name: string }) {
   const initial = (name || '?').trim().charAt(0).toUpperCase() || '?'
   return (
     <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0"
-      style={{ background: 'rgba(99,102,241,0.15)', color: '#a5b4fc' }}>
+      style={{ background: 'rgb(var(--brand-rgb) / 0.15)', color: 'rgb(var(--brand-300-rgb))' }}>
       {initial}
     </div>
   )
@@ -1042,7 +1042,7 @@ function CyclePaymentsTab({ schemeId, nextCycle }: { schemeId: string; nextCycle
         </div>
         <p className="text-sm mb-2" style={{ color: 'var(--text-2)' }}>{paidMembers} / {totalMembers} Members Paid</p>
         <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--bg-soft)' }}>
-          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 100 ? '#22c55e' : '#6366f1' }} />
+          <div className="h-full rounded-full" style={{ width: `${pct}%`, background: pct >= 100 ? '#22c55e' : 'var(--brand-primary)' }} />
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-xs">
           <div><span style={{ color: 'var(--text-3)' }}>Total Expected</span><p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Rs.{money(progress.totalExpected)}</p></div>

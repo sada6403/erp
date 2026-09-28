@@ -81,11 +81,31 @@ CREATE TABLE IF NOT EXISTS suppliers (
   email       TEXT,
   address     TEXT,
   tax_number  TEXT,
+  due_balance REAL NOT NULL DEFAULT 0,
   is_active   INTEGER NOT NULL DEFAULT 1,
   created_at  TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at   TEXT
 );
+
+CREATE TABLE IF NOT EXISTS supplier_payments (
+  id             TEXT PRIMARY KEY,
+  supplier_id    TEXT NOT NULL REFERENCES suppliers(id),
+  branch_id      TEXT REFERENCES branches(id),
+  amount         REAL NOT NULL,
+  payment_method TEXT NOT NULL,
+  reference_no   TEXT,
+  payment_date   TEXT NOT NULL,
+  notes          TEXT,
+  balance_before REAL NOT NULL,
+  balance_after  REAL NOT NULL,
+  paid_by        TEXT REFERENCES users(id),
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_supplier_payments_supplier ON supplier_payments(supplier_id);
+CREATE INDEX IF NOT EXISTS idx_supplier_payments_date ON supplier_payments(payment_date);
 
 -- ─── PRODUCTS ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS products (

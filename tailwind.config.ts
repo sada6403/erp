@@ -1,29 +1,32 @@
 import type { Config } from 'tailwindcss'
 
+const brandPalette = {
+  50:  'rgb(var(--brand-50-rgb, 239 246 255) / <alpha-value>)',
+  100: 'rgb(var(--brand-100-rgb, 219 234 254) / <alpha-value>)',
+  200: 'rgb(var(--brand-200-rgb, 191 219 254) / <alpha-value>)',
+  300: 'rgb(var(--brand-300-rgb, 147 197 253) / <alpha-value>)',
+  400: 'rgb(var(--brand-400-rgb, 96 165 250) / <alpha-value>)',
+  500: 'rgb(var(--brand-500-rgb, 59 130 246) / <alpha-value>)',
+  600: 'rgb(var(--brand-600-rgb, 37 99 235) / <alpha-value>)',
+  700: 'rgb(var(--brand-700-rgb, 29 78 216) / <alpha-value>)',
+  800: 'rgb(var(--brand-800-rgb, 30 64 175) / <alpha-value>)',
+  900: 'rgb(var(--brand-900-rgb, 30 58 138) / <alpha-value>)',
+  950: 'rgb(var(--brand-950-rgb, 23 37 84) / <alpha-value>)',
+}
+
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        // blue-600/700 mapped to CSS variables so brand color works app-wide
-        blue: {
-          600: 'var(--brand-primary, #2563eb)',
-          700: 'var(--brand-primary-hover, #1d4ed8)',
-        },
-        brand: {
-          50:  '#eef2ff',
-          100: '#e0e7ff',
-          200: '#c7d2fe',
-          300: '#a5b4fc',
-          400: '#818cf8',
-          500: '#6366f1',
-          600: '#4f46e5',
-          700: '#4338ca',
-          800: '#3730a3',
-          900: '#312e81',
-          950: '#1e1b4b',
-        },
+        // Legacy blue/indigo utility classes are brand-aware too, so every
+        // existing screen follows the color selected by the administrator.
+        blue: brandPalette,
+        indigo: brandPalette,
+        violet: brandPalette,
+        purple: brandPalette,
+        brand: brandPalette,
         surface: {
           DEFAULT: 'rgb(var(--s-900) / <alpha-value>)',
           50:  'rgb(var(--s-50)  / <alpha-value>)',

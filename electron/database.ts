@@ -148,6 +148,29 @@ function runMigrations(): void {
     }
   }
 
+  // Supplier liability settlements. Payments are immutable ledger rows;
+  // suppliers.due_balance stores the current outstanding snapshot.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS supplier_payments (
+      id             TEXT PRIMARY KEY,
+      supplier_id    TEXT NOT NULL REFERENCES suppliers(id),
+      branch_id      TEXT REFERENCES branches(id),
+      amount         REAL NOT NULL,
+      payment_method TEXT NOT NULL,
+      reference_no   TEXT,
+      payment_date   TEXT NOT NULL,
+      notes          TEXT,
+      balance_before REAL NOT NULL,
+      balance_after  REAL NOT NULL,
+      paid_by        TEXT REFERENCES users(id),
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_supplier_payments_supplier ON supplier_payments(supplier_id);
+    CREATE INDEX IF NOT EXISTS idx_supplier_payments_date ON supplier_payments(payment_date);
+  `)
+
   // One-time backfill: hash legacy plaintext PINs so they can sync safely.
   // Each migrated row is also enqueued for cloud sync so PINs created before
   // this update start working on the company's other devices.

@@ -369,7 +369,7 @@ export default function SetupWizardPage() {
                 }
               }}
               className="flex items-center justify-center gap-2 w-full py-2.5 rounded-lg text-sm font-semibold"
-              style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.3)', color: '#818cf8' }}
+              style={{ background: 'rgb(var(--brand-rgb) / 0.12)', border: '1px solid rgb(var(--brand-rgb) / 0.3)', color: 'rgb(var(--brand-400-rgb))' }}
             >
               <HardDrive size={14} />
               Setup Locally (No Cloud)

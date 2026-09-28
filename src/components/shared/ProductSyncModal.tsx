@@ -253,7 +253,7 @@ export default function ProductSyncModal() {
             disabled={syncState === 'SYNCING'}
             className="flex-1 py-2.5 rounded-xl font-semibold text-xs text-white flex items-center justify-center gap-2 transition"
             style={{
-              background: 'linear-gradient(135deg, #4f46e5, #4338ca)',
+              background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))',
               boxShadow: '0 4px 12px rgba(79, 70, 229, 0.35)',
               opacity: syncState === 'SYNCING' ? 0.75 : 1
             }}

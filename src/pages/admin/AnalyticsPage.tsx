@@ -193,7 +193,7 @@ export default function AnalyticsPage() {
                 <XAxis dataKey="date" stroke="#64748b" tick={{ fontSize: 10 }} tickFormatter={d => (d as string).slice(5)} />
                 <YAxis stroke="#64748b" tick={{ fontSize: 10 }} tickFormatter={v => `${(Number(v)/1000).toFixed(0)}k`} />
                 <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} formatter={(v) => [`Rs.${Number(v).toLocaleString()}`, 'Revenue']} />
-                <Bar dataKey="total_revenue" fill="#6366f1" radius={[4,4,0,0]} />
+                <Bar dataKey="total_revenue" fill="var(--brand-primary)" radius={[4,4,0,0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

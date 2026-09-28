@@ -202,7 +202,7 @@ export const mockApi = {
     branches: { list: async () => ok(BRANCHES), create: async (_p:unknown) => ok({id:'br-'+Date.now()}), update: async (_id:string,_p:unknown) => ok(null) },
     users: { list: async () => { await delay(); return ok(USERS) }, create: async (_p:unknown) => ok({id:'u-'+Date.now()}), update: async (_id:string,_p:unknown) => ok(null) },
     roles: { list: async () => ok(ROLES) },
-    suppliers: { list: async () => { await delay(); return ok(SUPPLIERS) }, create: async (_p:unknown) => ok({id:'s-'+Date.now()}), update: async (_id:string,_p:unknown) => ok(null) },
+    suppliers: { list: async () => { await delay(); return ok(SUPPLIERS) }, payments: async (_id:string) => ok([]), payDue: async (_id:string,_p:unknown) => ok({ balance_after: 0 }), create: async (_p:unknown) => ok({id:'s-'+Date.now()}), update: async (_id:string,_p:unknown) => ok(null), restore: async (_id:string) => ok(null) },
     categories: { list: async () => ok(CATEGORIES), create: async (_p:unknown) => ok({id:'c-'+Date.now()}), update: async (_id:string,_p:unknown) => ok(null), delete: async (_id:string) => ok(null) },
     auditLogs: { list: async (_f?: unknown) => { await delay(); return ok(AUDIT_LOGS) } },
     deliveries: { list: async (f?: Record<string,unknown>) => { await delay(); let d=DELIVERIES; if(f?.status) d=d.filter(x=>x.status===f.status); return ok(d) }, update: async (_id:string,_p:unknown) => ok(null) },

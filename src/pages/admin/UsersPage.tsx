@@ -922,7 +922,7 @@ function UserForm({
         {isAgentRole && !user && (
           <>
             <div className="col-span-2 rounded-lg px-3 py-2.5 flex items-center gap-2 text-sm"
-              style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#818cf8' }}>
+              style={{ background: 'rgb(var(--brand-rgb) / 0.08)', border: '1px solid rgb(var(--brand-rgb) / 0.2)', color: 'rgb(var(--brand-400-rgb))' }}>
               <UserSearch size={13} />
               This role logs in as an Agent — search and select an existing Agent Management record.
             </div>
@@ -1019,7 +1019,7 @@ function UserForm({
         {isPinOnly && (
           <>
             <div className="col-span-2 rounded-lg px-3 py-2.5 flex items-center gap-2 text-sm"
-              style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid rgba(99,102,241,0.2)', color: '#818cf8' }}>
+              style={{ background: 'rgb(var(--brand-rgb) / 0.08)', border: '1px solid rgb(var(--brand-rgb) / 0.2)', color: 'rgb(var(--brand-400-rgb))' }}>
               <Lock size={13} />
               Staff role — login via PIN only. Email &amp; password not required.
             </div>

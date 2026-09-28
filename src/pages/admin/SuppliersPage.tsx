@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import DeleteConfirmModal from '@/components/shared/DeleteConfirmModal'
-import { Plus, Edit2, Trash2, Search } from 'lucide-react'
+import { Plus, Edit2, Trash2, Search, Banknote, History, Power } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useDeleteAction } from '@/hooks/useDeleteAction'
 import { useAuthStore } from '@/store/authStore'
@@ -17,7 +17,9 @@ export default function SuppliersPage() {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [showForm, setShowForm]   = useState(false)
   const [editing, setEditing]     = useState<Supplier | null>(null)
+  const [paymentSupplier, setPaymentSupplier] = useState<Supplier | null>(null)
   const [search, setSearch]       = useState('')
+  const [activatingId, setActivatingId] = useState<string | null>(null)
 
   const load = async () => {
     try {
@@ -41,6 +43,29 @@ export default function SuppliersPage() {
   const totalDue = suppliers.reduce((s, sup) => s + Number(sup.due_balance || 0), 0)
 
   const del = useDeleteAction<Supplier>(id => window.api.admin.suppliers.delete(id), load)
+
+  const activate = async (supplier: Supplier) => {
+    setActivatingId(supplier.id)
+    try {
+      const supplierApi = window.api.admin.suppliers as {
+        restore?: (id: string) => Promise<any>
+        update: (id: string, payload: Record<string, unknown>) => Promise<any>
+      }
+      // During Vite hot reload the renderer can update before Electron's
+      // preload is restarted. Fall back to the existing update bridge so
+      // reactivation still works in that mixed-version window.
+      const res = typeof supplierApi.restore === 'function'
+        ? await supplierApi.restore(supplier.id)
+        : await supplierApi.update(supplier.id, { is_active: 1 })
+      if (!res.success) return toast.error(res.error || 'Failed to activate supplier')
+      toast.success(`${String(supplier.name || 'Supplier')} activated`)
+      await load()
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to activate supplier')
+    } finally {
+      setActivatingId(null)
+    }
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -106,6 +131,20 @@ export default function SuppliersPage() {
                 </td>
                 <td className="table-cell px-3">
                   <div className="flex items-center gap-1">
+                    {Boolean(s.is_active) && Number(s.due_balance || 0) > 0 && (
+                      <button onClick={() => setPaymentSupplier(s)} className="btn-ghost btn-sm p-1.5 text-green-400" title="Pay Due Balance">
+                        <Banknote size={14}/>
+                      </button>
+                    )}
+                    {!Boolean(s.is_active) && canDelete && (
+                      <button onClick={() => activate(s)} disabled={activatingId === s.id}
+                        className="btn-ghost btn-sm p-1.5 text-green-400 disabled:opacity-50" title="Activate Supplier">
+                        <Power size={14}/>
+                      </button>
+                    )}
+                    <button onClick={() => setPaymentSupplier(s)} className="btn-ghost btn-sm p-1.5 text-slate-400" title="Payment History">
+                      <History size={13}/>
+                    </button>
                     <button onClick={() => { setEditing(s); setShowForm(true) }} className="btn-ghost btn-sm p-1.5" title="Edit">
                       <Edit2 size={13}/>
                     </button>
@@ -129,6 +168,14 @@ export default function SuppliersPage() {
         <SupplierForm supplier={editing} onClose={() => setShowForm(false)} onSave={() => { setShowForm(false); load() }} />
       )}
 
+      {paymentSupplier && (
+        <SupplierPaymentModal
+          supplier={paymentSupplier}
+          onClose={() => setPaymentSupplier(null)}
+          onPaid={() => { setPaymentSupplier(null); load() }}
+        />
+      )}
+
       {del.target && (
         <DeleteConfirmModal
           title="Delete Supplier"
@@ -140,6 +187,126 @@ export default function SuppliersPage() {
         />
       )}
     </div>
+  )
+}
+
+function SupplierPaymentModal({ supplier, onClose, onPaid }: { supplier: Supplier; onClose: () => void; onPaid: () => void }) {
+  const today = new Date().toISOString().split('T')[0]
+  const due = Number(supplier.due_balance || 0)
+  const canPay = Boolean(supplier.is_active) && due > 0
+  const [form, setForm] = useState({ amount: due > 0 ? String(due) : '', payment_method: '', payment_date: today, reference_no: '', notes: '' })
+  const [payments, setPayments] = useState<Record<string, unknown>[]>([])
+  const [loadingHistory, setLoadingHistory] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    window.api.admin.suppliers.payments(supplier.id)
+      .then((res: any) => {
+        if (res.success) setPayments(res.data || [])
+        else toast.error(res.error || 'Failed to load payment history')
+      })
+      .catch((e: any) => toast.error(e?.message || 'Failed to load payment history'))
+      .finally(() => setLoadingHistory(false))
+  }, [supplier.id])
+
+  const save = async () => {
+    const amount = Number(form.amount)
+    if (!Number.isFinite(amount) || amount <= 0) return toast.error('Enter a valid payment amount')
+    if (amount > due) return toast.error('Payment cannot exceed the due balance')
+    if (!form.payment_method) return toast.error('Select a payment method')
+    setSaving(true)
+    try {
+      const res = await window.api.admin.suppliers.payDue(supplier.id, { ...form, amount })
+      if (!res.success) return toast.error(res.error || 'Failed to record supplier payment')
+      toast.success(`Payment recorded. Remaining due: Rs.${Number(res.data?.balance_after || 0).toLocaleString()}`)
+      onPaid()
+    } catch (e: any) {
+      toast.error(e?.message || 'Failed to record supplier payment')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Modal title={`Supplier Payments — ${String(supplier.name || '')}`} onClose={onClose} size="lg"
+      footer={<>
+        <button onClick={onClose} className="btn-secondary">Close</button>
+        {canPay && <button onClick={save} disabled={saving} className="btn-primary gap-1.5"><Banknote size={14}/>{saving ? 'Saving...' : 'Record Payment'}</button>}
+      </>}>
+      <div className="space-y-5">
+        <div className="flex items-center justify-between rounded-lg border border-red-800/60 bg-red-950/30 px-4 py-3">
+          <span className="text-sm text-slate-300">Current Due Balance</span>
+          <span className="text-lg font-bold text-red-400">Rs.{due.toLocaleString()}</span>
+        </div>
+
+        {!Boolean(supplier.is_active) && (
+          <div className="rounded-lg border border-amber-700/60 bg-amber-950/30 px-4 py-3 text-sm text-amber-300">
+            Activate this supplier before recording a due payment.
+          </div>
+        )}
+
+        {canPay && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="label">Payment Amount *</label>
+              <input type="number" min="0.01" max={due} step="0.01" className="input" value={form.amount}
+                onChange={e => setForm(p => ({ ...p, amount: e.target.value }))} autoFocus />
+            </div>
+            <div>
+              <label className="label">Payment Method *</label>
+              <select className="input" value={form.payment_method} onChange={e => setForm(p => ({ ...p, payment_method: e.target.value }))}>
+                <option value="">Select Method</option>
+                <option value="cash">Cash</option>
+                <option value="card">Card</option>
+                <option value="bank_transfer">Bank Transfer</option>
+                <option value="cheque">Cheque</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+            <div>
+              <label className="label">Payment Date *</label>
+              <input type="date" max={today} className="input" value={form.payment_date}
+                onChange={e => setForm(p => ({ ...p, payment_date: e.target.value }))} />
+            </div>
+            <div>
+              <label className="label">Reference / Cheque No.</label>
+              <input className="input" value={form.reference_no} placeholder="Optional reference"
+                onChange={e => setForm(p => ({ ...p, reference_no: e.target.value }))} />
+            </div>
+            <div className="col-span-2">
+              <label className="label">Notes</label>
+              <textarea className="input h-16 resize-none" value={form.notes} placeholder="Optional payment notes"
+                onChange={e => setForm(p => ({ ...p, notes: e.target.value }))} />
+            </div>
+          </div>
+        )}
+
+        <div>
+          <h3 className="text-sm font-semibold text-white mb-2">Payment History</h3>
+          <div className="max-h-56 overflow-auto rounded-lg border border-slate-700">
+            <table className="w-full text-xs">
+              <thead className="sticky top-0 bg-surface-800">
+                <tr>{['Date', 'Amount', 'Method', 'Reference', 'Paid By', 'Balance After'].map(h => <th key={h} className="px-3 py-2 text-left text-slate-400">{h}</th>)}</tr>
+              </thead>
+              <tbody>
+                {payments.map(p => (
+                  <tr key={String(p.id)} className="border-t border-slate-800">
+                    <td className="px-3 py-2">{new Date(String(p.payment_date)).toLocaleDateString()}</td>
+                    <td className="px-3 py-2 font-semibold text-green-400">Rs.{Number(p.amount || 0).toLocaleString()}</td>
+                    <td className="px-3 py-2 capitalize">{String(p.payment_method || '').replace('_', ' ')}</td>
+                    <td className="px-3 py-2">{String(p.reference_no || '—')}</td>
+                    <td className="px-3 py-2">{String(p.paid_by_name || '—')}</td>
+                    <td className="px-3 py-2">Rs.{Number(p.balance_after || 0).toLocaleString()}</td>
+                  </tr>
+                ))}
+                {!loadingHistory && payments.length === 0 && <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-500">No supplier payments recorded</td></tr>}
+                {loadingHistory && <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-500">Loading...</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </Modal>
   )
 }
 
