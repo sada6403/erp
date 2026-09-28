@@ -56,6 +56,22 @@ function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
 }
 
+// Transfers belong to the physical device's assigned branch. In particular,
+// a Company Admin account may itself be attached to HQ while signed in on a
+// Mannar terminal. Using only auth_user.branch_id made that terminal scan HQ
+// transfers and silently miss every transfer addressed to Mannar.
+function notificationBranchId(caller: Record<string, unknown> = authUser()): string | null {
+  const scope = caller.scope as { branchId?: string | null } | undefined
+  const nestedBranch = caller.branch as { id?: string } | undefined
+  return String(
+    store.get('device_branch_id')
+    || scope?.branchId
+    || caller.branch_id
+    || nestedBranch?.id
+    || ''
+  ) || null
+}
+
 // Broadcast rows (no targeting at all) are visible to everyone, same as
 // before targeting existed. A targeted row is visible to its exact user, or
 // to every session matching its role_scope (optionally narrowed to one
@@ -67,8 +83,7 @@ function notificationVisibilityWhere(): { where: string; params: unknown[] } {
   if (scope?.level === 'owner') return { where: '', params: [] }
   const userId = caller.id as string | undefined
   const roleLevel = scope?.level
-  const nestedBranch = caller.branch as { id?: string } | undefined
-  const branchId = scope?.branchId || (caller.branch_id as string | undefined) || nestedBranch?.id || null
+  const branchId = notificationBranchId(caller)
 
   const conditions = ['(user_id IS NULL AND role_scope IS NULL AND target_branch_id IS NULL)']
   const params: unknown[] = []
@@ -161,13 +176,7 @@ export function registerNotificationHandlers() {
   safeHandle(ipcMain, 'notifications:refresh', () => {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
-      const scope = user?.scope as { branchId?: string | null } | undefined
-      const branchId = String(
-        user?.branch_id
-        || scope?.branchId
-        || (user?.branch as Record<string, unknown> | undefined)?.id
-        || ''
-      )
+      const branchId = notificationBranchId(user || {}) || ''
 
       // Low stock check
       // `product_inventory` was never part of the SQLite schema. Querying it

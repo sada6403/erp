@@ -211,6 +211,22 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(notifications.some(notification => notification.data?.includes(destinationTransferId))).toBe(true)
   })
 
+  it('uses the activated device branch for transfer notifications even when the admin user belongs to HQ', async () => {
+    sharedStoreData.device_branch_id = BR_B
+    setSession({
+      id: 'owner-at-hq', branch_id: BR_A,
+      role: { name: 'Company Admin', permissions: { all: true } },
+      permissions: { all: true },
+      scope: { level: 'owner', branchId: null },
+    })
+
+    const refreshed = await call('notifications:refresh')
+    expect(refreshed.success).toBe(true)
+    const notifications = await call('notifications:getAll') as Array<{ data: string | null }>
+    expect(notifications.some(notification => notification.data?.includes(destinationTransferId))).toBe(true)
+    delete sharedStoreData.device_branch_id
+  })
+
   it('admin:suppliers:payDue records an auditable partial payment and blocks overpayment', async () => {
     setSession(admin)
     db.prepare('UPDATE suppliers SET due_balance=12500 WHERE id=?').run(SUPPLIER1)
