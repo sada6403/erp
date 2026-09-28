@@ -26,10 +26,10 @@ const DRAIN_RETRY_MS = 1_500
 // categories) without shortening the full-table cycle. A lightweight
 // watermark check every 10s is fast enough for another till to see changes
 // while avoiding a permanent network request loop on low-powered devices.
-// escalating to a targeted 3-table pull only when it actually changed.
+// escalating to a targeted pull only when tracked data actually changed.
 const WATERMARK_INTERVAL_MS = 10_000
 const WATERMARK_STARTUP_DELAY_MS = 15_000
-const WATERMARK_TABLES = ['products', 'stocks', 'categories']
+const WATERMARK_TABLES = ['categories', 'products', 'stocks', 'branch_transfers', 'branch_transfer_items']
 const DEFAULT_FAILED_RETRY_MINUTES = 2
 
 function sleep(ms: number) {
@@ -53,6 +53,17 @@ function notifyPendingDeletions(item: {
     }
   } catch {
     // In headless or test environments
+  }
+}
+
+function notifyRendererDataChanged() {
+  try {
+    const wins = BrowserWindow?.getAllWindows ? BrowserWindow.getAllWindows() : []
+    for (const win of wins) {
+      if (!win.isDestroyed()) win.webContents.send('sync:dataChanged')
+    }
+  } catch {
+    // Renderer may not exist yet during startup sync.
   }
 }
 
@@ -149,10 +160,11 @@ export class SyncService {
 
   // Targeted pull for just the watermark-tracked tables — same upsert logic
   // as the full pullChanges() loop (insertFiltered), same idempotency
-  // guarantees, just scoped to 3 tables instead of 59 and on its own cursor
+  // guarantees, just scoped to the watermark tables instead of the full set and on its own cursor
   // so it never interacts with pullChanges()'s own cursor bookkeeping.
   private async pullWatermarkTables(cloud: CloudApi): Promise<void> {
-    await this.pullTables(cloud, ['categories', 'products', 'stocks'])
+    await this.pullTables(cloud, WATERMARK_TABLES)
+    notifyRendererDataChanged()
   }
 
   private getCloudApi(): CloudApi | null {
@@ -201,6 +213,7 @@ export class SyncService {
       // repeatedly-failing item (any table) delayed every OTHER table's pull
       // too, sometimes for the full ~2-minute resetFailedForAutoRetry cycle.
       await this.pullChanges(cloud)
+      notifyRendererDataChanged()
       await this.syncBranding(cloud)
       await this.reconcileSupportSession(cloud)
       const unfinished = getDb().prepare("SELECT COUNT(*) AS n FROM sync_queue WHERE status != 'synced'").get() as { n: number }

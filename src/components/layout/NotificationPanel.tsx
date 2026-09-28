@@ -24,7 +24,12 @@ function routeFor(n: Notification): string | null {
     return '/admin/stock-intelligence'
   }
   if (n.type === 'installment_due' || n.type === 'installment_overdue') return '/admin/installments'
-  if (n.type === 'transfer_request') return '/admin/stock-requests'
+  if (n.type === 'transfer_request') {
+    const event = typeof data.event === 'string' ? data.event : ''
+    const transferId = typeof data.transfer_id === 'string' ? data.transfer_id : ''
+    if (event.startsWith('multi_') && transferId) return `/admin/branch-transfers/${transferId}`
+    return '/admin/stock-requests'
+  }
   if (n.type === 'info' && typeof data.event === 'string' && data.event.startsWith('edit_request_')) return '/admin/edit-requests'
   if (n.type === 'chit_collaboration_invite') return '/admin/smart-buy'
   if (n.type === 'chit_payment_due') return '/admin/smart-buy-reports'
@@ -88,6 +93,13 @@ export default function NotificationPanel() {
     // Trigger immediate refresh on mount
     window.api.notifications.refresh().then(() => load())
     return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    const unsubscribe = window.api.on('sync:dataChanged', () => {
+      window.api.notifications.refresh().then(() => load())
+    })
+    return unsubscribe
   }, [])
 
   // Close on outside click

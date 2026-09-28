@@ -81,6 +81,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       if (!from_branch_id || !to_branch_id || !items || !items.length) {
         throw new Error('Missing required fields for transfer')
       }
+      for (const item of items) {
+        const quantity = Number(item.quantity)
+        if (!Number.isInteger(quantity) || quantity <= 0) {
+          throw new Error('Transfer quantity must be a whole number greater than zero')
+        }
+      }
       if (rest.expected_delivery_at && new Date(String(rest.expected_delivery_at)).getTime() < Date.now()) {
         throw new Error('Expected delivery date and time cannot be in the past')
       }

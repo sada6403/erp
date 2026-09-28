@@ -134,7 +134,9 @@ export default function BranchTransferForm() {
     
     for (const item of items) {
       if (!item.product_id) return toast.error('Please select a product for all items')
-      if (item.quantity <= 0) return toast.error('Quantity must be greater than zero')
+      if (!Number.isInteger(item.quantity) || item.quantity <= 0) {
+        return toast.error('Quantity must be a whole number greater than zero')
+      }
       if (status === 'dispatched') {
         const product = products.find(p => p.id === item.product_id)
         const available = Number(product?.stock || 0)
@@ -266,10 +268,18 @@ export default function BranchTransferForm() {
                           <div className="flex gap-2">
                             <input 
                               type="number"
-                              min="0.01" step="0.01"
+                              min="1"
+                              step="1"
+                              inputMode="numeric"
                               max={Number(products.find(p => p.id === item.product_id)?.stock || 0) || undefined}
                               value={item.quantity || ''}
-                              onChange={e => updateItem(item.id, 'quantity', parseFloat(e.target.value))}
+                              onKeyDown={e => {
+                                if (['.', ',', '-', '+', 'e', 'E'].includes(e.key)) e.preventDefault()
+                              }}
+                              onChange={e => {
+                                const value = e.target.value
+                                updateItem(item.id, 'quantity', value === '' ? 0 : Math.max(1, Math.trunc(Number(value))))
+                              }}
                               className="w-full bg-surface-800 border border-surface-600 text-white px-3 py-1.5 rounded-lg focus:outline-none focus:border-brand-500 text-sm"
                             />
                             <span className="inline-flex items-center text-sm text-slate-400">{item.unit || 'units'}</span>

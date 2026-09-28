@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 // without paying the ~25s cost of the full 59-table pullChanges() cycle on
 // every check. Polled every few seconds by SyncService; only when this
 // value changes does the client do the (still cheap, now scoped to just
-// these 3 tables) targeted pull. The full cycle keeps running unchanged as
+// these frequently changing tables) targeted pull. The full cycle keeps running unchanged as
 // the comprehensive catch-all for every other table and offline catch-up.
 export async function GET(request: NextRequest) {
   const limited = syncLimiter(request)
@@ -55,6 +55,10 @@ export async function GET(request: NextRequest) {
          SELECT MAX(updated_at) as ts FROM stocks
          UNION ALL
          SELECT MAX(updated_at) as ts FROM categories
+         UNION ALL
+         SELECT MAX(updated_at) as ts FROM branch_transfers
+         UNION ALL
+         SELECT MAX(updated_at) as ts FROM branch_transfer_items
        ) x`
     )
     const watermark = (rows[0] as { watermark: string | null } | undefined)?.watermark ?? null

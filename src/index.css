@@ -90,7 +90,7 @@ html.dark {
   --pos-card-hover: rgba(30,41,59,0.92);
   --pos-card-border: rgba(148,163,184,0.16);
   --pos-card-selected: rgb(var(--brand-rgb) / 0.20);
-  --pos-card-selected-border: rgb(var(--brand-rgb) / 0.72);
+  --pos-card-selected-border: rgb(var(--brand-rgb) / 0.52);
   --pos-media: rgba(15,23,42,0.82);
   --pos-shadow: 0 12px 30px rgba(2,6,23,0.18);
 }
@@ -335,7 +335,7 @@ html.dark .pos-shell {
 }
 .pos-product-card.selected {
   border-color: var(--pos-card-selected-border);
-  box-shadow: 0 0 0 2px rgb(var(--brand-rgb) / 0.22), 0 14px 35px rgba(2,6,23,0.28);
+  box-shadow: 0 0 0 1px rgb(var(--brand-rgb) / 0.10), 0 7px 18px rgba(2,6,23,0.20);
 }
 .pos-product-card.out-of-stock { opacity: 0.45; cursor: not-allowed; }
 html:not(.dark) .pos-product-card.out-of-stock { opacity: 0.72; }
@@ -441,29 +441,29 @@ html:not(.dark) .border-white\/20 { border-color: var(--border) !important; }
   --text-1: #102033;
   --text-2: #34465c;
   --text-3: #6b7f95;
-  --border: color-mix(in srgb, #dce5ef 88%, var(--brand-primary));
-  --border-2: color-mix(in srgb, #c9d6e4 84%, var(--brand-primary));
-  --bg-page: color-mix(in srgb, #f5f8fc 95%, var(--brand-primary));
+  --border: #dce5ef;
+  --border-2: #c9d6e4;
+  --bg-page: #f5f8fc;
   --bg-card: #ffffff;
-  --bg-soft: color-mix(in srgb, #eef4fa 94%, var(--brand-primary));
+  --bg-soft: #eef4fa;
   --bg-elevated: #ffffff;
   --ring: rgb(var(--brand-rgb) / 0.30);
-  --shadow: 0 1px 2px rgb(var(--brand-rgb) / 0.08);
-  --shadow-lg: 0 20px 45px rgb(var(--brand-rgb) / 0.12);
+  --shadow: 0 1px 2px rgba(15,23,42,0.08);
+  --shadow-lg: 0 20px 45px rgba(15,23,42,0.12);
 
-  --pos-bg: color-mix(in srgb, #f5f8fc 94%, var(--brand-primary));
+  --pos-bg: #f4f8fc;
   --pos-toolbar: #ffffff;
   --pos-panel: #ffffff;
   --pos-panel-solid: #ffffff;
-  --pos-panel-soft: color-mix(in srgb, #f7fafd 96%, var(--brand-primary));
-  --pos-hover: rgb(var(--brand-rgb) / 0.08);
+  --pos-panel-soft: #f7fafd;
+  --pos-hover: #eef4fa;
   --pos-card: #ffffff;
-  --pos-card-hover: color-mix(in srgb, #ffffff 96%, var(--brand-primary));
-  --pos-card-border: color-mix(in srgb, #d7e2ee 90%, var(--brand-primary));
+  --pos-card-hover: #fbfdff;
+  --pos-card-border: #d7e2ee;
   --pos-card-selected: rgb(var(--brand-rgb) / 0.10);
   --pos-card-selected-border: var(--brand-primary);
-  --pos-media: color-mix(in srgb, #eef4fa 94%, var(--brand-primary));
-  --pos-shadow: 0 6px 18px rgb(var(--brand-rgb) / 0.10);
+  --pos-media: #eef4fa;
+  --pos-shadow: 0 6px 18px rgba(15,23,42,0.08);
 }
 
 /* ── DARK palette (wins over the light variables above) ── */
@@ -471,43 +471,37 @@ html.dark .pos-cashier {
   --text-1: #f1f5f9;
   --text-2: #cbd5e1;
   --text-3: #94a3b8;
-  --border: color-mix(in srgb, #1e293b 86%, var(--brand-primary));
-  --border-2: color-mix(in srgb, #334155 84%, var(--brand-primary));
-  --bg-page: color-mix(in srgb, #0f172a 92%, var(--brand-primary));
-  --bg-card: color-mix(in srgb, #1e293b 94%, var(--brand-primary));
-  --bg-soft: color-mix(in srgb, #111827 91%, var(--brand-primary));
-  --bg-elevated: color-mix(in srgb, #1e293b 94%, var(--brand-primary));
+  --border: #1e293b;
+  --border-2: #334155;
+  --bg-page: #0f172a;
+  --bg-card: #1e293b;
+  --bg-soft: #111827;
+  --bg-elevated: #1e293b;
   --ring: rgb(var(--brand-rgb) / 0.35);
   --shadow: 0 1px 2px rgba(0,0,0,0.40);
   --shadow-lg: 0 20px 50px rgba(0,0,0,0.50);
 
-  --pos-bg: color-mix(in srgb, #0f172a 91%, var(--brand-primary));
-  --pos-toolbar: color-mix(in srgb, #020617 94%, var(--brand-primary));
-  --pos-panel: color-mix(in srgb, #1e293b 94%, var(--brand-primary));
-  --pos-panel-solid: color-mix(in srgb, #020617 93%, var(--brand-primary));
-  --pos-panel-soft: color-mix(in srgb, #0f172a 91%, var(--brand-primary));
-  --pos-hover: color-mix(in srgb, #334155 86%, var(--brand-primary));
-  --pos-card: color-mix(in srgb, #1e293b 90%, var(--brand-primary));
-  --pos-card-hover: color-mix(in srgb, #334155 88%, var(--brand-primary));
-  --pos-card-border: rgb(var(--brand-rgb) / 0.16);
+  --pos-bg: #0f172a;
+  --pos-toolbar: #020617;
+  --pos-panel: #1e293b;
+  --pos-panel-solid: #020617;
+  --pos-panel-soft: #0f172a;
+  --pos-hover: #334155;
+  --pos-card: #1e293b;
+  --pos-card-hover: #293548;
+  --pos-card-border: rgba(148,163,184,0.16);
   --pos-card-selected: rgb(var(--brand-rgb) / 0.22);
-  --pos-card-selected-border: rgb(var(--brand-400-rgb));
-  --pos-media: color-mix(in srgb, #0f172a 92%, var(--brand-primary));
-  --pos-shadow: 0 10px 26px rgba(0,0,0,0.40);
+  --pos-card-selected-border: rgb(var(--brand-rgb) / 0.58);
+  --pos-media: #0f172a;
+  --pos-shadow: 0 6px 16px rgba(0,0,0,0.24);
 }
 
 /* Ambient tinted background — light + dark variants (specificity beats .pos-shell) */
 .pos-cashier.pos-shell {
-  background:
-    radial-gradient(1200px 480px at 12% -8%, rgb(var(--brand-rgb) / 0.10), transparent 60%),
-    radial-gradient(900px 420px at 108% 4%, rgb(var(--brand-rgb) / 0.06), transparent 58%),
-    linear-gradient(180deg, color-mix(in srgb, #f8fafc 96%, var(--brand-primary)) 0%, color-mix(in srgb, #eef2f7 93%, var(--brand-primary)) 100%);
+  background: var(--pos-bg);
 }
 html.dark .pos-cashier.pos-shell {
-  background:
-    radial-gradient(1200px 480px at 12% -8%, rgb(var(--brand-rgb) / 0.20), transparent 60%),
-    radial-gradient(900px 420px at 108% 4%, rgb(var(--brand-rgb) / 0.12), transparent 58%),
-    linear-gradient(180deg, color-mix(in srgb, #0f172a 91%, var(--brand-primary)) 0%, color-mix(in srgb, #020617 93%, var(--brand-primary)) 100%);
+  background: var(--pos-bg);
 }
 
 /* Solid, softly-shadowed header like a real register (light + dark) */
@@ -528,7 +522,7 @@ html.dark .pos-cashier .pos-toolbar {
 .pos-cashier .btn-primary {
   background-image: linear-gradient(135deg, rgb(var(--brand-500-rgb)) 0%, rgb(var(--brand-700-rgb)) 100%) !important;
   border-color: transparent !important;
-  box-shadow: 0 4px 12px rgb(var(--brand-rgb) / 0.32);
+  box-shadow: 0 2px 7px rgb(var(--brand-rgb) / 0.14);
 }
 .pos-cashier .btn-primary:hover,
 .pos-cashier .hover\:bg-blue-700:hover,
@@ -538,8 +532,8 @@ html.dark .pos-cashier .pos-toolbar {
 
 /* Rounder product tiles with a soft lift on hover */
 .pos-cashier .pos-product-card { border-radius: 14px; }
-.pos-cashier .pos-product-card:hover { box-shadow: 0 10px 24px rgb(var(--brand-rgb) / 0.16); }
-html.dark .pos-cashier .pos-product-card:hover { box-shadow: 0 12px 28px rgba(0,0,0,0.45); }
+.pos-cashier .pos-product-card:hover { box-shadow: 0 5px 14px rgb(var(--brand-rgb) / 0.07); }
+html.dark .pos-cashier .pos-product-card:hover { box-shadow: 0 6px 16px rgba(0,0,0,0.26); }
 
 /* Softer, rounder inputs & chips */
 .pos-cashier .input { border-radius: 12px; }

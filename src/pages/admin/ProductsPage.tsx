@@ -334,7 +334,7 @@ export default function ProductsPage() {
           {[
             { label: 'Missing SKU', value: audit?.missingSku ?? 0, tone: (audit?.missingSku ?? 0) > 0 ? 'text-red-500' : 'text-green-500' },
             { label: 'Duplicate SKU Groups', value: audit?.duplicateSkuGroups ?? 0, tone: (audit?.duplicateSkuGroups ?? 0) > 0 ? 'text-amber-500' : 'text-green-500' },
-            { label: 'Category Short Codes', value: `${audit?.totalCategories ?? 0} / ${audit?.missingShortCodes ?? 0}`, tone: 'text-slate-100' },
+            { label: 'Category Short Codes', value: `${audit?.totalCategories ?? 0} / ${audit?.missingShortCodes ?? 0}`, tone: 'text-[var(--text-1)]' },
             { label: 'Unnormalized Categories', value: audit?.nonNormalizedCategories ?? 0, tone: (audit?.nonNormalizedCategories ?? 0) > 0 ? 'text-amber-500' : 'text-green-500' },
           ].map(card => (
             <div key={card.label} className="rounded-xl border px-4 py-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-card)' }}>
