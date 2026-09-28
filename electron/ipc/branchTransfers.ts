@@ -33,6 +33,12 @@ function currentPerms(caller: Record<string, unknown> = authUser()): Record<stri
     || {}
 }
 
+function currentBranchId(caller: Record<string, unknown> = authUser()): string {
+  const scope = caller.scope as { branchId?: string | null } | undefined
+  const branch = caller.branch as { id?: string | null } | undefined
+  return String(store.get('device_branch_id') || scope?.branchId || caller.branch_id || branch?.id || '')
+}
+
 // This whole module previously had ZERO access control — any authenticated
 // renderer call could move real stock between branches. `requireBranch`
 // checks the caller has inventory access and (unless global) belongs to one
@@ -42,7 +48,7 @@ function requireBranch(...branchIds: Array<string | null | undefined>): string |
   const perms = currentPerms(caller)
   if (!perms.all && !perms.inventory) return 'Inventory access required'
   if (perms.all) return null
-  const callerBranch = String(caller.branch_id || '')
+  const callerBranch = currentBranchId(caller)
   if (!callerBranch || !branchIds.some(b => String(b || '') === callerBranch)) {
     return 'You do not have access to this branch transfer'
   }
@@ -227,7 +233,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         params.push(filters.status)
       }
       
-      const scopedBranchId = privileged ? filters.branch_id : caller.branch_id
+      const scopedBranchId = privileged ? filters.branch_id : currentBranchId(caller)
       if (!privileged && !scopedBranchId) return { success: false, error: 'Your account must be assigned to a branch' }
       if (scopedBranchId) {
         sql += ' AND (bt.from_branch_id = ? OR bt.to_branch_id = ?)'
@@ -235,7 +241,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
 
       sql += ' ORDER BY bt.created_at DESC LIMIT 200'
-      const rows = db.prepare(sql).all(...params)
+      const deviceBranchId = currentBranchId(caller)
+      const rows = (db.prepare(sql).all(...params) as Record<string, any>[]).map(row => ({
+        ...row,
+        is_incoming_to_device: Boolean(deviceBranchId && String(row.to_branch_id) === deviceBranchId),
+        is_outgoing_from_device: Boolean(deviceBranchId && String(row.from_branch_id) === deviceBranchId),
+      }))
       return { success: true, data: rows }
     }
   })
@@ -292,7 +303,19 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         ORDER BY p.created_at DESC
       `).all(id)
 
-      return { success: true, data: { ...transfer, items, mismatches, logs, prints } }
+      const deviceBranchId = currentBranchId()
+      const isSourceDevice = Boolean(deviceBranchId && deviceBranchId === String(transfer.from_branch_id))
+      const isDestinationDevice = Boolean(deviceBranchId && deviceBranchId === String(transfer.to_branch_id))
+      return {
+        success: true,
+        data: {
+          ...transfer, items, mismatches, logs, prints,
+          is_source_device: isSourceDevice,
+          is_destination_device: isDestinationDevice,
+          can_receive: isDestinationDevice && ['dispatched', 'in_transit', 'partially_received'].includes(String(transfer.status)),
+          can_print_delivery_note: isDestinationDevice && !['draft', 'approved'].includes(String(transfer.status)),
+        },
+      }
     }
   })
 
@@ -313,9 +336,8 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         if (branchErr) return { success: false, error: branchErr }
       }
       const caller = authUser()
-      const privileged = Boolean(currentPerms(caller).all)
-      const callerBranch = String(caller.branch_id || '')
-      if (!privileged && callerBranch !== String(transfer.from_branch_id)) {
+      const callerBranch = currentBranchId(caller)
+      if (callerBranch !== String(transfer.from_branch_id)) {
         return { success: false, error: 'Only the source branch can approve or dispatch this transfer' }
       }
 
@@ -435,9 +457,10 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       if (!['dispatched', 'in_transit', 'partially_received'].includes(String(transfer.status))) {
         throw new Error('Transfer must be dispatched before it can be received')
       }
-      {
-        const branchErr = requireBranch(transfer.to_branch_id)
-        if (branchErr) return { success: false, error: branchErr }
+      // Receipt is a physical destination-branch action. Global admin rights
+      // must not let the source/HQ device confirm its own dispatch.
+      if (currentBranchId() !== String(transfer.to_branch_id)) {
+        return { success: false, error: 'Only the destination branch device can receive this transfer' }
       }
 
       const { items, received_by_name, received_designation, notes } = payload
@@ -631,6 +654,14 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
   safeHandleModule(ipcMain, 'branchTransfers:logPrint', 'stock_transfers', async (_e, id: string) => {
     {
       const db = getDb()
+      const transfer = db.prepare('SELECT to_branch_id, status FROM branch_transfers WHERE id=?').get(id) as { to_branch_id: string; status: string } | undefined
+      if (!transfer) throw new Error('Transfer not found')
+      if (currentBranchId() !== String(transfer.to_branch_id)) {
+        return { success: false, error: 'Only the destination branch device can print the delivery note' }
+      }
+      if (['draft', 'approved'].includes(String(transfer.status))) {
+        return { success: false, error: 'Delivery note is available after dispatch' }
+      }
       const logId = crypto.randomUUID()
       const log = {
         id: logId,

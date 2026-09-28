@@ -95,6 +95,22 @@ const LEGACY_PERMISSION_SQL = `CASE
   ELSE 'all'
 END`
 
+// Transfers belong to the physical device's assigned branch. In particular,
+// a Company Admin account may itself be attached to HQ while signed in on a
+// Mannar terminal. Using only auth_user.branch_id made that terminal scan HQ
+// transfers and silently miss every transfer addressed to Mannar.
+function notificationBranchId(caller: Record<string, unknown> = authUser()): string | null {
+  const scope = caller.scope as { branchId?: string | null } | undefined
+  const nestedBranch = caller.branch as { id?: string } | undefined
+  return String(
+    store.get('device_branch_id')
+    || scope?.branchId
+    || caller.branch_id
+    || nestedBranch?.id
+    || ''
+  ) || null
+}
+
 // Broadcast rows (no targeting at all) are visible to everyone, same as
 // before targeting existed. A targeted row is visible to its exact user, or
 // to every session matching its role_scope (optionally narrowed to one
@@ -107,8 +123,7 @@ function notificationVisibilityWhere(): { where: string; params: unknown[] } {
   if (scope?.level === 'owner' || permissions.all) return { where: '', params: [] }
   const userId = caller.id as string | undefined
   const roleLevel = scope?.level
-  const nestedBranch = caller.branch as { id?: string } | undefined
-  const branchId = scope?.branchId || (caller.branch_id as string | undefined) || nestedBranch?.id || null
+  const branchId = notificationBranchId(caller)
 
   const conditions: string[] = []
   const params: unknown[] = []
@@ -227,10 +242,7 @@ export function registerNotificationHandlers() {
       const db = getDb()
       const caller = authUser()
       const permissions = authPermissions(caller)
-      const branchId = String(
-        (caller.scope as { branchId?: string | null } | undefined)?.branchId ||
-        caller.branch_id || (caller.branch as Record<string, unknown> | undefined)?.id || ''
-      )
+      const branchId = notificationBranchId(caller) || ''
       const canInventory = Boolean(permissions.all || permissions.inventory)
       const canCustomers = Boolean(permissions.all || permissions.customers)
 
@@ -239,13 +251,13 @@ export function registerNotificationHandlers() {
       if (canInventory && branchId) {
         const lowStockItems = db.prepare(`
           SELECT p.name,
-                 COALESCE(SUM(COALESCE(s.quantity, 0)), 0) AS quantity,
+                 COALESCE(SUM(COALESCE(s.quantity, 0) - COALESCE(s.damaged_qty, 0)), 0) AS quantity,
                  COALESCE(p.min_stock_level, 5) AS min_stock_level
           FROM products p
           LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?
           WHERE p.is_active = 1 AND (p.branch_id = ? OR p.branch_id IS NULL)
           GROUP BY p.id, p.name, p.min_stock_level
-          HAVING COALESCE(SUM(COALESCE(s.quantity, 0)), 0) <= COALESCE(p.min_stock_level, 5)
+          HAVING quantity <= COALESCE(p.min_stock_level, 5) AND quantity >= 0
           ORDER BY quantity ASC, p.name
           LIMIT 20
         `).all(branchId, branchId) as { name: string; quantity: number; min_stock_level: number }[]

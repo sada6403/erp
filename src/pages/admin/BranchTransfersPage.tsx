@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Plus, Search, Eye, Filter } from 'lucide-react'
+import { Plus, Search, Eye, RefreshCw, Truck, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
 interface Transfer {
@@ -9,6 +9,8 @@ interface Transfer {
   to_branch_name: string
   status: string
   created_at: string
+  is_incoming_to_device?: boolean
+  is_outgoing_from_device?: boolean
 }
 
 export default function BranchTransfersPage() {
@@ -16,29 +18,48 @@ export default function BranchTransfersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState('all')
 
   useEffect(() => {
     loadTransfers()
+    const unsubscribe = window.api.on('sync:dataChanged', () => {
+      void loadTransfers(false)
+    })
+    return unsubscribe
   }, [])
 
-  async function loadTransfers() {
+  async function loadTransfers(showLoading = true) {
     try {
-      setLoading(true)
+      if (showLoading) setLoading(true)
+      setError(null)
       const res = await window.api.branchTransfers.list()
       if (!res.success) throw new Error(res.error)
       setTransfers(res.data)
     } catch (err: any) {
       setError(err.message)
     } finally {
-      setLoading(false)
+      if (showLoading) setLoading(false)
     }
   }
 
-  const filtered = transfers.filter(t => 
-    t.transfer_number.toLowerCase().includes(search.toLowerCase()) ||
-    t.from_branch_name?.toLowerCase().includes(search.toLowerCase()) ||
-    t.to_branch_name?.toLowerCase().includes(search.toLowerCase())
-  )
+  const awaitingStatuses = new Set(['dispatched', 'in_transit', 'partially_received'])
+  const incomingPending = transfers.filter(t => t.is_incoming_to_device && awaitingStatuses.has(t.status)).length
+  const allPending = transfers.filter(t => awaitingStatuses.has(t.status)).length
+  const received = transfers.filter(t => t.status === 'received' || t.status === 'corrected').length
+  const issues = transfers.filter(t => t.status === 'discrepancy' || t.status === 'under_admin_review').length
+
+  const filtered = transfers.filter(t => {
+    const matchesSearch = t.transfer_number.toLowerCase().includes(search.toLowerCase()) ||
+      t.from_branch_name?.toLowerCase().includes(search.toLowerCase()) ||
+      t.to_branch_name?.toLowerCase().includes(search.toLowerCase())
+    const matchesStatus = statusFilter === 'all' ||
+      (statusFilter === 'awaiting'
+        ? awaitingStatuses.has(t.status)
+        : statusFilter === 'issues'
+          ? ['discrepancy', 'under_admin_review'].includes(t.status)
+          : t.status === statusFilter)
+    return matchesSearch && matchesStatus
+  })
 
   const getStatusColor = (status: string) => {
     switch(status) {
@@ -69,6 +90,26 @@ export default function BranchTransfersPage() {
         </Link>
       </div>
 
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <button onClick={() => setStatusFilter('awaiting')} className="text-left bg-surface-800 border border-surface-700 rounded-xl p-4 hover:border-brand-500 transition-colors">
+          <div className="flex items-center justify-between"><span className="text-sm text-slate-400">Awaiting Receipt</span><Truck className="w-5 h-5 text-amber-400" /></div>
+          <p className="text-2xl font-bold text-amber-400 mt-2">{allPending}</p>
+          <p className="text-xs text-slate-500 mt-1">{incomingPending} incoming to this device branch</p>
+        </button>
+        <button onClick={() => setStatusFilter('received')} className="text-left bg-surface-800 border border-surface-700 rounded-xl p-4 hover:border-brand-500 transition-colors">
+          <div className="flex items-center justify-between"><span className="text-sm text-slate-400">Received</span><CheckCircle2 className="w-5 h-5 text-emerald-400" /></div>
+          <p className="text-2xl font-bold text-emerald-400 mt-2">{received}</p>
+        </button>
+        <button onClick={() => setStatusFilter('issues')} className="text-left bg-surface-800 border border-surface-700 rounded-xl p-4 hover:border-brand-500 transition-colors">
+          <div className="flex items-center justify-between"><span className="text-sm text-slate-400">Issues</span><AlertTriangle className="w-5 h-5 text-rose-400" /></div>
+          <p className="text-2xl font-bold text-rose-400 mt-2">{issues}</p>
+        </button>
+        <button onClick={() => setStatusFilter('all')} className="text-left bg-surface-800 border border-surface-700 rounded-xl p-4 hover:border-brand-500 transition-colors">
+          <div className="flex items-center justify-between"><span className="text-sm text-slate-400">All Transfers</span><RefreshCw className="w-5 h-5 text-brand-400" /></div>
+          <p className="text-2xl font-bold text-white mt-2">{transfers.length}</p>
+        </button>
+      </div>
+
       <div className="bg-surface-800 rounded-xl border border-surface-700 flex flex-col min-h-[500px]">
         <div className="p-4 border-b border-surface-700 flex gap-4">
           <div className="relative flex-1 max-w-md">
@@ -81,10 +122,22 @@ export default function BranchTransfersPage() {
               className="w-full bg-surface-900 border border-surface-600 text-white pl-10 pr-4 py-2 rounded-lg focus:outline-none focus:border-brand-500"
             />
           </div>
-          <button className="flex items-center gap-2 px-4 py-2 bg-surface-900 border border-surface-600 rounded-lg text-slate-300 hover:text-white transition-colors">
-            <Filter className="w-4 h-4" />
-            <span>Filter</span>
-          </button>
+          <select
+            value={statusFilter}
+            onChange={e => setStatusFilter(e.target.value)}
+            className="px-4 py-2 bg-surface-900 border border-surface-600 rounded-lg text-slate-300 focus:outline-none focus:border-brand-500"
+          >
+            <option value="all">All statuses</option>
+            <option value="awaiting">Awaiting receipt</option>
+            <option value="draft">Draft</option>
+            <option value="dispatched">Dispatched</option>
+            <option value="in_transit">In transit</option>
+            <option value="partially_received">Partially received</option>
+            <option value="received">Received</option>
+            <option value="discrepancy">Discrepancy</option>
+            <option value="under_admin_review">Under review</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
         </div>
 
         <div className="flex-1 overflow-auto">

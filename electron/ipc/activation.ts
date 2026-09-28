@@ -258,6 +258,9 @@ export function registerActivationHandlers() {
     if (company_key?.trim()) store.set('device_company_key', company_key.trim())
     store.set('device_id', device_id)
     store.set('activation_company_name', data.company_name ?? '')
+    const activatedBranchId = data.branch_id || branch_id
+    if (activatedBranchId) store.set('device_branch_id', String(activatedBranchId))
+    else store.delete('device_branch_id')
 
     // Phase 1 device-authorization work — a fresh activation (including a
     // RE-activation of a previously-locked/revoked device) always starts a

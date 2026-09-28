@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
       license_id:     entitlements.licenseId,
       device_status:               device?.status ?? null,
       device_authorization_version: device?.authorizationVersion ?? null,
+      device_branch_id:             device?.branchId ?? null,
     })
   } catch (err) {
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })

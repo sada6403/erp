@@ -87,10 +87,20 @@ export async function sendSupplierOrderNotification(
     day: '2-digit', month: 'short', year: 'numeric'
   }) : null
 
-  // Keep the supplier's number exactly as entered, apart from characters that
-  // wa.me does not accept. Do not assume or prepend a country code.
+  // Click-to-chat requires an international number without `+`, spaces, or a
+  // local trunk prefix. Supplier records in this installation commonly store
+  // Sri Lankan mobiles as 07XXXXXXXX, so convert only that local form to 94...
+  // Numbers already entered with an international prefix (for example +94 or
+  // +91) are preserved and never have a second country code prepended.
   const rawPhone = String(po.supplier_mobile || po.supplier_phone || '').trim()
-  const cleanPhone = rawPhone.replace(/[^0-9]/g, '')
+  const phoneDigits = rawPhone.replace(/[^0-9]/g, '')
+  const cleanPhone = rawPhone.startsWith('00')
+    ? phoneDigits.slice(2)
+    : phoneDigits.length === 10 && phoneDigits.startsWith('0')
+      ? `94${phoneDigits.slice(1)}`
+      : phoneDigits.length === 9 && phoneDigits.startsWith('7')
+        ? `94${phoneDigits}`
+        : phoneDigits
 
   // WhatsApp formatted text
   const itemsText = items.map((it, idx) => {

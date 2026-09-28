@@ -149,6 +149,8 @@ export async function fetchAndCacheLicense(): Promise<LicenseData | null> {
   if (data.device_status != null) {
     unlockDevice()
     store.set('device_authorization_version', Number(data.device_authorization_version ?? 1))
+    if (data.device_branch_id) store.set('device_branch_id', String(data.device_branch_id))
+    else store.delete('device_branch_id')
     store.set('offline_authorization_expires_at', Date.now() + OFFLINE_LEASE_MS)
   }
 

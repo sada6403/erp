@@ -161,6 +161,7 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
   const admin = makeSession({ id: 'u-sec-admin', permissions: { all: true } })
   const mgrA = makeSession({ id: 'u-sec-mgr-a', branchId: BR_A, permissions: { inventory: true, employees: true, chits: true } })
   const mgrB = makeSession({ id: 'u-sec-mgr-b', branchId: BR_B, permissions: { inventory: true, employees: true, chits: true } })
+  let destinationTransferId = ''
 
   it('branchTransfers:create links stock movements to the multi-item branch transfer table', async () => {
     setSession(admin)
@@ -178,6 +179,7 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     })
 
     expect(res.success).toBe(true)
+    destinationTransferId = res.data.id
     const movement = db.prepare(`
       SELECT reference_transfer_id, reference_branch_transfer_id
       FROM stock_movements
@@ -187,6 +189,42 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(movement.reference_branch_transfer_id).toBe(res.data.id)
     const stock = db.prepare('SELECT quantity FROM stocks WHERE id=?').get('sec-branch-transfer-stock') as { quantity: number }
     expect(stock.quantity).toBe(7)
+  })
+
+  it('branchTransfers:list scopes a destination user with nested branch identity', async () => {
+    setSession({
+      id: 'u-sec-mgr-b',
+      branch: { id: BR_B },
+      role: { permissions: { inventory: true } },
+      scope: { level: 'branch', branchId: BR_B },
+    })
+    const res = await call('branchTransfers:list')
+    expect(res.success, res.error).toBe(true)
+    expect(res.data.some((transfer: { to_branch_id: string }) => transfer.to_branch_id === BR_B)).toBe(true)
+  })
+
+  it('notifications:refresh reaches transfer alerts instead of failing on the removed product_inventory table', async () => {
+    setSession(mgrB)
+    const refreshed = await call('notifications:refresh')
+    expect(refreshed.success, refreshed.error).toBe(true)
+    const notifications = await call('notifications:getAll') as Array<{ data: string | null }>
+    expect(notifications.some(notification => notification.data?.includes(destinationTransferId))).toBe(true)
+  })
+
+  it('uses the activated device branch for transfer notifications even when the admin user belongs to HQ', async () => {
+    sharedStoreData.device_branch_id = BR_B
+    setSession({
+      id: 'owner-at-hq', branch_id: BR_A,
+      role: { name: 'Company Admin', permissions: { all: true } },
+      permissions: { all: true },
+      scope: { level: 'owner', branchId: null },
+    })
+
+    const refreshed = await call('notifications:refresh')
+    expect(refreshed.success).toBe(true)
+    const notifications = await call('notifications:getAll') as Array<{ data: string | null }>
+    expect(notifications.some(notification => notification.data?.includes(destinationTransferId))).toBe(true)
+    delete sharedStoreData.device_branch_id
   })
 
   it('admin:suppliers:payDue records an auditable partial payment and blocks overpayment', async () => {
@@ -309,9 +347,9 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(row.branch_id).toBe('b1111111-1111-4111-8111-111111111111')
   })
 
-  it('purchases:notifySupplier opens the exact WhatsApp chat with full PO details pre-filled', async () => {
+  it('purchases:notifySupplier normalizes a local number and pre-fills full PO details', async () => {
     setSession(admin)
-    db.prepare('UPDATE suppliers SET mobile_number=? WHERE id=?').run('+94771234567', SUPPLIER1)
+    db.prepare('UPDATE suppliers SET mobile_number=? WHERE id=?').run('0771234567', SUPPLIER1)
     hoisted.openedUrls.length = 0
 
     const res = await call('purchases:notifySupplier', poId, { openWhatsApp: true, sendEmail: false })

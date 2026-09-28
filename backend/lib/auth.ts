@@ -1483,6 +1483,7 @@ export type DeviceContext = {
   id: string
   status: string
   authorizationVersion: number
+  branchId: string | null
 }
 
 export class DeviceAuthorizationError extends Error {
@@ -1500,7 +1501,7 @@ export async function resolveDeviceAuthorization(req: NextRequest, companyId: st
   if (!deviceId) return null
 
   const { rows } = await pool.query(
-    `SELECT id, status, authorization_version FROM pos_devices WHERE company_id = ? AND device_id = ? LIMIT 1`,
+    `SELECT id, status, authorization_version, branch_id FROM pos_devices WHERE company_id = ? AND device_id = ? LIMIT 1`,
     [companyId, deviceId]
   )
   if (!rows.length) return null
@@ -1513,7 +1514,12 @@ export async function resolveDeviceAuthorization(req: NextRequest, companyId: st
     throw new DeviceAuthorizationError('DEVICE_REVOKED', 'This device has been deactivated by your administrator. Re-activation required.')
   }
 
-  return { id: String(d.id), status, authorizationVersion }
+  return {
+    id: String(d.id),
+    status,
+    authorizationVersion,
+    branchId: d.branch_id ? String(d.branch_id) : null,
+  }
 }
 
 // ─── Legacy single-tenant API key check (kept for backward compat) ────────────
