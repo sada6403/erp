@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
+import { createPortal } from 'react-dom'
 import { ChevronDown, Package, Search } from 'lucide-react'
 import { resolveImageSrc } from '@/lib/imageUrl'
 
@@ -26,7 +27,9 @@ export default function ProductSearchSelect({
   const [query, setQuery]       = useState('')
   const [open, setOpen]         = useState(false)
   const [highlighted, setHighlighted] = useState(0)
+  const [dropdownStyle, setDropdownStyle] = useState<CSSProperties>({})
   const ref     = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
   const selected = products.find(p => String(p.id) === value)
@@ -40,7 +43,8 @@ export default function ProductSearchSelect({
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      if (!ref.current?.contains(target) && !dropdownRef.current?.contains(target)) setOpen(false)
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -56,7 +60,42 @@ export default function ProductSearchSelect({
     item?.scrollIntoView({ block: 'nearest' })
   }, [highlighted])
 
-  const openDropdown = () => { setOpen(true); setQuery(''); setHighlighted(0) }
+  const positionDropdown = useCallback(() => {
+    const trigger = ref.current?.getBoundingClientRect()
+    if (!trigger) return
+    const viewportGap = 12
+    const desiredWidth = Math.max(trigger.width, 460)
+    const width = Math.min(desiredWidth, window.innerWidth - viewportGap * 2)
+    const left = Math.min(
+      Math.max(viewportGap, trigger.left),
+      Math.max(viewportGap, window.innerWidth - width - viewportGap),
+    )
+    const roomBelow = window.innerHeight - trigger.bottom
+    const roomAbove = trigger.top
+    if (roomBelow < 250 && roomAbove > roomBelow) {
+      setDropdownStyle({ left, bottom: window.innerHeight - trigger.top + 4, width })
+    } else {
+      setDropdownStyle({ left, top: trigger.bottom + 4, width })
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    positionDropdown()
+    window.addEventListener('resize', positionDropdown)
+    window.addEventListener('scroll', positionDropdown, true)
+    return () => {
+      window.removeEventListener('resize', positionDropdown)
+      window.removeEventListener('scroll', positionDropdown, true)
+    }
+  }, [open, positionDropdown])
+
+  const openDropdown = () => {
+    setOpen(true)
+    setQuery('')
+    setHighlighted(0)
+    requestAnimationFrame(positionDropdown)
+  }
 
   const select = (id: string) => {
     onChange(id)
@@ -88,9 +127,9 @@ export default function ProductSearchSelect({
         <ChevronDown size={12} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
       </div>
 
-      {open && (
-        <div className="absolute z-50 top-full mt-1 left-0 right-0 rounded-lg shadow-xl border"
-          style={{ background: 'var(--bg-card)', borderColor: 'var(--border-2)' }}>
+      {open && createPortal(
+        <div ref={dropdownRef} className="fixed z-[200] rounded-lg shadow-2xl border overflow-hidden"
+          style={{ ...dropdownStyle, background: 'var(--bg-card)', borderColor: 'var(--border-2)' }}>
           <div className="flex items-center gap-2 px-2 py-1.5" style={{ borderBottom: '1px solid var(--border)' }}>
             <Search size={12} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
             <input
@@ -104,7 +143,7 @@ export default function ProductSearchSelect({
               onKeyDown={onKeyDown}
             />
           </div>
-          <div ref={listRef} className="max-h-52 overflow-y-auto">
+          <div ref={listRef} className="max-h-64 overflow-y-auto">
             {filtered.length === 0 ? (
               <p className="text-xs text-center py-3" style={{ color: 'var(--text-3)' }}>No products found</p>
             ) : filtered.map((p, i) => (
@@ -120,8 +159,14 @@ export default function ProductSearchSelect({
               >
                 <ProductThumb imageUrl={p.image_url} />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium leading-tight">{String(p.name)}</p>
-                  <p className="text-xs truncate leading-tight" style={{ color: 'var(--text-3)' }}>{String(p.sku || '')}</p>
+                  <p className="font-medium leading-snug whitespace-normal break-words">{String(p.name)}</p>
+                  <p className="text-xs leading-snug mt-0.5 whitespace-normal break-words" style={{ color: 'var(--text-3)' }}>
+                    {[
+                      p.sku ? `SKU: ${String(p.sku)}` : '',
+                      p.barcode ? `Barcode: ${String(p.barcode)}` : '',
+                      Number(p.cost_price || 0) > 0 ? `Cost: Rs.${Number(p.cost_price).toLocaleString()}` : '',
+                    ].filter(Boolean).join(' · ')}
+                  </p>
                 </div>
                 {Object.prototype.hasOwnProperty.call(p, 'stock') && (
                   <span className={`text-xs font-semibold flex-shrink-0 ${Number(p.stock || 0) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
@@ -131,7 +176,8 @@ export default function ProductSearchSelect({
               </div>
             ))}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )

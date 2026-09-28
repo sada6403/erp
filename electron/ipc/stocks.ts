@@ -456,7 +456,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         'transfer_request',
         'Stock request submitted',
         `${Number(payload.quantity)} x ${product?.name || 'product'} requested from ${fromBranch?.name || 'source branch'}.`,
-        { event: 'request_submitted', transfer_id: id, transfer_number: transferNumber, from_branch_id: payload.from_branch_id, to_branch_id: payload.to_branch_id }
+        { event: 'request_submitted', transfer_id: id, transfer_number: transferNumber, from_branch_id: payload.from_branch_id, to_branch_id: payload.to_branch_id },
+        { branchId: String(payload.to_branch_id) },
       )
       await enqueuSync('stock_transfers', id, 'INSERT', record)
       return { success: true, data: { id, transfer_number: transferNumber } }
@@ -973,7 +974,12 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         'transfer_request',
         `Stock transfer ${messageStatus}`,
         `${fromBranch?.name || 'Source branch'} — ${Number(transfer.quantity)} x ${product?.name || 'product'} is now ${messageStatus}.`,
-        { event: `status_${status}`, transfer_id: id, transfer_number: transfer.transfer_number, status }
+        { event: `status_${status}`, transfer_id: id, transfer_number: transfer.transfer_number, status },
+        {
+          branchId: ['received', 'partially_received', 'discrepancy'].includes(status)
+            ? String(transfer.from_branch_id)
+            : String(transfer.to_branch_id),
+        },
       )
 
       return { success: true }

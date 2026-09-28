@@ -315,8 +315,8 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     const res = await call('purchases:notifySupplier', poId, { openWhatsApp: true, sendEmail: false })
     expect(res.success).toBe(true)
     const composeUrl = hoisted.openedUrls.at(-1) || ''
-    expect(composeUrl.startsWith('whatsapp://send?phone=94771234567&text=')).toBe(true)
-    const message = decodeURIComponent(composeUrl.split('&text=')[1] || '')
+    expect(composeUrl.startsWith('https://wa.me/94771234567?text=')).toBe(true)
+    const message = decodeURIComponent(composeUrl.split('?text=')[1] || '')
     expect(message).toContain(String(res.data.po_number))
     expect(message).toContain('sec-prod-1')
     expect(message).toContain('Qty: *5 pcs*')

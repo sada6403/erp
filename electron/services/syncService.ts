@@ -29,7 +29,7 @@ const DRAIN_RETRY_MS = 1_500
 // escalating to a targeted pull only when tracked data actually changed.
 const WATERMARK_INTERVAL_MS = 10_000
 const WATERMARK_STARTUP_DELAY_MS = 15_000
-const WATERMARK_TABLES = ['categories', 'products', 'stocks', 'branch_transfers', 'branch_transfer_items']
+const WATERMARK_TABLES = ['categories', 'products', 'stocks', 'stock_transfers', 'branch_transfers', 'branch_transfer_items']
 const DEFAULT_FAILED_RETRY_MINUTES = 2
 
 function sleep(ms: number) {
