@@ -11,6 +11,7 @@ export type StockMovementInput = {
   movement_type: StockMovementType
   reference_order_id?: string | null
   reference_transfer_id?: string | null
+  reference_branch_transfer_id?: string | null
   notes?: string | null
   created_by?: string | null
 }
@@ -28,6 +29,7 @@ export function insertStockMovement(
     movement_type: input.movement_type,
     reference_order_id: input.reference_order_id || null,
     reference_transfer_id: input.reference_transfer_id || null,
+    reference_branch_transfer_id: input.reference_branch_transfer_id || null,
     notes: input.notes || null,
     created_by: input.created_by || null,
   }
@@ -39,11 +41,11 @@ export function insertStockMovement(
   db.prepare(`
     INSERT INTO stock_movements (
       id, product_id, from_branch_id, to_branch_id, quantity, movement_type,
-      reference_order_id, reference_transfer_id, notes, created_by
+      reference_order_id, reference_transfer_id, reference_branch_transfer_id, notes, created_by
     )
     VALUES (
       @id, @product_id, @from_branch_id, @to_branch_id, @quantity, @movement_type,
-      @reference_order_id, @reference_transfer_id, @notes, @created_by
+      @reference_order_id, @reference_transfer_id, @reference_branch_transfer_id, @notes, @created_by
     )
   `).run(record)
 

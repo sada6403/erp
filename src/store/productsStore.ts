@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import toast from 'react-hot-toast'
 import type { Product, Category, Supplier } from '@/types'
+import { useAuthStore } from '@/store/authStore'
+import { canManageProcurement } from '@/lib/branchAccess'
 
 // Shared cache for the Products admin page's data (products/categories/
 // suppliers) — same Zustand-store pattern already used by authStore/
@@ -31,10 +33,13 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
     if (get().loading) return
     set({ loading: true })
     try {
+      const mayLoadSuppliers = canManageProcurement(useAuthStore.getState().user)
       const [p, c, s] = await Promise.all([
         window.api.products.list({}),
         window.api.admin.categories.list(),
-        window.api.admin.suppliers.list(),
+        mayLoadSuppliers
+          ? window.api.admin.suppliers.list()
+          : Promise.resolve({ success: true, data: [] as Supplier[] }),
       ]) as [
         { success: boolean; data?: Product[]; error?: string },
         { success: boolean; data?: Category[]; error?: string },

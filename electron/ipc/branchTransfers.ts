@@ -9,6 +9,16 @@ import { safeHandleModule } from './ipcHandler'
 
 const store = new Store()
 
+const STATUS_TRANSITIONS: Record<string, string[]> = {
+  draft: ['approved', 'rejected', 'cancelled'],
+  approved: ['dispatched', 'cancelled'],
+  dispatched: ['in_transit', 'cancelled'],
+  in_transit: ['cancelled'],
+  partially_received: ['cancelled'],
+  discrepancy: ['corrected', 'cancelled'],
+  under_admin_review: ['corrected', 'cancelled'],
+}
+
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
 }
@@ -71,6 +81,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       if (!from_branch_id || !to_branch_id || !items || !items.length) {
         throw new Error('Missing required fields for transfer')
       }
+      if (rest.expected_delivery_at && new Date(String(rest.expected_delivery_at)).getTime() < Date.now()) {
+        throw new Error('Expected delivery date and time cannot be in the past')
+      }
       const branchErr = requireBranch(from_branch_id)
       if (branchErr) return { success: false, error: branchErr }
 
@@ -85,6 +98,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
 
       let dispatchedOnCreate = false
+      const movementRecords: Record<string, unknown>[] = []
       let logRecord: Record<string, unknown> | null = null
 
       db.transaction(() => {
@@ -140,18 +154,21 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
               WHERE product_id=? AND branch_id=? AND quantity>=?
             `).run(qty, item.product_id, from_branch_id, qty)
 
-            if (!changed.changes) throw new Error(`Insufficient stock for product ${item.product_id}`)
+            if (!changed.changes) {
+              const product = db.prepare('SELECT name FROM products WHERE id=?').get(item.product_id) as { name?: string } | undefined
+              throw new Error(`Insufficient stock for ${product?.name || item.product_id} at the source branch`)
+            }
 
-            insertStockMovement(db, {
+            movementRecords.push(insertStockMovement(db, {
               product_id: item.product_id,
               from_branch_id,
               to_branch_id,
               quantity: qty,
               movement_type: 'TRANSFER',
-              reference_transfer_id: transferId,
+              reference_branch_transfer_id: transferId,
               notes: `Branch Transfer Out: ${transferNumber}`,
               created_by: currentUserId()
-            })
+            }))
             dispatchedOnCreate = true
           }
         }
@@ -167,6 +184,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       for (const item of savedItems) {
         await enqueuSync('branch_transfer_items', String((item as any).id), 'INSERT', item as Record<string, any>)
         if (dispatchedOnCreate) await syncStockRow(db, String((item as any).product_id), from_branch_id)
+      }
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       }
       if (logRecord) await enqueuSync('branch_transfer_logs', String((logRecord as Record<string, unknown>).id), 'INSERT', logRecord)
 
@@ -267,6 +287,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
+      if (['received', 'corrected', 'cancelled', 'rejected'].includes(String(transfer.status))) {
+        throw new Error(`Transfer is already ${transfer.status} and cannot be updated again`)
+      }
+      if (!STATUS_TRANSITIONS[String(transfer.status)]?.includes(status)) {
+        throw new Error(`Cannot move transfer from '${transfer.status}' to '${status}'`)
+      }
       {
         const branchErr = requireBranch(transfer.from_branch_id, transfer.to_branch_id)
         if (branchErr) return { success: false, error: branchErr }
@@ -280,6 +306,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
       
       if (status === 'dispatched') {
+        if (payload.expected_delivery_at && new Date(String(payload.expected_delivery_at)).getTime() < Date.now()) {
+          throw new Error('Expected delivery date and time cannot be in the past')
+        }
         patch.dispatch_at = now
         if (!transfer.approved_by) {
           patch.approved_by = currentUserId()
@@ -291,6 +320,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
 
       const dispatchedProductIds: string[] = []
+      const movementRecords: Record<string, unknown>[] = []
       let logRecord: Record<string, unknown> | null = null
 
       db.transaction(() => {
@@ -304,18 +334,51 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
               WHERE product_id=? AND branch_id=? AND quantity>=?
             `).run(qty, item.product_id, transfer.from_branch_id, qty)
 
-            if (!changed.changes) throw new Error(`Insufficient stock for product ${item.product_id}`)
+            if (!changed.changes) {
+              const product = db.prepare('SELECT name FROM products WHERE id=?').get(item.product_id) as { name?: string } | undefined
+              throw new Error(`Insufficient stock for ${product?.name || item.product_id} at the source branch`)
+            }
 
-            insertStockMovement(db, {
+            movementRecords.push(insertStockMovement(db, {
               product_id: item.product_id,
               from_branch_id: String(transfer.from_branch_id),
               to_branch_id: String(transfer.to_branch_id),
               quantity: qty,
               movement_type: 'TRANSFER',
-              reference_transfer_id: id,
+              reference_branch_transfer_id: id,
               notes: `Branch Transfer Out: ${transfer.transfer_number}`,
               created_by: currentUserId()
-            })
+            }))
+            dispatchedProductIds.push(item.product_id)
+          }
+        }
+
+        // Cancellation after dispatch returns only stock that has not already
+        // been received (or recorded damaged) at the destination.
+        if (status === 'cancelled' && ['dispatched', 'in_transit', 'partially_received'].includes(String(transfer.status))) {
+          const items = db.prepare('SELECT * FROM branch_transfer_items WHERE transfer_id=?').all(id) as any[]
+          for (const item of items) {
+            const restoreQty = Math.max(0, Number(item.quantity) - Number(item.received_qty || 0) - Number(item.damaged_qty || 0))
+            if (restoreQty <= 0) continue
+            const source = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
+              .get(item.product_id, transfer.from_branch_id) as { id: string } | undefined
+            if (source) {
+              db.prepare(`UPDATE stocks SET quantity=quantity+?, updated_at=datetime('now') WHERE id=?`)
+                .run(restoreQty, source.id)
+            } else {
+              db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)`)
+                .run(crypto.randomUUID(), item.product_id, transfer.from_branch_id, restoreQty)
+            }
+            movementRecords.push(insertStockMovement(db, {
+              product_id: item.product_id,
+              from_branch_id: String(transfer.to_branch_id),
+              to_branch_id: String(transfer.from_branch_id),
+              quantity: restoreQty,
+              movement_type: 'TRANSFER',
+              reference_branch_transfer_id: id,
+              notes: `Branch transfer cancelled; in-transit stock restored: ${transfer.transfer_number}`,
+              created_by: currentUserId(),
+            }))
             dispatchedProductIds.push(item.product_id)
           }
         }
@@ -331,6 +394,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       for (const productId of dispatchedProductIds) {
         await syncStockRow(db, productId, String(transfer.from_branch_id))
       }
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      }
       if (logRecord) await enqueuSync('branch_transfer_logs', String((logRecord as Record<string, unknown>).id), 'INSERT', logRecord)
       return { success: true }
     }
@@ -342,6 +408,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const transfer = db.prepare('SELECT * FROM branch_transfers WHERE id=?').get(id) as Record<string, any>
       if (!transfer) throw new Error('Transfer not found')
+      if (['received', 'corrected', 'cancelled', 'rejected'].includes(String(transfer.status))) {
+        throw new Error(`Transfer is already ${transfer.status} and cannot be received again`)
+      }
+      if (!['dispatched', 'in_transit', 'partially_received'].includes(String(transfer.status))) {
+        throw new Error('Transfer must be dispatched before it can be received')
+      }
       {
         const branchErr = requireBranch(transfer.to_branch_id)
         if (branchErr) return { success: false, error: branchErr }
@@ -356,6 +428,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       let hasMismatch = false
       const newMismatches: any[] = []
       const receivedProductIds: string[] = []
+      const movementRecords: Record<string, unknown>[] = []
       let logRecord: Record<string, unknown> | null = null
 
       db.transaction(() => {
@@ -366,6 +439,11 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
           const sent = Number(item.quantity)
           const rec = Number(input.received_qty || 0)
           const dam = Number(input.damaged_qty || 0)
+          const recDelta = rec - Number(item.received_qty || 0)
+          const damagedDelta = dam - Number(item.damaged_qty || 0)
+          if (recDelta < 0 || damagedDelta < 0 || rec + dam > sent) {
+            throw new Error('Received quantities cannot go backwards or exceed the sent quantity')
+          }
           const missing = sent - rec - dam
           
           totalSent += sent
@@ -405,28 +483,28 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
           `).run(rec, dam, missing, item.id)
 
           // Add to dest stock
-          if (rec > 0) {
+          if (recDelta > 0 || damagedDelta > 0) {
             const dest = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
               .get(item.product_id, transfer.to_branch_id) as { id: string } | undefined
             
             if (dest) {
               db.prepare(`UPDATE stocks SET quantity=quantity+?, damaged_qty=damaged_qty+?, updated_at=datetime('now') WHERE id=?`)
-                .run(rec, dam, dest.id)
+                .run(recDelta + damagedDelta, damagedDelta, dest.id)
             } else {
               db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,?)`)
-                .run(crypto.randomUUID(), item.product_id, transfer.to_branch_id, rec, dam)
+                .run(crypto.randomUUID(), item.product_id, transfer.to_branch_id, recDelta + damagedDelta, damagedDelta)
             }
 
-            insertStockMovement(db, {
+            movementRecords.push(insertStockMovement(db, {
               product_id: item.product_id,
               from_branch_id: String(transfer.from_branch_id),
               to_branch_id: String(transfer.to_branch_id),
-              quantity: rec,
+              quantity: recDelta + damagedDelta,
               movement_type: 'RECEIVE',
-              reference_transfer_id: id,
-              notes: `Branch Transfer Received: ${transfer.transfer_number}`,
+              reference_branch_transfer_id: id,
+              notes: `Branch Transfer Received: ${transfer.transfer_number} (${recDelta} available, ${damagedDelta} damaged)`,
               created_by: currentUserId()
-            })
+            }))
             receivedProductIds.push(item.product_id)
           }
         }
@@ -454,6 +532,9 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
       for (const productId of receivedProductIds) {
         await syncStockRow(db, productId, String(transfer.to_branch_id))
+      }
+      for (const movement of movementRecords) {
+        await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       }
       if (logRecord) await enqueuSync('branch_transfer_logs', String((logRecord as Record<string, unknown>).id), 'INSERT', logRecord)
 

@@ -123,6 +123,11 @@ export default function ProductSearchSelect({
                   <p className="truncate font-medium leading-tight">{String(p.name)}</p>
                   <p className="text-xs truncate leading-tight" style={{ color: 'var(--text-3)' }}>{String(p.sku || '')}</p>
                 </div>
+                {Object.prototype.hasOwnProperty.call(p, 'stock') && (
+                  <span className={`text-xs font-semibold flex-shrink-0 ${Number(p.stock || 0) > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {Number(p.stock || 0)} in stock
+                  </span>
+                )}
               </div>
             ))}
           </div>

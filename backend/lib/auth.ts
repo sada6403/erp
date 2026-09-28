@@ -201,6 +201,7 @@ async function runTenantCompatibility(dbSchema: string) {
        movement_type          VARCHAR(32)   NOT NULL,
        reference_order_id     CHAR(36)      NULL,
        reference_transfer_id  CHAR(36)      NULL,
+       reference_branch_transfer_id CHAR(36) NULL,
        notes                  TEXT          NULL,
        created_by             CHAR(36)      NULL,
        created_at             DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -210,6 +211,7 @@ async function runTenantCompatibility(dbSchema: string) {
        INDEX idx_stock_movements_from_branch (from_branch_id),
        INDEX idx_stock_movements_to_branch (to_branch_id),
        INDEX idx_stock_movements_type (movement_type),
+       INDEX idx_stock_movements_branch_transfer (reference_branch_transfer_id),
        INDEX idx_stock_movements_updated (updated_at)
      )`,
     `CREATE TABLE IF NOT EXISTS stock_transfers (
@@ -1344,6 +1346,11 @@ async function runTenantCompatibility(dbSchema: string) {
     `ALTER TABLE chit_schemes ADD COLUMN projected_early_winners INT NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_schemes ADD COLUMN avg_product_cost DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_schemes ADD COLUMN other_expenses DECIMAL(14,2) NOT NULL DEFAULT 0`,
+
+    // Multi-item branch transfers use branch_transfers, not the legacy
+    // single-item stock_transfers table referenced by reference_transfer_id.
+    `ALTER TABLE stock_movements ADD COLUMN reference_branch_transfer_id CHAR(36) NULL`,
+    `CREATE INDEX idx_stock_movements_branch_transfer ON stock_movements(reference_branch_transfer_id)`,
 
     // Multi-device forced-lock signal (Issue 30) — one row per Clear All
     // Data event, the source of truth every other device's normal sync pull

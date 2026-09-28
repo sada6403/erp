@@ -71,6 +71,7 @@ function runMigrations(): void {
     ['branches',             'branch_pin',  "TEXT"],
     ['users',                'pin_hash',    "TEXT"],
     ['branch_transfers',     'approved_by', "TEXT"],
+    ['stock_movements',      'reference_branch_transfer_id', "TEXT REFERENCES branch_transfers(id)"],
     // Bill type system
     ['invoices', 'bill_type',    "TEXT NOT NULL DEFAULT 'RETAIL'"],
     ['invoices', 'valid_until',  "TEXT"],
@@ -1547,6 +1548,7 @@ function runMigrations(): void {
       movement_type         TEXT NOT NULL CHECK (movement_type IN ('SALE','TRANSFER','ADJUSTMENT','RECEIVE')),
       reference_order_id    TEXT,
       reference_transfer_id TEXT REFERENCES stock_transfers(id),
+      reference_branch_transfer_id TEXT REFERENCES branch_transfers(id),
       notes                 TEXT,
       created_by            TEXT REFERENCES users(id),
       created_at            TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1557,6 +1559,7 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_stock_movements_to_branch ON stock_movements(to_branch_id);
     CREATE INDEX IF NOT EXISTS idx_stock_movements_type ON stock_movements(movement_type);
     CREATE INDEX IF NOT EXISTS idx_stock_movements_created_at ON stock_movements(created_at);
+    CREATE INDEX IF NOT EXISTS idx_stock_movements_branch_transfer ON stock_movements(reference_branch_transfer_id);
 
     CREATE TABLE IF NOT EXISTS stock_count_sessions (
       id            TEXT PRIMARY KEY,

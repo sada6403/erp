@@ -247,6 +247,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
       if (!product_id || !branch_id) throw new Error('Product and branch are required')
+      if (branch_id === 'all') throw new Error('All-branches stock is calculated and cannot be adjusted directly')
+      if (!String(reason || '').trim()) throw new Error('A reason is required for every stock adjustment')
       if (!Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
         throw new Error('Stock quantity must be zero or greater')
       }
@@ -258,14 +260,16 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       {
         const perms = currentPerms()
         const isPrivileged = perms.all || isMainBranchManagerOrAdmin(user)
-        if (!isPrivileged && user?.branch_id && branch_id !== user.branch_id) {
-          return { success: false, error: 'Cannot adjust stock for another branch' }
-        }
+        if (!isPrivileged) return { success: false, error: 'Only the main branch can create opening stock; use a stock request instead' }
       }
 
       const existing = db.prepare(`
         SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
       `).get(product_id, branch_id) as Record<string, unknown> | undefined
+
+      if (existing && Number(existing.quantity || 0) !== Number(quantity)) {
+        return { success: false, error: 'Existing stock is calculated and cannot be overwritten; use Stock Adjustment with a reason' }
+      }
 
       let stockId: string
       if (existing) {
@@ -288,7 +292,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           to_branch_id: delta > 0 ? branch_id : null,
           quantity: Math.abs(delta),
           movement_type: 'ADJUSTMENT',
-          notes: reason || `Stock adjusted from ${previousQty} to ${quantity}`,
+          notes: String(reason),
           created_by: (user?.id as string) || null,
         })
       }
@@ -316,6 +320,19 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
       const isAdmin = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
+
+      if (!isAdmin) {
+        return { success: false, error: 'Sub branches cannot overwrite stock; create a stock request instead' }
+      }
+      if (!product_id || !branch_id || branch_id === 'all') {
+        return { success: false, error: 'A specific branch and product are required' }
+      }
+      if (!Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
+        return { success: false, error: 'Stock quantity must be zero or greater' }
+      }
+      if (!String(reason || '').trim()) {
+        return { success: false, error: 'A reason is required for every stock adjustment' }
+      }
 
       if (!isAdmin && !payload.edit_request_id) {
         return { success: false, error: 'No approved edit request found — please request approval first' }
@@ -468,6 +485,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'stocks:getTransfer', (_e, id: string) => {
     const db = getDb()
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
       const transfer = db.prepare(`
         SELECT st.*, p.name as product_name, p.sku, p.barcode, p.unit,
                fb.name as from_branch_name, fb.address as from_branch_address,
@@ -484,6 +502,12 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         WHERE st.id=?
       `).get(id) as Record<string, unknown> | undefined
       if (!transfer) return { success: false, error: 'Transfer not found' }
+      if (!isSuperAdmin(user) && !isMainBranchManagerOrAdmin(user)) {
+        const ownBranch = String(user?.branch_id || '')
+        if (!ownBranch || (String(transfer.from_branch_id) !== ownBranch && String(transfer.to_branch_id) !== ownBranch)) {
+          return { success: false, error: 'You do not have access to this transfer' }
+        }
+      }
       const printLogs = db.prepare(`
         SELECT pl.*, u.name as printed_by_name
         FROM stock_transfer_print_logs pl
@@ -546,12 +570,14 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'stocks:movements', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const privileged = isSuperAdmin(user) || isMainBranchManagerOrAdmin(user)
       let sql = `
         SELECT sm.*, p.name AS product_name, p.sku,
                fb.name AS from_branch_name, tb.name AS to_branch_name,
                u.name AS done_by_name,
                i.invoice_number,
-               st.transfer_number
+               COALESCE(st.transfer_number, bt.transfer_number) AS transfer_number
         FROM stock_movements sm
         JOIN products p ON p.id = sm.product_id
         LEFT JOIN branches fb ON fb.id = sm.from_branch_id
@@ -559,14 +585,16 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         LEFT JOIN users u ON u.id = sm.created_by
         LEFT JOIN invoices i ON i.id = sm.reference_order_id
         LEFT JOIN stock_transfers st ON st.id = sm.reference_transfer_id
+        LEFT JOIN branch_transfers bt ON bt.id = sm.reference_branch_transfer_id
         WHERE 1=1
       `
       const params: unknown[] = []
       if (filters.date_from) { sql += ' AND date(sm.created_at) >= ?'; params.push(filters.date_from) }
       if (filters.date_to) { sql += ' AND date(sm.created_at) <= ?'; params.push(filters.date_to) }
-      if (filters.branch_id) {
+      const movementBranchId = privileged ? filters.branch_id : user?.branch_id
+      if (movementBranchId) {
         sql += ' AND (sm.from_branch_id = ? OR sm.to_branch_id = ?)'
-        params.push(filters.branch_id, filters.branch_id)
+        params.push(movementBranchId, movementBranchId)
       }
       if (filters.product_id) { sql += ' AND sm.product_id = ?'; params.push(filters.product_id) }
       if (filters.movement_type) { sql += ' AND sm.movement_type = ?'; params.push(filters.movement_type) }
@@ -635,6 +663,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         ready_for_dispatch: ['dispatched', 'received', 'partially_received', 'cancelled'],
         dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy', 'mismatch_reported'],
         in_transit:         ['received', 'partially_received', 'discrepancy', 'mismatch_reported'],
+        partially_received: ['received', 'partially_received', 'discrepancy', 'mismatch_reported', 'cancelled'],
         mismatch_reported:  ['under_admin_review', 'cancelled'],
         under_admin_review: ['received', 'partially_received', 'cancelled', 'corrected'],
       }
@@ -719,9 +748,11 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         if (payload.expected_delivery_at) patch.expected_delivery_at = payload.expected_delivery_at
       }
       if (status === 'received' || status === 'partially_received') {
-        const received = status === 'received' ? qty : Number(payload.received_quantity || 0)
         const damaged  = Number(payload.damaged_quantity || 0)
-        if (received < 0 || damaged < 0 || received + damaged > qty) {
+        const received = status === 'received' ? qty - damaged : Number(payload.received_quantity || 0)
+        const previousReceived = Number(transfer.received_quantity || 0)
+        const previousDamaged = Number(transfer.damaged_quantity || 0)
+        if (received < previousReceived || damaged < previousDamaged || received + damaged > qty) {
           throw new Error('Received and damaged quantities exceed the dispatched quantity')
         }
         patch.received_quantity  = received
@@ -803,24 +834,26 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         if (status === 'received' || status === 'partially_received') {
           const received = Number(patch.received_quantity ?? qty)
           const damaged  = Number(patch.damaged_quantity || 0)
-          if (received > 0 || damaged > 0) {
+          const receivedDelta = received - Number(transfer.received_quantity || 0)
+          const damagedDelta = damaged - Number(transfer.damaged_quantity || 0)
+          if (receivedDelta > 0 || damagedDelta > 0) {
             const dest = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
               .get(transfer.product_id, transfer.to_branch_id) as { id: string } | undefined
             if (dest) {
               db.prepare(`UPDATE stocks SET quantity=quantity+?, damaged_qty=damaged_qty+?,
-                updated_at=datetime('now') WHERE id=?`).run(received, damaged, dest.id)
+                updated_at=datetime('now') WHERE id=?`).run(receivedDelta + damagedDelta, damagedDelta, dest.id)
             } else {
               db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty)
                 VALUES (?,?,?,?,?)`)
-                .run(crypto.randomUUID(), transfer.product_id, transfer.to_branch_id, received, damaged)
+                .run(crypto.randomUUID(), transfer.product_id, transfer.to_branch_id, receivedDelta + damagedDelta, damagedDelta)
             }
-            if (received > 0) {
+            if (receivedDelta + damagedDelta > 0) {
               movementRecords.push(insertStockMovement(db, {
                 product_id: String(transfer.product_id),
                 from_branch_id: String(transfer.from_branch_id),
                 to_branch_id: String(transfer.to_branch_id),
-                quantity: received, movement_type: 'RECEIVE', reference_transfer_id: id,
-                notes: `Received at destination: ${transfer.transfer_number || id}`,
+                quantity: receivedDelta + damagedDelta, movement_type: 'RECEIVE', reference_transfer_id: id,
+                notes: `Received at destination: ${transfer.transfer_number || id} (${receivedDelta} available, ${damagedDelta} damaged)`,
                 created_by: (user?.id as string) || null,
               }))
             }
@@ -829,19 +862,22 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
         // 3. CANCEL after source was deducted → return goods to source.
         if (status === 'cancelled' && alreadyDeducted) {
+          const restoreQty = Math.max(0, qty - Number(transfer.received_quantity || 0) - Number(transfer.damaged_quantity || 0))
           const src = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
             .get(transfer.product_id, transfer.from_branch_id) as { id: string } | undefined
-          if (src) db.prepare(`UPDATE stocks SET quantity=quantity+?, updated_at=datetime('now') WHERE id=?`).run(qty, src.id)
+          if (src) db.prepare(`UPDATE stocks SET quantity=quantity+?, updated_at=datetime('now') WHERE id=?`).run(restoreQty, src.id)
           else db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity) VALUES (?,?,?,?)`)
-            .run(crypto.randomUUID(), transfer.product_id, transfer.from_branch_id, qty)
-          movementRecords.push(insertStockMovement(db, {
-            product_id: String(transfer.product_id),
-            from_branch_id: String(transfer.to_branch_id),
-            to_branch_id: String(transfer.from_branch_id),
-            quantity: qty, movement_type: 'TRANSFER', reference_transfer_id: id,
-            notes: `Cancelled - stock returned to source: ${transfer.transfer_number || id}`,
-            created_by: (user?.id as string) || null,
-          }))
+            .run(crypto.randomUUID(), transfer.product_id, transfer.from_branch_id, restoreQty)
+          if (restoreQty > 0) {
+            movementRecords.push(insertStockMovement(db, {
+              product_id: String(transfer.product_id),
+              from_branch_id: String(transfer.to_branch_id),
+              to_branch_id: String(transfer.from_branch_id),
+              quantity: restoreQty, movement_type: 'TRANSFER', reference_transfer_id: id,
+              notes: `Cancelled - in-transit stock returned to source: ${transfer.transfer_number || id}`,
+              created_by: (user?.id as string) || null,
+            }))
+          }
         }
 
         if (status === 'received' || status === 'partially_received') {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { ArrowLeft, Save, Truck, Plus, Trash2 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -16,6 +16,7 @@ interface Product {
   name: string
   sku: string
   unit: string
+  stock: number
 }
 
 interface TransferItem {
@@ -29,9 +30,15 @@ interface TransferItem {
   description: string
 }
 
+function localDateTimeInputValue(date: Date): string {
+  const offsetMs = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
+}
+
 export default function BranchTransferForm() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
+  const itemsEndRef = useRef<HTMLDivElement>(null)
   
   const [branches, setBranches] = useState<Branch[]>([])
   const [products, setProducts] = useState<Product[]>([])
@@ -48,7 +55,9 @@ export default function BranchTransferForm() {
   const [expectedDelivery, setExpectedDelivery] = useState('')
   const [notes, setNotes] = useState('')
 
-  const fromBranchId = user?.branch?.id || ''
+  const fromBranchId = user?.branch?.id || user?.branch_id || ''
+  const fromBranchName = user?.branch?.name || 'source branch'
+  const minimumDeliveryDate = localDateTimeInputValue(new Date())
 
   useEffect(() => {
     loadData()
@@ -65,7 +74,10 @@ export default function BranchTransferForm() {
       }
 
       // Load products (ideally stocks available in current branch)
-      const prodRes = await window.api.products?.list?.({ is_active: 1 })
+      const prodRes = await window.api.products?.list?.({
+        is_active: true,
+        branch_id: fromBranchId || undefined,
+      })
       if (prodRes?.success) {
         setProducts(prodRes.data)
       } else {
@@ -77,7 +89,7 @@ export default function BranchTransferForm() {
   }
 
   const addItem = () => {
-    setItems([...items, {
+    setItems(current => [...current, {
       id: crypto.randomUUID(),
       product_id: '',
       product_name: '',
@@ -87,6 +99,9 @@ export default function BranchTransferForm() {
       serial_batch_no: '',
       description: ''
     }])
+    requestAnimationFrame(() => {
+      itemsEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    })
   }
 
   const updateItem = (id: string, field: keyof TransferItem, value: any) => {
@@ -113,10 +128,20 @@ export default function BranchTransferForm() {
   const handleSubmit = async (status: 'draft' | 'dispatched') => {
     if (!toBranchId) return toast.error('Please select a destination branch')
     if (items.length === 0) return toast.error('Please add at least one item')
+    if (expectedDelivery && new Date(expectedDelivery).getTime() < Date.now()) {
+      return toast.error('Expected delivery date and time cannot be in the past')
+    }
     
     for (const item of items) {
       if (!item.product_id) return toast.error('Please select a product for all items')
       if (item.quantity <= 0) return toast.error('Quantity must be greater than zero')
+      if (status === 'dispatched') {
+        const product = products.find(p => p.id === item.product_id)
+        const available = Number(product?.stock || 0)
+        if (item.quantity > available) {
+          return toast.error(`${product?.name || 'Selected product'}: only ${available} available at ${fromBranchName}`)
+        }
+      }
     }
 
     try {
@@ -149,7 +174,7 @@ export default function BranchTransferForm() {
   }
 
   return (
-    <div className="p-6 max-w-5xl mx-auto space-y-6">
+    <div className="h-full min-h-0 overflow-y-auto p-6 pb-10 max-w-5xl mx-auto space-y-6">
       <div className="flex items-center gap-4">
         <Link 
           to="/admin/branch-transfers"
@@ -225,6 +250,14 @@ export default function BranchTransferForm() {
                           value={item.product_id}
                           onChange={id => updateItem(item.id, 'product_id', id)}
                         />
+                        {item.product_id && (() => {
+                          const available = Number(products.find(p => p.id === item.product_id)?.stock || 0)
+                          return (
+                            <p className={`text-xs mt-1 ${item.quantity > available ? 'text-red-400' : 'text-emerald-400'}`}>
+                              Available at {fromBranchName}: {available}
+                            </p>
+                          )
+                        })()}
                       </div>
                       
                       <div className="flex gap-4">
@@ -234,6 +267,7 @@ export default function BranchTransferForm() {
                             <input 
                               type="number"
                               min="0.01" step="0.01"
+                              max={Number(products.find(p => p.id === item.product_id)?.stock || 0) || undefined}
                               value={item.quantity || ''}
                               onChange={e => updateItem(item.id, 'quantity', parseFloat(e.target.value))}
                               className="w-full bg-surface-800 border border-surface-600 text-white px-3 py-1.5 rounded-lg focus:outline-none focus:border-brand-500 text-sm"
@@ -287,6 +321,7 @@ export default function BranchTransferForm() {
                     </div>
                   </div>
                 ))}
+                <div ref={itemsEndRef} aria-hidden="true" />
               </div>
             )}
           </div>
@@ -340,6 +375,7 @@ export default function BranchTransferForm() {
               <label className="block text-sm font-medium text-slate-300 mb-1">Expected Delivery</label>
               <input 
                 type="datetime-local"
+                min={minimumDeliveryDate}
                 value={expectedDelivery}
                 onChange={e => setExpectedDelivery(e.target.value)}
                 className="w-full bg-surface-900 border border-surface-600 text-white px-4 py-2 rounded-lg focus:outline-none focus:border-brand-500"

@@ -199,10 +199,12 @@ export default function InventoryPage() {
                       : <span className="badge-green">In Stock</span>}
                     </td>
                     <td className="table-cell">
-                      {branchId ? (
+                      {branchId && canManageAllBranches ? (
                         <AdjustBtn stockId={s.id as string} productId={s.product_id as string} branchId={branchId} current={s.quantity as number} onDone={load} />
                       ) : (
-                        <span className="text-xs" style={{ color: 'var(--text-3)' }}>Calculated total</span>
+                        <span className="text-xs" style={{ color: 'var(--text-3)' }}>
+                          {branchId ? 'Transaction controlled' : 'Calculated total'}
+                        </span>
                       )}
                     </td>
                   </tr>

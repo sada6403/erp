@@ -9,6 +9,7 @@ import { safeHandleModule } from './ipcHandler'
 import { sendEmail } from '../services/emailService'
 import { sendWhatsApp } from '../services/whatsappService'
 import { canManageProcurement, resolveMainBranchId } from '../services/branchAccess'
+import { insertStockMovement } from '../services/stockMovement'
 
 const store = new Store()
 
@@ -411,6 +412,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       // When marking RECEIVED or PARTIAL, update received quantities on items and adjust stock
       const receivedItemIds: string[] = []
       const receivedProductIds: string[] = []
+      const movementRecords: Record<string, unknown>[] = []
       if ((status === 'RECEIVED' || status === 'PARTIAL') && payload.items) {
         db.transaction(() => {
           let allFullyReceived = true
@@ -421,7 +423,13 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             if (!poItem) continue
 
             const newReceived = Number(item.received_qty) || 0
-            const totalReceived = Number(poItem.received_qty || 0) + newReceived
+            const previouslyReceived = Number(poItem.received_qty || 0)
+            // The UI sends the quantity it observed before this receipt. A
+            // stale retry must not receive the same goods twice.
+            if (item.already_received !== undefined && Number(item.already_received) !== previouslyReceived) {
+              throw new Error('This purchase order was already updated. Refresh it before receiving more stock.')
+            }
+            const totalReceived = previouslyReceived + newReceived
             if (totalReceived > Number(poItem.quantity)) {
               throw new Error(`Received quantity exceeds ordered quantity for product`)
             }
@@ -443,6 +451,16 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
                 db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty)
                   VALUES (?,?,?,?,0)`).run(crypto.randomUUID(), productId, branchId, newReceived)
               }
+              movementRecords.push(insertStockMovement(db, {
+                product_id: productId,
+                from_branch_id: null,
+                to_branch_id: branchId,
+                quantity: newReceived,
+                movement_type: 'RECEIVE',
+                reference_order_id: id,
+                notes: `Supplier receipt ${po.po_number || id} / item ${poItem.id}`,
+                created_by: (user?.id as string) || null,
+              }))
               receivedProductIds.push(productId)
             }
 
@@ -468,6 +486,9 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
         }
         for (const productId of receivedProductIds) {
           await syncStockRow(db, productId, String(po.branch_id))
+        }
+        for (const movement of movementRecords) {
+          await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
         }
       } else {
         if (status === 'SENT')      patch.sent_at      = now

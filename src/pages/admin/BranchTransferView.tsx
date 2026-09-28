@@ -1,11 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import NumberInput from '@/components/shared/NumberInput'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Check, Truck, AlertTriangle, Printer, FileText } from 'lucide-react'
+import { ArrowLeft, Check, Truck, AlertTriangle, Printer } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
-import { DeliveryNoteTemplate } from '@/components/print/DeliveryNoteTemplate'
-import { createPortal } from 'react-dom'
 
 export default function BranchTransferView() {
   const { id } = useParams<{ id: string }>()
@@ -25,8 +23,7 @@ export default function BranchTransferView() {
   // Resolve modal states
   const [showResolve, setShowResolve] = useState(false)
   const [adminReason, setAdminReason] = useState('')
-  
-  const printRef = useRef<HTMLDivElement>(null)
+  const [printing, setPrinting] = useState(false)
 
   useEffect(() => {
     loadData()
@@ -123,37 +120,24 @@ export default function BranchTransferView() {
   }
 
   const handlePrint = async () => {
-    if (!printRef.current) return
-    const content = printRef.current.innerHTML
-    const printWindow = window.open('', '_blank', 'width=800,height=600')
-    if (!printWindow) return toast.error('Popup blocked')
-
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Delivery Note - ${transfer.transfer_number}</title>
-          <script src="https://cdn.tailwindcss.com"></script>
-          <style>
-            @media print {
-              body { -webkit-print-color-adjust: exact; }
-            }
-          </style>
-        </head>
-        <body onload="window.print(); setTimeout(() => window.close(), 500)">
-          ${content}
-        </body>
-      </html>
-    `)
-    printWindow.document.close()
-
-    // Log print
+    if (printing) return
+    setPrinting(true)
     try {
-      const res = await window.api.branchTransfers.logPrint(id!)
-      if (!res.success) toast.error(res.error || 'Failed to log print')
+      const printResult = await window.api.printer.printDeliveryNote({
+        ...transfer,
+        company_name: settings.company_name || 'Nature Plantation',
+      })
+      if (!printResult.success) throw new Error(printResult.error || 'Print failed')
+
+      const logResult = await window.api.branchTransfers.logPrint(id!)
+      toast.success('Delivery note sent to printer')
+      if (!logResult.success) toast.error(logResult.error || 'Printed, but failed to save the print log')
+      await loadData()
     } catch (err: any) {
-      toast.error(err.message || 'Failed to log print')
+      toast.error(err.message || 'Print failed')
+    } finally {
+      setPrinting(false)
     }
-    loadData()
   }
 
   if (loading) {
@@ -198,9 +182,10 @@ export default function BranchTransferView() {
         <div className="flex gap-3">
           <button 
             onClick={handlePrint}
-            className="flex items-center gap-2 bg-surface-700 hover:bg-surface-600 text-white px-4 py-2 rounded-lg transition-colors"
+            disabled={printing}
+            className="flex items-center gap-2 bg-surface-700 hover:bg-surface-600 text-white px-4 py-2 rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Printer className="w-4 h-4" /> Print Delivery Note
+            <Printer className="w-4 h-4" /> {printing ? 'Printing...' : 'Print Delivery Note'}
           </button>
           
           {(isAdmin || isSender) && transfer.status === 'draft' && (
@@ -345,16 +330,6 @@ export default function BranchTransferView() {
             )}
           </div>
         </div>
-      </div>
-
-      {/* Hidden print template */}
-      <div className="hidden">
-        <DeliveryNoteTemplate
-          ref={printRef}
-          transfer={transfer}
-          companyName={settings.company_name || 'Company Name'}
-          companyLogo={settings.company_logo_url}
-        />
       </div>
 
       {/* Receive Modal */}

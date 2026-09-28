@@ -99,6 +99,7 @@ beforeAll(async () => {
   const { registerAdminHandlers } = await import('../ipc/admin')
   const { registerRegionHandlers } = await import('../ipc/regions')
   const { registerAuthHandlers } = await import('../ipc/auth')
+  const { registerBranchTransferHandlers } = await import('../ipc/branchTransfers')
   registerBatchHandlers()
   registerProductHandlers(fakeIpcMain)
   registerPurchaseHandlers(fakeIpcMain)
@@ -110,6 +111,7 @@ beforeAll(async () => {
   registerAdminHandlers(fakeIpcMain)
   registerRegionHandlers(fakeIpcMain)
   registerAuthHandlers(fakeIpcMain)
+  registerBranchTransferHandlers(fakeIpcMain)
 })
 
 function seedBranch(id: string, name: string, code: string) {
@@ -150,6 +152,33 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
   const admin = makeSession({ id: 'u-sec-admin', permissions: { all: true } })
   const mgrA = makeSession({ id: 'u-sec-mgr-a', branchId: BR_A, permissions: { inventory: true, employees: true, chits: true } })
   const mgrB = makeSession({ id: 'u-sec-mgr-b', branchId: BR_B, permissions: { inventory: true, employees: true, chits: true } })
+
+  it('branchTransfers:create links stock movements to the multi-item branch transfer table', async () => {
+    setSession(admin)
+    const transferProductId = 'sec-prod-branch-transfer'
+    seedProduct(transferProductId, 1250)
+    db.prepare(`INSERT OR REPLACE INTO stocks (id, product_id, branch_id, quantity, damaged_qty) VALUES (?,?,?,?,0)`)
+      .run('sec-branch-transfer-stock', transferProductId, BR_A, 12)
+
+    const res = await call('branchTransfers:create', {
+      from_branch_id: BR_A,
+      to_branch_id: BR_B,
+      status: 'dispatched',
+      expected_delivery_at: new Date(Date.now() + 60_000).toISOString(),
+      items: [{ product_id: transferProductId, quantity: 5, unit: 'pcs', package_count: 1 }],
+    })
+
+    expect(res.success).toBe(true)
+    const movement = db.prepare(`
+      SELECT reference_transfer_id, reference_branch_transfer_id
+      FROM stock_movements
+      WHERE reference_branch_transfer_id = ?
+    `).get(res.data.id) as { reference_transfer_id: string | null; reference_branch_transfer_id: string }
+    expect(movement.reference_transfer_id).toBeNull()
+    expect(movement.reference_branch_transfer_id).toBe(res.data.id)
+    const stock = db.prepare('SELECT quantity FROM stocks WHERE id=?').get('sec-branch-transfer-stock') as { quantity: number }
+    expect(stock.quantity).toBe(7)
+  })
 
   let batchId: string
 
@@ -210,6 +239,12 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(res.success).toBe(false)
   })
 
+  it('admin:suppliers:list hides supplier management from a sub branch', async () => {
+    setSession(mgrA)
+    const res = await call('admin:suppliers:list')
+    expect(res.success).toBe(false)
+  })
+
   it('purchases:create always receives supplier stock into the main branch', async () => {
     setSession(admin)
     const res = await call('purchases:create', {
@@ -236,6 +271,29 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(res.success).toBe(false)
   })
 
+  it('supplier receipt increases only main-branch stock and records a RECEIVE movement once', async () => {
+    setSession(admin)
+    expect((await call('purchases:updateStatus', poId, 'SENT', { open_whatsapp: false, send_email: false })).success).toBe(true)
+    const item = db.prepare('SELECT id, received_qty FROM purchase_items WHERE po_id=?').get(poId) as { id: string; received_qty: number }
+    const receivePayload = { items: [{ id: item.id, received_qty: 5, already_received: item.received_qty }] }
+    expect((await call('purchases:updateStatus', poId, 'RECEIVED', receivePayload)).success).toBe(true)
+
+    const mainQty = db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?')
+      .get(PROD1, 'b1111111-1111-4111-8111-111111111111') as { quantity: number }
+    expect(mainQty.quantity).toBe(5)
+    const movementCount = db.prepare(`
+      SELECT COUNT(*) AS count FROM stock_movements
+      WHERE reference_order_id=? AND product_id=? AND movement_type='RECEIVE'
+    `).get(poId, PROD1) as { count: number }
+    expect(movementCount.count).toBe(1)
+
+    const retry = await call('purchases:updateStatus', poId, 'RECEIVED', receivePayload)
+    expect(retry.success).toBe(false)
+    const unchanged = db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?')
+      .get(PROD1, 'b1111111-1111-4111-8111-111111111111') as { quantity: number }
+    expect(unchanged.quantity).toBe(5)
+  })
+
   let transferId: string
 
   it('stocks:transfer lets a destination branch request stock from another branch', async () => {
@@ -252,6 +310,24 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     })
     expect(res.success).toBe(true)
     transferId = res.data.id
+  })
+
+  it('calculated stock cannot be overwritten through the product form adjustment endpoint', async () => {
+    setSession(admin)
+    const res = await call('stocks:adjust', {
+      product_id: PROD1, branch_id: BR_B, quantity: 99, reason: 'Attempted direct overwrite',
+    })
+    expect(res.success).toBe(false)
+    const row = db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_B) as { quantity: number }
+    expect(row.quantity).toBe(10)
+  })
+
+  it('products:list without a branch returns the all-branches aggregate stock', async () => {
+    setSession(admin)
+    const res = await call('products:list', { is_active: true })
+    expect(res.success).toBe(true)
+    const product = (res.data as Array<{ id: string; stock: number }>).find(p => p.id === PROD1)
+    expect(Number(product?.stock)).toBe(15)
   })
 
   it('stocks:transfer rejects a sub branch requesting stock for a different destination', async () => {

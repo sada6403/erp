@@ -928,7 +928,11 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [localCategories, setLocalCategories] = useState(categories)
   const user = useAuthStore(s => s.user)
+  // Existing stock is changed only through explicit stock transactions
+  // (sale, receipt, transfer, return, or the stock-adjustment workflow).
+  // The product editor may seed opening stock for a brand-new product only.
   const stockIsAggregate = Boolean(product && !stockBranchId)
+  const stockIsReadOnly = Boolean(product) || !canManageAllBranchStock(user)
 
   useEffect(() => { setLocalCategories(categories) }, [categories])
 
@@ -1015,9 +1019,9 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
       }
       // Aggregate stock is calculated from every branch and must never be
       // written back into one branch. A branch-specific edit may adjust it.
-      const stockPromise = stockIsAggregate
+      const stockPromise = stockIsReadOnly
         ? Promise.resolve({ success: true } as { success: boolean; error?: string })
-        : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: stockQty, reason: 'Product form update' }) as Promise<{ success: boolean; error?: string }>
+        : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: stockQty, reason: 'Opening stock for new product' }) as Promise<{ success: boolean; error?: string }>
       const [stockRes, uomRes] = await Promise.all([
         stockPromise,
         window.api.admin.productUom.save(productId, uoms.filter(u => u.uom_name.trim())) as Promise<{ success: boolean; error?: string }>,
@@ -1323,11 +1327,15 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
           {/* ── Stock ─────────────────────────────────────────────────── */}
           <div>
             <label className="label">{product ? 'Current Stock Qty' : 'Initial Stock Qty'} — {stockScopeLabel}</label>
-            {stockIsAggregate ? (
+            {stockIsReadOnly ? (
               <div className="rounded-lg border px-3 py-2 w-fit" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
                 <span className="text-lg font-bold" style={{ color: 'var(--text-1)' }}>{stockQty}</span>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
-                  Calculated from all branches. Select a branch before editing its stock.
+                  {stockIsAggregate
+                    ? 'Calculated from all branches.'
+                    : product
+                      ? 'Calculated stock is read-only here. Use Stock Adjustment for a documented correction.'
+                      : 'Sub branches receive stock through an approved stock request or transfer.'}
                 </p>
               </div>
             ) : (

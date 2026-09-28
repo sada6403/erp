@@ -12,7 +12,32 @@ export function buildDeliveryNoteHtml(t: Record<string, unknown>): string {
   const v = (k: string) => esc(String(t[k] ?? ''))
   const fmtDate = (s: unknown) => s ? new Date(String(s)).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'
   const transferNumber = esc(String(t.transfer_number || ''))
-  const qty = Number(t.quantity || 0)
+  const items = Array.isArray(t.items) && t.items.length
+    ? t.items as Record<string, unknown>[]
+    : [{
+        product_name: t.product_name,
+        sku: t.sku,
+        barcode: t.barcode,
+        description: t.item_description,
+        quantity: t.quantity,
+        unit: t.unit,
+        package_count: t.package_count,
+        serial_batch_no: t.serial_batch_no,
+      }]
+  const totalQty = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)
+  const rows = items.map((item, index) => {
+    const product = esc(String(item.product_name || ''))
+    const sku = esc(String(item.sku || ''))
+    const barcode = esc(String(item.barcode || ''))
+    const description = esc(String(item.description || item.item_description || ''))
+    const quantity = Number(item.quantity || 0)
+    const unit = esc(String(item.unit || 'Nos'))
+    const packages = Number(item.package_count || 0)
+    const serial = esc(String(item.serial_batch_no || ''))
+    return `<tr><td>${index + 1}</td><td>${product}<br/><small>${sku}${barcode ? ` / ${barcode}` : ''}</small></td><td>${description}</td><td class="num">${quantity}</td><td>${unit}</td><td class="num">${packages || ''}</td><td>${serial}</td></tr>`
+  }).join('')
+  const printCount = Array.isArray(t.prints) ? t.prints.length + 1 : Number(t.print_count || 0) + 1
+  const companyName = esc(String(t.company_name || 'Nature Plantation'))
   return `<!doctype html><html><head><meta charset="utf-8"><title>Delivery Note ${transferNumber}</title>
   <style>
     @page { size: A4; margin: 12mm; }
@@ -33,19 +58,19 @@ export function buildDeliveryNoteHtml(t: Record<string, unknown>): string {
     .line { border-top:1px dotted #111827; padding-top:6px; min-height:44px; }
     .footer { margin-top:18px; font-size:10px; color:#64748b; display:flex; justify-content:space-between; }
   </style></head><body>
-    <div class="top"><div><h1>DELIVERY NOTE / ISSUE NOTE</h1><h2>Branch Stock Transfer</h2></div><div style="text-align:right"><strong>${transferNumber}</strong><br/>${esc(new Date().toLocaleString())}</div></div>
+    <div class="top"><div><h1>${companyName}</h1><h2>DELIVERY NOTE / ISSUE NOTE &mdash; Branch Stock Transfer</h2></div><div style="text-align:right"><strong>${transferNumber}</strong><br/>${esc(new Date().toLocaleString())}</div></div>
     <div class="meta">
       <div class="box"><span class="label">Issuing Store Name</span>${v('from_branch_name')}</div>
       <div class="box"><span class="label">Receiving Store Name</span>${v('to_branch_name')}</div>
       <div class="box"><span class="label">Driver Name / Phone</span>${v('driver_name')}${t.driver_phone ? ` / ${v('driver_phone')}` : ''}</div>
       <div class="box"><span class="label">Vehicle No</span>${v('vehicle_number')}</div>
-      <div class="box"><span class="label">Issuing Officer</span>${v('issuing_officer_name') || v('initiated_by_name')}</div>
+      <div class="box"><span class="label">Issuing Officer</span>${v('issuing_officer_name') || v('created_by_name') || v('initiated_by_name')}</div>
       <div class="box"><span class="label">Dispatch Date</span>${esc(fmtDate(t.dispatch_at) !== '—' ? fmtDate(t.dispatch_at) : fmtDate(t.initiated_at))}</div>
     </div>
     <table>
       <thead><tr><th>No</th><th>Product / SKU</th><th>Description</th><th>Qty</th><th>Unit</th><th>No. of Packages</th><th>Serial / Batch</th></tr></thead>
-      <tbody><tr><td>1</td><td>${v('product_name')}<br/><small>${v('sku')}${t.barcode ? ` / ${v('barcode')}` : ''}</small></td><td>${v('item_description')}</td><td class="num">${qty}</td><td>${v('unit') || 'Nos'}</td><td class="num">${Number(t.package_count || 0) || ''}</td><td>${v('serial_batch_no')}</td></tr></tbody>
-      <tfoot><tr><th colspan="3" class="num">Total Quantity</th><th class="num">${qty}</th><th colspan="3"></th></tr></tfoot>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><th colspan="3" class="num">Total Quantity</th><th class="num">${totalQty}</th><th colspan="3"></th></tr></tfoot>
     </table>
     <div class="box remarks" style="margin-top:12px"><span class="label">Remarks</span>${v('notes')}</div>
     <div class="sign">
@@ -53,7 +78,7 @@ export function buildDeliveryNoteHtml(t: Record<string, unknown>): string {
       <div class="line"><strong>Name & Signature of Driver / Officer Taking Over</strong><br/>Designation:<br/>Date:</div>
       <div class="line"><strong>Name & Signature of Receiving Officer</strong><br/>Designation:<br/>Date:</div>
     </div>
-    <div class="footer"><span>Printed copy must be signed manually and retained by both branches.</span><span>Print count: ${Number(t.print_count || 0) + 1}</span></div>
+    <div class="footer"><span>Printed copy must be signed manually and retained by both branches.</span><span>Print count: ${printCount}</span></div>
   </body></html>`
 }
 

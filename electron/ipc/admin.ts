@@ -997,6 +997,9 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Suppliers
   safeHandle(ipcMain, 'admin:suppliers:list', () => {
+    if (!canManageProcurement(getDb(), authUser())) {
+      return { success: false, error: 'Supplier management is available only at the main branch' }
+    }
     return { success: true, data: getDb().prepare('SELECT * FROM suppliers ORDER BY name').all() }
   })
   safeHandle(ipcMain, 'admin:suppliers:create', async (_e, p) => {
