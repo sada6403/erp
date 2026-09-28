@@ -86,10 +86,10 @@ export async function sendSupplierOrderNotification(
     day: '2-digit', month: 'short', year: 'numeric'
   }) : null
 
-  // Phone number sanitation
+  // Keep the supplier's number exactly as entered, apart from characters that
+  // wa.me does not accept. Do not assume or prepend a country code.
   const rawPhone = String(po.supplier_mobile || po.supplier_phone || '').trim()
-  let cleanPhone = rawPhone.replace(/[^0-9]/g, '')
-  if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone
+  const cleanPhone = rawPhone.replace(/[^0-9]/g, '')
 
   // WhatsApp formatted text
   const itemsText = items.map((it, idx) => {
