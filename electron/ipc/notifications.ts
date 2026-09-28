@@ -34,6 +34,23 @@ export interface NotificationTarget {
   userId?: string | null
   roleScope?: string | null
   branchId?: string | null
+  requiredPermission?: string | null
+}
+
+const INVENTORY_NOTIFICATION_TYPES = new Set<NotifType>(['low_stock', 'transfer_request'])
+
+function defaultPermission(type: NotifType): string {
+  if (INVENTORY_NOTIFICATION_TYPES.has(type)) return 'inventory'
+  if (type === 'installment_due' || type === 'installment_overdue') return 'customers'
+  if (type === 'sync_failed') return 'branches'
+  if (type === 'license_expiry' || type === 'subscription_grace' || type === 'subscription_expired') return 'settings'
+  if (
+    type.startsWith('chit_') || type.startsWith('commission_') ||
+    type === 'agent_registered' || type === 'agent_approved' ||
+    type === 'scheme_created' || type === 'scheme_status_update' ||
+    type === 'branch_performance_alert'
+  ) return 'chits'
+  return 'all'
 }
 
 export function createNotification(
@@ -43,11 +60,13 @@ export function createNotification(
   try {
     const db = getDb()
     db.prepare(`
-      INSERT OR IGNORE INTO notifications (id, type, title, message, data, user_id, role_scope, target_branch_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      INSERT OR IGNORE INTO notifications
+        (id, type, title, message, data, user_id, role_scope, target_branch_id, required_permission, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `).run(
       randomUUID(), type, title, message, data ? JSON.stringify(data) : null,
-      target?.userId || null, target?.roleScope || null, target?.branchId || null
+      target?.userId || null, target?.roleScope || null, target?.branchId || null,
+      target?.requiredPermission || defaultPermission(type)
     )
   } catch { /* db not ready */ }
 }
@@ -55,6 +74,26 @@ export function createNotification(
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
 }
+
+function authPermissions(caller: Record<string, unknown> = authUser()): Record<string, boolean> {
+  try {
+    const role = caller.role as Record<string, unknown> | undefined
+    const raw = role?.permissions ?? caller.permissions ?? {}
+    return typeof raw === 'string' ? JSON.parse(raw) as Record<string, boolean> : raw as Record<string, boolean>
+  } catch {
+    return {}
+  }
+}
+
+const LEGACY_PERMISSION_SQL = `CASE
+  WHEN type IN ('low_stock','transfer_request') THEN 'inventory'
+  WHEN type IN ('installment_due','installment_overdue') THEN 'customers'
+  WHEN type = 'sync_failed' THEN 'branches'
+  WHEN type IN ('license_expiry','subscription_grace','subscription_expired') THEN 'settings'
+  WHEN type LIKE 'chit_%' OR type LIKE 'commission_%'
+    OR type IN ('agent_registered','agent_approved','scheme_created','scheme_status_update','branch_performance_alert') THEN 'chits'
+  ELSE 'all'
+END`
 
 // Broadcast rows (no targeting at all) are visible to everyone, same as
 // before targeting existed. A targeted row is visible to its exact user, or
@@ -64,23 +103,43 @@ function authUser(): Record<string, unknown> {
 function notificationVisibilityWhere(): { where: string; params: unknown[] } {
   const caller = authUser()
   const scope = caller.scope as { level?: string; branchId?: string | null } | undefined
-  if (scope?.level === 'owner') return { where: '', params: [] }
+  const permissions = authPermissions(caller)
+  if (scope?.level === 'owner' || permissions.all) return { where: '', params: [] }
   const userId = caller.id as string | undefined
   const roleLevel = scope?.level
   const nestedBranch = caller.branch as { id?: string } | undefined
   const branchId = scope?.branchId || (caller.branch_id as string | undefined) || nestedBranch?.id || null
 
-  const conditions = ['(user_id IS NULL AND role_scope IS NULL AND target_branch_id IS NULL)']
+  const conditions: string[] = []
   const params: unknown[] = []
   if (userId) { conditions.push('user_id = ?'); params.push(userId) }
+
+  const audience: string[] = ['(role_scope IS NULL AND target_branch_id IS NULL)']
   if (branchId) {
-    conditions.push('(target_branch_id = ? AND user_id IS NULL AND role_scope IS NULL)')
+    audience.push('(role_scope IS NULL AND target_branch_id = ?)')
     params.push(branchId)
   }
   if (roleLevel) {
-    conditions.push('(role_scope = ? AND (target_branch_id IS NULL OR target_branch_id = ?))')
+    audience.push('(role_scope = ? AND (target_branch_id IS NULL OR target_branch_id = ?))')
     params.push(roleLevel, branchId)
   }
+
+  const granted = Object.entries(permissions).filter(([, enabled]) => Boolean(enabled)).map(([name]) => name)
+  if (granted.length) {
+    const placeholders = granted.map(() => '?').join(',')
+    const stockBranchSql = branchId
+      ? `(type NOT IN ('low_stock','transfer_request') OR target_branch_id = ?)`
+      : `type NOT IN ('low_stock','transfer_request')`
+    conditions.push(`(
+      user_id IS NULL
+      AND (${audience.join(' OR ')})
+      AND COALESCE(required_permission, ${LEGACY_PERMISSION_SQL}) IN (${placeholders})
+      AND ${stockBranchSql}
+    )`)
+    params.push(...granted)
+    if (branchId) params.push(branchId)
+  }
+  if (!conditions.length) return { where: 'WHERE 0', params: [] }
   return { where: `WHERE ${conditions.join(' OR ')}`, params }
 }
 
@@ -105,7 +164,7 @@ function createUniqueTransferNotification(
       createNotification(
         'transfer_request', title, message,
         { ...data, event, transfer_id: transferId },
-        targetBranchId ? { branchId: targetBranchId } : undefined,
+        { branchId: targetBranchId || null, requiredPermission: 'inventory' },
       )
     }
   } catch { /* db not ready */ }
@@ -126,8 +185,8 @@ export function registerNotificationHandlers() {
     try {
       const db = getDb()
       const { where, params } = notificationVisibilityWhere()
-      const cond = where ? `${where} AND is_read = 0` : 'WHERE is_read = 0'
-      const row = db.prepare(`SELECT COUNT(*) as cnt FROM notifications ${cond}`).get(...params) as { cnt: number }
+      const visible = where ? where.replace(/^WHERE\s+/i, '') : '1=1'
+      const row = db.prepare(`SELECT COUNT(*) as cnt FROM notifications WHERE (${visible}) AND is_read = 0`).get(...params) as { cnt: number }
       return row.cnt
     } catch { return 0 }
   })
@@ -140,114 +199,147 @@ export function registerNotificationHandlers() {
       const { where, params } = notificationVisibilityWhere()
       db.prepare(`UPDATE notifications SET is_read = 1 ${where}`).run(...params)
     } else {
-      db.prepare(`UPDATE notifications SET is_read = 1 WHERE id = ?`).run(id)
+      const { where, params } = notificationVisibilityWhere()
+      const visible = where ? where.replace(/^WHERE\s+/i, '') : '1=1'
+      db.prepare(`UPDATE notifications SET is_read = 1 WHERE id = ? AND (${visible})`).run(id, ...params)
     }
     return { success: true }
   })
 
   safeHandle(ipcMain, 'notifications:delete', (_e, id: string) => {
     const db = getDb()
-    db.prepare(`DELETE FROM notifications WHERE id = ?`).run(id)
+    const { where, params } = notificationVisibilityWhere()
+    const visible = where ? where.replace(/^WHERE\s+/i, '') : '1=1'
+    db.prepare(`DELETE FROM notifications WHERE id = ? AND (${visible})`).run(id, ...params)
     return { success: true }
   })
 
   safeHandle(ipcMain, 'notifications:clearAll', () => {
     const db = getDb()
-    db.prepare(`DELETE FROM notifications WHERE is_read = 1`).run()
+    const { where, params } = notificationVisibilityWhere()
+    const visible = where ? where.replace(/^WHERE\s+/i, '') : '1=1'
+    db.prepare(`DELETE FROM notifications WHERE is_read = 1 AND (${visible})`).run(...params)
     return { success: true }
   })
 
   // Generate notifications based on current app state
   safeHandle(ipcMain, 'notifications:refresh', () => {
       const db = getDb()
+      const caller = authUser()
+      const permissions = authPermissions(caller)
+      const branchId = String(
+        (caller.scope as { branchId?: string | null } | undefined)?.branchId ||
+        caller.branch_id || (caller.branch as Record<string, unknown> | undefined)?.id || ''
+      )
+      const canInventory = Boolean(permissions.all || permissions.inventory)
+      const canCustomers = Boolean(permissions.all || permissions.customers)
 
-      // Low stock check
-      const lowStockItems = db.prepare(`
-        SELECT p.name, pi.quantity, p.min_stock_level
-        FROM product_inventory pi
-        JOIN products p ON p.id = pi.product_id
-        WHERE pi.quantity <= p.min_stock_level AND pi.quantity >= 0
-        LIMIT 20
-      `).all() as { name: string; quantity: number; min_stock_level: number }[]
+      // Keep the refresh light: branch inventory users calculate only their
+      // own branch. Company Admin reads the alerts produced by branch sessions.
+      if (canInventory && branchId) {
+        const lowStockItems = db.prepare(`
+          SELECT p.name,
+                 COALESCE(SUM(COALESCE(s.quantity, 0)), 0) AS quantity,
+                 COALESCE(p.min_stock_level, 5) AS min_stock_level
+          FROM products p
+          LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?
+          WHERE p.is_active = 1 AND (p.branch_id = ? OR p.branch_id IS NULL)
+          GROUP BY p.id, p.name, p.min_stock_level
+          HAVING COALESCE(SUM(COALESCE(s.quantity, 0)), 0) <= COALESCE(p.min_stock_level, 5)
+          ORDER BY quantity ASC, p.name
+          LIMIT 20
+        `).all(branchId, branchId) as { name: string; quantity: number; min_stock_level: number }[]
 
-      if (lowStockItems.length > 0) {
-        const names = lowStockItems.slice(0, 3).map(i => i.name).join(', ')
-        const more  = lowStockItems.length > 3 ? ` and ${lowStockItems.length - 3} more` : ''
-        // Only create if no recent low_stock notification (within 1 hour)
-        const recent = db.prepare(`
-          SELECT id FROM notifications WHERE type='low_stock'
-          AND created_at > datetime('now', '-1 hour') LIMIT 1
-        `).get()
-        if (!recent) {
-          createNotification('low_stock', 'Low Stock Alert',
-            `${lowStockItems.length} item${lowStockItems.length > 1 ? 's' : ''} need restocking: ${names}${more}`,
-            { count: lowStockItems.length }
-          )
+        if (lowStockItems.length > 0) {
+          const names = lowStockItems.slice(0, 3).map(i => i.name).join(', ')
+          const more = lowStockItems.length > 3 ? ` and ${lowStockItems.length - 3} more` : ''
+          const recent = db.prepare(`
+            SELECT id FROM notifications WHERE type='low_stock' AND title='Low Stock Alert'
+            AND target_branch_id = ?
+            AND created_at > datetime('now', '-1 hour') LIMIT 1
+          `).get(branchId)
+          if (!recent) {
+            createNotification('low_stock', 'Low Stock Alert',
+              `${lowStockItems.length} item${lowStockItems.length > 1 ? 's' : ''} need restocking: ${names}${more}`,
+              { count: lowStockItems.length, branchId },
+              { branchId, requiredPermission: 'inventory' }
+            )
+          }
         }
       }
 
-      // Overdue installments
-      const overdueCount = db.prepare(`
-        SELECT COUNT(*) as cnt FROM installments
-        WHERE status = 'active' AND next_due_date < date('now') AND due_amount > paid_amount
-      `).get() as { cnt: number }
+      if (canCustomers) {
+        const branchClause = branchId ? 'AND branch_id = ?' : ''
+        const branchParams = branchId ? [branchId] : []
+        const overdueCount = db.prepare(`
+          SELECT COUNT(*) as cnt FROM installments
+          WHERE status = 'active' AND next_due_date < date('now') AND due_amount > paid_amount
+          ${branchClause}
+        `).get(...branchParams) as { cnt: number }
 
-      if (overdueCount.cnt > 0) {
-        const recent = db.prepare(`
-          SELECT id FROM notifications WHERE type='installment_overdue'
-          AND created_at > datetime('now', '-6 hours') LIMIT 1
-        `).get()
-        if (!recent) {
-          createNotification('installment_overdue', 'Overdue Installments',
-            `${overdueCount.cnt} installment${overdueCount.cnt > 1 ? 's are' : ' is'} overdue and require attention.`,
-            { count: overdueCount.cnt }
-          )
+        if (overdueCount.cnt > 0) {
+          const recent = db.prepare(`
+            SELECT id FROM notifications WHERE type='installment_overdue'
+            AND target_branch_id IS ?
+            AND created_at > datetime('now', '-6 hours') LIMIT 1
+          `).get(branchId || null)
+          if (!recent) {
+            createNotification('installment_overdue', 'Overdue Installments',
+              `${overdueCount.cnt} installment${overdueCount.cnt > 1 ? 's are' : ' is'} overdue and require attention.`,
+              { count: overdueCount.cnt, branchId: branchId || null },
+              { branchId: branchId || null, requiredPermission: 'customers' }
+            )
+          }
+        }
+
+        const dueTodayCount = db.prepare(`
+          SELECT COUNT(*) as cnt FROM installments
+          WHERE status = 'active' AND next_due_date = date('now') AND due_amount > paid_amount
+          ${branchClause}
+        `).get(...branchParams) as { cnt: number }
+
+        if (dueTodayCount.cnt > 0) {
+          const recent = db.prepare(`
+            SELECT id FROM notifications WHERE type='installment_due'
+            AND target_branch_id IS ?
+            AND created_at > datetime('now', '-6 hours') LIMIT 1
+          `).get(branchId || null)
+          if (!recent) {
+            createNotification('installment_due', 'Installments Due Today',
+              `${dueTodayCount.cnt} installment payment${dueTodayCount.cnt > 1 ? 's are' : ' is'} due today.`,
+              { count: dueTodayCount.cnt, branchId: branchId || null },
+              { branchId: branchId || null, requiredPermission: 'customers' }
+            )
+          }
         }
       }
 
-      // Due today
-      const dueTodayCount = db.prepare(`
-        SELECT COUNT(*) as cnt FROM installments
-        WHERE status = 'active' AND next_due_date = date('now') AND due_amount > paid_amount
-      `).get() as { cnt: number }
-
-      if (dueTodayCount.cnt > 0) {
-        const recent = db.prepare(`
-          SELECT id FROM notifications WHERE type='installment_due'
-          AND created_at > datetime('now', '-6 hours') LIMIT 1
-        `).get()
-        if (!recent) {
-          createNotification('installment_due', 'Installments Due Today',
-            `${dueTodayCount.cnt} installment payment${dueTodayCount.cnt > 1 ? 's are' : ' is'} due today.`,
-            { count: dueTodayCount.cnt }
-          )
-        }
+      if (canInventory) {
+        try {
+          const batchBranchClause = branchId ? 'AND branch_id = ?' : ''
+          const batchParams = branchId ? [branchId] : []
+          const expiringBatches = db.prepare(`
+            SELECT COUNT(*) as cnt FROM product_batches
+            WHERE expiry_date IS NOT NULL AND quantity > 0
+              AND expiry_date <= date('now', '+30 days') AND expiry_date >= date('now')
+              ${batchBranchClause}
+          `).get(...batchParams) as { cnt: number }
+          if (expiringBatches.cnt > 0) {
+            const recent = db.prepare(`SELECT id FROM notifications WHERE title='Batches Expiring Soon' AND target_branch_id IS ? AND created_at > datetime('now', '-6 hours') LIMIT 1`).get(branchId || null)
+            if (!recent) createNotification('low_stock', 'Batches Expiring Soon', `${expiringBatches.cnt} batch${expiringBatches.cnt > 1 ? 'es' : ''} will expire within 30 days. Review your inventory.`, { count: expiringBatches.cnt, branchId: branchId || null }, { branchId: branchId || null, requiredPermission: 'inventory' })
+          }
+          const expiredBatches = db.prepare(`SELECT COUNT(*) as cnt FROM product_batches WHERE expiry_date IS NOT NULL AND quantity > 0 AND expiry_date < date('now') ${batchBranchClause}`).get(...batchParams) as { cnt: number }
+          if (expiredBatches.cnt > 0) {
+            const recent = db.prepare(`SELECT id FROM notifications WHERE title='Expired Stock Alert' AND target_branch_id IS ? AND created_at > datetime('now', '-6 hours') LIMIT 1`).get(branchId || null)
+            if (!recent) createNotification('low_stock', 'Expired Stock Alert', `${expiredBatches.cnt} batch${expiredBatches.cnt > 1 ? 'es' : ''} have expired but still have stock. Remove from sale immediately.`, { count: expiredBatches.cnt, branchId: branchId || null }, { branchId: branchId || null, requiredPermission: 'inventory' })
+          }
+        } catch { /* product_batches table may not exist on first run */ }
       }
-
-      // Expiring batches (within 30 days)
-      try {
-        const expiringBatches = db.prepare(`
-          SELECT COUNT(*) as cnt FROM product_batches
-          WHERE expiry_date IS NOT NULL AND quantity > 0
-            AND expiry_date <= date('now', '+30 days') AND expiry_date >= date('now')
-        `).get() as { cnt: number }
-        if (expiringBatches.cnt > 0) {
-          const recent = db.prepare(`SELECT id FROM notifications WHERE title='Batches Expiring Soon' AND created_at > datetime('now', '-6 hours') LIMIT 1`).get()
-          if (!recent) createNotification('low_stock', 'Batches Expiring Soon', `${expiringBatches.cnt} batch${expiringBatches.cnt > 1 ? 'es' : ''} will expire within 30 days. Review your inventory.`, { count: expiringBatches.cnt })
-        }
-        const expiredBatches = db.prepare(`SELECT COUNT(*) as cnt FROM product_batches WHERE expiry_date IS NOT NULL AND quantity > 0 AND expiry_date < date('now')`).get() as { cnt: number }
-        if (expiredBatches.cnt > 0) {
-          const recent = db.prepare(`SELECT id FROM notifications WHERE title='Expired Stock Alert' AND created_at > datetime('now', '-6 hours') LIMIT 1`).get()
-          if (!recent) createNotification('low_stock', 'Expired Stock Alert', `${expiredBatches.cnt} batch${expiredBatches.cnt > 1 ? 'es' : ''} have expired but still have stock. Remove from sale immediately.`, { count: expiredBatches.cnt })
-        }
-      } catch { /* product_batches table may not exist on first run */ }
 
       // Inter-branch transfer notifications. These are generated from synced
       // stock_transfers so every branch sees the correct request/status after
       // background sync pulls the row down.
-      const user = store.get('auth_user') as Record<string, unknown> | undefined
-      const branchId = String(user?.branch_id || (user?.branch as Record<string, unknown> | undefined)?.id || '')
-      if (branchId) {
+      if (canInventory && branchId) {
         const incoming = db.prepare(`
           SELECT st.id, st.transfer_number, st.quantity, st.status,
                  p.name AS product_name, fb.name AS from_branch_name, tb.name AS to_branch_name

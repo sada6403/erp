@@ -105,6 +105,7 @@ beforeAll(async () => {
   const { registerInvoiceHandlers } = await import('../ipc/invoices')
   const { registerReturnHandlers } = await import('../ipc/returns')
   const { registerBranchTransferHandlers } = await import('../ipc/branchTransfers')
+  const { registerNotificationHandlers } = await import('../ipc/notifications')
   registerBatchHandlers()
   registerProductHandlers(fakeIpcMain)
   registerPurchaseHandlers(fakeIpcMain)
@@ -119,6 +120,7 @@ beforeAll(async () => {
   registerInvoiceHandlers(fakeIpcMain)
   registerReturnHandlers()
   registerBranchTransferHandlers(fakeIpcMain)
+  registerNotificationHandlers()
 })
 
 function seedBranch(id: string, name: string, code: string) {
@@ -746,6 +748,117 @@ describe('Security audit regression — SmartBuy Commission Rules / Scheme Maste
       scheme_name: 'Sec4 Admin Scheme', monthly_contribution_amount: 1000, duration_months: 5, minimum_members: 3, product_value: 5000,
     })
     expect(res.success).toBe(true)
+  })
+})
+
+describe('Notification audience isolation', () => {
+  const BR_A = 'notif-branch-a', BR_B = 'notif-branch-b'
+  const smartBuyUser = {
+    id: 'notif-smartbuy', branch_id: BR_A,
+    role: { permissions: { chits: true } }, permissions: { chits: true },
+    scope: { level: 'smartBuy', branchId: BR_A },
+  }
+  const inventoryA = {
+    id: 'notif-inventory-a', branch_id: BR_A,
+    role: { permissions: { inventory: true } }, permissions: { inventory: true },
+    scope: { level: 'branch', branchId: BR_A },
+  }
+  const customerA = {
+    id: 'notif-customer-a', branch_id: BR_A,
+    role: { permissions: { customers: true } }, permissions: { customers: true },
+    scope: { level: 'branch', branchId: BR_A },
+  }
+  const owner = {
+    id: 'notif-owner', branch_id: null,
+    role: { permissions: { all: true } }, permissions: { all: true },
+    scope: { level: 'owner', branchId: null },
+  }
+
+  beforeAll(() => {
+    seedBranch(BR_A, 'Notification Branch A', 'NBA')
+    seedBranch(BR_B, 'Notification Branch B', 'NBB')
+    db.prepare(`INSERT OR REPLACE INTO notifications
+      (id,type,title,message,is_read,user_id,role_scope,target_branch_id,required_permission)
+      VALUES (?,?,?,?,0,NULL,NULL,?,?)`).run('notif-stock-a', 'low_stock', 'A stock', 'A', BR_A, 'inventory')
+    db.prepare(`INSERT OR REPLACE INTO notifications
+      (id,type,title,message,is_read,user_id,role_scope,target_branch_id,required_permission)
+      VALUES (?,?,?,?,0,NULL,NULL,?,?)`).run('notif-stock-b', 'transfer_request', 'B transfer', 'B', BR_B, 'inventory')
+    db.prepare(`INSERT OR REPLACE INTO notifications
+      (id,type,title,message,is_read,user_id,role_scope,target_branch_id,required_permission)
+      VALUES (?,?,?,?,0,NULL,NULL,NULL,NULL)`).run('notif-stock-legacy', 'low_stock', 'Legacy stock broadcast', 'legacy')
+    db.prepare(`INSERT OR REPLACE INTO notifications
+      (id,type,title,message,is_read,user_id,role_scope,target_branch_id,required_permission)
+      VALUES (?,?,?,?,0,NULL,'smartBuy',?,'chits')`).run('notif-smartbuy-a', 'scheme_created', 'A SmartBuy', 'A', BR_A)
+    db.prepare(`INSERT OR REPLACE INTO notifications
+      (id,type,title,message,is_read,user_id,role_scope,target_branch_id,required_permission)
+      VALUES (?,?,?,?,0,NULL,NULL,?,'customers')`).run('notif-installment-a', 'installment_due', 'A installment', 'A', BR_A)
+  })
+
+  it('hides branch stock alerts from a Smart Buy Manager and keeps Smart Buy alerts visible', async () => {
+    setSession(smartBuyUser)
+    const rows = await call('notifications:getAll') as Array<{ id: string; is_read: number }>
+    const ids = new Set(rows.map(row => row.id))
+    expect(ids.has('notif-stock-a')).toBe(false)
+    expect(ids.has('notif-stock-b')).toBe(false)
+    expect(ids.has('notif-stock-legacy')).toBe(false)
+    expect(ids.has('notif-smartbuy-a')).toBe(true)
+    expect(await call('notifications:getUnreadCount')).toBe(rows.filter(row => !row.is_read).length)
+  })
+
+  it('shows inventory alerts only for the inventory user own branch', async () => {
+    setSession(inventoryA)
+    const rows = await call('notifications:getAll') as Array<{ id: string }>
+    const ids = new Set(rows.map(row => row.id))
+    expect(ids.has('notif-stock-a')).toBe(true)
+    expect(ids.has('notif-stock-b')).toBe(false)
+    expect(ids.has('notif-stock-legacy')).toBe(false)
+    expect(ids.has('notif-smartbuy-a')).toBe(false)
+    expect(ids.has('notif-installment-a')).toBe(false)
+  })
+
+  it('shows customer-management alerts only to the matching branch and permission', async () => {
+    setSession(customerA)
+    const rows = await call('notifications:getAll') as Array<{ id: string }>
+    const ids = new Set(rows.map(row => row.id))
+    expect(ids.has('notif-installment-a')).toBe(true)
+    expect(ids.has('notif-stock-a')).toBe(false)
+    expect(ids.has('notif-smartbuy-a')).toBe(false)
+  })
+
+  it('refresh uses branch-scoped stocks and skips inventory work for Smart Buy accounts', async () => {
+    const productId = 'notif-low-stock-product'
+    seedProduct(productId, 1000)
+    db.prepare('UPDATE products SET min_stock_level=5 WHERE id=?').run(productId)
+    db.prepare(`INSERT OR REPLACE INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)`)
+      .run('notif-low-stock-a', productId, BR_A, 1)
+    db.prepare(`INSERT OR REPLACE INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)`)
+      .run('notif-low-stock-b', productId, BR_B, 50)
+    db.prepare("DELETE FROM notifications WHERE type='low_stock' AND title='Low Stock Alert'").run()
+
+    setSession(smartBuyUser)
+    await call('notifications:refresh')
+    expect(db.prepare("SELECT COUNT(*) AS cnt FROM notifications WHERE type='low_stock' AND title='Low Stock Alert'").get()).toMatchObject({ cnt: 0 })
+
+    setSession(inventoryA)
+    await call('notifications:refresh')
+    const alerts = db.prepare("SELECT target_branch_id,required_permission FROM notifications WHERE type='low_stock' AND title='Low Stock Alert'").all()
+    expect(alerts).toEqual([{ target_branch_id: BR_A, required_permission: 'inventory' }])
+  })
+
+  it('prevents another position from marking or deleting a hidden notification', async () => {
+    setSession(smartBuyUser)
+    await call('notifications:markRead', 'notif-stock-a')
+    await call('notifications:delete', 'notif-stock-a')
+    const row = db.prepare('SELECT is_read FROM notifications WHERE id=?').get('notif-stock-a') as { is_read: number }
+    expect(row.is_read).toBe(0)
+  })
+
+  it('keeps Company Admin visibility across branches', async () => {
+    setSession(owner)
+    const rows = await call('notifications:getAll') as Array<{ id: string }>
+    const ids = new Set(rows.map(row => row.id))
+    expect(ids.has('notif-stock-a')).toBe(true)
+    expect(ids.has('notif-stock-b')).toBe(true)
   })
 })
 

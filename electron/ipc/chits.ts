@@ -1189,7 +1189,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     })
     createNotification('chit_collaboration_invite', 'Branch Collaboration Invite',
       `${targetBranch.name} invited to collaborate on "${scheme.name}"`,
-      { schemeId, targetBranchId })
+      { schemeId, targetBranchId },
+      { roleScope: 'smartBuy', branchId: targetBranchId, requiredPermission: 'chits' })
     return { success: true, data: { id } }
   })
 

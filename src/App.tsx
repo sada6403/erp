@@ -114,6 +114,15 @@ function RequireSmartBuyAccess({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function RequirePermission({ permission, children }: { permission: string; children: React.ReactNode }) {
+  const { user, isLoading } = useAuthStore()
+  if (isLoading) return <LoadingScreen />
+  if (!user) return <Navigate to="/login" replace />
+  const permissions = (user.role?.permissions || user.permissions || {}) as Record<string, unknown>
+  if (!permissions.all && !permissions[permission]) return <Navigate to={getLandingRoute(user)} replace />
+  return <>{children}</>
+}
+
 function RequireMainBranch({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuthStore()
   if (isLoading) return <LoadingScreen />
@@ -263,10 +272,10 @@ export default function App() {
         <Route path="/admin" element={<AdminDashboard />} />
         <Route path="/admin/products" element={<ProductsPage />} />
         <Route path="/admin/customers" element={<CustomersPage />} />
-        <Route path="/admin/stock-intelligence" element={<StockIntelligencePage />} />
-        <Route path="/admin/stock-count" element={<StockCountPage />} />
-        <Route path="/admin/batches" element={<BatchesPage />} />
-        <Route path="/admin/stock-lookup" element={<StockLookupPage />} />
+        <Route path="/admin/stock-intelligence" element={<RequirePermission permission="inventory"><StockIntelligencePage /></RequirePermission>} />
+        <Route path="/admin/stock-count" element={<RequirePermission permission="inventory"><StockCountPage /></RequirePermission>} />
+        <Route path="/admin/batches" element={<RequirePermission permission="inventory"><BatchesPage /></RequirePermission>} />
+        <Route path="/admin/stock-lookup" element={<RequirePermission permission="inventory"><StockLookupPage /></RequirePermission>} />
         <Route path="/admin/bills" element={<BillsPage />} />
         <Route path="/admin/orders" element={<OrdersPage />} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
@@ -286,7 +295,7 @@ export default function App() {
         <Route path="/admin/suppliers" element={<RequireMainBranch><SuppliersPage /></RequireMainBranch>} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
         <Route path="/admin/deliveries" element={<RequireModule module="deliveries"><DeliveriesPage /></RequireModule>} />
-        <Route path="/admin/installments" element={<RequireModule module="installments"><InstallmentsPage /></RequireModule>} />
+        <Route path="/admin/installments" element={<RequirePermission permission="customers"><RequireModule module="installments"><InstallmentsPage /></RequireModule></RequirePermission>} />
         <Route path="/admin/chits" element={<RequireSmartBuyAccess><ChitSchemesPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/chits/:id" element={<RequireSmartBuyAccess><ChitSchemeDetailPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/chit-customers" element={<RequireSmartBuyAccess><ChitCustomersPage /></RequireSmartBuyAccess>} />
@@ -305,7 +314,7 @@ export default function App() {
             all, which SchemeMasterPage now gates client-side. */}
         <Route path="/admin/scheme-master" element={<RequireSmartBuyAccess><SchemeMasterPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
-        <Route path="/admin/edit-requests" element={<EditRequestsPage />} />
+        <Route path="/admin/edit-requests" element={<RequireSuperAdmin><EditRequestsPage /></RequireSuperAdmin>} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />
         <Route path="/admin/sync" element={<SyncMonitorPage />} />
         <Route path="/admin/settings" element={<RequireSuperAdmin><SettingsPage /></RequireSuperAdmin>} />
@@ -313,12 +322,12 @@ export default function App() {
         <Route path="/admin/roles" element={<RolesPage />} />
         <Route path="/admin/returns" element={<ReturnsPage />} />
         <Route path="/admin/cash-register" element={<CashRegisterPage />} />
-        <Route path="/admin/stock-requests" element={<StockRequestsPage />} />
-        <Route path="/admin/stock-transfers" element={<RequireModule module="stock_transfers"><StockTransfersPage /></RequireModule>} />
-        <Route path="/admin/track-transfer" element={<RequireModule module="stock_transfers"><TrackTransferPage /></RequireModule>} />
-        <Route path="/admin/branch-transfers" element={<RequireModule module="stock_transfers"><BranchTransfersPage /></RequireModule>} />
-        <Route path="/admin/branch-transfers/new" element={<RequireModule module="stock_transfers"><BranchTransferForm /></RequireModule>} />
-        <Route path="/admin/branch-transfers/:id" element={<RequireModule module="stock_transfers"><BranchTransferView /></RequireModule>} />
+        <Route path="/admin/stock-requests" element={<RequirePermission permission="inventory"><StockRequestsPage /></RequirePermission>} />
+        <Route path="/admin/stock-transfers" element={<RequirePermission permission="inventory"><RequireModule module="stock_transfers"><StockTransfersPage /></RequireModule></RequirePermission>} />
+        <Route path="/admin/track-transfer" element={<RequirePermission permission="inventory"><RequireModule module="stock_transfers"><TrackTransferPage /></RequireModule></RequirePermission>} />
+        <Route path="/admin/branch-transfers" element={<RequirePermission permission="inventory"><RequireModule module="stock_transfers"><BranchTransfersPage /></RequireModule></RequirePermission>} />
+        <Route path="/admin/branch-transfers/new" element={<RequirePermission permission="inventory"><RequireModule module="stock_transfers"><BranchTransferForm /></RequireModule></RequirePermission>} />
+        <Route path="/admin/branch-transfers/:id" element={<RequirePermission permission="inventory"><RequireModule module="stock_transfers"><BranchTransferView /></RequireModule></RequirePermission>} />
         <Route path="/admin/backup"         element={<RequireSuperAdmin><BackupPage /></RequireSuperAdmin>} />
         <Route path="/admin/security"       element={<SecurityPage />} />
         <Route path="/admin/system-health"  element={<RequireSuperAdmin><SystemHealthPage /></RequireSuperAdmin>} />

@@ -105,7 +105,8 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
         'info',
         'Edit request submitted',
         `${String(user.name || 'A user')} requested to edit a ${targetLabel}.`,
-        { event: 'edit_request_submitted', edit_request_id: id, target_table: payload.target_table }
+        { event: 'edit_request_submitted', edit_request_id: id, target_table: payload.target_table },
+        { roleScope: 'owner', requiredPermission: 'all' }
       )
 
       return { success: true, data: { id } }
@@ -179,7 +180,8 @@ export function registerEditRequestHandlers(ipcMain: IpcMain) {
         action === 'approve'
           ? `Your edit request is approved — you have ${APPROVAL_WINDOW_HOURS}h to make the change.`
           : `Your edit request was rejected.${notes ? ` Reason: ${notes}` : ''}`,
-        { event: 'edit_request_reviewed', edit_request_id: id, status: updated.status }
+        { event: 'edit_request_reviewed', edit_request_id: id, status: updated.status },
+        { userId: String(request.requested_by || '') || null }
       )
 
       return { success: true }

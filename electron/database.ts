@@ -1827,11 +1827,13 @@ function runMigrations(): void {
   // low-stock alerts, chit payment/closing reminders, etc. are untouched.
   if (!hasColumn('notifications', 'user_id')) {
     db.exec(`ALTER TABLE notifications ADD COLUMN user_id TEXT REFERENCES users(id)`)
-    db.exec(`ALTER TABLE notifications ADD COLUMN role_scope TEXT`)
-    db.exec(`ALTER TABLE notifications ADD COLUMN target_branch_id TEXT REFERENCES branches(id)`)
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)`)
-    db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_role_branch ON notifications(role_scope, target_branch_id)`)
   }
+  if (!hasColumn('notifications', 'role_scope')) db.exec(`ALTER TABLE notifications ADD COLUMN role_scope TEXT`)
+  if (!hasColumn('notifications', 'target_branch_id')) db.exec(`ALTER TABLE notifications ADD COLUMN target_branch_id TEXT REFERENCES branches(id)`)
+  if (!hasColumn('notifications', 'required_permission')) db.exec(`ALTER TABLE notifications ADD COLUMN required_permission TEXT`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id)`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_role_branch ON notifications(role_scope, target_branch_id)`)
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_notifications_permission ON notifications(required_permission)`)
 
   // ── Loyalty Points ─────────────────────────────────────────────────────────
   db.exec(`

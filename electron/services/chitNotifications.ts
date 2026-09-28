@@ -103,10 +103,15 @@ export async function notifyWinnerSelected(
 // (which only cover POST-redemption repayment) — there is no per-member
 // due-date column for pre-redemption contributions, so "due this month, not
 // yet paid" is used as the practical due/late signal.
-export async function runChitPaymentDueSweep(db: Database.Database): Promise<{ dueCount: number; schemeCount: number }> {
+export async function runChitPaymentDueSweep(db: Database.Database): Promise<{
+  dueCount: number
+  schemeCount: number
+  branches: Array<{ branchId: string | null; dueCount: number; schemeCount: number }>
+}> {
   const enabled = channelsEnabled()
   const dueMembers = db.prepare(`
-    SELECT m.id, m.customer_id, m.contributions_paid, cs.name as scheme_name, cs.scheme_number, cs.contribution_amount
+    SELECT m.id, m.customer_id, m.contributions_paid, cs.name as scheme_name,
+           cs.scheme_number, cs.contribution_amount, cs.branch_id
     FROM chit_members m
     JOIN chit_schemes cs ON cs.id = m.scheme_id
     WHERE m.status = 'active' AND cs.status = 'active' AND cs.frequency = 'monthly'
@@ -135,26 +140,44 @@ export async function runChitPaymentDueSweep(db: Database.Database): Promise<{ d
   }
 
   const schemeIds = new Set(dueMembers.map(m => m.scheme_number))
-  return { dueCount: dueMembers.length, schemeCount: schemeIds.size }
+  const byBranch = new Map<string | null, { members: number; schemes: Set<unknown> }>()
+  for (const member of dueMembers) {
+    const branchId = member.branch_id ? String(member.branch_id) : null
+    const current = byBranch.get(branchId) || { members: 0, schemes: new Set<unknown>() }
+    current.members += 1
+    current.schemes.add(member.scheme_number)
+    byBranch.set(branchId, current)
+  }
+  const branches = Array.from(byBranch, ([branchId, stats]) => ({
+    branchId,
+    dueCount: stats.members,
+    schemeCount: stats.schemes.size,
+  }))
+  return { dueCount: dueMembers.length, schemeCount: schemeIds.size, branches }
 }
 
 // Scheme Closing — remaining active members of a scheme entering its final
 // cycle (all of them settle together next draw) get a heads-up.
-export async function runChitSchemeClosingSweep(db: Database.Database): Promise<Array<{ schemeId: string; schemeName: string; remaining: number }>> {
+export async function runChitSchemeClosingSweep(db: Database.Database): Promise<Array<{ schemeId: string; schemeName: string; remaining: number; branchId: string | null }>> {
   const enabled = channelsEnabled()
   const closingSchemes = db.prepare(`
-    SELECT cs.id, cs.name, cs.scheme_number, cs.cycle_count,
+    SELECT cs.id, cs.name, cs.scheme_number, cs.cycle_count, cs.branch_id,
       (SELECT COUNT(*) FROM chit_draws d WHERE d.scheme_id = cs.id) as cycles_done,
       (SELECT COUNT(*) FROM chit_members m WHERE m.scheme_id = cs.id AND m.status = 'active') as remaining
     FROM chit_schemes cs
     WHERE cs.status = 'active'
   `).all() as Record<string, unknown>[]
 
-  const results: Array<{ schemeId: string; schemeName: string; remaining: number }> = []
+  const results: Array<{ schemeId: string; schemeName: string; remaining: number; branchId: string | null }> = []
   for (const s of closingSchemes) {
     const nextCycle = Number(s.cycles_done || 0) + 1
     if (nextCycle < Number(s.cycle_count) || Number(s.remaining) === 0) continue
-    results.push({ schemeId: String(s.id), schemeName: String(s.name), remaining: Number(s.remaining) })
+    results.push({
+      schemeId: String(s.id),
+      schemeName: String(s.name),
+      remaining: Number(s.remaining),
+      branchId: s.branch_id ? String(s.branch_id) : null,
+    })
 
     if (enabled.email || enabled.sms || enabled.whatsapp) {
       const members = db.prepare(`

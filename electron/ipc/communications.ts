@@ -161,7 +161,7 @@ export function startReminderScheduler() {
       const lowStockSmsAllowed      = notificationAllowed(settings, 'low_stock', 'sms')
 
       const pick = (cond: string) => db.prepare(`
-        SELECT i.id, i.next_due_date, i.due_amount, i.paid_amount,
+        SELECT i.id, i.branch_id, i.next_due_date, i.due_amount, i.paid_amount,
                c.name as customer_name, c.phone, c.email
         FROM installments i
         JOIN customers c ON c.id = i.customer_id
@@ -176,19 +176,39 @@ export function startReminderScheduler() {
       // In-app notification for admins & managers — always, even without email/SMS.
       // Deduped to at most once per calendar day.
       const today = new Date().toISOString().slice(0, 10)
-      const notedToday = (type: string) => Boolean(db.prepare(
-        `SELECT 1 FROM notifications WHERE type=? AND date(created_at)=? LIMIT 1`
-      ).get(type, today))
-      if (overdue.length && !notedToday('installment_overdue')) {
-        createNotification('installment_overdue', 'Overdue Installments',
-          `${overdue.length} installment${overdue.length > 1 ? 's are' : ' is'} overdue and need follow-up.`,
-          { count: overdue.length })
+      const notedToday = (type: string, branchId: string | null) => Boolean(db.prepare(
+        `SELECT 1 FROM notifications WHERE type=? AND target_branch_id IS ? AND date(created_at)=? LIMIT 1`
+      ).get(type, branchId, today))
+      const targetFor = (branchId: string | null, permission: string) => branchId
+        ? { branchId, requiredPermission: permission }
+        : { roleScope: 'owner', requiredPermission: permission }
+      const branchGroups = (rows: Record<string, unknown>[]) => {
+        const grouped = new Map<string | null, Record<string, unknown>[]>()
+        for (const row of rows) {
+          const branchId = row.branch_id ? String(row.branch_id) : null
+          grouped.set(branchId, [...(grouped.get(branchId) || []), row])
+        }
+        return grouped
       }
-      const upcoming = dueToday.length + due1Day.length + dueSoon.length
-      if (upcoming && !notedToday('installment_due')) {
+
+      for (const [branchId, rows] of branchGroups(overdue)) {
+        if (notedToday('installment_overdue', branchId)) continue
+        createNotification('installment_overdue', 'Overdue Installments',
+          `${rows.length} installment${rows.length > 1 ? 's are' : ' is'} overdue and need follow-up.`,
+          { count: rows.length, branchId }, targetFor(branchId, 'customers'))
+      }
+
+      const upcomingByBranch = branchGroups([...dueToday, ...due1Day, ...dueSoon])
+      for (const [branchId, rows] of upcomingByBranch) {
+        if (notedToday('installment_due', branchId)) continue
+        const sameBranch = (items: Record<string, unknown>[]) => items.filter(item => (item.branch_id ? String(item.branch_id) : null) === branchId).length
+        const todayCount = sameBranch(dueToday)
+        const tomorrowCount = sameBranch(due1Day)
+        const soonCount = sameBranch(dueSoon)
         createNotification('installment_due', 'Installment Payments Due',
-          `${dueToday.length} due today, ${due1Day.length} due tomorrow, ${dueSoon.length} due in 3 days.`,
-          { today: dueToday.length, in1: due1Day.length, in3: dueSoon.length })
+          `${todayCount} due today, ${tomorrowCount} due tomorrow, ${soonCount} due in 3 days.`,
+          { count: rows.length, today: todayCount, in1: tomorrowCount, in3: soonCount, branchId },
+          targetFor(branchId, 'customers'))
       }
 
       // Smart Buy: pre-redemption contribution due reminders + final-cycle
@@ -197,18 +217,25 @@ export function startReminderScheduler() {
       // in-app summary (own channels checked internally, so this must run
       // even when only WhatsApp — not email/SMS — is enabled).
       try {
-        const { dueCount, schemeCount } = await runChitPaymentDueSweep(db)
-        if (dueCount && !notedToday('chit_payment_due')) {
+        const { branches } = await runChitPaymentDueSweep(db)
+        for (const branch of branches) {
+          if (!branch.dueCount || notedToday('chit_payment_due', branch.branchId)) continue
           createNotification('chit_payment_due', 'Smart Buy Payments Due',
-            `${dueCount} member(s) across ${schemeCount} scheme(s) haven't paid this month's Smart Buy installment yet.`,
-            { dueCount, schemeCount })
+            `${branch.dueCount} member(s) across ${branch.schemeCount} scheme(s) haven't paid this month's Smart Buy installment yet.`,
+            { dueCount: branch.dueCount, schemeCount: branch.schemeCount, branchId: branch.branchId },
+            targetFor(branch.branchId, 'chits'))
         }
         const closingSchemes = await runChitSchemeClosingSweep(db)
-        if (closingSchemes.length && !notedToday('chit_scheme_closing')) {
-          const names = closingSchemes.map(s => s.schemeName).join(', ')
+        const closingByBranch = new Map<string | null, typeof closingSchemes>()
+        for (const scheme of closingSchemes) {
+          closingByBranch.set(scheme.branchId, [...(closingByBranch.get(scheme.branchId) || []), scheme])
+        }
+        for (const [branchId, schemes] of closingByBranch) {
+          if (notedToday('chit_scheme_closing', branchId)) continue
+          const names = schemes.map(s => s.schemeName).join(', ')
           createNotification('chit_scheme_closing', 'Smart Buy Scheme(s) Closing',
-            `${closingSchemes.length} scheme(s) entering their final cycle: ${names}.`,
-            { schemes: closingSchemes })
+            `${schemes.length} scheme(s) entering their final cycle: ${names}.`,
+            { schemes, branchId }, targetFor(branchId, 'chits'))
         }
       } catch { /* Smart Buy sweep must never break the rest of the scheduler */ }
 
@@ -230,7 +257,7 @@ export function startReminderScheduler() {
                   AND strftime('%Y-%m', cc.paid_at) = strftime('%Y-%m', 'now')
               )
           `).all() as { id: string; name: string }[]
-          if (quietBranches.length && !notedToday('branch_performance_alert')) {
+          if (quietBranches.length && !notedToday('branch_performance_alert', null)) {
             const names = quietBranches.map(b => b.name).join(', ')
             createNotification('branch_performance_alert', 'Branch Performance Alert',
               `${quietBranches.length} branch(es) have zero SmartBuy collections this month: ${names}.`,

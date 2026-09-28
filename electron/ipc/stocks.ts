@@ -457,7 +457,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         'Stock request submitted',
         `${Number(payload.quantity)} x ${product?.name || 'product'} requested from ${fromBranch?.name || 'source branch'}.`,
         { event: 'request_submitted', transfer_id: id, transfer_number: transferNumber, from_branch_id: payload.from_branch_id, to_branch_id: payload.to_branch_id },
-        { branchId: String(payload.to_branch_id) },
+        { branchId: String(payload.to_branch_id), requiredPermission: 'inventory' },
       )
       await enqueuSync('stock_transfers', id, 'INSERT', record)
       return { success: true, data: { id, transfer_number: transferNumber } }
@@ -979,6 +979,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           branchId: ['received', 'partially_received', 'discrepancy'].includes(status)
             ? String(transfer.from_branch_id)
             : String(transfer.to_branch_id),
+          requiredPermission: 'inventory',
         },
       )
 
@@ -1088,7 +1089,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         'transfer_request',
         'Transfer mismatch reported',
         `${Number(transfer.quantity)} x ${product?.name || 'product'} has a receiving mismatch and needs admin review.`,
-        { event: 'mismatch_reported', transfer_id: id, transfer_number: transfer.transfer_number, status: 'under_admin_review' }
+        { event: 'mismatch_reported', transfer_id: id, transfer_number: transfer.transfer_number, status: 'under_admin_review' },
+        { roleScope: 'owner', requiredPermission: 'inventory' }
       )
       return { success: true, data: mismatch }
   })

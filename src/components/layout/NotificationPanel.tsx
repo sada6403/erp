@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell, X, Check, CheckCheck, Trash2, Package, CreditCard, RefreshCw, ShieldAlert, Info, ArrowLeftRight, GitBranch, Coins } from 'lucide-react'
+import { useAuthStore } from '@/store/authStore'
 
 interface Notification {
   id: string
@@ -15,25 +16,32 @@ interface Notification {
 // Best-effort destination for a notification click. Not every type has an
 // obvious single page (sync_failed, license/subscription alerts) — those
 // just mark read and close instead of navigating.
-function routeFor(n: Notification): string | null {
+export function routeFor(n: Notification, permissions: Record<string, unknown>): string | null {
   let data: Record<string, unknown> = {}
   try { data = n.data ? JSON.parse(n.data) : {} } catch { /* ignore malformed data */ }
 
   if (n.type === 'low_stock') {
+    if (!permissions.all && !permissions.inventory) return null
     if (n.title === 'Batches Expiring Soon' || n.title === 'Expired Stock Alert') return '/admin/batches'
     return '/admin/stock-intelligence'
   }
-  if (n.type === 'installment_due' || n.type === 'installment_overdue') return '/admin/installments'
+  if (n.type === 'installment_due' || n.type === 'installment_overdue') {
+    return permissions.all || permissions.customers ? '/admin/installments' : null
+  }
   if (n.type === 'transfer_request') {
+    if (!permissions.all && !permissions.inventory) return null
     const event = typeof data.event === 'string' ? data.event : ''
     const transferId = typeof data.transfer_id === 'string' ? data.transfer_id : ''
     if (event.startsWith('multi_') && transferId) return `/admin/branch-transfers/${transferId}`
     return '/admin/stock-requests'
   }
-  if (n.type === 'info' && typeof data.event === 'string' && data.event.startsWith('edit_request_')) return '/admin/edit-requests'
-  if (n.type === 'chit_collaboration_invite') return '/admin/smart-buy'
-  if (n.type === 'chit_payment_due') return '/admin/smart-buy-reports'
+  if (n.type === 'info' && data.event === 'edit_request_submitted') {
+    return permissions.all ? '/admin/edit-requests' : null
+  }
+  if (n.type === 'chit_collaboration_invite') return permissions.all || permissions.chits ? '/admin/smart-buy' : null
+  if (n.type === 'chit_payment_due') return permissions.all || permissions.chits ? '/admin/smart-buy-reports' : null
   if (n.type === 'chit_scheme_closing') {
+    if (!permissions.all && !permissions.chits) return null
     const schemeId = typeof data.schemeId === 'string' ? data.schemeId : ''
     return schemeId ? `/admin/chits/${schemeId}` : '/admin/chits'
   }
@@ -67,6 +75,8 @@ function timeAgo(dt: string) {
 
 export default function NotificationPanel() {
   const navigate = useNavigate()
+  const user = useAuthStore(state => state.user)
+  const permissions = (user?.role?.permissions || user?.permissions || {}) as Record<string, unknown>
   const [open, setOpen]             = useState(false)
   const [items, setItems]           = useState<Notification[]>([])
   const [unread, setUnread]         = useState(0)
@@ -137,7 +147,7 @@ export default function NotificationPanel() {
 
   const openNotification = async (n: Notification) => {
     if (!n.is_read) await markRead(n.id)
-    const to = routeFor(n)
+    const to = routeFor(n, permissions)
     if (to) { navigate(to); setOpen(false) }
   }
 
@@ -200,7 +210,7 @@ export default function NotificationPanel() {
               </div>
             )}
             {items.map(n => {
-              const clickable = Boolean(routeFor(n))
+              const clickable = Boolean(routeFor(n, permissions))
               return (
               <div key={n.id}
                 onClick={clickable ? () => openNotification(n) : undefined}
