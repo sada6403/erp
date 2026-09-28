@@ -244,14 +244,12 @@ Thank you for your partnership!
   if (whatsappUrl && options?.openWhatsApp) {
     try {
       if (typeof shell !== 'undefined' && shell && typeof shell.openExternal === 'function') {
-        try {
-          // Prefer the installed WhatsApp Desktop app on Windows.
-          await shell.openExternal(whatsappAppUrl)
-        } catch {
-          // If the protocol is unavailable, WhatsApp Web preserves the same
-          // phone + pre-filled message compose behavior.
-          await shell.openExternal(whatsappUrl)
-        }
+        // Use WhatsApp's HTTPS compose endpoint as the primary route. Some
+        // WhatsApp Desktop releases report that the whatsapp:// protocol was
+        // opened successfully but silently discard its `text` parameter. The
+        // wa.me route preserves both the exact phone and the pre-filled order
+        // text, then lets the user choose Desktop or Web and press Send.
+        await shell.openExternal(whatsappUrl)
         openedInWhatsApp = true
       }
     } catch (e) {

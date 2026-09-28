@@ -67,11 +67,16 @@ function notificationVisibilityWhere(): { where: string; params: unknown[] } {
   if (scope?.level === 'owner') return { where: '', params: [] }
   const userId = caller.id as string | undefined
   const roleLevel = scope?.level
-  const branchId = scope?.branchId || (caller.branch_id as string | undefined) || null
+  const nestedBranch = caller.branch as { id?: string } | undefined
+  const branchId = scope?.branchId || (caller.branch_id as string | undefined) || nestedBranch?.id || null
 
-  const conditions = ['(user_id IS NULL AND role_scope IS NULL)']
+  const conditions = ['(user_id IS NULL AND role_scope IS NULL AND target_branch_id IS NULL)']
   const params: unknown[] = []
   if (userId) { conditions.push('user_id = ?'); params.push(userId) }
+  if (branchId) {
+    conditions.push('(target_branch_id = ? AND user_id IS NULL AND role_scope IS NULL)')
+    params.push(branchId)
+  }
   if (roleLevel) {
     conditions.push('(role_scope = ? AND (target_branch_id IS NULL OR target_branch_id = ?))')
     params.push(roleLevel, branchId)
@@ -84,7 +89,8 @@ function createUniqueTransferNotification(
   transferId: string,
   title: string,
   message: string,
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  targetBranchId?: string | null,
 ) {
   try {
     const db = getDb()
@@ -95,7 +101,13 @@ function createUniqueTransferNotification(
         AND data LIKE ?
       LIMIT 1
     `).get(`%"transfer_id":"${transferId}"%`, `%"event":"${event}"%`)
-    if (!existing) createNotification('transfer_request', title, message, { ...data, event, transfer_id: transferId })
+    if (!existing) {
+      createNotification(
+        'transfer_request', title, message,
+        { ...data, event, transfer_id: transferId },
+        targetBranchId ? { branchId: targetBranchId } : undefined,
+      )
+    }
   } catch { /* db not ready */ }
 }
 
@@ -254,7 +266,8 @@ export function registerNotificationHandlers() {
             String(tf.id),
             'New stock request',
             `${tf.to_branch_name || 'A branch'} requested ${Number(tf.quantity)} x ${tf.product_name || 'product'}.`,
-            tf
+            tf,
+            branchId,
           )
         }
 
@@ -277,7 +290,8 @@ export function registerNotificationHandlers() {
             String(tf.id),
             `Stock request ${status}`,
             `${tf.from_branch_name || 'Source branch'} marked ${Number(tf.quantity)} x ${tf.product_name || 'product'} as ${status}.`,
-            tf
+            tf,
+            branchId,
           )
         }
 
@@ -300,7 +314,8 @@ export function registerNotificationHandlers() {
             String(tf.id),
             `Transfer ${status}`,
             `${tf.to_branch_name || 'Destination branch'} confirmed ${Number(tf.quantity)} x ${tf.product_name || 'product'} as ${status}.`,
-            tf
+            tf,
+            branchId,
           )
         }
         
@@ -322,7 +337,8 @@ export function registerNotificationHandlers() {
             String(tf.id),
             'New branch transfer request',
             `${tf.to_branch_name || 'A branch'} requested stock from your branch.`,
-            tf
+            tf,
+            branchId,
           )
         }
 
@@ -344,7 +360,8 @@ export function registerNotificationHandlers() {
             String(tf.id),
             `Transfer request ${status}`,
             `${tf.from_branch_name || 'Source branch'} marked transfer ${tf.transfer_number} as ${status}.`,
-            tf
+            tf,
+            branchId,
           )
         }
 
@@ -366,7 +383,8 @@ export function registerNotificationHandlers() {
             String(tf.id),
             `Transfer ${status}`,
             `${tf.to_branch_name || 'Destination branch'} confirmed receipt of transfer ${tf.transfer_number} as ${status}.`,
-            tf
+            tf,
+            branchId,
           )
         }
       }

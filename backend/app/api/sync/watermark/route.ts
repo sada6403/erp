@@ -56,6 +56,8 @@ export async function GET(request: NextRequest) {
          UNION ALL
          SELECT MAX(updated_at) as ts FROM categories
          UNION ALL
+         SELECT MAX(updated_at) as ts FROM stock_transfers
+         UNION ALL
          SELECT MAX(updated_at) as ts FROM branch_transfers
          UNION ALL
          SELECT MAX(updated_at) as ts FROM branch_transfer_items
