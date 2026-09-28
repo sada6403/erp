@@ -105,6 +105,7 @@ beforeAll(async () => {
   const { registerInvoiceHandlers } = await import('../ipc/invoices')
   const { registerReturnHandlers } = await import('../ipc/returns')
   const { registerBranchTransferHandlers } = await import('../ipc/branchTransfers')
+  const { registerNotificationHandlers } = await import('../ipc/notifications')
   registerBatchHandlers()
   registerProductHandlers(fakeIpcMain)
   registerPurchaseHandlers(fakeIpcMain)
@@ -119,6 +120,7 @@ beforeAll(async () => {
   registerInvoiceHandlers(fakeIpcMain)
   registerReturnHandlers()
   registerBranchTransferHandlers(fakeIpcMain)
+  registerNotificationHandlers()
 })
 
 function seedBranch(id: string, name: string, code: string) {
@@ -159,6 +161,7 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
   const admin = makeSession({ id: 'u-sec-admin', permissions: { all: true } })
   const mgrA = makeSession({ id: 'u-sec-mgr-a', branchId: BR_A, permissions: { inventory: true, employees: true, chits: true } })
   const mgrB = makeSession({ id: 'u-sec-mgr-b', branchId: BR_B, permissions: { inventory: true, employees: true, chits: true } })
+  let destinationTransferId = ''
 
   it('branchTransfers:create links stock movements to the multi-item branch transfer table', async () => {
     setSession(admin)
@@ -176,6 +179,7 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     })
 
     expect(res.success).toBe(true)
+    destinationTransferId = res.data.id
     const movement = db.prepare(`
       SELECT reference_transfer_id, reference_branch_transfer_id
       FROM stock_movements
@@ -197,6 +201,14 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     const res = await call('branchTransfers:list')
     expect(res.success, res.error).toBe(true)
     expect(res.data.some((transfer: { to_branch_id: string }) => transfer.to_branch_id === BR_B)).toBe(true)
+  })
+
+  it('notifications:refresh reaches transfer alerts instead of failing on the removed product_inventory table', async () => {
+    setSession(mgrB)
+    const refreshed = await call('notifications:refresh')
+    expect(refreshed.success, refreshed.error).toBe(true)
+    const notifications = await call('notifications:getAll') as Array<{ data: string | null }>
+    expect(notifications.some(notification => notification.data?.includes(destinationTransferId))).toBe(true)
   })
 
   it('admin:suppliers:payDue records an auditable partial payment and blocks overpayment', async () => {

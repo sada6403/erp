@@ -160,15 +160,31 @@ export function registerNotificationHandlers() {
   // Generate notifications based on current app state
   safeHandle(ipcMain, 'notifications:refresh', () => {
       const db = getDb()
+      const user = store.get('auth_user') as Record<string, unknown> | undefined
+      const scope = user?.scope as { branchId?: string | null } | undefined
+      const branchId = String(
+        user?.branch_id
+        || scope?.branchId
+        || (user?.branch as Record<string, unknown> | undefined)?.id
+        || ''
+      )
 
       // Low stock check
+      // `product_inventory` was never part of the SQLite schema. Querying it
+      // threw before execution reached the transfer-notification section,
+      // which made both stock and branch-transfer alerts silently disappear.
       const lowStockItems = db.prepare(`
-        SELECT p.name, pi.quantity, p.min_stock_level
-        FROM product_inventory pi
-        JOIN products p ON p.id = pi.product_id
-        WHERE pi.quantity <= p.min_stock_level AND pi.quantity >= 0
+        SELECT p.name,
+               SUM(COALESCE(s.quantity, 0) - COALESCE(s.damaged_qty, 0)) AS quantity,
+               p.min_stock_level
+        FROM stocks s
+        JOIN products p ON p.id = s.product_id
+        WHERE (? = '' OR s.branch_id = ?)
+          AND COALESCE(p.is_active, 1) = 1
+        GROUP BY p.id, p.name, p.min_stock_level
+        HAVING quantity <= p.min_stock_level AND quantity >= 0
         LIMIT 20
-      `).all() as { name: string; quantity: number; min_stock_level: number }[]
+      `).all(branchId, branchId) as { name: string; quantity: number; min_stock_level: number }[]
 
       if (lowStockItems.length > 0) {
         const names = lowStockItems.slice(0, 3).map(i => i.name).join(', ')
@@ -245,8 +261,6 @@ export function registerNotificationHandlers() {
       // Inter-branch transfer notifications. These are generated from synced
       // stock_transfers so every branch sees the correct request/status after
       // background sync pulls the row down.
-      const user = store.get('auth_user') as Record<string, unknown> | undefined
-      const branchId = String(user?.branch_id || (user?.branch as Record<string, unknown> | undefined)?.id || '')
       if (branchId) {
         const incoming = db.prepare(`
           SELECT st.id, st.transfer_number, st.quantity, st.status,
