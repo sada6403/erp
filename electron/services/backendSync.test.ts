@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { applySyncOperation } from '../../backend/lib/sync'
+import { applySyncOperation, assertRelatedKey } from '../../backend/lib/sync'
 import { ensureSyncSchema } from '../../backend/lib/syncSchema'
 import { ALLOWED_TABLES } from '../../backend/lib/sync'
 import { duplicateStockGroups, identicalStockBalances } from '../../backend/lib/stockIdentity'
@@ -17,6 +17,10 @@ function client(options: { existing?: boolean; stocks?: object[]; movements?: ob
 }
 
 describe('Backend sync write contract', () => {
+  it('allows exact id lookup for dependency repair but rejects arbitrary columns', () => {
+    expect(() => assertRelatedKey('categories', 'id')).not.toThrow()
+    expect(() => assertRelatedKey('categories', 'name')).toThrow('Unsupported related-data key')
+  })
   it('timestamps offline uploads using server SQL time', async () => {
     const db = client()
     await applySyncOperation(db as any, { table: 'products', operation: 'INSERT', recordId: 'p', record: { id: 'p', name: 'Desk', updated_at: '2001-01-01T00:00:00.000Z' } })

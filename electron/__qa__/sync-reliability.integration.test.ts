@@ -105,6 +105,35 @@ describe('Sync recovery and durable outbox', () => {
     expect(db.prepare("SELECT id FROM customers WHERE id='bad-parent'").get()).toBeTruthy()
   })
 
+  it('repairs an exact missing parent without rewinding its whole table cursor', async () => {
+    const categoryId = 'category-exact-repair'
+    const productId = 'product-exact-repair'
+    const cloud = {
+      changes: vi.fn().mockResolvedValue([{
+        id: productId,
+        sku: 'EXACT-REPAIR',
+        name: 'Exact repair product',
+        selling_price: 10,
+        category_id: categoryId,
+        updated_at: date,
+      }]),
+      related: vi.fn().mockResolvedValue([{
+        id: categoryId,
+        name: 'Recovered category',
+        updated_at: '2025-01-01T00:00:00.000Z',
+      }]),
+    }
+
+    state.data.sync_table_cursors_v2 = { categories: '2026-09-27T00:00:00.000Z' }
+    await service.pullTables(cloud, ['products'])
+
+    expect(cloud.related).toHaveBeenCalledTimes(1)
+    expect(cloud.related).toHaveBeenCalledWith('categories', 'id', [categoryId])
+    expect(db.prepare('SELECT name FROM categories WHERE id=?').get(categoryId).name).toBe('Recovered category')
+    expect(db.prepare('SELECT category_id FROM products WHERE id=?').get(productId).category_id).toBe(categoryId)
+    expect(state.data.sync_table_cursors_v2.categories).toBe('2026-09-27T00:00:00.000Z')
+  })
+
   it('protects failed local uploads and does not advance their table checkpoint', async () => {
     db.prepare("INSERT INTO customers(id,name) VALUES ('local-edit','Local')").run()
     await enqueue('customers', 'local-edit', 'UPDATE', { name: 'Local' })

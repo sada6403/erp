@@ -82,6 +82,11 @@ export function assertTable(table: unknown): asserts table is string {
 }
 
 export function assertRelatedKey(table: string, key: unknown): asserts key is string {
+  // Every sync table is keyed by id. The desktop uses this narrowly-scoped
+  // lookup to repair a missing FK parent whose normal timestamp cursor has
+  // already moved past that parent row. Keeping all other keys allowlisted
+  // prevents the endpoint becoming an arbitrary column-query API.
+  if (key === 'id' && ALLOWED_TABLES.has(table)) return
   if (typeof key !== 'string' || !RELATED_KEYS[table]?.has(key)) {
     throw new Error('Unsupported related-data key')
   }

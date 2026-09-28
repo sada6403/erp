@@ -562,6 +562,9 @@ export class SyncService {
     const cursors = (store.get('sync_table_cursors_v2') || {}) as Record<string, string>
     const errors = { ...((store.get('sync_pull_errors') || {}) as Record<string, string>) }
     const failures: string[] = []
+    // One exact lookup per missing parent during this pull. This keeps repair
+    // bounded even when many child rows reference the same missing record.
+    const parentRepairCache = new Map<string, Promise<boolean>>()
     let batch: Awaited<ReturnType<CloudApi['batchChanges']>> | undefined
     try {
       batch = await cloud.batchChanges(orderedTables.map(table => ({
@@ -639,8 +642,29 @@ export class SyncService {
                   .run(local.id, Number(row.quantity), Number(row.damaged_qty ?? 0))
               }
             } catch (error) {
+              // A parent can be absent locally even though its cloud row is
+              // older than this device's table cursor (for example after a
+              // partial local cleanup). Fetch only that exact parent and
+              // retry the child instead of rewinding a whole table to epoch.
+              if (/foreign key|has not arrived|missing cloud/i.test(error instanceof Error ? error.message : String(error))) {
+                try {
+                  const repaired = await this.repairMissingParents(cloud, db, table, row, parentRepairCache)
+                  if (repaired) {
+                    this.insertFiltered(db, table, row)
+                    if (table === 'stocks') this.recordStockBaseline(db, row)
+                    continue
+                  }
+                } catch {
+                  // An older backend may not support exact parent lookup yet.
+                  // Preserve the original row error and normal retry behavior
+                  // until the rolling deployment completes.
+                }
+              }
               retry.push(row)
-              if (pass === 1) rowErrors.add(error instanceof Error ? error.message : String(error))
+              if (pass === 1 && rowErrors.size < 3) {
+                const message = error instanceof Error ? error.message : String(error)
+                rowErrors.add(`${String(row.id || 'unknown row')}: ${message}`)
+              }
             }
           }
           remaining = retry
@@ -833,6 +857,72 @@ export class SyncService {
     )
     this.colCache.set(table, cols)
     return cols
+  }
+
+  private quoteLocalIdentifier(value: string): string {
+    return `"${value.replace(/"/g, '""')}"`
+  }
+
+  private recordStockBaseline(
+    db: ReturnType<typeof getDb>,
+    row: Record<string, unknown>
+  ): void {
+    const local = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS ?')
+      .get(row.product_id, row.branch_id, row.warehouse_id ?? null) as { id: string } | undefined
+    if (!local) return
+    db.prepare('INSERT OR REPLACE INTO sync_stock_baselines (record_id,quantity,damaged_qty) VALUES (?,?,?)')
+      .run(local.id, Number(row.quantity), Number(row.damaged_qty ?? 0))
+  }
+
+  private async repairMissingParents(
+    cloud: CloudApi,
+    db: ReturnType<typeof getDb>,
+    table: string,
+    row: Record<string, unknown>,
+    cache: Map<string, Promise<boolean>>,
+    ancestors = new Set<string>()
+  ): Promise<boolean> {
+    if (typeof (cloud as { related?: unknown }).related !== 'function') return false
+
+    const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${this.quoteLocalIdentifier(table)})`).all() as Array<{
+      table: string; from: string; to: string
+    }>
+    let repairedAny = false
+
+    for (const foreignKey of foreignKeys) {
+      // Exact repair is intentionally limited to the standard id references.
+      // Composite/business-key relationships continue through normal pulls.
+      if (foreignKey.to !== 'id') continue
+      const value = row[foreignKey.from]
+      if (value === null || value === undefined || value === '') continue
+
+      const parentId = String(value)
+      const parentTable = foreignKey.table
+      const parentTableSql = this.quoteLocalIdentifier(parentTable)
+      const parentColumnSql = this.quoteLocalIdentifier(foreignKey.to)
+      if (db.prepare(`SELECT 1 FROM ${parentTableSql} WHERE ${parentColumnSql}=? LIMIT 1`).get(parentId)) continue
+
+      const key = `${parentTable}:${parentId}`
+      if (ancestors.has(key)) continue
+      let repair = cache.get(key)
+      if (!repair) {
+        repair = (async () => {
+          const parentRows = await cloud.related(parentTable, 'id', [parentId])
+          const parent = parentRows.find(candidate => String(candidate.id) === parentId)
+          if (!parent) return false
+
+          const nextAncestors = new Set(ancestors)
+          nextAncestors.add(key)
+          await this.repairMissingParents(cloud, db, parentTable, parent, cache, nextAncestors)
+          this.insertFiltered(db, parentTable, parent)
+          return Boolean(db.prepare(`SELECT 1 FROM ${parentTableSql} WHERE ${parentColumnSql}=? LIMIT 1`).get(parentId))
+        })()
+        cache.set(key, repair)
+      }
+      repairedAny = (await repair) || repairedAny
+    }
+
+    return repairedAny
   }
 
   private insertFiltered(
