@@ -36,7 +36,7 @@ function currentPerms(caller: Record<string, unknown> = authUser()): Record<stri
 function currentBranchId(caller: Record<string, unknown> = authUser()): string {
   const scope = caller.scope as { branchId?: string | null } | undefined
   const branch = caller.branch as { id?: string | null } | undefined
-  return String(caller.branch_id || scope?.branchId || branch?.id || '')
+  return String(store.get('device_branch_id') || scope?.branchId || caller.branch_id || branch?.id || '')
 }
 
 // This whole module previously had ZERO access control — any authenticated
@@ -241,7 +241,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
 
       sql += ' ORDER BY bt.created_at DESC LIMIT 200'
-      const rows = db.prepare(sql).all(...params)
+      const deviceBranchId = currentBranchId(caller)
+      const rows = (db.prepare(sql).all(...params) as Record<string, any>[]).map(row => ({
+        ...row,
+        is_incoming_to_device: Boolean(deviceBranchId && String(row.to_branch_id) === deviceBranchId),
+        is_outgoing_from_device: Boolean(deviceBranchId && String(row.from_branch_id) === deviceBranchId),
+      }))
       return { success: true, data: rows }
     }
   })
