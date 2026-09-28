@@ -6,6 +6,7 @@ import fs from 'fs'
 import path from 'path'
 import { enqueuSync } from '../services/syncQueue'
 import { syncStockRow } from '../services/stockSync'
+import { insertStockMovement } from '../services/stockMovement'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { CloudApi } from '../services/cloudApi'
@@ -187,13 +188,13 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const stockJoin = targetBranchId
         ? `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
         : `LEFT JOIN (
-             SELECT product_id, SUM(quantity) AS quantity
+             SELECT product_id, SUM(quantity) AS quantity, SUM(damaged_qty) AS damaged_qty
              FROM stocks GROUP BY product_id
            ) s ON s.product_id = p.id`
 
       let sql = `
         SELECT p.*, c.name as category_name,
-               COALESCE(s.quantity, 0) as stock,
+               MAX(COALESCE(s.quantity, 0) - COALESCE(s.damaged_qty, 0), 0) as stock,
                b.name as branch_name
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
@@ -566,6 +567,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         const importUser = store.get('auth_user') as Record<string, unknown> | undefined
         const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
         const stockBranchId = importUser?.branch_id as string || 'b1111111-1111-4111-8111-111111111111'
+        const canImportStock = canManageAllBranchStock(db, importUser)
         const productHasBrand = hasColumn(db, 'products', 'brand')
         const productHasWeight = hasColumn(db, 'products', 'weight')
         const productHasProductType = hasColumn(db, 'products', 'product_type')
@@ -707,16 +709,38 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             }
 
             const existingStock = db.prepare(`
-              SELECT id FROM stocks
+              SELECT id, quantity, damaged_qty FROM stocks
               WHERE product_id=? AND branch_id=? AND warehouse_id IS NULL
-            `).get(productId, stockBranchId) as { id: string } | undefined
-            if (existingStock) {
-              db.prepare('UPDATE stocks SET quantity=?, updated_at=datetime("now") WHERE id=?').run(stockQty, existingStock.id)
-            } else {
-              db.prepare('INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,?,?)')
-                .run(crypto.randomUUID(), productId, stockBranchId, null, stockQty)
+            `).get(productId, stockBranchId) as { id: string; quantity: number; damaged_qty: number } | undefined
+            if (!canImportStock && stockQty !== Number(existingStock?.quantity || 0)) {
+              throw new Error('Only main-branch inventory managers can import stock quantities')
             }
+            if (existingStock && stockQty < Number(existingStock.damaged_qty || 0)) {
+              throw new Error('Imported stock cannot be lower than the recorded damaged quantity')
+            }
+            let stockMovement: Record<string, unknown> | null = null
+            db.transaction(() => {
+              if (existingStock) {
+                db.prepare('UPDATE stocks SET quantity=?, updated_at=datetime("now") WHERE id=?').run(stockQty, existingStock.id)
+              } else {
+                db.prepare('INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,?,?)')
+                  .run(crypto.randomUUID(), productId, stockBranchId, null, stockQty)
+              }
+              const delta = stockQty - Number(existingStock?.quantity || 0)
+              if (delta !== 0) {
+                stockMovement = insertStockMovement(db, {
+                  product_id: productId,
+                  from_branch_id: delta < 0 ? stockBranchId : null,
+                  to_branch_id: delta > 0 ? stockBranchId : null,
+                  quantity: Math.abs(delta),
+                  movement_type: 'ADJUSTMENT',
+                  notes: 'WooCommerce import stock reconciliation',
+                  created_by: (importUser?.id as string) || null,
+                })
+              }
+            })()
             await syncStockRow(db, productId, stockBranchId)
+            if (stockMovement) await enqueuSync('stock_movements', String((stockMovement as Record<string, unknown>).id), 'INSERT', stockMovement)
 
             imported++
           } catch (rowErr) {
@@ -877,14 +901,36 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           // Set opening stock
           if (stockQty > 0) {
             const user = store.get('auth_user') as Record<string, unknown>
-            const branchId = user?.branch_id as string || 'b1111111-1111-4111-8111-111111111111'
-            const existingStock = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?').get(productId, branchId)
-            if (existingStock) {
-              db.prepare(`UPDATE stocks SET quantity=?, updated_at=datetime('now') WHERE product_id=? AND branch_id=?`).run(stockQty, productId, branchId)
-            } else {
-              db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)`).run(crypto.randomUUID(), productId, branchId, stockQty)
+            if (!canManageAllBranchStock(db, user)) {
+              throw new Error('Only main-branch inventory managers can import stock quantities')
             }
+            const branchId = user?.branch_id as string || 'b1111111-1111-4111-8111-111111111111'
+            const existingStock = db.prepare('SELECT id, quantity, damaged_qty FROM stocks WHERE product_id=? AND branch_id=?').get(productId, branchId) as { id: string; quantity: number; damaged_qty: number } | undefined
+            if (existingStock && stockQty < Number(existingStock.damaged_qty || 0)) {
+              throw new Error('Imported stock cannot be lower than the recorded damaged quantity')
+            }
+            let stockMovement: Record<string, unknown> | null = null
+            db.transaction(() => {
+              if (existingStock) {
+                db.prepare(`UPDATE stocks SET quantity=?, updated_at=datetime('now') WHERE product_id=? AND branch_id=?`).run(stockQty, productId, branchId)
+              } else {
+                db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)`).run(crypto.randomUUID(), productId, branchId, stockQty)
+              }
+              const delta = stockQty - Number(existingStock?.quantity || 0)
+              if (delta !== 0) {
+                stockMovement = insertStockMovement(db, {
+                  product_id: productId,
+                  from_branch_id: delta < 0 ? branchId : null,
+                  to_branch_id: delta > 0 ? branchId : null,
+                  quantity: Math.abs(delta),
+                  movement_type: 'ADJUSTMENT',
+                  notes: 'Product import opening stock reconciliation',
+                  created_by: (user?.id as string) || null,
+                })
+              }
+            })()
             await syncStockRow(db, productId, branchId)
+            if (stockMovement) await enqueuSync('stock_movements', String((stockMovement as Record<string, unknown>).id), 'INSERT', stockMovement)
           }
 
           imported++

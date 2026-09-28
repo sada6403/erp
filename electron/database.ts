@@ -1574,6 +1574,7 @@ function runMigrations(): void {
       reference_branch_transfer_id TEXT REFERENCES branch_transfers(id),
       notes                 TEXT,
       created_by            TEXT REFERENCES users(id),
+      status                TEXT NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED','VOID')),
       created_at            TEXT NOT NULL DEFAULT (datetime('now')),
       synced_at             TEXT
     );
@@ -1610,6 +1611,11 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_stock_count_items_session   ON stock_count_items(session_id);
     CREATE INDEX IF NOT EXISTS idx_stock_count_items_product   ON stock_count_items(product_id);
   `)
+
+  if (!hasColumn('stock_movements', 'status')) {
+    db.exec(`ALTER TABLE stock_movements ADD COLUMN status TEXT NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED','VOID'))`)
+    console.log('[DB] Migration: added stock_movements.status')
+  }
 
   // Installment enhancements
   const instCols: [string, string][] = [

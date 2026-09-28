@@ -5,11 +5,11 @@ import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import Store from 'electron-store'
 import { syncStockRow } from '../services/stockSync'
+import { insertStockMovement } from '../services/stockMovement'
 import { safeHandleModule } from './ipcHandler'
 import { sendEmail } from '../services/emailService'
 import { sendWhatsApp } from '../services/whatsappService'
 import { canManageProcurement, resolveMainBranchId } from '../services/branchAccess'
-import { insertStockMovement } from '../services/stockMovement'
 
 const store = new Store()
 

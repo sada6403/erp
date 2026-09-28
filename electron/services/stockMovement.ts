@@ -14,6 +14,7 @@ export type StockMovementInput = {
   reference_branch_transfer_id?: string | null
   notes?: string | null
   created_by?: string | null
+  status?: 'POSTED' | 'VOID'
 }
 
 export function insertStockMovement(
@@ -32,6 +33,7 @@ export function insertStockMovement(
     reference_branch_transfer_id: input.reference_branch_transfer_id || null,
     notes: input.notes || null,
     created_by: input.created_by || null,
+    status: input.status || 'POSTED',
   }
 
   if (record.quantity <= 0) {
@@ -41,11 +43,11 @@ export function insertStockMovement(
   db.prepare(`
     INSERT INTO stock_movements (
       id, product_id, from_branch_id, to_branch_id, quantity, movement_type,
-      reference_order_id, reference_transfer_id, reference_branch_transfer_id, notes, created_by
+      reference_order_id, reference_transfer_id, reference_branch_transfer_id, notes, created_by, status
     )
     VALUES (
       @id, @product_id, @from_branch_id, @to_branch_id, @quantity, @movement_type,
-      @reference_order_id, @reference_transfer_id, @reference_branch_transfer_id, @notes, @created_by
+      @reference_order_id, @reference_transfer_id, @reference_branch_transfer_id, @notes, @created_by, @status
     )
   `).run(record)
 

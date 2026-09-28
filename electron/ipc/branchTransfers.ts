@@ -81,9 +81,13 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       if (!from_branch_id || !to_branch_id || !items || !items.length) {
         throw new Error('Missing required fields for transfer')
       }
+      if (from_branch_id === to_branch_id) throw new Error('Source and destination branches must be different')
+      if (!['draft', 'dispatched'].includes(String(status || 'draft'))) {
+        throw new Error('A new transfer can only be saved as draft or dispatched')
+      }
       for (const item of items) {
         const quantity = Number(item.quantity)
-        if (!Number.isInteger(quantity) || quantity <= 0) {
+        if (!item.product_id || !Number.isInteger(quantity) || quantity <= 0) {
           throw new Error('Transfer quantity must be a whole number greater than zero')
         }
       }
@@ -92,7 +96,6 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       }
       const branchErr = requireBranch(from_branch_id)
       if (branchErr) return { success: false, error: branchErr }
-
       const transfer: Record<string, any> = {
         id: transferId,
         transfer_number: transferNumber,
@@ -157,7 +160,7 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
             const qty = Number(item.quantity)
             const changed = db.prepare(`
               UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
-              WHERE product_id=? AND branch_id=? AND quantity>=?
+              WHERE product_id=? AND branch_id=? AND quantity - COALESCE(damaged_qty,0) >= ?
             `).run(qty, item.product_id, from_branch_id, qty)
 
             if (!changed.changes) {
@@ -216,15 +219,19 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         WHERE 1=1
       `
       const params: any[] = []
+      const caller = authUser()
+      const privileged = Boolean(currentPerms(caller).all)
       
       if (filters.status) {
         sql += ' AND bt.status = ?'
         params.push(filters.status)
       }
       
-      if (filters.branch_id) {
+      const scopedBranchId = privileged ? filters.branch_id : caller.branch_id
+      if (!privileged && !scopedBranchId) return { success: false, error: 'Your account must be assigned to a branch' }
+      if (scopedBranchId) {
         sql += ' AND (bt.from_branch_id = ? OR bt.to_branch_id = ?)'
-        params.push(filters.branch_id, filters.branch_id)
+        params.push(scopedBranchId, scopedBranchId)
       }
 
       sql += ' ORDER BY bt.created_at DESC LIMIT 200'
@@ -250,6 +257,8 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
       `).get(id) as Record<string, any> | undefined
 
       if (!transfer) return { success: false, error: 'Transfer not found' }
+      const branchErr = requireBranch(transfer.from_branch_id, transfer.to_branch_id)
+      if (branchErr) return { success: false, error: branchErr }
 
       const items = db.prepare(`
         SELECT bti.*, p.name as product_name, p.sku, p.barcode
@@ -303,6 +312,12 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
         const branchErr = requireBranch(transfer.from_branch_id, transfer.to_branch_id)
         if (branchErr) return { success: false, error: branchErr }
       }
+      const caller = authUser()
+      const privileged = Boolean(currentPerms(caller).all)
+      const callerBranch = String(caller.branch_id || '')
+      if (!privileged && callerBranch !== String(transfer.from_branch_id)) {
+        return { success: false, error: 'Only the source branch can approve or dispatch this transfer' }
+      }
 
       const now = new Date().toISOString()
       const patch: any = { status }
@@ -331,13 +346,13 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
 
       db.transaction(() => {
         // If dispatching, deduct stock
-        if (status === 'dispatched' && transfer.status !== 'dispatched') {
+        if (status === 'dispatched') {
           const items = db.prepare('SELECT * FROM branch_transfer_items WHERE transfer_id=?').all(id) as any[]
           for (const item of items) {
             const qty = Number(item.quantity)
             const changed = db.prepare(`
               UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
-              WHERE product_id=? AND branch_id=? AND quantity>=?
+              WHERE product_id=? AND branch_id=? AND quantity - COALESCE(damaged_qty,0) >= ?
             `).run(qty, item.product_id, transfer.from_branch_id, qty)
 
             if (!changed.changes) {
@@ -377,10 +392,10 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
             }
             movementRecords.push(insertStockMovement(db, {
               product_id: item.product_id,
-              from_branch_id: String(transfer.to_branch_id),
+              from_branch_id: null,
               to_branch_id: String(transfer.from_branch_id),
               quantity: restoreQty,
-              movement_type: 'TRANSFER',
+              movement_type: 'RECEIVE',
               reference_branch_transfer_id: id,
               notes: `Branch transfer cancelled; in-transit stock restored: ${transfer.transfer_number}`,
               created_by: currentUserId(),
@@ -427,6 +442,14 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
 
       const { items, received_by_name, received_designation, notes } = payload
       // items should be [{ item_id, received_qty, damaged_qty }]
+      if (!Array.isArray(items) || items.length === 0) throw new Error('At least one received item is required')
+      const expectedItemIds = (db.prepare('SELECT id FROM branch_transfer_items WHERE transfer_id=?').all(id) as Array<{ id: string }>).map(row => row.id)
+      const receivedItemIds = items.map((item: any) => String(item.item_id))
+      if (new Set(receivedItemIds).size !== receivedItemIds.length ||
+          expectedItemIds.length !== receivedItemIds.length ||
+          expectedItemIds.some(itemId => !receivedItemIds.includes(itemId))) {
+        throw new Error('Receipt must include every transfer item exactly once')
+      }
       
       const now = new Date().toISOString()
       let totalSent = 0
@@ -439,12 +462,15 @@ export function registerBranchTransferHandlers(ipcMain: IpcMain) {
 
       db.transaction(() => {
         for (const input of items) {
-          const item = db.prepare('SELECT * FROM branch_transfer_items WHERE id=?').get(input.item_id) as any
-          if (!item) continue
+          const item = db.prepare('SELECT * FROM branch_transfer_items WHERE id=? AND transfer_id=?').get(input.item_id, id) as any
+          if (!item) throw new Error('One of the received items does not belong to this transfer')
           
           const sent = Number(item.quantity)
           const rec = Number(input.received_qty || 0)
           const dam = Number(input.damaged_qty || 0)
+          if (!Number.isFinite(rec) || !Number.isFinite(dam) || rec < 0 || dam < 0) {
+            throw new Error('Received and damaged quantities must be valid non-negative numbers')
+          }
           const recDelta = rec - Number(item.received_qty || 0)
           const damagedDelta = dam - Number(item.damaged_qty || 0)
           if (recDelta < 0 || damagedDelta < 0 || rec + dam > sent) {

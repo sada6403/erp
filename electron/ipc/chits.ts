@@ -3681,7 +3681,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       .get(productId) as { id: string; name: string; selling_price: number; tax_rate: number } | undefined
     if (!product) return { success: false, error: 'Product not found' }
 
-    const stockRow = db.prepare('SELECT COALESCE(SUM(quantity),0) as available FROM stocks WHERE product_id=? AND branch_id=?')
+    const stockRow = db.prepare('SELECT COALESCE(SUM(quantity - COALESCE(damaged_qty,0)),0) as available FROM stocks WHERE product_id=? AND branch_id=?')
       .get(productId, fulfillBranchId) as { available: number }
     if (stockRow.available < qty) {
       return { success: false, error: `Insufficient stock for "${product.name}" at this branch — available ${stockRow.available}, requested ${qty}` }
@@ -3739,7 +3739,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
       const changed = db.prepare(`
         UPDATE stocks SET quantity = quantity - ?, updated_at=datetime('now')
-        WHERE product_id=? AND branch_id=? AND quantity >= ?
+        WHERE product_id=? AND branch_id=? AND quantity - COALESCE(damaged_qty,0) >= ?
       `).run(qty, productId, fulfillBranchId, qty)
       if (!changed.changes) throw new Error('Insufficient stock — it may have just been sold elsewhere')
 

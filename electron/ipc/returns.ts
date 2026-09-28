@@ -144,44 +144,53 @@ export function registerReturnHandlers() {
     }
     total_refund = Math.round(total_refund * 100) / 100
 
-    db.prepare(`
-      INSERT INTO returns (id, invoice_id, customer_id, reason, total_refund, refund_method, notes, created_by, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed')
-    `).run(id, data.invoice_id, data.customer_id ?? null, data.reason, total_refund, data.refund_method, data.notes ?? null, caller.id || null)
-
     const itemRecords: Record<string, unknown>[] = []
     const movementRecords: Record<string, unknown>[] = []
-    for (const item of resolvedItems) {
-      const itemId = crypto.randomUUID()
+    db.transaction(() => {
       db.prepare(`
-        INSERT INTO return_items (id, return_id, product_id, invoice_item_id, quantity, unit_price)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(itemId, id, item.product_id, item.invoice_item_id, item.quantity, item.unit_price)
-      itemRecords.push({
-        id: itemId, return_id: id, product_id: item.product_id,
-        invoice_item_id: item.invoice_item_id, quantity: item.quantity, unit_price: item.unit_price,
+        INSERT INTO returns (id, invoice_id, customer_id, reason, total_refund, refund_method, notes, created_by, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed')
+      `).run(id, data.invoice_id, data.customer_id ?? null, data.reason, total_refund, data.refund_method, data.notes ?? null, caller.id || null)
+
+      for (const item of resolvedItems) {
+        const itemId = crypto.randomUUID()
+        db.prepare(`
+          INSERT INTO return_items (id, return_id, product_id, invoice_item_id, quantity, unit_price)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(itemId, id, item.product_id, item.invoice_item_id, item.quantity, item.unit_price)
+        itemRecords.push({
+          id: itemId, return_id: id, product_id: item.product_id,
+          invoice_item_id: item.invoice_item_id, quantity: item.quantity, unit_price: item.unit_price,
+        })
+
+        // Restore stock in the branch the sale actually happened in.
+        const existing = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
+          .get(item.product_id, branchId) as { id: string } | undefined
+        if (existing) {
+          db.prepare(`UPDATE stocks SET quantity = quantity + ?, updated_at=datetime('now') WHERE id = ?`)
+            .run(item.quantity, existing.id)
+        } else {
+          db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)`)
+            .run(crypto.randomUUID(), item.product_id, branchId, item.quantity)
+        }
+        movementRecords.push(insertStockMovement(db, {
+          product_id: item.product_id,
+          from_branch_id: null,
+          to_branch_id: branchId,
+          quantity: item.quantity,
+          movement_type: 'ADJUSTMENT',
+          reference_order_id: data.invoice_id,
+          notes: `Sale return received: ${data.reason}`,
+          created_by: (caller.id as string) || null,
+        }))
+      }
+
+      logAudit(db, {
+        userId: (caller.id as string) || null, branchId: branchId as string,
+        action: 'RETURN_CREATED', tableName: 'returns', recordId: id,
+        newValues: { invoiceId: data.invoice_id, totalRefund: total_refund, itemCount: resolvedItems.length },
       })
-
-      // Restore stock in the branch the sale actually happened in
-      db.prepare(`UPDATE stocks SET quantity = quantity + ? WHERE product_id = ? AND branch_id = ?`)
-        .run(item.quantity, item.product_id, branchId)
-      movementRecords.push(insertStockMovement(db, {
-        product_id: item.product_id,
-        from_branch_id: null,
-        to_branch_id: branchId,
-        quantity: item.quantity,
-        movement_type: 'ADJUSTMENT',
-        reference_order_id: data.invoice_id,
-        notes: `Return: ${data.reason}`,
-        created_by: (caller.id as string) || null,
-      }))
-    }
-
-    logAudit(db, {
-      userId: (caller.id as string) || null, branchId: branchId as string,
-      action: 'RETURN_CREATED', tableName: 'returns', recordId: id,
-      newValues: { invoiceId: data.invoice_id, totalRefund: total_refund, itemCount: resolvedItems.length },
-    })
+    })()
 
     await enqueuSync('returns', id, 'INSERT', { id, invoice_id: data.invoice_id, customer_id: data.customer_id ?? null, reason: data.reason, refund_method: data.refund_method, notes: data.notes ?? null, created_by: caller.id || null, total_refund })
     for (const itemRow of itemRecords) {
@@ -200,16 +209,46 @@ export function registerReturnHandlers() {
     const caller = authUser()
     const db = getDb()
     const ret = db.prepare(`
-      SELECT r.id, r.status, i.branch_id FROM returns r LEFT JOIN invoices i ON i.id = r.invoice_id WHERE r.id=?
-    `).get(id) as { id: string; status: string; branch_id: unknown } | undefined
+      SELECT r.id, r.status, r.invoice_id, i.branch_id FROM returns r LEFT JOIN invoices i ON i.id = r.invoice_id WHERE r.id=?
+    `).get(id) as { id: string; status: string; invoice_id: string; branch_id: unknown } | undefined
     if (!ret) return { success: false, error: 'Return not found' }
     if (!perms.all && caller.branch_id && ret.branch_id && ret.branch_id !== caller.branch_id) {
       return { success: false, error: 'Cannot cancel a return from another branch' }
     }
     if (ret.status === 'cancelled') return { success: false, error: 'This return is already cancelled' }
-    db.prepare(`UPDATE returns SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
-    logAudit(db, { userId: (caller.id as string) || null, branchId: (ret.branch_id as string) || null, action: 'RETURN_CANCELLED', tableName: 'returns', recordId: id })
+    const branchId = String(ret.branch_id || '')
+    if (!branchId) return { success: false, error: 'Cannot determine the branch for this return' }
+    const items = db.prepare('SELECT product_id, quantity FROM return_items WHERE return_id=?').all(id) as Array<{ product_id: string; quantity: number }>
+    const movementRecords: Record<string, unknown>[] = []
+    db.transaction(() => {
+      for (const item of items) {
+        const qty = Number(item.quantity)
+        const changed = db.prepare(`
+          UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
+          WHERE product_id=? AND branch_id=? AND quantity - COALESCE(damaged_qty,0) >= ?
+        `).run(qty, item.product_id, branchId, qty)
+        if (!changed.changes) {
+          throw new Error('Cannot cancel this return because some returned stock has already been sold or moved')
+        }
+        movementRecords.push(insertStockMovement(db, {
+          product_id: item.product_id,
+          from_branch_id: branchId,
+          to_branch_id: null,
+          quantity: qty,
+          movement_type: 'ADJUSTMENT',
+          reference_order_id: ret.invoice_id,
+          notes: `Return cancelled: ${id}`,
+          created_by: (caller.id as string) || null,
+        }))
+      }
+      db.prepare(`UPDATE returns SET status='cancelled', updated_at=datetime('now') WHERE id=? AND status<>'cancelled'`).run(id)
+      logAudit(db, { userId: (caller.id as string) || null, branchId, action: 'RETURN_CANCELLED', tableName: 'returns', recordId: id })
+    })()
     await enqueuSync('returns', id, 'UPDATE', { id, status: 'cancelled' })
+    for (const movement of movementRecords) {
+      await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      await syncStockRow(db, String(movement.product_id), branchId)
+    }
     return { success: true }
   })
 }

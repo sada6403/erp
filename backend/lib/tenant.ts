@@ -168,6 +168,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   reference_transfer_id  CHAR(36)      NULL,
   notes                  TEXT          NULL,
   created_by             CHAR(36)      NULL,
+  status                 VARCHAR(16)   NOT NULL DEFAULT 'POSTED',
   created_at             DATETIME      NOT NULL DEFAULT NOW(),
   updated_at             DATETIME      NOT NULL DEFAULT NOW() ON UPDATE NOW(),
   synced_at              DATETIME      NULL,

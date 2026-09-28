@@ -130,6 +130,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   reference_transfer_id TEXT,
   notes                 TEXT,
   created_by            TEXT REFERENCES users(id),
+  status                TEXT NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED','VOID')),
   created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at            TIMESTAMPTZ NOT NULL DEFAULT now()
 );

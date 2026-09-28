@@ -224,6 +224,7 @@ async function runTenantCompatibility(dbSchema: string) {
        reference_branch_transfer_id CHAR(36) NULL,
        notes                  TEXT          NULL,
        created_by             CHAR(36)      NULL,
+       status                 VARCHAR(16)   NOT NULL DEFAULT 'POSTED',
        created_at             DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
        updated_at             DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
        synced_at              DATETIME      NULL,
@@ -468,6 +469,7 @@ async function runTenantCompatibility(dbSchema: string) {
     `ALTER TABLE stock_transfers ADD COLUMN received_at DATETIME NULL`,
     `ALTER TABLE stock_transfers ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
     `ALTER TABLE stock_transfers ADD COLUMN synced_at DATETIME NULL`,
+    `ALTER TABLE stock_movements ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'POSTED'`,
     `ALTER TABLE branch_transfers ADD COLUMN approved_by CHAR(36) NULL`,
     `ALTER TABLE branch_transfer_prints ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
 

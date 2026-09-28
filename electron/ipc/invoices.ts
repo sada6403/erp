@@ -421,7 +421,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           if (billType !== 'QUOTATION') {
             const changed = db.prepare(`
               UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now')
-              WHERE product_id = ? AND branch_id = ? AND quantity >= ?
+              WHERE product_id = ? AND branch_id = ? AND quantity - COALESCE(damaged_qty,0) >= ?
             `).run(item.quantity, item.product_id, branchId, item.quantity)
             if (!changed.changes) {
               throw new Error(`Insufficient branch stock for product ${item.product_id}`)
@@ -633,7 +633,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         for (const item of items) {
           const changed = db.prepare(`
             UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now')
-            WHERE product_id = ? AND branch_id = ? AND quantity >= ?
+            WHERE product_id = ? AND branch_id = ? AND quantity - COALESCE(damaged_qty,0) >= ?
           `).run(item.quantity, item.product_id, invoice.branch_id, item.quantity)
           if (!changed.changes) {
             throw new Error(`Insufficient branch stock for product ${item.product_id}`)
@@ -1012,10 +1012,18 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
         if (deltaQuantity !== 0 && invoice.bill_type !== 'QUOTATION') {
           // A quantity increase sells more (stock decreases further); a decrease restores stock.
-          db.prepare(`
-            UPDATE stocks SET quantity = quantity - ?, updated_at=datetime('now')
-            WHERE product_id=? AND branch_id=?
-          `).run(deltaQuantity, item.product_id, invoice.branch_id)
+          if (deltaQuantity > 0) {
+            const changed = db.prepare(`
+              UPDATE stocks SET quantity = quantity - ?, updated_at=datetime('now')
+              WHERE product_id=? AND branch_id=? AND quantity - COALESCE(damaged_qty,0) >= ?
+            `).run(deltaQuantity, item.product_id, invoice.branch_id, deltaQuantity)
+            if (!changed.changes) throw new Error('Insufficient stock for this invoice quantity increase')
+          } else {
+            db.prepare(`
+              UPDATE stocks SET quantity = quantity + ?, updated_at=datetime('now')
+              WHERE product_id=? AND branch_id=?
+            `).run(Math.abs(deltaQuantity), item.product_id, invoice.branch_id)
+          }
           movementRecords.push(insertStockMovement(db, {
             product_id: item.product_id as string,
             from_branch_id: deltaQuantity > 0 ? invoice.branch_id as string : null,

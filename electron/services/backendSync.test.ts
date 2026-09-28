@@ -67,6 +67,21 @@ describe('Backend sync write contract', () => {
     const insert = db.query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO `stocks`'))!
     expect(insert[1]).toContain(6)
   })
+  it('credits a legacy transfer destination once from RECEIVE, not again from TRANSFER', async () => {
+    const db = client({
+      stocks: [{ id: 'canonical', quantity: 8, damaged_qty: 0, updated_at: '2026-09-27 02:43:06' }],
+      movements: [
+        { movement_type: 'TRANSFER', quantity: 2, from_branch_id: 'a', to_branch_id: 'b' },
+        { movement_type: 'RECEIVE', quantity: 2, from_branch_id: 'a', to_branch_id: 'b' },
+      ],
+    })
+    await applySyncOperation(db as any, { table: 'stocks', operation: 'INSERT', recordId: 'p', record: {
+      product_id: 'p', branch_id: 'b', quantity: 9,
+    } })
+    const insert = db.query.mock.calls.find(([sql]) => sql.startsWith('INSERT INTO `stocks`'))!
+    expect(insert[1]).toContain(10)
+    expect(insert[1]).not.toContain(12)
+  })
   it('rejects a concurrent stock merge that would create a negative balance', async () => {
     const db = client({ stocks: [{ id: 'canonical', quantity: 2, damaged_qty: 0 }] })
     await expect(applySyncOperation(db as any, { table: 'stocks', operation: 'INSERT', recordId: 'p', record: {

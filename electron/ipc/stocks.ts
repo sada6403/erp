@@ -246,64 +246,63 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
+      const perms = currentPerms()
+      const isPrivileged = Boolean(perms.all) || isMainBranchManagerOrAdmin(user)
       if (!product_id || !branch_id) throw new Error('Product and branch are required')
       if (branch_id === 'all') throw new Error('All-branches stock is calculated and cannot be adjusted directly')
       if (!String(reason || '').trim()) throw new Error('A reason is required for every stock adjustment')
       if (!Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
         throw new Error('Stock quantity must be zero or greater')
       }
-      // Deliberately no permission gate (see comment below) since this also
-      // fires on every product-form save — but it must still stay inside
-      // the caller's own branch, or a direct IPC call from any session
-      // could silently set stock for a branch the caller has nothing to do
-      // with.
-      {
-        const perms = currentPerms()
-        const isPrivileged = perms.all || isMainBranchManagerOrAdmin(user)
-        if (!isPrivileged) return { success: false, error: 'Only the main branch can create opening stock; use a stock request instead' }
+      if (!isPrivileged) {
+        return { success: false, error: 'Only the main branch can create opening stock; use a stock request instead' }
+      }
+      const activeBranch = db.prepare('SELECT id FROM branches WHERE id=? AND is_active=1').get(branch_id)
+      if (!activeBranch) throw new Error('Select a valid active branch for this stock adjustment')
+      if (!db.prepare('SELECT id FROM products WHERE id=? AND is_active=1').get(product_id)) {
+        throw new Error('Product not found or inactive')
       }
 
-      const existing = db.prepare(`
-        SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
-      `).get(product_id, branch_id) as Record<string, unknown> | undefined
-
-      if (existing && Number(existing.quantity || 0) !== Number(quantity)) {
-        return { success: false, error: 'Existing stock is calculated and cannot be overwritten; use Stock Adjustment with a reason' }
-      }
-
-      let stockId: string
-      if (existing) {
-        stockId = String(existing.id)
-        db.prepare(`UPDATE stocks SET quantity = ?, updated_at = datetime('now')
-          WHERE product_id = ? AND branch_id = ?`).run(quantity, product_id, branch_id)
-      } else {
-        stockId = crypto.randomUUID()
-        db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity)
-          VALUES (?, ?, ?, ?, ?)`).run(stockId, product_id, branch_id, warehouse_id || null, quantity)
-      }
-
-      const previousQty = existing ? Number(existing.quantity || 0) : 0
-      const delta = Number(quantity) - previousQty
+      let previousQty = 0
       let movement: Record<string, unknown> | null = null
-      if (delta !== 0) {
-        movement = insertStockMovement(db, {
-          product_id,
-          from_branch_id: delta < 0 ? branch_id : null,
-          to_branch_id: delta > 0 ? branch_id : null,
-          quantity: Math.abs(delta),
-          movement_type: 'ADJUSTMENT',
-          notes: String(reason),
-          created_by: (user?.id as string) || null,
+      db.transaction(() => {
+        const existing = db.prepare(`
+          SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
+        `).get(product_id, branch_id) as Record<string, unknown> | undefined
+        if (existing && Number(existing.quantity || 0) !== Number(quantity)) {
+          throw new Error('Existing stock is calculated and cannot be overwritten; use Stock Adjustment with a reason')
+        }
+        previousQty = existing ? Number(existing.quantity || 0) : 0
+        if (existing && Number(quantity) < Number(existing.damaged_qty || 0)) {
+          throw new Error('Stock quantity cannot be lower than the recorded damaged quantity')
+        }
+        if (!existing) {
+          const stockId = crypto.randomUUID()
+          db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity)
+            VALUES (?, ?, ?, ?, ?)`).run(stockId, product_id, branch_id, warehouse_id || null, Number(quantity))
+        }
+
+        const delta = Number(quantity) - previousQty
+        if (delta !== 0) {
+          movement = insertStockMovement(db, {
+            product_id,
+            from_branch_id: delta < 0 ? branch_id : null,
+            to_branch_id: delta > 0 ? branch_id : null,
+            quantity: Math.abs(delta),
+            movement_type: 'ADJUSTMENT',
+            notes: reason || `Stock adjusted from ${previousQty} to ${quantity}`,
+            created_by: (user?.id as string) || null,
+          })
+        }
+
+        logAudit(db, {
+          userId: (user?.id as string) || null, branchId: branch_id, action: 'STOCK_ADJUST',
+          tableName: 'stocks', recordId: product_id, newValues: { quantity, previousQty, reason },
         })
-      }
+      })()
 
-      logAudit(db, {
-        userId: (user?.id as string) || null, branchId: branch_id, action: 'STOCK_ADJUST',
-        tableName: 'stocks', recordId: product_id, newValues: { quantity, reason },
-      })
-
-      await enqueuSync('stocks', stockId, 'UPDATE', { ...payload, id: stockId })
-      if (movement) await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+      await syncStockRow(db, product_id, branch_id, warehouse_id || null)
+      if (movement) await enqueuSync('stock_movements', String((movement as Record<string, unknown>).id), 'INSERT', movement)
       return { success: true }
   })
 
@@ -333,9 +332,15 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (!String(reason || '').trim()) {
         return { success: false, error: 'A reason is required for every stock adjustment' }
       }
+      if (!db.prepare('SELECT id FROM branches WHERE id=? AND is_active=1').get(branch_id)) {
+        throw new Error('Select a valid active branch for this stock adjustment')
+      }
 
       if (!isAdmin && !payload.edit_request_id) {
         return { success: false, error: 'No approved edit request found — please request approval first' }
+      }
+      if (!isAdmin && String(user?.branch_id || '') !== branch_id) {
+        return { success: false, error: 'Cannot adjust stock for another branch' }
       }
 
       let movement: Record<string, unknown> | null = null
@@ -357,6 +362,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
         const existing = db.prepare(`SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?`)
           .get(product_id, branch_id) as Record<string, unknown> | undefined
+
+        if (existing && Number(quantity) < Number(existing.damaged_qty || 0)) {
+          throw new Error('Stock quantity cannot be lower than the recorded damaged quantity')
+        }
 
         if (existing) {
           stockId = String(existing.id)
@@ -591,10 +600,13 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const params: unknown[] = []
       if (filters.date_from) { sql += ' AND date(sm.created_at) >= ?'; params.push(filters.date_from) }
       if (filters.date_to) { sql += ' AND date(sm.created_at) <= ?'; params.push(filters.date_to) }
-      const movementBranchId = privileged ? filters.branch_id : user?.branch_id
-      if (movementBranchId) {
+      const scopedBranchId = privileged ? filters.branch_id : user?.branch_id
+      if (!privileged && !scopedBranchId) {
+        return { success: false, error: 'Your account must be assigned to a branch' }
+      }
+      if (scopedBranchId) {
         sql += ' AND (sm.from_branch_id = ? OR sm.to_branch_id = ?)'
-        params.push(movementBranchId, movementBranchId)
+        params.push(scopedBranchId, scopedBranchId)
       }
       if (filters.product_id) { sql += ' AND sm.product_id = ?'; params.push(filters.product_id) }
       if (filters.movement_type) { sql += ' AND sm.movement_type = ?'; params.push(filters.movement_type) }
@@ -661,8 +673,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         pending_approval:   ['approved', 'rejected', 'cancelled'],
         approved:           ['ready_for_dispatch', 'dispatched', 'received', 'partially_received', 'cancelled'],
         ready_for_dispatch: ['dispatched', 'received', 'partially_received', 'cancelled'],
-        dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy', 'mismatch_reported'],
-        in_transit:         ['received', 'partially_received', 'discrepancy', 'mismatch_reported'],
+        dispatched:         ['in_transit', 'received', 'partially_received', 'discrepancy', 'mismatch_reported', 'cancelled'],
+        in_transit:         ['received', 'partially_received', 'discrepancy', 'mismatch_reported', 'cancelled'],
         partially_received: ['received', 'partially_received', 'discrepancy', 'mismatch_reported', 'cancelled'],
         mismatch_reported:  ['under_admin_review', 'cancelled'],
         under_admin_review: ['received', 'partially_received', 'cancelled', 'corrected'],
@@ -684,6 +696,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         }
         if (destinationActions.includes(status) && !isDestinationBranch) {
           throw new Error('Only the destination branch can receive this transfer')
+        }
+        if (status === 'cancelled' && ['dispatched', 'in_transit', 'partially_received'].includes(String(transfer.status)) && !isSourceBranch) {
+          throw new Error('Only the source branch can cancel this transfer after dispatch')
         }
         if (status === 'under_admin_review' || status === 'corrected') {
           throw new Error('Only an administrator can review transfer discrepancies')
@@ -709,7 +724,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           throw new Error('You cannot approve a transfer you initiated (maker-checker rule)')
         }
         const source = db.prepare(`
-          SELECT quantity FROM stocks
+          SELECT quantity - COALESCE(damaged_qty,0) AS quantity FROM stocks
           WHERE product_id=? AND branch_id=?
           LIMIT 1
         `).get(transfer.product_id, transfer.from_branch_id) as { quantity: number } | undefined
@@ -752,7 +767,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         const received = status === 'received' ? qty - damaged : Number(payload.received_quantity || 0)
         const previousReceived = Number(transfer.received_quantity || 0)
         const previousDamaged = Number(transfer.damaged_quantity || 0)
-        if (received < previousReceived || damaged < previousDamaged || received + damaged > qty) {
+        if (!Number.isFinite(received) || !Number.isFinite(damaged) || received < previousReceived || damaged < previousDamaged || received + damaged > qty) {
           throw new Error('Received and damaged quantities exceed the dispatched quantity')
         }
         patch.received_quantity  = received
@@ -797,7 +812,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           const qty = Number(transfer.quantity)
           const changed = db.prepare(`
             UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
-            WHERE product_id=? AND branch_id=? AND quantity>=?`)
+            WHERE product_id=? AND branch_id=? AND quantity - COALESCE(damaged_qty,0) >= ?`)
             .run(qty, transfer.product_id, transfer.from_branch_id, qty)
           if (!changed.changes) throw new Error('Insufficient source stock at confirmation time')
           movementRecords.push(insertStockMovement(db, {
@@ -815,7 +830,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           const qty = Number(transfer.quantity)
           const changed = db.prepare(`
             UPDATE stocks SET quantity=quantity-?, updated_at=datetime('now')
-            WHERE product_id=? AND branch_id=? AND quantity>=?`)
+            WHERE product_id=? AND branch_id=? AND quantity - COALESCE(damaged_qty,0) >= ?`)
             .run(qty, transfer.product_id, transfer.from_branch_id, qty)
           if (!changed.changes) throw new Error('Insufficient source stock at approval time')
           movementRecords.push(insertStockMovement(db, {
@@ -871,9 +886,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
           if (restoreQty > 0) {
             movementRecords.push(insertStockMovement(db, {
               product_id: String(transfer.product_id),
-              from_branch_id: String(transfer.to_branch_id),
+              from_branch_id: null,
               to_branch_id: String(transfer.from_branch_id),
-              quantity: restoreQty, movement_type: 'TRANSFER', reference_transfer_id: id,
+              quantity: restoreQty, movement_type: 'RECEIVE', reference_transfer_id: id,
               notes: `Cancelled - in-transit stock returned to source: ${transfer.transfer_number || id}`,
               created_by: (user?.id as string) || null,
             }))
@@ -937,7 +952,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('stock_transfers', id, 'UPDATE', { id, ...patch })
 
-      if (status === 'dispatched' || status === 'received' || status === 'partially_received') {
+      if (status === 'dispatched' || status === 'received' || status === 'partially_received' || status === 'cancelled') {
         const source = db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=?')
           .get(transfer.product_id, transfer.from_branch_id) as Record<string, unknown>
         if (source) await enqueuSync('stocks', String(source.id), 'UPDATE', source)
@@ -1332,6 +1347,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const user = store.get('auth_user') as Record<string, unknown> | undefined
       const session = db.prepare('SELECT branch_id FROM stock_count_sessions WHERE id=?').get(sessionId) as { branch_id: unknown } | undefined
       if (!session) return { success: false, error: 'Stock count not found' }
+      if (!Number.isFinite(Number(countedQty)) || Number(countedQty) < 0) {
+        return { success: false, error: 'Counted quantity must be zero or greater' }
+      }
       const isPrivileged = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
       if (!isPrivileged && user?.branch_id && session.branch_id !== user.branch_id) {
         return { success: false, error: 'Cannot update a stock count from another branch' }
@@ -1363,12 +1381,15 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       db.transaction(() => {
         for (const item of items) {
-          const existing = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
-            .get(item.product_id, session.branch_id) as { id: string; quantity?: number } | undefined
+          const existing = db.prepare('SELECT id, quantity, damaged_qty FROM stocks WHERE product_id=? AND branch_id=?')
+            .get(item.product_id, session.branch_id) as { id: string; quantity: number; damaged_qty: number } | undefined
           const previousQty = existing
             ? Number((db.prepare('SELECT quantity FROM stocks WHERE id=?').get(existing.id) as { quantity: number } | undefined)?.quantity || 0)
             : 0
           const countedQty = Number(item.counted_qty || 0)
+          if (existing && countedQty < Number(existing.damaged_qty || 0)) {
+            throw new Error('Counted stock cannot be lower than the recorded damaged quantity')
+          }
           if (existing) {
             db.prepare("UPDATE stocks SET quantity=?, updated_at=datetime('now') WHERE id=?")
               .run(countedQty, existing.id)

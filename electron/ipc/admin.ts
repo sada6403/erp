@@ -1389,7 +1389,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         })
         const changed = db.prepare(`
           UPDATE stocks SET quantity = quantity - ?, updated_at=datetime('now')
-          WHERE product_id=? AND branch_id=? AND quantity >= ?
+          WHERE product_id=? AND branch_id=? AND quantity - COALESCE(damaged_qty,0) >= ?
         `).run(qty, productId, branchId, qty)
         if (!changed.changes) throw new Error(`Insufficient branch stock for product ${productId}`)
         movementRecords.push(insertStockMovement(db, {

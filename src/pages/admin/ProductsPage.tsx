@@ -1017,8 +1017,8 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
         productId = (res.data as { id: string }).id
         toast.success('Product created')
       }
-      // Aggregate stock is calculated from every branch and must never be
-      // written back into one branch. A branch-specific edit may adjust it.
+      // Existing stock is a calculated projection and is never edited from
+      // the product form. New products may create one audited opening balance.
       const stockPromise = stockIsReadOnly
         ? Promise.resolve({ success: true } as { success: boolean; error?: string })
         : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: stockQty, reason: 'Opening stock for new product' }) as Promise<{ success: boolean; error?: string }>
@@ -1332,7 +1332,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
                 <span className="text-lg font-bold" style={{ color: 'var(--text-1)' }}>{stockQty}</span>
                 <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                   {stockIsAggregate
-                    ? 'Calculated from all branches.'
+                    ? 'Calculated from all branches. Select a branch to view its balance.'
                     : product
                       ? 'Calculated stock is read-only here. Use Stock Adjustment for a documented correction.'
                       : 'Sub branches receive stock through an approved stock request or transfer.'}

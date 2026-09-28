@@ -296,8 +296,9 @@ async function applyOperation(
             if (movement.movement_type === 'SALE' && movement.from_branch_id === record.branch_id) delta -= quantity
             if (movement.movement_type === 'RECEIVE' && movement.to_branch_id === record.branch_id) delta += quantity
             if (movement.movement_type === 'TRANSFER') {
+              // TRANSFER is the dispatch/source deduction. Destination stock
+              // is credited by a separate RECEIVE movement at confirmation.
               if (movement.from_branch_id === record.branch_id) delta -= quantity
-              if (movement.to_branch_id === record.branch_id) delta += quantity
             }
           }
           const repairedQuantity = Number((currentQuantity + delta).toFixed(6))

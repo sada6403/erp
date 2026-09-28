@@ -102,6 +102,8 @@ beforeAll(async () => {
   const { registerAdminHandlers } = await import('../ipc/admin')
   const { registerRegionHandlers } = await import('../ipc/regions')
   const { registerAuthHandlers } = await import('../ipc/auth')
+  const { registerInvoiceHandlers } = await import('../ipc/invoices')
+  const { registerReturnHandlers } = await import('../ipc/returns')
   const { registerBranchTransferHandlers } = await import('../ipc/branchTransfers')
   registerBatchHandlers()
   registerProductHandlers(fakeIpcMain)
@@ -114,6 +116,8 @@ beforeAll(async () => {
   registerAdminHandlers(fakeIpcMain)
   registerRegionHandlers(fakeIpcMain)
   registerAuthHandlers(fakeIpcMain)
+  registerInvoiceHandlers(fakeIpcMain)
+  registerReturnHandlers()
   registerBranchTransferHandlers(fakeIpcMain)
 })
 
@@ -433,13 +437,49 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
       to_branch_id: BR_A,
       quantity: 1,
     })
-    expect(created.success).toBe(true)
+    expect(created.success, created.error).toBe(true)
     setSession(mgrB)
     expect((await call('stocks:updateTransfer', created.data.id, 'approved', {})).success).toBe(true)
     setSession(mgrA)
     expect((await call('stocks:updateTransfer', created.data.id, 'cancelled', {})).success).toBe(true)
     const source = db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_B) as { quantity: number }
     expect(source.quantity).toBe(8)
+  })
+
+  it('All Branches is an aggregate and cannot be used as a manual stock target', async () => {
+    setSession(admin)
+    const listed = await call('products:list', { is_active: true })
+    const product = listed.data.find((row: Record<string, unknown>) => row.id === PROD1)
+    const expected = (db.prepare('SELECT COALESCE(SUM(quantity),0) q FROM stocks WHERE product_id=?').get(PROD1) as { q: number }).q
+    expect(Number(product.stock)).toBe(Number(expected))
+    const invalid = await call('stocks:adjust', { product_id: PROD1, branch_id: 'all', quantity: 999, reason: 'must fail' })
+    expect(invalid.success).toBe(false)
+  })
+
+  it('a stock adjustment is branch-scoped and creates an ADJUSTMENT movement', async () => {
+    setSession(admin)
+    const before = (db.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT'`).get(PROD1) as { c: number }).c
+    const res = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: BR_A, quantity: 7, reason: 'QA counted stock' })
+    expect(res.success).toBe(true)
+    const movement = db.prepare(`SELECT * FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT' ORDER BY created_at DESC LIMIT 1`).get(PROD1) as Record<string, unknown>
+    expect(movement.notes).toBe('QA counted stock')
+    expect(movement.status).toBe('POSTED')
+    expect((db.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT'`).get(PROD1) as { c: number }).c).toBe(before + 1)
+  })
+
+  it('a sub branch cannot overwrite existing calculated stock through the product-form IPC', async () => {
+    setSession(mgrA)
+    const before = (db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_A) as { quantity: number }).quantity
+    const res = await call('stocks:adjust', { product_id: PROD1, branch_id: BR_A, quantity: before + 100, reason: 'bypass attempt' })
+    expect(res.success).toBe(false)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(PROD1, BR_A) as { quantity: number }).quantity).toBe(before)
+  })
+
+  it('sub-branch movement history is limited to its own branch', async () => {
+    setSession(mgrA)
+    const res = await call('stocks:movements', { branch_id: BR_B })
+    expect(res.success).toBe(true)
+    expect(res.data.every((m: Record<string, unknown>) => m.from_branch_id === BR_A || m.to_branch_id === BR_A)).toBe(true)
   })
 
   let orderId: string
@@ -471,6 +511,110 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(res).toBeDefined()
     const row = db.prepare('SELECT total_amount FROM customer_orders WHERE id=?').get(orderId) as { total_amount: number }
     expect(row.total_amount).not.toBe(999999)
+  })
+})
+
+describe('Stock transaction workflow regression', () => {
+  const MAIN = 'b1111111-1111-4111-8111-111111111111'
+  const A = 'stock-flow-a', B = 'stock-flow-b'
+  const P1 = 'stock-flow-p1', P2 = 'stock-flow-p2'
+  const admin = makeSession({ id: 'stock-flow-admin', permissions: { all: true } })
+  const managerA = makeSession({ id: 'stock-flow-manager-a', branchId: A, permissions: { inventory: true, employees: true, pos: true } })
+  const managerB = makeSession({ id: 'stock-flow-manager-b', branchId: B, permissions: { inventory: true, employees: true, pos: true } })
+
+  beforeAll(() => {
+    seedBranch(A, 'Stock Flow A', 'SFA')
+    seedBranch(B, 'Stock Flow B', 'SFB')
+    seedUser('stock-flow-admin', null)
+    seedUser('stock-flow-manager-a', A)
+    seedUser('stock-flow-manager-b', B)
+    seedProduct(P1, 1000)
+    seedProduct(P2, 500)
+    db.prepare('INSERT OR REPLACE INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)').run('flow-main-p1', P1, MAIN, 20)
+    db.prepare('INSERT OR REPLACE INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)').run('flow-main-p2', P2, MAIN, 10)
+    db.prepare('INSERT OR REPLACE INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)').run('flow-a-p1', P1, A, 0)
+    db.prepare('INSERT OR REPLACE INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)').run('flow-a-p2', P2, A, 0)
+    db.prepare('INSERT OR REPLACE INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)').run('flow-b-p1', P1, B, 6)
+  })
+
+  it('main branch sends multiple products and duplicate receive cannot add stock twice', async () => {
+    setSession(admin)
+    const created = await call('branchTransfers:create', {
+      from_branch_id: MAIN, to_branch_id: A, status: 'dispatched',
+      items: [{ product_id: P1, quantity: 3 }, { product_id: P2, quantity: 2 }],
+    })
+    expect(created.success, created.error).toBe(true)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, MAIN) as { quantity: number }).quantity).toBe(17)
+    const transferItems = db.prepare('SELECT id,quantity FROM branch_transfer_items WHERE transfer_id=? ORDER BY product_id').all(created.data.id) as Array<{ id: string; quantity: number }>
+    setSession(managerA)
+    const received = await call('branchTransfers:receive', created.data.id, {
+      items: transferItems.map(item => ({ item_id: item.id, received_qty: item.quantity, damaged_qty: 0 })),
+      received_by_name: 'Manager A',
+    })
+    expect(received.success).toBe(true)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, A) as { quantity: number }).quantity).toBe(3)
+    expect((await call('branchTransfers:receive', created.data.id, {
+      items: transferItems.map(item => ({ item_id: item.id, received_qty: item.quantity, damaged_qty: 0 })),
+    })).success).toBe(false)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, A) as { quantity: number }).quantity).toBe(3)
+  })
+
+  it('sub branch can transfer available stock to another sub branch', async () => {
+    setSession(managerB)
+    const created = await call('branchTransfers:create', {
+      from_branch_id: B, to_branch_id: A, status: 'dispatched', items: [{ product_id: P1, quantity: 2 }],
+    })
+    expect(created.success, created.error).toBe(true)
+    const item = db.prepare('SELECT id FROM branch_transfer_items WHERE transfer_id=?').get(created.data.id) as { id: string }
+    setSession(managerA)
+    expect((await call('branchTransfers:receive', created.data.id, { items: [{ item_id: item.id, received_qty: 2, damaged_qty: 0 }] })).success).toBe(true)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, B) as { quantity: number }).quantity).toBe(4)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, A) as { quantity: number }).quantity).toBe(5)
+  })
+
+  it('sale reduces only its branch, blocks negative stock, and supports request-from-another-branch', async () => {
+    setSession(managerA)
+    const sale = await call('invoices:create', {
+      bill_type: 'RETAIL', branch_id: B,
+      items: [{ product_id: P1, quantity: 1, unit_price: 1000, discount_pct: 0, discount_amount: 0 }],
+      subtotal: 1000, discount_amount: 0, tax_amount: 0, total_amount: 1000, paid_amount: 1000,
+      payments: [{ method: 'cash', amount: 1000 }],
+    })
+    expect(sale.success, sale.error).toBe(true)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, A) as { quantity: number }).quantity).toBe(4)
+    const tooMany = await call('invoices:create', {
+      bill_type: 'RETAIL', items: [{ product_id: P1, quantity: 99, unit_price: 1000, discount_pct: 0 }],
+      subtotal: 99000, discount_amount: 0, tax_amount: 0, total_amount: 99000, paid_amount: 99000,
+      payments: [{ method: 'cash', amount: 99000 }],
+    })
+    expect(tooMany.success).toBe(false)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, A) as { quantity: number }).quantity).toBe(4)
+    const request = await call('stocks:transfer', { product_id: P1, from_branch_id: B, to_branch_id: A, quantity: 1, notes: 'Out-of-stock fulfilment request' })
+    expect(request.success).toBe(true)
+    expect((db.prepare('SELECT status FROM stock_transfers WHERE id=?').get(request.data.id) as { status: string }).status).toBe('pending_approval')
+
+    const invoiceItem = db.prepare('SELECT id FROM invoice_items WHERE invoice_id=?').get(sale.data.id) as { id: string }
+    const returned = await call('returns:create', {
+      invoice_id: sale.data.id, reason: 'QA return', refund_method: 'cash',
+      items: [{ product_id: P1, invoice_item_id: invoiceItem.id, quantity: 1, unit_price: 1 }],
+    })
+    expect(returned.success).toBe(true)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, A) as { quantity: number }).quantity).toBe(5)
+    expect((await call('returns:cancel', returned.data.id)).success).toBe(true)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, A) as { quantity: number }).quantity).toBe(4)
+    expect((await call('returns:cancel', returned.data.id)).success).toBe(false)
+  })
+
+  it('cancelling a dispatched request restores source stock exactly once', async () => {
+    setSession(managerA)
+    const requested = await call('stocks:transfer', { product_id: P1, from_branch_id: B, to_branch_id: A, quantity: 1 })
+    setSession(managerB)
+    expect((await call('stocks:updateTransfer', requested.data.id, 'approved', {})).success).toBe(true)
+    expect((await call('stocks:updateTransfer', requested.data.id, 'dispatched', {})).success).toBe(true)
+    const afterDispatch = (db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, B) as { quantity: number }).quantity
+    expect((await call('stocks:updateTransfer', requested.data.id, 'cancelled', {})).success).toBe(true)
+    expect((db.prepare('SELECT quantity FROM stocks WHERE product_id=? AND branch_id=?').get(P1, B) as { quantity: number }).quantity).toBe(afterDispatch + 1)
+    expect((await call('stocks:updateTransfer', requested.data.id, 'cancelled', {})).success).toBe(false)
   })
 })
 

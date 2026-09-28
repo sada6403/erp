@@ -162,6 +162,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   reference_branch_transfer_id TEXT REFERENCES branch_transfers(id),
   notes                 TEXT,
   created_by            TEXT REFERENCES users(id),
+  status                TEXT NOT NULL DEFAULT 'POSTED' CHECK (status IN ('POSTED','VOID')),
   created_at            TEXT NOT NULL DEFAULT (datetime('now')),
   synced_at             TEXT
 );
