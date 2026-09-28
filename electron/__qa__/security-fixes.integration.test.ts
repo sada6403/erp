@@ -307,9 +307,9 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(row.branch_id).toBe('b1111111-1111-4111-8111-111111111111')
   })
 
-  it('purchases:notifySupplier opens the exact WhatsApp chat with full PO details pre-filled', async () => {
+  it('purchases:notifySupplier normalizes a local number and pre-fills full PO details', async () => {
     setSession(admin)
-    db.prepare('UPDATE suppliers SET mobile_number=? WHERE id=?').run('+94771234567', SUPPLIER1)
+    db.prepare('UPDATE suppliers SET mobile_number=? WHERE id=?').run('0771234567', SUPPLIER1)
     hoisted.openedUrls.length = 0
 
     const res = await call('purchases:notifySupplier', poId, { openWhatsApp: true, sendEmail: false })
