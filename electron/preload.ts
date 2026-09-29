@@ -567,8 +567,9 @@ const api = {
 
   // Events from main → renderer
   on: (channel: string, listener: (...args: unknown[]) => void) => {
-    ipcRenderer.on(channel, (_event, ...args) => listener(...args))
-    return () => ipcRenderer.removeListener(channel, listener)
+    const wrappedListener = (_event: unknown, ...args: unknown[]) => listener(...args)
+    ipcRenderer.on(channel, wrappedListener)
+    return () => ipcRenderer.removeListener(channel, wrappedListener)
   },
 }
 
