@@ -22,6 +22,7 @@ export default function ChitSchemesPage() {
   const [purging, setPurging] = useState<Row | null>(null)
   const [branches, setBranches] = useState<Row[]>([])
   const [agents, setAgents] = useState<Row[]>([])
+  const [templates, setTemplates] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [search, setSearch] = useState('')
@@ -32,10 +33,11 @@ export default function ChitSchemesPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const [s, b, a] = await Promise.all([
+      const [s, b, a, t] = await Promise.all([
         window.api.chits.list(),
         window.api.admin.branches.list(),
         window.api.agents.list(),
+        window.api.chits.templates.list({ status: 'active' }),
       ])
       if (s.success) setSchemes(s.data as Row[])
       else toast.error(String(s.error || 'Failed to load chit schemes'))
@@ -43,6 +45,8 @@ export default function ChitSchemesPage() {
       else toast.error(String(b.error || 'Failed to load branches'))
       if (a.success) setAgents(a.data as Row[])
       else toast.error(String(a.error || 'Failed to load agents'))
+      if (t.success) setTemplates(t.data as Row[])
+      else toast.error(String(t.error || 'Failed to load Scheme Master templates'))
     } catch (err: any) {
       toast.error(err.message || 'Failed to load data')
     } finally {
@@ -253,7 +257,7 @@ export default function ChitSchemesPage() {
       </div>
 
       {showForm && (
-        <ChitSchemeForm branches={branches} agents={agents}
+        <ChitSchemeForm branches={branches} agents={agents} templates={templates} isSuperAdmin={isSuperAdmin}
           onClose={() => setShowForm(false)}
           onSave={(id) => { setShowForm(false); load(); navigate(`/admin/chits/${id}`) }} />
       )}
@@ -271,12 +275,12 @@ export default function ChitSchemesPage() {
   )
 }
 
-function ChitSchemeForm({ branches, agents, onClose, onSave }: {
-  branches: Row[]; agents: Row[]
+function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, onClose, onSave }: {
+  branches: Row[]; agents: Row[]; templates: Row[]; isSuperAdmin: boolean
   onClose: () => void; onSave: (id: string) => void
 }) {
   const [form, setForm] = useState({
-    name: '', contribution_amount: 0, cycle_count: 12, chit_value: 0,
+    template_id: '', name: '', contribution_amount: 0, cycle_count: 12, chit_value: 0,
     branch_id: '', agent_id: '', member_count: 0,
     early_redemption_count: 0, early_redemption_amount: 0,
     repayment_months: 12, agent_commission_pct: 0,
@@ -321,8 +325,26 @@ function ChitSchemeForm({ branches, agents, onClose, onSave }: {
   const f = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setForm(p => ({ ...p, [k]: e.target.type === 'number' ? parseFloat(e.target.value) || 0 : e.target.value }))
 
+  const selectTemplate = (templateId: string) => {
+    const template = templates.find(item => String(item.id) === templateId)
+    if (!template) {
+      setForm(p => ({ ...p, template_id: '' }))
+      return
+    }
+    setForm(p => ({
+      ...p,
+      template_id: templateId,
+      name: String(template.scheme_name || ''),
+      contribution_amount: Number(template.monthly_contribution_amount || 0),
+      cycle_count: Number(template.duration_months || 0),
+      chit_value: Number(template.product_value || 0),
+      member_count: Math.max(Number(p.member_count || 0), Number(template.minimum_members || 0)),
+    }))
+  }
+
   const save = async () => {
     if (submittingRef.current) return
+    if (!isSuperAdmin && !form.template_id) { toast.error('Select a Scheme Master template'); return }
     if (!form.name.trim()) { toast.error('Enter a scheme name'); return }
     if (form.contribution_amount <= 0) { toast.error('Enter the contribution amount'); return }
     if (form.cycle_count <= 0) { toast.error('Enter the duration (months)'); return }
@@ -350,21 +372,41 @@ function ChitSchemeForm({ branches, agents, onClose, onSave }: {
     <Modal title="New Smart Buy Scheme" size="lg" onClose={onClose}
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Create Scheme'}</button></>}>
       <div className="space-y-4">
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Scheme Name *</label><input value={form.name} onChange={f('name')} className="input" placeholder="e.g. Rs.5000 Scheme" /></div>
+        <div>
+          <label className="block text-xs font-medium text-slate-400 mb-1">Scheme Master Template {!isSuperAdmin && '*'}</label>
+          <select value={form.template_id} onChange={e => selectTemplate(e.target.value)} className="input">
+            <option value="">{isSuperAdmin ? '— Custom scheme (no template) —' : '— Select Scheme Master template —'}</option>
+            {templates.map(template => (
+              <option key={String(template.id)} value={String(template.id)}>
+                {String(template.scheme_name)} — Rs.{money(template.monthly_contribution_amount)} × {Number(template.duration_months || 0)} months
+              </option>
+            ))}
+          </select>
+          {!templates.length && (
+            <p className="text-xs text-amber-400 mt-1">
+              No active Scheme Master templates are available. A Super Admin must create or activate one first.
+            </p>
+          )}
+          {form.template_id && (
+            <p className="text-xs text-green-400 mt-1">Template values applied. Financial fields below are controlled by Scheme Master.</p>
+          )}
+        </div>
+
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Scheme Name *</label><input value={form.name} onChange={f('name')} disabled={Boolean(form.template_id)} className="input disabled:opacity-60" placeholder="e.g. Rs.5000 Scheme" /></div>
 
         <div className="grid grid-cols-3 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Contribution Amount (Rs.) *</label>
-            <NumberInput value={form.contribution_amount} onChange={f('contribution_amount')} className="input" min={0} />
+            <NumberInput value={form.contribution_amount} onChange={f('contribution_amount')} disabled={Boolean(form.template_id)} className="input disabled:opacity-60" min={0} />
             <p className="text-[11px] text-slate-500 mt-1">Paid per member, per cycle</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Duration (months) *</label>
-            <NumberInput value={form.cycle_count} onChange={f('cycle_count')} className="input" min={1} />
+            <NumberInput value={form.cycle_count} onChange={f('cycle_count')} disabled={Boolean(form.template_id)} className="input disabled:opacity-60" min={1} />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Product Value (Rs.) *</label>
-            <NumberInput value={form.chit_value} onChange={f('chit_value')} className="input" min={0} />
+            <NumberInput value={form.chit_value} onChange={f('chit_value')} disabled={Boolean(form.template_id)} className="input disabled:opacity-60" min={0} />
             <p className="text-[11px] text-slate-500 mt-1">What a winner receives</p>
           </div>
         </div>
