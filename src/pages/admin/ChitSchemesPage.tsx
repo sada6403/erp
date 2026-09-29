@@ -18,6 +18,8 @@ export default function ChitSchemesPage() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
   const isSuperAdmin = Boolean(((user?.role as unknown as Row)?.permissions as Row)?.all)
+  const ownBranchId = String(user?.branch?.id || user?.branch_id || '')
+  const ownBranchName = String(user?.branch?.name || 'Your branch')
   const [schemes, setSchemes] = useState<Row[]>([])
   const [purging, setPurging] = useState<Row | null>(null)
   const [branches, setBranches] = useState<Row[]>([])
@@ -26,7 +28,7 @@ export default function ChitSchemesPage() {
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [search, setSearch] = useState('')
-  const [branchFilter, setBranchFilter] = useState('')
+  const [branchFilter, setBranchFilter] = useState(isSuperAdmin ? '' : ownBranchId)
   const [statusFilter, setStatusFilter] = useState('')
   const [exporting, setExporting] = useState(false)
 
@@ -171,10 +173,16 @@ export default function ChitSchemesPage() {
           <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or scheme number..." className="input pl-8 text-sm" />
         </div>
-        <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input text-sm w-auto">
-          <option value="">All Branches</option>
-          {branches.map(b => <option key={b.id as string} value={b.id as string}>{b.name as string}</option>)}
-        </select>
+        {isSuperAdmin ? (
+          <select value={branchFilter} onChange={e => setBranchFilter(e.target.value)} className="input text-sm w-auto">
+            <option value="">All Branches</option>
+            {branches.map(b => <option key={b.id as string} value={b.id as string}>{b.name as string}</option>)}
+          </select>
+        ) : (
+          <div className="input text-sm w-auto flex items-center opacity-80" title="Smart Buy Managers are restricted to their login branch">
+            {ownBranchName}
+          </div>
+        )}
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="input text-sm w-auto">
           <option value="">All Statuses</option>
           <option value="pending">Pending</option>
@@ -258,6 +266,7 @@ export default function ChitSchemesPage() {
 
       {showForm && (
         <ChitSchemeForm branches={branches} agents={agents} templates={templates} isSuperAdmin={isSuperAdmin}
+          ownBranchId={ownBranchId} ownBranchName={ownBranchName}
           onClose={() => setShowForm(false)}
           onSave={(id) => { setShowForm(false); load(); navigate(`/admin/chits/${id}`) }} />
       )}
@@ -275,13 +284,14 @@ export default function ChitSchemesPage() {
   )
 }
 
-function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, onClose, onSave }: {
+function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, ownBranchId, ownBranchName, onClose, onSave }: {
   branches: Row[]; agents: Row[]; templates: Row[]; isSuperAdmin: boolean
+  ownBranchId: string; ownBranchName: string
   onClose: () => void; onSave: (id: string) => void
 }) {
   const [form, setForm] = useState({
     template_id: '', name: '', contribution_amount: 0, cycle_count: 12, chit_value: 0,
-    branch_id: '', agent_id: '', member_count: 0,
+    branch_id: isSuperAdmin ? '' : ownBranchId, agent_id: '', member_count: 0,
     early_redemption_count: 0, early_redemption_amount: 0,
     repayment_months: 12, agent_commission_pct: 0,
     start_date: new Date().toISOString().slice(0, 10), notes: '',
@@ -302,6 +312,9 @@ function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, onClose, on
   // already pre-filled above. Everything here still saves normally if left
   // untouched — this only changes what's visible, not the form's behavior.
   const [showAdvanced, setShowAdvanced] = useState(false)
+  const visibleAgents = isSuperAdmin
+    ? agents
+    : agents.filter(agent => String(agent.branch_id || '') === ownBranchId)
   // A plain ref, not just the `saving` state, guards against a double-
   // click creating two live branch schemes — React state updates aren't
   // guaranteed to reflect in the DOM (disabling the button) before a
@@ -344,6 +357,7 @@ function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, onClose, on
 
   const save = async () => {
     if (submittingRef.current) return
+    if (!isSuperAdmin && !ownBranchId) { toast.error('Your login is not assigned to a branch'); return }
     if (!isSuperAdmin && !form.template_id) { toast.error('Select a Scheme Master template'); return }
     if (!form.name.trim()) { toast.error('Enter a scheme name'); return }
     if (form.contribution_amount <= 0) { toast.error('Enter the contribution amount'); return }
@@ -447,16 +461,23 @@ function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, onClose, on
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Branch</label>
-            <select value={form.branch_id} onChange={f('branch_id')} className="input">
-              <option value="">— Select —</option>
-              {branches.map(b => <option key={b.id as string} value={b.id as string}>{b.name as string}</option>)}
-            </select>
+            {isSuperAdmin ? (
+              <select value={form.branch_id} onChange={f('branch_id')} className="input">
+                <option value="">— Select —</option>
+                {branches.map(b => <option key={b.id as string} value={b.id as string}>{b.name as string}</option>)}
+              </select>
+            ) : (
+              <div className={`input flex items-center ${ownBranchId ? 'opacity-80' : 'border-red-500 text-red-400'}`}>
+                {ownBranchId ? ownBranchName : 'No branch assigned to this login'}
+              </div>
+            )}
+            {!isSuperAdmin && <p className="text-[11px] text-slate-500 mt-1">A manager can create schemes only for their login branch.</p>}
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Agent</label>
             <select value={form.agent_id} onChange={f('agent_id')} className="input">
               <option value="">— Select —</option>
-              {agents.map(a => <option key={a.id as string} value={a.id as string}>{a.name as string} ({a.code as string})</option>)}
+              {visibleAgents.map(a => <option key={a.id as string} value={a.id as string}>{a.name as string} ({a.code as string})</option>)}
             </select>
           </div>
         </div>
