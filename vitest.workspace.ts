@@ -38,10 +38,11 @@ export default defineWorkspace([
       testTimeout: 60_000,
       pool: 'forks',
       // Each integration file defines its own Electron/electron-store mocks
-      // and temp database. Run files sequentially, but in separate forked
-      // workers so a hoisted Electron mock cannot leak into the next file.
+      // and temp database. Run files sequentially (configured via --no-file-parallelism
+      // in package.json test:integration, since fileParallelism is a runner-level option
+      // not permitted in Vitest ProjectConfig), but in separate forked workers so
+      // a hoisted Electron mock cannot leak into the next file.
       isolate: true,
-      fileParallelism: false,
       poolOptions: { forks: { singleFork: false, isolate: true } },
     },
   },
