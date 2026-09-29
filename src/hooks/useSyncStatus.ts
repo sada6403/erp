@@ -36,7 +36,9 @@ export function useSyncStatus() {
   useEffect(() => {
     void refresh()
     const interval = setInterval(refresh, 10_000)
-    const unsubscribeDataChanged = window.api.on('sync:dataChanged', () => { void refresh() })
+    const unsubscribeDataChanged = typeof window.api.on === 'function'
+      ? window.api.on('sync:dataChanged', () => { void refresh() })
+      : () => undefined
     let onlineRefreshTimer: ReturnType<typeof setTimeout> | null = null
     const onOnline  = () => {
       setStatus(s => ({ ...s, online: true }))

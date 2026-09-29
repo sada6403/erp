@@ -2,6 +2,33 @@
 
 Internal release log. Not customer-facing.
 
+## 2.7.14 — 2026-09-29 — Smart Buy payments, sync recovery, and branch-safe scheme creation
+
+- Late Smart Buy payments now show the full cycle balance plus the applicable
+  late fee before collection. Late fees are charged once per cycle and never
+  count as installment principal or advance credit.
+- Pending-payment management now includes customer search and a clearer
+  required/paid/balance/late-charge/pay-now breakdown.
+- Smart Buy voucher balances can be printed with winner bills and remain
+  visible in the pending-voucher dashboard until fully used.
+- Cloud sync now repairs a missing Scheme → Member parent chain before retrying
+  a contribution, preventing Smart Buy payments from remaining permanently
+  failed with a foreign-key error.
+- Sync cursor compatibility was added for Smart Buy wallet, transfer,
+  commission-history, and payment-reminder tables.
+- The header warning dot now appears only for a real failed/error state;
+  ordinary pending work uses a pulsing Wi-Fi icon and refreshes immediately
+  after sync data changes.
+- The New Smart Buy Scheme form now exposes the required Scheme Master template
+  selector. Template-controlled financial fields auto-fill and are locked.
+- Smart Buy Managers are restricted to their login branch and that branch's
+  agents when creating a scheme. Cross-branch participation continues through
+  the existing invite/approve collaboration workflow. Super Admin retains
+  company-wide branch selection.
+
+Deployment order: deploy the backend first, then publish the Windows installer
+and updater metadata from `release/`.
+
 ## 2.7.0 — 2026-08-29 — Stock/inventory feature work + reporting
 
 Minor version bump (not a patch) — this release folds in feature work from
