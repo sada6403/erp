@@ -176,6 +176,7 @@ const api = {
       list:    (filters?: unknown) => ipcRenderer.invoke('chits:reminders:list', filters),
     },
     contributions: {
+      quote:            (memberId: string, cycleNo: number, paidAt?: string) => ipcRenderer.invoke('chits:contributions:quote', memberId, cycleNo, paidAt),
       record:           (memberId: string, payload: unknown) => ipcRenderer.invoke('chits:contributions:record', memberId, payload),
       verify:            (id: string, action: 'approve' | 'reject', notes?: string) => ipcRenderer.invoke('chits:contributions:verify', id, action, notes),
       pendingTransfers: (filters?: unknown) => ipcRenderer.invoke('chits:contributions:pendingTransfers', filters),

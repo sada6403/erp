@@ -367,7 +367,8 @@ function computeMemberCycleBalance(
   db: ReturnType<typeof getDb>, memberId: string, schemeId: string, cycleNo: number, expectedAmount: number
 ): { expectedAmount: number; paidAmount: number; creditUsed: number; balanceDue: number } {
   const row = db.prepare(`
-    SELECT COALESCE(SUM(amount), 0) as paid, COALESCE(SUM(credit_applied), 0) as creditUsed
+    SELECT COALESCE(SUM(amount - COALESCE(late_fee_applied, 0)), 0) as paid,
+      COALESCE(SUM(credit_applied), 0) as creditUsed
     FROM chit_contributions
     WHERE member_id=? AND scheme_id=? AND cycle_no=? AND contribution_type='cycle' AND status='approved'
   `).get(memberId, schemeId, cycleNo) as { paid: number; creditUsed: number }
@@ -427,7 +428,7 @@ function eligibleMembersForDraw(db: ReturnType<typeof getDb>, schemeId: string, 
 // dashboard, and reports all derive "is this cycle ready" from the exact
 // same numbers as eligibleMembersForDraw — never a second, divergent count.
 function cyclePaymentProgress(db: ReturnType<typeof getDb>, schemeId: string, cycleNo: number) {
-  const scheme = db.prepare('SELECT contribution_amount FROM chit_schemes WHERE id=?').get(schemeId) as { contribution_amount: number } | undefined
+  const scheme = db.prepare('SELECT contribution_amount, start_date, late_payment_days, late_fee_amount FROM chit_schemes WHERE id=?').get(schemeId) as Record<string, unknown> | undefined
   const expectedAmount = money(Number(scheme?.contribution_amount) || 0)
   const candidates = activeCandidatesForCycle(db, schemeId, cycleNo)
 
@@ -446,10 +447,12 @@ function cyclePaymentProgress(db: ReturnType<typeof getDb>, schemeId: string, cy
     } else {
       if (settled > 0) countPartial++
       else countPending++
+      const quote = contributionQuote(db, m, { ...scheme, id: schemeId }, cycleNo, new Date().toISOString())
       pendingMembers.push({
         member_id: m.id, customer_name: m.customer_name, customer_phone: m.customer_phone,
         agent_id: m.agent_id, join_order: m.join_order,
         required_amount: expectedAmount, paid_amount: settled, balance: balance.balanceDue,
+        due_date: quote.dueDate, late_fee: quote.lateFee, total_payable: quote.totalPayable,
         status: settled > 0 ? 'partial' : 'pending',
       })
     }
@@ -496,6 +499,34 @@ function cycleDueDate(startDate: string, cycleNo: number, latePaymentDays: numbe
   const start = new Date(startDate)
   const due = new Date(start.getFullYear(), start.getMonth() + (cycleNo - 1), Math.min(day, 28))
   return due.toISOString().slice(0, 10)
+}
+
+function contributionQuote(
+  db: ReturnType<typeof getDb>, member: Record<string, unknown>, scheme: Record<string, unknown>,
+  cycleNo: number, paidAt: string
+) {
+  const balance = computeMemberCycleBalance(db, String(member.id), String(member.scheme_id), cycleNo, Number(scheme.contribution_amount) || 0)
+  const dueDate = cycleDueDate(String(scheme.start_date), cycleNo, Number(scheme.late_payment_days) || 0)
+  const paymentDate = String(paidAt || new Date().toISOString()).slice(0, 10)
+  const isLate = paymentDate > dueDate && balance.balanceDue > 0.01
+  const charged = db.prepare(`
+    SELECT COALESCE(SUM(late_fee_applied), 0) as total
+    FROM chit_contributions
+    WHERE member_id=? AND scheme_id=? AND cycle_no=? AND status IN ('approved','pending_verification')
+  `).get(member.id, member.scheme_id, cycleNo) as { total: number }
+  const lateFee = isLate && Number(charged.total || 0) <= 0.005 ? money(Number(scheme.late_fee_amount) || 0) : 0
+  const availableCredit = money(Number(member.credit_balance) || 0)
+  const creditUsable = money(Math.min(availableCredit, balance.balanceDue))
+  const cashPrincipalDue = money(Math.max(0, balance.balanceDue - creditUsable))
+  return {
+    cycleNo, dueDate, paymentDate, isLate,
+    installmentAmount: balance.expectedAmount,
+    paidPrincipal: balance.paidAmount,
+    creditAlreadyUsed: balance.creditUsed,
+    balanceDue: balance.balanceDue,
+    availableCredit, creditUsable, cashPrincipalDue,
+    lateFee, totalPayable: money(cashPrincipalDue + lateFee),
+  }
 }
 
 export function registerChitHandlers(ipcMain: IpcMain) {
@@ -2470,8 +2501,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       }
     }
 
-    let amount = money(Number(payload.amount) || 0)
-    if (amount <= 0) return { success: false, error: 'Enter a valid amount' }
+    const principalAmount = money(Number(payload.amount) || 0)
+    if (principalAmount <= 0) return { success: false, error: 'Enter a valid amount' }
     const method = String(payload.method || 'cash')
     const status = method === 'bank_transfer' ? 'pending_verification' : 'approved'
     const contributionId = crypto.randomUUID()
@@ -2493,14 +2524,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     // computeMemberCycleBalance's comment for the known, accepted
     // trade-off (a late fee can end up contributing toward carried-forward
     // credit rather than being purely punitive).
-    let lateFeeApplied = 0
-    if (Number(scheme.late_payment_days) > 0 && Number(scheme.late_fee_amount) > 0) {
-      const dayOfMonth = new Date(paidAt).getDate()
-      if (dayOfMonth > Number(scheme.late_payment_days)) {
-        lateFeeApplied = money(Number(scheme.late_fee_amount))
-        amount = money(amount + lateFeeApplied)
-      }
-    }
+    const lateFeeApplied = cycleNo !== null
+      ? contributionQuote(db, member, scheme, cycleNo, paidAt).lateFee
+      : (Number(scheme.late_payment_days) > 0 && new Date(paidAt).getDate() > Number(scheme.late_payment_days)
+          ? money(Number(scheme.late_fee_amount) || 0) : 0)
+    const amount = money(principalAmount + lateFeeApplied)
 
     // Auto credit-application (only ever for an immediately-approved
     // payment against a real cycle — a bank-transfer submission sitting at
@@ -2511,9 +2539,9 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     let creditBalanceAfter = Number(member.credit_balance) || 0
     let cycleStatusAfter: { paidAmount: number; creditUsed: number; balanceDue: number } | null = null
     if (status === 'approved' && balanceBefore) {
-      const shortfallAfterCash = money(Math.max(0, balanceBefore.balanceDue - amount))
+      const shortfallAfterCash = money(Math.max(0, balanceBefore.balanceDue - principalAmount))
       creditApplied = shortfallAfterCash > 0 ? money(Math.min(creditBalanceAfter, shortfallAfterCash)) : 0
-      const newPaidTotal = money(balanceBefore.paidAmount + amount)
+      const newPaidTotal = money(balanceBefore.paidAmount + principalAmount)
       const newCreditUsedTotal = money(balanceBefore.creditUsed + creditApplied)
       const overshoot = money(Math.max(0, (newPaidTotal + newCreditUsedTotal) - balanceBefore.expectedAmount))
       creditBalanceAfter = money(creditBalanceAfter - creditApplied + overshoot)
@@ -2526,6 +2554,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const row: Record<string, unknown> = {
       id: contributionId, scheme_id: member.scheme_id, member_id: memberId,
       cycle_no: cycleNo, contribution_type: 'cycle', amount, method, credit_applied: creditApplied,
+      late_fee_applied: lateFeeApplied,
       receipt_number: payload.receipt_number || null, reference: payload.reference || null,
       status, received_by: caller.id || null, collected_by_agent_id: collectedByAgentId,
       branch_id: scheme.branch_id,
@@ -2541,9 +2570,9 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       db.prepare(`
         INSERT INTO chit_contributions
           (id, scheme_id, member_id, cycle_no, contribution_type, amount, method, credit_applied, receipt_number,
-           reference, status, received_by, collected_by_agent_id, branch_id, commission_amount, notes, paid_at)
+           reference, status, received_by, collected_by_agent_id, branch_id, commission_amount, late_fee_applied, notes, paid_at)
         VALUES (@id,@scheme_id,@member_id,@cycle_no,@contribution_type,@amount,@method,@credit_applied,@receipt_number,
-           @reference,@status,@received_by,@collected_by_agent_id,@branch_id,@commission_amount,@notes,@paid_at)
+           @reference,@status,@received_by,@collected_by_agent_id,@branch_id,@commission_amount,@late_fee_applied,@notes,@paid_at)
       `).run(row)
       if (status === 'approved') {
         db.prepare(`
@@ -2553,7 +2582,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       logAudit(db, {
         userId: (caller.id as string) || null, branchId: (scheme.branch_id as string) || null,
         action: 'CHIT_CONTRIBUTION', tableName: 'chit_contributions', recordId: contributionId,
-        newValues: { amount, method, cycleNo, creditApplied },
+        newValues: { amount, principalAmount, lateFeeApplied, method, cycleNo, creditApplied },
       })
     })()
 
@@ -2576,6 +2605,21 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         } : {}),
       },
     }
+  })
+
+  safeHandle(ipcMain, 'chits:contributions:quote', (_e, memberId: string, cycleNo: number, paidAt?: string) => {
+    const perms = currentPerms()
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
+    const db = getDb()
+    const caller = authUser()
+    const member = db.prepare('SELECT * FROM chit_members WHERE id=?').get(memberId) as Record<string, unknown> | undefined
+    if (!member) return { success: false, error: 'Member not found' }
+    const scheme = db.prepare('SELECT * FROM chit_schemes WHERE id=?').get(member.scheme_id) as Record<string, unknown> | undefined
+    if (!scheme || !assertMemberAccess(perms, caller, scheme as { branch_id: unknown }, member)) {
+      return { success: false, error: 'You do not have access to this member' }
+    }
+    const resolvedCycle = Math.max(1, Number(cycleNo) || currentCycleNo(db, String(member.scheme_id)))
+    return { success: true, data: contributionQuote(db, member, scheme, resolvedCycle, paidAt || new Date().toISOString()) }
   })
 
   safeHandle(ipcMain, 'chits:contributions:verify', async (_e, contributionId: string, action: 'approve' | 'reject', notes?: string) => {
@@ -2624,9 +2668,10 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         const scheme = db.prepare('SELECT contribution_amount FROM chit_schemes WHERE id=?').get(contribution.scheme_id) as { contribution_amount: number } | undefined
         const balanceBefore = computeMemberCycleBalance(db, String(contribution.member_id), String(contribution.scheme_id), Number(contribution.cycle_no), Number(scheme?.contribution_amount) || 0)
         const amount = Number(contribution.amount) || 0
-        const shortfallAfterCash = money(Math.max(0, balanceBefore.balanceDue - amount))
+        const principalAmount = money(Math.max(0, amount - Number(contribution.late_fee_applied || 0)))
+        const shortfallAfterCash = money(Math.max(0, balanceBefore.balanceDue - principalAmount))
         creditApplied = shortfallAfterCash > 0 ? money(Math.min(creditBalanceAfter, shortfallAfterCash)) : 0
-        const newPaidTotal = money(balanceBefore.paidAmount + amount)
+        const newPaidTotal = money(balanceBefore.paidAmount + principalAmount)
         const newCreditUsedTotal = money(balanceBefore.creditUsed + creditApplied)
         const overshoot = money(Math.max(0, (newPaidTotal + newCreditUsedTotal) - balanceBefore.expectedAmount))
         creditBalanceAfter = money(creditBalanceAfter - creditApplied + overshoot)

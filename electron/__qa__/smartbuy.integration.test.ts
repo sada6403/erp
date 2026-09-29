@@ -4964,6 +4964,47 @@ describe('SmartBuy QA', () => {
     }
   })
 
+  it('late-payment quote shows the full cycle total, charges once, and never turns the fee into cycle credit', async () => {
+    setSession(mgrA)
+    const schemeRes = await createSchemeViaTemplate({
+      name: 'QA Late Payment Quote', branch_id: BR_A, product_id: PROD1,
+      member_count: 1, cycle_count: 2, min_members: 1,
+      chit_value: 2000, contribution_amount: 1000,
+      start_date: '2025-01-01', late_payment_days: 5, late_fee_amount: 200,
+    })
+    expect(schemeRes.success).toBe(true)
+    const member = await call('chits:members:add', schemeRes.data.id, {
+      customer_name: 'Late Quote Customer', customer_phone: '0771199001', agent_id: AGENT_REG,
+    })
+    expect(member.success).toBe(true)
+
+    const quote1 = await call('chits:contributions:quote', member.data.id, 1, '2026-02-10')
+    expect(quote1.success).toBe(true)
+    expect(quote1.data.balanceDue).toBe(1000)
+    expect(quote1.data.lateFee).toBe(200)
+    expect(quote1.data.totalPayable).toBe(1200)
+
+    const part1 = await call('chits:contributions:record', member.data.id, {
+      amount: 400, method: 'cash', cycle_no: 1, paid_at: '2026-02-10',
+    })
+    expect(part1.success).toBe(true)
+    expect(part1.data.amount).toBe(600)
+    expect(part1.data.lateFeeApplied).toBe(200)
+
+    const quote2 = await call('chits:contributions:quote', member.data.id, 1, '2026-02-11')
+    expect(quote2.data.balanceDue).toBe(600)
+    expect(quote2.data.lateFee).toBe(0)
+    expect(quote2.data.totalPayable).toBe(600)
+
+    const part2 = await call('chits:contributions:record', member.data.id, {
+      amount: 600, method: 'cash', cycle_no: 1, paid_at: '2026-02-11',
+    })
+    expect(part2.success).toBe(true)
+    expect(part2.data.balanceDue).toBe(0)
+    const savedMember = db.prepare('SELECT credit_balance FROM chit_members WHERE id=?').get(member.data.id) as { credit_balance: number }
+    expect(Number(savedMember.credit_balance)).toBe(0)
+  })
+
   it('SUMMARY: print all findings', () => {
     console.log('\n\n=== QA FINDINGS SUMMARY ===')
     if (findings.length === 0) console.log('No findings recorded by inline checks.')

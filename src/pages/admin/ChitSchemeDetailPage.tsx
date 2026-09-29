@@ -1014,6 +1014,7 @@ function CyclePaymentsTab({ schemeId, nextCycle }: { schemeId: string; nextCycle
   const [payingMember, setPayingMember] = useState<Row | null>(null)
   const [remindingMemberId, setRemindingMemberId] = useState<string | null>(null)
   const [historyMemberId, setHistoryMemberId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   const load = () => {
     setLoading(true)
@@ -1031,6 +1032,10 @@ function CyclePaymentsTab({ schemeId, nextCycle }: { schemeId: string; nextCycle
   const paidMembers = Number(progress.paidMembers || 0)
   const pct = totalMembers > 0 ? Math.round((paidMembers / totalMembers) * 100) : 0
   const pendingMembers = (progress.pendingMembers || []) as Row[]
+  const filteredPending = pendingMembers.filter(pm => {
+    const q = search.trim().toLowerCase()
+    return !q || String(pm.customer_name || '').toLowerCase().includes(q) || String(pm.customer_phone || '').toLowerCase().includes(q)
+  })
   const statusLabel = totalMembers === 0 ? 'No active members' : paidMembers >= totalMembers ? 'Ready for Manual Draw' : 'Waiting for Payments'
 
   return (
@@ -1053,26 +1058,32 @@ function CyclePaymentsTab({ schemeId, nextCycle }: { schemeId: string; nextCycle
       </div>
 
       <div>
-        <p className="text-sm font-semibold mb-2" style={{ color: 'var(--text-1)' }}>Pending Members</p>
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Pending Members</p>
+          <input value={search} onChange={e => setSearch(e.target.value)} className="input max-w-xs" placeholder="Search name or phone..." />
+        </div>
         <div className="overflow-x-auto rounded-lg border" style={{ borderColor: 'var(--border)' }}>
           <table className="w-full text-sm">
             <thead>
               <tr style={{ background: 'var(--bg-soft)' }}>
-                {['Member', 'Phone', 'Required', 'Paid', 'Balance', 'Status', ''].map(h => (
+                {['Member', 'Phone', 'Due Date', 'Required', 'Paid', 'Balance', 'Late Charge', 'Pay Now', 'Status', ''].map(h => (
                   <th key={h} className="px-3 py-2 text-left text-xs font-semibold" style={{ color: 'var(--text-3)' }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {pendingMembers.length === 0 ? (
-                <tr><td colSpan={7} className="text-center py-8" style={{ color: 'var(--text-3)' }}>Everyone has paid — cycle is ready for the draw</td></tr>
-              ) : pendingMembers.map(pm => (
+              {filteredPending.length === 0 ? (
+                <tr><td colSpan={10} className="text-center py-8" style={{ color: 'var(--text-3)' }}>{pendingMembers.length ? 'No matching customer' : 'Everyone has paid — cycle is ready for the draw'}</td></tr>
+              ) : filteredPending.map(pm => (
                 <tr key={pm.member_id as string} className="border-t" style={{ borderColor: 'var(--border)' }}>
                   <td className="px-3 py-2" style={{ color: 'var(--text-1)' }}>{(pm.customer_name as string) || '—'}</td>
                   <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-3)' }}>{(pm.customer_phone as string) || '—'}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-3)' }}>{String(pm.due_date || '—')}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-xs">Rs.{money(pm.required_amount)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-xs">Rs.{money(pm.paid_amount)}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: '#f59e0b' }}>Rs.{money(pm.balance)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums text-xs" style={{ color: Number(pm.late_fee || 0) > 0 ? '#f59e0b' : 'var(--text-3)' }}>Rs.{money(pm.late_fee)}</td>
+                  <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: '#f59e0b' }}>Rs.{money(pm.total_payable)}</td>
                   <td className="px-3 py-2"><span className={pm.status === 'partial' ? 'badge-yellow' : 'badge-gray'}>{pm.status as string}</span></td>
                   <td className="px-3 py-2">
                     <div className="flex gap-1">
@@ -1257,6 +1268,8 @@ function Row2({ label, value, bold, color }: { label: string; value: string; bol
 
 function RecordContributionModal({ member, schemeId, defaultCycleNo, onClose, onSave }: { member: Row; schemeId: string; defaultCycleNo: number; onClose: () => void; onSave: () => void }) {
   const [amount, setAmount] = useState(0)
+  const [quote, setQuote] = useState<Row | null>(null)
+  const [quoteLoading, setQuoteLoading] = useState(true)
   const [method, setMethod] = useState('cash')
   const [reference, setReference] = useState('')
   const [receiptNumber, setReceiptNumber] = useState('')
@@ -1282,6 +1295,22 @@ function RecordContributionModal({ member, schemeId, defaultCycleNo, onClose, on
       if (res.success) setAgents(res.data || [])
     }).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    setQuoteLoading(true)
+    window.api.chits.contributions.quote(String(member.id), cycleNo, paidAt).then((res: Row) => {
+      if (cancelled) return
+      if (res.success) {
+        const next = res.data as Row
+        setQuote(next)
+        setAmount(Number(next.cashPrincipalDue || 0))
+      } else toast.error(String(res.error || 'Failed to calculate cycle payment'))
+    }).catch((err: any) => {
+      if (!cancelled) toast.error(err.message || 'Failed to calculate cycle payment')
+    }).finally(() => { if (!cancelled) setQuoteLoading(false) })
+    return () => { cancelled = true }
+  }, [member.id, cycleNo, paidAt])
 
   const save = async () => {
     if (submittingRef.current) return
@@ -1311,10 +1340,32 @@ function RecordContributionModal({ member, schemeId, defaultCycleNo, onClose, on
 
   return (
     <Modal title={`Record Contribution — ${(member.customer_name as string) || 'Member'}`} onClose={onClose}
-      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Record Payment'}</button></>}>
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving || quoteLoading} className="btn-primary">{saving ? 'Saving...' : `Collect Rs.${money(amount + Number(quote?.lateFee || 0))}`}</button></>}>
       <div className="space-y-3">
+        <div className="rounded-xl border p-3" style={{ background: 'var(--bg-soft)', borderColor: Number(quote?.lateFee || 0) > 0 ? '#f59e0b' : 'var(--border)' }}>
+          {quoteLoading ? <p className="text-sm" style={{ color: 'var(--text-3)' }}>Calculating this cycle...</p> : quote ? (
+            <>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Cycle {cycleNo} Amount Due</p>
+                <span className={quote.isLate ? 'badge-yellow' : 'badge-green'}>{quote.isLate ? 'Late Payment' : 'On Time'}</span>
+              </div>
+              <div className="space-y-1 text-sm">
+                <Row2 label="Monthly installment" value={`Rs.${money(quote.installmentAmount)}`} />
+                <Row2 label="Already paid for cycle" value={`Rs.${money(Number(quote.paidPrincipal || 0) + Number(quote.creditAlreadyUsed || 0))}`} />
+                <Row2 label="Installment balance" value={`Rs.${money(quote.balanceDue)}`} />
+                {Number(quote.creditUsable || 0) > 0 && <Row2 label="Available credit applied" value={`- Rs.${money(quote.creditUsable)}`} color="#22c55e" />}
+                <Row2 label={`Late charge${quote.dueDate ? ` (due ${String(quote.dueDate)})` : ''}`} value={`Rs.${money(quote.lateFee)}`} color={Number(quote.lateFee || 0) > 0 ? '#f59e0b' : undefined} />
+                <div className="border-t pt-2 mt-2"><Row2 label="Full amount to collect now" value={`Rs.${money(quote.totalPayable)}`} bold color="#f59e0b" /></div>
+              </div>
+            </>
+          ) : null}
+        </div>
         <div className="grid grid-cols-2 gap-3">
-          <div><label className="block text-xs font-medium text-slate-400 mb-1">Amount (Rs.) *</label><NumberInput value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={0} /></div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Contribution amount (before charge) *</label>
+            <NumberInput value={amount} onChange={e => setAmount(parseFloat(e.target.value) || 0)} className="input" min={0} />
+            {quote && amount !== Number(quote.cashPrincipalDue || 0) && <button type="button" onClick={() => setAmount(Number(quote.cashPrincipalDue || 0))} className="text-xs text-brand-400 mt-1 hover:underline">Use full balance</button>}
+          </div>
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">For cycle #</label>
             <NumberInput value={cycleNo} onChange={e => setCycleNo(parseInt(e.target.value) || 1)} className="input" min={1} />

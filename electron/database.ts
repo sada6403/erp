@@ -904,6 +904,7 @@ function runMigrations(): void {
       rejected_reason       TEXT,
       branch_id             TEXT REFERENCES branches(id),
       commission_amount     REAL NOT NULL DEFAULT 0,
+      late_fee_applied      REAL NOT NULL DEFAULT 0,
       notes                 TEXT,
       paid_at               TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at            TEXT NOT NULL DEFAULT (datetime('now')),
@@ -1345,6 +1346,9 @@ function runMigrations(): void {
     // cash/method collected and credit-covered amounts as distinct lines.
     db.exec(`ALTER TABLE chit_contributions ADD COLUMN credit_applied REAL NOT NULL DEFAULT 0`)
   }
+  if (!hasColumn('chit_contributions', 'late_fee_applied')) {
+    db.exec(`ALTER TABLE chit_contributions ADD COLUMN late_fee_applied REAL NOT NULL DEFAULT 0`)
+  }
 
   // ── Centralized Scheme Master ────────────────────────────────────────
   // Super Admin-only catalog of reusable SmartBuy "products" (e.g.
@@ -1530,6 +1534,21 @@ function runMigrations(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_smartbuy_transfer_history_member ON smartbuy_transfer_history(member_id);
   `)
+
+  const smartBuyCursorTables: Array<[string, string]> = [
+    ['smartbuy_wallet_transactions', 'created_at'],
+    ['smartbuy_transfer_history', 'created_at'],
+    ['commission_approval_logs', 'created_at'],
+    ['commission_statement_history', 'generated_at'],
+    ['commission_rule_history', 'created_at'],
+    ['chit_payment_reminders', 'created_at'],
+  ]
+  for (const [table, timestampColumn] of smartBuyCursorTables) {
+    if (!hasColumn(table, 'updated_at')) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN updated_at TEXT`)
+      db.exec(`UPDATE ${table} SET updated_at=COALESCE(${timestampColumn}, datetime('now')) WHERE updated_at IS NULL`)
+    }
+  }
 
   // Edit requests — a branch manager/cashier wanting to correct an
   // already-completed invoice line item or a direct stock quantity must

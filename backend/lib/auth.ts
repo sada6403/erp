@@ -887,6 +887,7 @@ async function runTenantCompatibility(dbSchema: string) {
        rejected_reason   TEXT          NULL,
        branch_id         CHAR(36)      NULL,
        commission_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+       late_fee_applied  DECIMAL(14,2) NOT NULL DEFAULT 0,
        notes             TEXT          NULL,
        paid_at           DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
        updated_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -910,6 +911,7 @@ async function runTenantCompatibility(dbSchema: string) {
     `ALTER TABLE chit_contributions DROP COLUMN approved_cycle_marker`,
     `ALTER TABLE chit_members ADD COLUMN credit_balance DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_contributions ADD COLUMN credit_applied DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_contributions ADD COLUMN late_fee_applied DECIMAL(14,2) NOT NULL DEFAULT 0`,
 
     // ── Centralized Scheme Master — see the matching SQLite migration for
     // full rationale. A reusable, Super-Admin-only catalog of named SmartBuy
@@ -1303,6 +1305,12 @@ async function runTenantCompatibility(dbSchema: string) {
        INDEX idx_chit_payment_reminders_member (member_id),
        INDEX idx_chit_payment_reminders_scheme (scheme_id)
      )`,
+    `ALTER TABLE smartbuy_wallet_transactions ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE smartbuy_transfer_history ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE commission_approval_logs ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE commission_statement_history ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE commission_rule_history ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
+    `ALTER TABLE chit_payment_reminders ADD COLUMN updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP`,
 
     // ── POS cart "Hold" — see held_carts table comment in
     // electron/database.ts for why this is separate from invoices ────────
