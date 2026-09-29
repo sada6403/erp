@@ -2,6 +2,7 @@ import { getDb } from '../database'
 import Store from 'electron-store'
 import fs from 'fs'
 import path from 'path'
+import { createHash } from 'crypto'
 import { app, BrowserWindow } from 'electron'
 import { CloudApi, CloudRateLimitError, DeviceRevokedError } from './cloudApi'
 import { CLOUD_BRANDING_KEYS, decryptSecret, pushBrandingToCloud } from '../ipc/settings'
@@ -498,7 +499,7 @@ export class SyncService {
 
       const effectiveOp = (item.table_name === 'stocks' && item.operation === 'UPDATE') ? 'INSERT' : item.operation
       try {
-        await cloud.push({
+        await this.pushWithParentRepair(cloud, db, {
           table: item.table_name, operation: effectiveOp,
           recordId: item.record_id, record: normalizeForCloud(payload), eventId: item.id,
         })
@@ -508,7 +509,7 @@ export class SyncService {
           || !/^[a-z][a-z0-9_]*$/.test(item.table_name)) throw error
         const full = db.prepare(`SELECT * FROM ${item.table_name} WHERE id=?`).get(item.record_id) as Record<string, unknown> | undefined
         if (!full) throw error
-        await cloud.push({ table: item.table_name, operation: 'INSERT', recordId: item.record_id, eventId: item.id,
+        await this.pushWithParentRepair(cloud, db, { table: item.table_name, operation: 'INSERT', recordId: item.record_id, eventId: item.id,
           record: normalizeForCloud({ ...full, ...payload }) })
       }
 
@@ -535,6 +536,60 @@ export class SyncService {
       const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending'
       db.prepare(`UPDATE sync_queue SET status=?, attempts=?, last_error=? WHERE id=?`)
         .run(status, attempts, message, item.id)
+    }
+  }
+
+  private async pushWithParentRepair(
+    cloud: CloudApi,
+    db: ReturnType<typeof getDb>,
+    request: {
+      table: string
+      operation: string
+      recordId: string
+      record: Record<string, unknown>
+      eventId: string
+    },
+    ancestors = new Set<string>()
+  ): Promise<void> {
+    try {
+      await cloud.push(request)
+      return
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const missingColumn = message.match(/FOREIGN KEY \(`([^`]+)`\)/i)?.[1]
+      if (!missingColumn || !/^[a-z][a-z0-9_]*$/.test(request.table)) throw error
+
+      const foreignKey = (db.prepare(`PRAGMA foreign_key_list(${this.quoteLocalIdentifier(request.table)})`).all() as Array<{
+        table: string; from: string; to: string
+      }>).find(candidate => candidate.from === missingColumn && candidate.to === 'id')
+      if (!foreignKey || !/^[a-z][a-z0-9_]*$/.test(foreignKey.table)) throw error
+
+      const parentIdValue = request.record[missingColumn]
+      if (parentIdValue === null || parentIdValue === undefined || parentIdValue === '') throw error
+      const parentId = String(parentIdValue)
+      const parentKey = `${foreignKey.table}:${parentId}`
+      if (ancestors.has(parentKey)) throw error
+
+      const parent = db.prepare(`SELECT * FROM ${this.quoteLocalIdentifier(foreignKey.table)} WHERE id=? LIMIT 1`)
+        .get(parentId) as Record<string, unknown> | undefined
+      if (!parent) throw error
+
+      const nextAncestors = new Set(ancestors)
+      nextAncestors.add(parentKey)
+      const repairEventId = `parent-repair:${createHash('sha256')
+        .update(`${request.eventId}:${parentKey}`)
+        .digest('hex')}`
+      await this.pushWithParentRepair(cloud, db, {
+        table: foreignKey.table,
+        operation: 'INSERT',
+        recordId: parentId,
+        record: normalizeForCloud(parent),
+        eventId: repairEventId,
+      }, nextAncestors)
+
+      // The failed child transaction has no receipt, so the original event
+      // id remains safe to retry after its exact missing parent is restored.
+      await cloud.push(request)
     }
   }
 

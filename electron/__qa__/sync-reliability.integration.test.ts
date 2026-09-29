@@ -181,6 +181,36 @@ describe('Sync recovery and durable outbox', () => {
     expect(db.prepare('SELECT status FROM sync_queue WHERE id=?').get(item.id).status).toBe('synced')
   })
 
+  it('repairs a missing Smart Buy member chain before retrying its contribution', async () => {
+    db.prepare("INSERT INTO customers(id,name) VALUES ('sync-customer-parent','Sync Customer')").run()
+    db.prepare(`INSERT INTO chit_schemes
+      (id,name,member_count,cycle_count,contribution_amount,chit_value,start_date)
+      VALUES ('sync-scheme-parent','Sync Scheme',1,1,1000,1000,'2026-09-01')`).run()
+    db.prepare(`INSERT INTO chit_members(id,scheme_id,customer_id,join_order)
+      VALUES ('sync-member-parent','sync-scheme-parent','sync-customer-parent',1)`).run()
+    db.prepare(`INSERT INTO chit_contributions(id,scheme_id,member_id,cycle_no,amount)
+      VALUES ('sync-contribution-child','sync-scheme-parent','sync-member-parent',1,1000)`).run()
+    await enqueue('chit_contributions', 'sync-contribution-child', 'INSERT', {
+      id: 'sync-contribution-child', scheme_id: 'sync-scheme-parent', member_id: 'sync-member-parent', cycle_no: 1, amount: 1000,
+    })
+    const item = db.prepare('SELECT * FROM sync_queue').get()
+    const cloud = { push: vi.fn(async (request: any) => {
+      if (request.table === 'chit_contributions' && cloud.push.mock.calls.filter((call: any[]) => call[0].table === 'chit_contributions').length === 1) {
+        throw new Error('Cannot add or update a child row: FOREIGN KEY (`member_id`) REFERENCES `chit_members` (`id`)')
+      }
+      if (request.table === 'chit_members' && cloud.push.mock.calls.filter((call: any[]) => call[0].table === 'chit_members').length === 1) {
+        throw new Error('Cannot add or update a child row: FOREIGN KEY (`scheme_id`) REFERENCES `chit_schemes` (`id`)')
+      }
+    }) }
+
+    await service.syncItem(cloud, item, db)
+
+    expect(cloud.push.mock.calls.map((call: any[]) => call[0].table)).toEqual([
+      'chit_contributions', 'chit_members', 'chit_schemes', 'chit_members', 'chit_contributions',
+    ])
+    expect(db.prepare('SELECT status FROM sync_queue WHERE id=?').get(item.id).status).toBe('synced')
+  })
+
   it('does not send a later deletion while its earlier create is failing', async () => {
     await enqueue('products', 'ordered', 'INSERT', { id: 'ordered', name: 'New' })
     const first = db.prepare('SELECT * FROM sync_queue').get()
