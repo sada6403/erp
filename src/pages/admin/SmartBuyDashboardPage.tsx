@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
-import { Coins, Users, Wallet, Shuffle, AlertCircle, GitBranch, Check, X, Package, Trophy, Clock, TrendingUp, Layers, Plus, UserPlus, Handshake, ChevronRight, Target } from 'lucide-react'
+import { Coins, Users, Wallet, Shuffle, AlertCircle, GitBranch, Check, X, Package, Trophy, Clock, TrendingUp, Layers, Plus, UserPlus, Handshake, ChevronRight, Target, Printer } from 'lucide-react'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import toast from 'react-hot-toast'
 
@@ -47,6 +47,7 @@ export default function SmartBuyDashboardPage() {
   const recentDraws = (data.recent_draws || []) as Row[]
   const agentsWithBalance = (data.agents_with_balance || []) as Row[]
   const pendingFinalClaims = (data.pending_final_claims || []) as Row[]
+  const pendingVoucherBalances = (data.pending_voucher_balances || []) as Row[]
   const activeCycleAlerts = (data.active_cycle_alerts || []) as Row[]
   const branchRanking = (data.branch_ranking || []) as Row[]
   const agentRanking = (data.agent_ranking || []) as Row[]
@@ -57,6 +58,14 @@ export default function SmartBuyDashboardPage() {
   const schemeRegistrationsTrend = ((data.monthly_scheme_registrations || []) as Row[]).map(r => ({ month: (r.month as string)?.slice(5), total: Number(r.total || 0) }))
   const winnerTimeline = ((data.winner_timeline || []) as Row[]).map(r => ({ month: (r.month as string)?.slice(5), winners: Number(r.winners || 0) }))
   const tooltipStyle = { background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }
+
+  const printVoucher = async (voucherId: string) => {
+    try {
+      const res = await window.api.printer.printSmartBuyVouchers([voucherId])
+      if (res.success) toast.success('Smart Buy voucher printed')
+      else toast.error(String(res.error || 'Voucher print failed'))
+    } catch (err) { toast.error((err as Error)?.message || 'Voucher print failed') }
+  }
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -144,6 +153,41 @@ export default function SmartBuyDashboardPage() {
                   <span className="badge-yellow">{Number(c.pending_count || 0)} pending</span>
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {pendingVoucherBalances.length > 0 && (
+          <div className="rounded-xl border overflow-hidden" style={{ background: 'var(--bg-card)', borderColor: '#d97706' }}>
+            <div className="flex items-center justify-between gap-3 px-4 py-3" style={{ background: 'color-mix(in srgb, #f59e0b 10%, transparent)' }}>
+              <div>
+                <p className="flex items-center gap-1.5 text-sm font-semibold" style={{ color: 'var(--text-1)' }}><Wallet size={14} /> Winner Voucher Balance Pending</p>
+                <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>Customer-wise amount still available after product billing</p>
+              </div>
+              <div className="text-right">
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>{Number(data.pending_voucher_count || pendingVoucherBalances.length)} voucher(s)</p>
+                <p className="text-lg font-bold text-amber-500">Rs.{money(data.pending_voucher_total)}</p>
+              </div>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead><tr style={{ color: 'var(--text-3)', borderBottom: '1px solid var(--border)' }}>
+                  <th className="px-4 py-2 text-left">Winner</th><th className="px-4 py-2 text-left">Scheme</th>
+                  <th className="px-4 py-2 text-left">Voucher</th><th className="px-4 py-2 text-right">Prize</th>
+                  <th className="px-4 py-2 text-right">Used</th><th className="px-4 py-2 text-right">Still Due</th><th className="px-4 py-2" />
+                </tr></thead>
+                <tbody>
+                  {pendingVoucherBalances.map(v => <tr key={v.voucher_id as string} style={{ borderBottom: '1px solid var(--border)' }}>
+                    <td className="px-4 py-2"><p className="font-medium" style={{ color: 'var(--text-1)' }}>{String(v.customer_name || 'Customer')}</p><p className="text-xs" style={{ color: 'var(--text-3)' }}>{String(v.customer_phone || '')}</p></td>
+                    <td className="px-4 py-2" style={{ color: 'var(--text-2)' }}>{String(v.scheme_name || '—')} <span className="text-xs">{v.scheme_number ? `(${String(v.scheme_number)})` : ''}</span></td>
+                    <td className="px-4 py-2 font-mono text-xs" style={{ color: 'var(--text-2)' }}>{String(v.voucher_code)}</td>
+                    <td className="px-4 py-2 text-right">Rs.{money(v.initial_value)}</td>
+                    <td className="px-4 py-2 text-right">Rs.{money(v.used_value)}</td>
+                    <td className="px-4 py-2 text-right font-bold text-amber-500">Rs.{money(v.balance)}</td>
+                    <td className="px-4 py-2 text-right"><button onClick={() => printVoucher(String(v.voucher_id))} className="btn-secondary btn-sm gap-1" title="Print / reprint voucher"><Printer size={13} /> Print</button></td>
+                  </tr>)}
+                </tbody>
+              </table>
             </div>
           </div>
         )}

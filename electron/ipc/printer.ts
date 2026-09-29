@@ -37,8 +37,49 @@ export function registerPrinterHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'printer:printInvoice', async (_e, payload: InvoicePayload) => {
     const settings = store.get('app_settings') as Record<string, unknown> || {}
-    const design = normalizeInvoiceDesign(payload.invoice_design || settings.invoice_active_design || 'thermal')
-    const html = await resolveInvoiceHtml(payload, settings, design)
+    // Never trust the renderer for a SmartBuy balance printed on a bill.
+    // Resolve it from the committed invoice/redemption rows so reprints show
+    // the same current voucher and no sale can invent a balance.
+    const voucher = getDb().prepare(`
+      SELECT cp.code, cp.balance, cp.smartbuy_entitlement_value,
+        cr.amount as amount_used, cs.name as scheme_name
+      FROM invoices i
+      JOIN coupon_redemptions cr ON cr.invoice_id = i.id AND cr.type = 'redeem'
+      JOIN coupons cp ON cp.id = cr.coupon_id AND cp.source_type = 'smartbuy_redemption'
+      LEFT JOIN chit_schemes cs ON cs.id = cp.smartbuy_scheme_id
+      WHERE i.invoice_number = ?
+      ORDER BY cr.created_at DESC LIMIT 1
+    `).get(String(payload.invoice_number || '')) as Record<string, unknown> | undefined
+    const trustedPayload: InvoicePayload = voucher ? {
+      ...payload,
+      smartbuy_voucher: {
+        code: String(voucher.code), amount_used: Number(voucher.amount_used || 0),
+        balance: Number(voucher.balance || 0),
+        entitlement_value: Number(voucher.smartbuy_entitlement_value || 0),
+        scheme_name: voucher.scheme_name ? String(voucher.scheme_name) : undefined,
+      },
+    } : payload
+    const design = normalizeInvoiceDesign(trustedPayload.invoice_design || settings.invoice_active_design || 'thermal')
+    let html = await resolveInvoiceHtml(trustedPayload, settings, design)
+    // Advanced/pre-printed layouts do not render the built-in invoice's
+    // SmartBuy block. Append a compact fallback so every invoice design still
+    // hands the winner written proof of the balance owed.
+    if (voucher && !html.includes('data-smartbuy-voucher="true"')) {
+      const safe = (value: unknown) => String(value ?? '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#039;')
+      const currency = safe(settings.currency_symbol || 'Rs.')
+      const fmt = (value: unknown) => `${currency}${Number(value || 0).toLocaleString('en', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+      const slip = `<div data-smartbuy-voucher="true" style="margin:12px;padding:12px;border:2px solid #d97706;background:#fffbeb;color:#78350f;text-align:center;font-family:Arial,sans-serif">
+        <div style="font-size:11px;font-weight:800;text-transform:uppercase">Smart Buy Voucher Balance</div>
+        <div style="font-size:15px;font-weight:800;margin-top:5px">${safe(voucher.code)}</div>
+        ${voucher.scheme_name ? `<div style="font-size:10px;margin-top:3px">${safe(voucher.scheme_name)}</div>` : ''}
+        <div style="font-size:12px;margin-top:5px">Used on this bill: <strong>${fmt(voucher.amount_used)}</strong></div>
+        <div style="font-size:18px;font-weight:900;margin-top:3px">Remaining: ${fmt(voucher.balance)}</div>
+        <div style="font-size:9px;margin-top:5px">Keep this bill and voucher number for the next purchase.</div>
+      </div>`
+      html = html.includes('</body>') ? html.replace('</body>', `${slip}</body>`) : `${html}${slip}`
+    }
     const branchId = getCurrentBranchId()
     if (branchId) {
       await printHtmlForModule(html, 'invoice', { design, paperType: selectedPaperType(settings, design), branchId, deviceId: getCurrentDeviceId() })
@@ -591,4 +632,3 @@ function sendRawToPrinter(host: string, port: number, buffer: Buffer): Promise<{
     })
   })
 }
-

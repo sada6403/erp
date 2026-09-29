@@ -41,6 +41,13 @@ export interface InvoicePayload {
   payment_method: string
   payment_reference?: string
   payments?: PaymentLine[]
+  smartbuy_voucher?: {
+    code: string
+    amount_used: number
+    balance: number
+    entitlement_value?: number
+    scheme_name?: string
+  }
 }
 
 function settingBool(settings: Record<string, unknown>, key: string, fallback: boolean): boolean {
@@ -194,6 +201,16 @@ async function buildInvoiceHtml(payload: InvoicePayload, settings: Record<string
         ${payment.reference
           ? `<div class="prow pref"><span class="pl">${payment.method === 'gift_voucher' ? 'Voucher No.' : payment.method === 'coupon' ? 'Coupon No.' : 'Reference'}</span><span class="pv">${esc(payment.reference)}</span></div>`
           : ''}`).join('')
+
+  const smartBuyVoucherHtml = payload.smartbuy_voucher ? `
+    <div class="note" data-smartbuy-voucher="true" style="border:2px solid #d97706;background:#fffbeb;color:#78350f;margin-top:16px;padding:12px;text-align:center">
+      <p style="font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.8px">Smart Buy Voucher Balance</p>
+      <p style="font-size:15px;font-weight:800;margin-top:5px">${esc(payload.smartbuy_voucher.code)}</p>
+      ${payload.smartbuy_voucher.scheme_name ? `<p style="font-size:10px;margin-top:3px">${esc(payload.smartbuy_voucher.scheme_name)}</p>` : ''}
+      <p style="font-size:12px;margin-top:5px">Used on this bill: <strong>${fmt(payload.smartbuy_voucher.amount_used)}</strong></p>
+      <p style="font-size:18px;font-weight:900;margin-top:3px">Remaining: ${fmt(payload.smartbuy_voucher.balance)}</p>
+      <p style="font-size:9px;margin-top:5px">Keep this bill and voucher number for the next purchase.</p>
+    </div>` : ''
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -438,6 +455,8 @@ tbody tr:nth-child(even){background:#fff!important}
       <div class="trow grand"><span class="tl">Total</span><span class="tv">${fmt(payload.total_amount)}</span></div>
     </div>
   </div>
+
+  ${smartBuyVoucherHtml}
 
   ${invoiceTerms ? `<div class="note"><p>${esc(invoiceTerms)}</p></div>` : ''}
 

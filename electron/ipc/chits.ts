@@ -4442,6 +4442,31 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       ORDER BY pending_count DESC
     `).all(...schemeParams)
 
+    // Winner entitlement still owed as spendable voucher value. This remains
+    // pending until the balance reaches zero, regardless of whether a card
+    // has already been printed, so staff always have one reliable due list.
+    const pendingVoucherBalances = db.prepare(`
+      SELECT cp.id as voucher_id, cp.code as voucher_code, cp.initial_value,
+        cp.balance, (cp.initial_value - cp.balance) as used_value,
+        cp.created_at, c.name as customer_name, c.phone as customer_phone,
+        cs.id as scheme_id, cs.name as scheme_name, cs.scheme_number
+      FROM coupons cp
+      JOIN chit_schemes cs ON cs.id = cp.smartbuy_scheme_id
+      LEFT JOIN customers c ON c.id = cp.customer_id
+      WHERE cp.source_type = 'smartbuy_redemption'
+        AND cp.balance > 0.005 AND cp.status = 'active'
+        ${branchId ? 'AND cp.branch_id = ?' : ''}
+      ORDER BY cp.balance DESC, cp.created_at ASC
+      LIMIT 100
+    `).all(...(branchId ? [branchId] : [])) as Record<string, unknown>[]
+    const pendingVoucherSummary = db.prepare(`
+      SELECT COUNT(*) as count, COALESCE(SUM(cp.balance), 0) as total
+      FROM coupons cp
+      WHERE cp.source_type = 'smartbuy_redemption'
+        AND cp.balance > 0.005 AND cp.status = 'active'
+        ${branchId ? 'AND cp.branch_id = ?' : ''}
+    `).get(...(branchId ? [branchId] : [])) as { count: number; total: number }
+
     // Branch Ranking — top branches by collection (company-wide view only;
     // a branch-scoped caller only ever has their own branch to rank).
     const branchRanking = db.prepare(`
@@ -4577,6 +4602,9 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         agents_with_balance: agentsWithBalance.slice(0, 10),
         recent_draws: recentDraws,
         pending_final_claims: pendingFinalClaims,
+        pending_voucher_balances: pendingVoucherBalances,
+        pending_voucher_count: Number(pendingVoucherSummary.count || 0),
+        pending_voucher_total: money(pendingVoucherSummary.total),
         branch_ranking: branchRanking,
         agent_ranking: agentRanking,
         monthly_collection_trend: monthlyCollectionTrend,
