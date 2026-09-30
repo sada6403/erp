@@ -579,6 +579,8 @@ CREATE TABLE IF NOT EXISTS sync_queue (
   operation    TEXT NOT NULL, -- INSERT|UPDATE|DELETE
   payload      TEXT NOT NULL, -- JSON
   attempts     INTEGER NOT NULL DEFAULT 0,
+  failure_cycles INTEGER NOT NULL DEFAULT 0,
+  next_retry_at TEXT,
   last_error   TEXT,
   status       TEXT NOT NULL DEFAULT 'pending', -- pending|processing|synced|failed
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
@@ -587,6 +589,30 @@ CREATE TABLE IF NOT EXISTS sync_queue (
 
 CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON sync_queue(status);
 CREATE INDEX IF NOT EXISTS idx_sync_queue_table  ON sync_queue(table_name, record_id);
+
+-- Incoming cloud rows that cannot be applied locally are isolated here.
+-- A bad relationship/schema row must never hold back the table cursor or
+-- unrelated business data. Background sync retries these records every cycle.
+CREATE TABLE IF NOT EXISTS sync_pull_quarantine (
+  id                TEXT PRIMARY KEY,
+  table_name        TEXT NOT NULL,
+  record_id         TEXT NOT NULL,
+  operation         TEXT NOT NULL DEFAULT 'UPSERT', -- UPSERT|DELETE
+  payload           TEXT NOT NULL,
+  source_updated_at TEXT,
+  attempts          INTEGER NOT NULL DEFAULT 1,
+  last_error        TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'pending', -- pending|resolved
+  first_seen_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  last_attempt_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  next_attempt_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at       TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_sync_pull_quarantine_status
+  ON sync_pull_quarantine(status, table_name);
+CREATE INDEX IF NOT EXISTS idx_sync_pull_quarantine_record
+  ON sync_pull_quarantine(table_name, record_id);
 
 -- ─── PENDING SYNC DELETIONS ────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS pending_sync_deletions (

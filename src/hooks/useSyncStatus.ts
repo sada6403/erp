@@ -8,6 +8,8 @@ interface SyncStatus {
   online: boolean
   running?: boolean
   error?: string | null
+  warning?: string | null
+  quarantined?: number
   pull_errors?: Record<string, string>
 }
 
@@ -27,8 +29,7 @@ export function useSyncStatus() {
       // consumer, e.g. AppLayout) when a field actually changed.
       setStatus(s => {
         const next = { ...s, ...(res.data as object) }
-        const keys = Object.keys(next) as (keyof SyncStatus)[]
-        return keys.every(k => next[k] === s[k]) ? s : next
+        return JSON.stringify(next) === JSON.stringify(s) ? s : next
       })
     } catch {}
   }, [])

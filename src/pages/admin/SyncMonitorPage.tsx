@@ -15,6 +15,17 @@ type QueueItem = {
   created_at: string
 }
 
+type QuarantineItem = {
+  id: string
+  table_name: string
+  record_id: string
+  operation: string
+  attempts: number
+  last_error: string
+  source_updated_at: string | null
+  last_attempt_at: string
+}
+
 type DiagStep = { step: string; ok: boolean; detail: string }
 
 export default function SyncMonitorPage() {
@@ -27,18 +38,26 @@ export default function SyncMonitorPage() {
   const [diagnosing, setDiagnosing] = useState(false)
   const [diagSteps, setDiagSteps] = useState<DiagStep[]>([])
   const [queue, setQueue] = useState<QueueItem[]>([])
+  const [quarantine, setQuarantine] = useState<QuarantineItem[]>([])
   const queueRefreshRunning = useRef(false)
 
   const loadQueue = useCallback(async () => {
     if (queueRefreshRunning.current) return
     queueRefreshRunning.current = true
     try {
-      const res = await window.api.sync.queue()
+      const [res, isolatedRes] = await Promise.all([
+        window.api.sync.queue(),
+        window.api.sync.quarantine(),
+      ])
       if (res.success) {
         const next = res.data as QueueItem[]
         setQueue(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
       }
       else toast.error(res.error || 'Failed to load sync queue')
+      if (isolatedRes.success) {
+        const next = isolatedRes.data as QuarantineItem[]
+        setQuarantine(current => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+      }
     } catch (e: any) {
       toast.error(e?.message || 'Failed to load sync queue')
     } finally {
@@ -196,6 +215,12 @@ export default function SyncMonitorPage() {
             ))}
           </div>
         )}
+        {!status.error && Object.keys(status.pull_errors || {}).length === 0 && status.warning && (
+          <div className="card border border-yellow-400/40 text-sm" role="status">
+            <p className="text-yellow-400 font-semibold">Synchronization is continuing with background repair</p>
+            <p>{status.warning}</p>
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <StatusCard
             icon={status.online ? Wifi : WifiOff}
@@ -204,7 +229,12 @@ export default function SyncMonitorPage() {
             label={status.online ? 'Network available' : 'Working locally'}
           />
           <StatusCard icon={Clock} tone={status.pending > 0 ? 'yellow' : 'green'} value={status.pending} label="Pending sync items" />
-          <StatusCard icon={status.failed > 0 ? AlertCircle : CheckCircle2} tone={status.failed > 0 ? 'red' : 'green'} value={status.failed} label="Failed sync items" />
+          <StatusCard
+            icon={(status.failed > 0 || (status.quarantined || 0) > 0) ? AlertCircle : CheckCircle2}
+            tone={(status.failed > 0 || (status.quarantined || 0) > 0) ? 'yellow' : 'green'}
+            value={status.failed + (status.quarantined || 0)}
+            label="Items under repair"
+          />
           <StatusCard icon={Activity} tone="blue" value={syncing ? 'Syncing' : 'Ready'} label={canManageSync ? 'Manual and background sync' : 'Automatic background sync'} spinning={syncing} />
         </div>
 
@@ -221,6 +251,7 @@ export default function SyncMonitorPage() {
               })() : 'Never'} />
               <InfoRow label="Pending Items" value={String(status.pending)} valueClass={status.pending > 0 ? 'text-yellow-400' : 'text-green-400'} />
               <InfoRow label="Failed Items" value={String(status.failed)} valueClass={status.failed > 0 ? 'text-red-400' : 'text-green-400'} />
+              <InfoRow label="Isolated Incoming Items" value={String(status.quarantined || 0)} valueClass={(status.quarantined || 0) > 0 ? 'text-yellow-400' : 'text-green-400'} />
             </div>
           </div>
 
@@ -318,6 +349,40 @@ export default function SyncMonitorPage() {
             </div>
           )}
         </div>
+
+        {quarantine.length > 0 && (
+          <div className="card border border-yellow-400/30">
+            <div className="flex items-center justify-between gap-3 mb-4">
+              <div>
+                <h3 className="font-semibold text-sm text-yellow-400">Incoming Records Under Automatic Repair</h3>
+                <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                  These records are isolated and retried in the background. They do not stop other data from syncing.
+                </p>
+              </div>
+              <span className="badge-yellow">{quarantine.length} item{quarantine.length === 1 ? '' : 's'}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead><tr>
+                  <th className="table-header">Table</th>
+                  <th className="table-header">Record</th>
+                  <th className="table-header">Operation</th>
+                  <th className="table-header">Attempts</th>
+                  <th className="table-header">Last Error</th>
+                </tr></thead>
+                <tbody>{quarantine.map(item => (
+                  <tr key={item.id} className="table-row">
+                    <td className="table-cell font-mono">{item.table_name}</td>
+                    <td className="table-cell font-mono max-w-48 truncate" title={item.record_id}>{item.record_id}</td>
+                    <td className="table-cell"><span className="badge-yellow">{item.operation}</span></td>
+                    <td className="table-cell">{item.attempts}</td>
+                    <td className="table-cell text-yellow-400 max-w-md truncate" title={item.last_error}>{item.last_error}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div className="card">
           <h3 className="font-semibold text-sm mb-4" style={{ color: 'var(--text-1)' }}>Sync Architecture</h3>

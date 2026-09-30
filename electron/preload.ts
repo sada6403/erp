@@ -351,6 +351,7 @@ const api = {
     trigger:  () => ipcRenderer.invoke('sync:trigger'),
     queueCount: () => ipcRenderer.invoke('sync:queueCount'),
     queue:    () => ipcRenderer.invoke('sync:queue'),
+    quarantine: () => ipcRenderer.invoke('sync:quarantine'),
     diagnose:    () => ipcRenderer.invoke('sync:diagnose'),
     resetFailed:  () => ipcRenderer.invoke('sync:resetFailed'),
     discardItem:  (id: string) => ipcRenderer.invoke('sync:discardItem', id),

@@ -41,7 +41,27 @@ export async function initDatabase(): Promise<void> {
   // hasColumn()/hasTable(), so re-running on an already-migrated DB is a no-op.
   db.exec(`CREATE TABLE IF NOT EXISTS sync_stock_baselines (
     record_id TEXT PRIMARY KEY, quantity REAL NOT NULL, damaged_qty REAL NOT NULL DEFAULT 0
-  )`)
+  );
+  CREATE TABLE IF NOT EXISTS sync_pull_quarantine (
+    id                TEXT PRIMARY KEY,
+    table_name        TEXT NOT NULL,
+    record_id         TEXT NOT NULL,
+    operation         TEXT NOT NULL DEFAULT 'UPSERT',
+    payload           TEXT NOT NULL,
+    source_updated_at TEXT,
+    attempts          INTEGER NOT NULL DEFAULT 1,
+    last_error        TEXT NOT NULL,
+    status            TEXT NOT NULL DEFAULT 'pending',
+    first_seen_at     TEXT NOT NULL DEFAULT (datetime('now')),
+    last_attempt_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    next_attempt_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at       TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_sync_pull_quarantine_status
+    ON sync_pull_quarantine(status, table_name);
+  CREATE INDEX IF NOT EXISTS idx_sync_pull_quarantine_record
+    ON sync_pull_quarantine(table_name, record_id);
+  `)
   runMigrations()
 
   console.log('[DB] SQLite initialized at', dbPath)
@@ -66,6 +86,8 @@ function runMigrations(): void {
     ['payments',             'updated_at',  "TEXT NOT NULL DEFAULT ''"],
     ['installment_payments', 'updated_at',  "TEXT NOT NULL DEFAULT ''"],
     ['audit_logs',           'updated_at',  "TEXT NOT NULL DEFAULT ''"],
+    ['sync_queue',           'failure_cycles', "INTEGER NOT NULL DEFAULT 0"],
+    ['sync_queue',           'next_retry_at', "TEXT"],
     ['products',             'branch_id',   "TEXT"],
     ['branches',             'code',        "TEXT"],
     ['branches',             'branch_pin',  "TEXT"],

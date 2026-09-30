@@ -22,6 +22,7 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const pending = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c
     const failed = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status='failed'").get() as { c: number }).c
+    const quarantined = (db.prepare("SELECT COUNT(*) as c FROM sync_pull_quarantine WHERE status='pending'").get() as { c: number }).c
     const last = db.prepare("SELECT synced_at FROM sync_queue WHERE status='synced' ORDER BY synced_at DESC LIMIT 1").get() as { synced_at: string } | undefined
 
     const parseToIso = (val?: string | null): string | undefined => {
@@ -45,6 +46,8 @@ export function registerSyncHandlers(ipcMain: IpcMain) {
       pending, failed, last_sync: latestIso,
       running: Boolean(store.get('sync_running')),
       error: store.get('sync_cycle_error') || null,
+      warning: store.get('sync_cycle_warning') || null,
+      quarantined,
       pull_errors: pullErrors,
     } }
 
@@ -210,7 +213,7 @@ let isRefreshing = false
     {
       const db = getDb()
       const result = db.prepare(`
-        UPDATE sync_queue SET status='pending', attempts=0, last_error=NULL
+        UPDATE sync_queue SET status='pending', attempts=0, failure_cycles=0, next_retry_at=NULL, last_error=NULL
         WHERE status IN ('failed','processing')
       `).run()
       return { success: true, data: result.changes }
@@ -304,7 +307,7 @@ let isRefreshing = false
             if (!payload.status) payload.status = 'completed'
             db.prepare(`
               UPDATE sync_queue
-              SET payload=?, attempts=0, status='pending', last_error=NULL
+              SET payload=?, attempts=0, failure_cycles=0, next_retry_at=NULL, status='pending', last_error=NULL
               WHERE id=?
             `).run(JSON.stringify(payload), item.id)
           }
@@ -379,7 +382,7 @@ let isRefreshing = false
       // Fresh attempts, regardless of whether this specific parent needed
       // repair — a child can fail on ITS OWN missing parent while sharing
       // the queue with children of an already-fine parent.
-      db.prepare(`UPDATE sync_queue SET status='pending', attempts=0, last_error=NULL WHERE id=?`).run(item.id)
+      db.prepare(`UPDATE sync_queue SET status='pending', attempts=0, failure_cycles=0, next_retry_at=NULL, last_error=NULL WHERE id=?`).run(item.id)
       childrenRequeued++
     }
 
@@ -404,5 +407,17 @@ let isRefreshing = false
       `).all()
       return { success: true, data: rows }
     }
+  })
+
+  safeHandle(ipcMain, 'sync:quarantine', () => {
+    const rows = getDb().prepare(`
+      SELECT id, table_name, record_id, operation, attempts, last_error,
+             source_updated_at, first_seen_at, last_attempt_at
+      FROM sync_pull_quarantine
+      WHERE status='pending'
+      ORDER BY last_attempt_at DESC
+      LIMIT 100
+    `).all()
+    return { success: true, data: rows }
   })
 }

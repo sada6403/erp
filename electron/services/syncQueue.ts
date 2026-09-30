@@ -62,6 +62,8 @@ export async function enqueuSync(
             payload = ?,
             status = 'pending',
             attempts = 0,
+            failure_cycles = 0,
+            next_retry_at = NULL,
             last_error = NULL
         WHERE id = ?
       `).run(operation, JSON.stringify(payload), existing.id)

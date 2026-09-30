@@ -36,6 +36,7 @@ describe('Sync recovery and durable outbox', () => {
   beforeEach(() => {
     state.data = {}
     db.prepare('DELETE FROM sync_queue').run()
+    db.prepare('DELETE FROM sync_pull_quarantine').run()
   })
   afterEach(() => service.stop())
   afterAll(() => { service.stop(); db.close(); fs.rmSync(state.directory, { recursive: true, force: true }) })
@@ -92,17 +93,19 @@ describe('Sync recovery and durable outbox', () => {
     expect(state.data.sync_table_cursors_v2.customers).toBe(checkpoint)
   })
 
-  it('keeps a failed row retryable while applying unrelated valid rows', async () => {
+  it('quarantines a failed row while applying unrelated valid rows and advancing the cursor', async () => {
     const cloud = { changes: vi.fn().mockResolvedValue([
       { id: 'bad-parent', name: 'Deferred', branch_id: 'branch-not-present', updated_at: date },
       { id: 'valid-customer', name: 'Valid', updated_at: date },
     ]) }
-    await expect(service.pullTables(cloud, ['customers'])).rejects.toThrow('incomplete')
+    await service.pullTables(cloud, ['customers'])
     expect(db.prepare("SELECT id FROM customers WHERE id='valid-customer'").get()).toBeTruthy()
-    expect(state.data.sync_table_cursors_v2?.customers).toBeUndefined()
+    expect(state.data.sync_table_cursors_v2?.customers).toBeTruthy()
+    expect(db.prepare("SELECT status FROM sync_pull_quarantine WHERE table_name='customers' AND record_id='bad-parent'").get().status).toBe('pending')
     db.prepare("INSERT INTO branches(id,name) VALUES ('branch-not-present','Recovered branch')").run()
     await service.pullTables(cloud, ['customers'])
     expect(db.prepare("SELECT id FROM customers WHERE id='bad-parent'").get()).toBeTruthy()
+    expect(db.prepare("SELECT status FROM sync_pull_quarantine WHERE table_name='customers' AND record_id='bad-parent'").get().status).toBe('resolved')
   })
 
   it('repairs an exact missing parent without rewinding its whole table cursor', async () => {
@@ -134,14 +137,13 @@ describe('Sync recovery and durable outbox', () => {
     expect(state.data.sync_table_cursors_v2.categories).toBe('2026-09-27T00:00:00.000Z')
   })
 
-  it('protects failed local uploads and does not advance their table checkpoint', async () => {
+  it('protects failed local uploads without blocking the table checkpoint', async () => {
     db.prepare("INSERT INTO customers(id,name) VALUES ('local-edit','Local')").run()
     await enqueue('customers', 'local-edit', 'UPDATE', { name: 'Local' })
     db.prepare("UPDATE sync_queue SET status='failed'").run()
-    await expect(service.pullTables({ changes: async () => [{ id: 'local-edit', name: 'Cloud', updated_at: date }] }, ['customers']))
-      .rejects.toThrow('incomplete')
+    await service.pullTables({ changes: async () => [{ id: 'local-edit', name: 'Cloud', updated_at: date }] }, ['customers'])
     expect(db.prepare("SELECT name FROM customers WHERE id='local-edit'").get().name).toBe('Local')
-    expect(state.data.sync_table_cursors_v2?.customers).toBeUndefined()
+    expect(state.data.sync_table_cursors_v2?.customers).toBeTruthy()
   })
 
   it('stages cloud deactivation using real schema column names', async () => {
@@ -151,11 +153,32 @@ describe('Sync recovery and durable outbox', () => {
     expect(db.prepare("SELECT is_active FROM products WHERE id='deactivate'").get().is_active).toBe(1)
   })
 
-  it('rejects ambiguous duplicate balances rather than selecting the last row', async () => {
+  it('isolates ambiguous duplicate balances without blocking unrelated sync', async () => {
     const rows = [1, 2].map((quantity, i) => ({ id: `dupe-${i}`, product_id: 'deactivate', branch_id: 'branch-not-present', quantity, updated_at: date }))
-    await expect(service.pullTables({ changes: async () => rows }, ['stocks'])).rejects.toThrow('incomplete')
-    expect(state.data.sync_pull_errors.stocks).toContain('Conflicting duplicate')
+    await service.pullTables({ changes: async () => rows }, ['stocks'])
+    expect(state.data.sync_pull_errors).toEqual({})
     expect(db.prepare("SELECT COUNT(*) AS n FROM stocks WHERE id LIKE 'dupe-%'").get().n).toBe(0)
+    expect(db.prepare("SELECT COUNT(*) AS n FROM sync_pull_quarantine WHERE table_name='stocks' AND status='pending'").get().n).toBe(2)
+  })
+
+  it('isolates a blocked deletion, advances its cursor, and repairs it later', async () => {
+    db.prepare("INSERT INTO branches(id,name) VALUES ('delete-parent','Delete parent')").run()
+    db.prepare("INSERT INTO customers(id,name,branch_id) VALUES ('delete-child','Delete child','delete-parent')").run()
+    const deletedAt = '2026-09-27T10:00:00.000Z'
+    const cloud = { deletions: vi.fn()
+      .mockResolvedValueOnce([{ table_name: 'branches', record_id: 'delete-parent', deleted_at: deletedAt }])
+      .mockResolvedValueOnce([]) }
+
+    await service.pullDeletions(cloud, db)
+    expect(db.prepare("SELECT id FROM branches WHERE id='delete-parent'").get()).toBeTruthy()
+    expect(db.prepare("SELECT status FROM sync_pull_quarantine WHERE record_id='delete-parent' AND operation='DELETE'").get().status).toBe('pending')
+    expect(state.data.last_deletion_pull_timestamp).toBeTruthy()
+
+    db.prepare("DELETE FROM customers WHERE id='delete-child'").run()
+    db.prepare("UPDATE sync_pull_quarantine SET next_attempt_at=datetime('now','-1 second') WHERE record_id='delete-parent'").run()
+    await service.pullDeletions(cloud, db)
+    expect(db.prepare("SELECT id FROM branches WHERE id='delete-parent'").get()).toBeUndefined()
+    expect(db.prepare("SELECT status FROM sync_pull_quarantine WHERE record_id='delete-parent' AND operation='DELETE'").get().status).toBe('resolved')
   })
 
   it('does not replace a parent and cascade-delete its local children', () => {
@@ -169,6 +192,28 @@ describe('Sync recovery and durable outbox', () => {
     expect(await service.runOnce()).toBe(false)
     expect(state.data.last_successful_sync_v2_at).toBeUndefined()
     expect(state.data.sync_cycle_error).toContain('not configured')
+  })
+
+  it('completes a healthy cycle while failed uploads remain isolated for retry', async () => {
+    db.prepare(`INSERT INTO sync_queue
+      (id,table_name,record_id,operation,payload,attempts,status)
+      VALUES ('failed-outbox','customers','failed-record','INSERT','{}',5,'failed')`).run()
+    const cycleService = new (service.constructor as any)()
+    vi.spyOn(cycleService, 'getCloudApi').mockReturnValue({})
+    vi.spyOn(cycleService, 'checkOnline').mockResolvedValue(true)
+    vi.spyOn(cycleService, 'processBatch').mockResolvedValue(undefined)
+    vi.spyOn(cycleService, 'pullChanges').mockResolvedValue(undefined)
+    vi.spyOn(cycleService, 'syncBranding').mockResolvedValue(undefined)
+    vi.spyOn(cycleService, 'reconcileSupportSession').mockResolvedValue(undefined)
+    vi.spyOn(cycleService, 'reconcileDefaultRolesFromCloud').mockResolvedValue(undefined)
+    vi.spyOn(cycleService, 'reconcileUserRolesFromCloud').mockResolvedValue(undefined)
+    vi.spyOn(cycleService, 'needsBootstrapPull').mockReturnValue(false)
+
+    expect(await cycleService.runOnce()).toBe(true)
+    expect(state.data.sync_cycle_error).toBeUndefined()
+    expect(state.data.last_successful_sync_v2_at).toBeTruthy()
+    expect(state.data.sync_cycle_warning).toContain('upload(s) queued for background retry')
+    cycleService.stop()
   })
 
   it('repairs a legacy UPDATE-only event by uploading the full local record', async () => {
@@ -248,6 +293,24 @@ describe('Sync recovery and durable outbox', () => {
     expect(cloud.push).toHaveBeenCalledTimes(1)
     expect(cloud.push.mock.calls[0][0].operation).toBe('INSERT')
     expect(db.prepare("SELECT COUNT(*) AS n FROM sync_queue WHERE status='pending'").get().n).toBe(2)
+  })
+
+  it('backs off permanent upload failures and wakes immediately for a new edit', async () => {
+    await enqueue('products', 'backoff-record', 'INSERT', { id: 'backoff-record', name: 'Backoff' })
+    db.prepare("UPDATE sync_queue SET attempts=4, failure_cycles=1 WHERE record_id='backoff-record'").run()
+    const item = db.prepare("SELECT * FROM sync_queue WHERE record_id='backoff-record'").get()
+    await service.syncItem({ push: vi.fn().mockRejectedValue(new Error('permanent validation failure')) }, item, db)
+
+    const failed = db.prepare("SELECT status,failure_cycles,next_retry_at FROM sync_queue WHERE record_id='backoff-record'").get()
+    expect(failed.status).toBe('failed')
+    expect(failed.failure_cycles).toBe(2)
+    expect(failed.next_retry_at).toBeTruthy()
+    service.resetFailedForAutoRetry()
+    expect(db.prepare("SELECT status FROM sync_queue WHERE record_id='backoff-record'").get().status).toBe('failed')
+
+    await enqueue('products', 'backoff-record', 'UPDATE', { name: 'Corrected' })
+    const corrected = db.prepare("SELECT status,failure_cycles,next_retry_at FROM sync_queue WHERE record_id='backoff-record'").get()
+    expect(corrected).toMatchObject({ status: 'pending', failure_cycles: 0, next_retry_at: null })
   })
 
   it('commits maintenance changes and their outbox together', () => {

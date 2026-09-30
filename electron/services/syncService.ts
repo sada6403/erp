@@ -78,7 +78,6 @@ export class SyncService {
   private running = false
   private colCache = new Map<string, Set<string>>()
   private backoffUntil = 0
-  private lastFailedRetryAt = 0
   // Issue 35: reconcileDefaultRolesFromCloud() previously only ran inside
   // needsBootstrapPull() (empty local `users` table) — so an already-
   // activated device with drifted role data never self-healed on a normal
@@ -204,6 +203,9 @@ export class SyncService {
         this.ensureLocalSystemRoles()
         await this.reconcileDefaultRolesFromCloud(cloud)
         store.delete('last_pull_timestamp')
+        store.delete('sync_table_cursors_v2')
+        store.delete('sync_pull_errors')
+        store.delete('last_deletion_pull_timestamp')
       }
       await this.processBatch(cloud)
       // Previously gated the ENTIRE pull (every table) on the local outbox
@@ -218,9 +220,18 @@ export class SyncService {
       await this.syncBranding(cloud)
       await this.reconcileSupportSession(cloud)
       const unfinished = getDb().prepare("SELECT COUNT(*) AS n FROM sync_queue WHERE status != 'synced'").get() as { n: number }
-      if (unfinished.n) throw new Error(`${unfinished.n} upload(s) still pending or failed`)
+      const isolated = getDb().prepare("SELECT COUNT(*) AS n FROM sync_pull_quarantine WHERE status='pending'").get() as { n: number }
+      const warnings: string[] = []
+      if (unfinished.n) warnings.push(`${unfinished.n} upload(s) queued for background retry`)
+      if (isolated.n) warnings.push(`${isolated.n} incoming record(s) isolated for background repair`)
+      if (warnings.length) store.set('sync_cycle_warning', warnings.join('; '))
+      else store.delete('sync_cycle_warning')
       store.delete('sync_cycle_error')
       store.set('last_successful_sync_v2_at', new Date().toISOString())
+      // Resolved rows are useful for short-term diagnostics, but must not make
+      // the local database grow forever on long-running customer devices.
+      getDb().prepare(`DELETE FROM sync_pull_quarantine
+        WHERE status='resolved' AND datetime(resolved_at) < datetime('now','-30 days')`).run()
       return true
     } catch (err) {
       store.set('sync_cycle_error', err instanceof Error ? err.message : String(err))
@@ -291,14 +302,6 @@ export class SyncService {
   }
 
   private resetFailedForAutoRetry(): void {
-    const settings = store.get('app_settings') as Record<string, unknown> | undefined
-    const retryMinutes = Math.max(
-      1,
-      Number(settings?.failed_sync_retry_minutes || DEFAULT_FAILED_RETRY_MINUTES)
-    )
-    const now = Date.now()
-    if (now - this.lastFailedRetryAt < retryMinutes * 60_000) return
-
     const db = getDb()
     const result = db.prepare(`
       UPDATE sync_queue
@@ -306,10 +309,10 @@ export class SyncService {
           attempts=0,
           last_error='Automatic retry scheduled'
       WHERE status='failed'
+        AND (next_retry_at IS NULL OR datetime(next_retry_at) <= datetime('now'))
     `).run()
 
     if (result.changes > 0) {
-      this.lastFailedRetryAt = now
       console.info(`[SyncService] Auto-retrying ${result.changes} failed sync item(s)`)
     }
   }
@@ -523,7 +526,7 @@ export class SyncService {
           .run(JSON.stringify({ ...JSON.parse(event.payload), _base_stock: baseline }), event.id)
       }
 
-      db.prepare(`UPDATE sync_queue SET status='synced', synced_at=datetime('now') WHERE id=?`)
+      db.prepare(`UPDATE sync_queue SET status='synced', failure_cycles=0, next_retry_at=NULL, synced_at=datetime('now') WHERE id=?`)
         .run(item.id)
     } catch (err: unknown) {
       if (err instanceof CloudRateLimitError) {
@@ -534,8 +537,18 @@ export class SyncService {
       const message = err instanceof Error ? err.message : String(err)
       const attempts = item.attempts + 1
       const status = attempts >= MAX_ATTEMPTS ? 'failed' : 'pending'
-      db.prepare(`UPDATE sync_queue SET status=?, attempts=?, last_error=? WHERE id=?`)
-        .run(status, attempts, message, item.id)
+      if (status === 'failed') {
+        const settings = store.get('app_settings') as Record<string, unknown> | undefined
+        const baseMinutes = Math.max(1, Number(settings?.failed_sync_retry_minutes || DEFAULT_FAILED_RETRY_MINUTES))
+        const failureCycles = Number(item.failure_cycles || 0) + 1
+        const retryMinutes = Math.min(360, baseMinutes * (2 ** Math.min(failureCycles - 1, 8)))
+        db.prepare(`UPDATE sync_queue SET status='failed', attempts=?, failure_cycles=?,
+          next_retry_at=datetime('now', ?), last_error=? WHERE id=?`)
+          .run(attempts, failureCycles, `+${retryMinutes} minutes`, message, item.id)
+      } else {
+        db.prepare(`UPDATE sync_queue SET status='pending', attempts=?, next_retry_at=NULL, last_error=? WHERE id=?`)
+          .run(attempts, message, item.id)
+      }
     }
   }
 
@@ -642,13 +655,36 @@ export class SyncService {
       try {
         const batched = batch?.[table]
         if (batched?.error) throw new Error(batched.error)
-        let rows = batched?.data ?? await cloud.changes(table, since)
+        let freshRows = batched?.data ?? await cloud.changes(table, since)
         // Preserve the existing complete pagination path for unusually large
         // tables instead of accepting a truncated batch page.
-        if (batched?.truncated) rows = await cloud.changes(table, since)
-        if (table === 'data_clear_events' && rows.length) {
-          rows = [rows.reduce((latest, row) => String(row.cleared_at) > String(latest.cleared_at) ? row : latest)]
+        if (batched?.truncated) freshRows = await cloud.changes(table, since)
+        if (table === 'data_clear_events' && freshRows.length) {
+          freshRows = [freshRows.reduce((latest, row) => String(row.cleared_at) > String(latest.cleared_at) ? row : latest)]
         }
+
+        // Retrying quarantined rows is independent from the table cursor. The
+        // payload is durable, so a malformed/orphaned row can be left behind
+        // while all newer, valid rows continue to arrive on this device.
+        const quarantined = (db.prepare(`SELECT record_id, payload FROM sync_pull_quarantine
+          WHERE table_name=? AND operation='UPSERT' AND status='pending'
+            AND datetime(next_attempt_at) <= datetime('now')
+          ORDER BY first_seen_at ASC LIMIT 200`).all(table) as Array<{ record_id: string; payload: string }>)
+          .flatMap(item => {
+            try { return [{ key: item.record_id, row: JSON.parse(item.payload) as Record<string, unknown> }] }
+            catch {
+              db.prepare(`UPDATE sync_pull_quarantine SET attempts=attempts+1,
+                last_error='Stored quarantine payload is invalid JSON', last_attempt_at=datetime('now'),
+                next_attempt_at=datetime('now','+1 hour')
+                WHERE table_name=? AND record_id=? AND operation='UPSERT'`).run(table, item.record_id)
+              return []
+            }
+          })
+        const work = new Map<string, Record<string, unknown>>()
+        for (const item of quarantined) work.set(item.key, item.row)
+        for (const row of freshRows) work.set(String(row.id || this.pullRowIdentity(row)), row)
+        const rows = [...work.values()]
+
         const stockBalances = new Map<string, string>()
         const stockConflicts = new Set<string>()
         if (table === 'stocks') for (const row of rows) {
@@ -660,16 +696,18 @@ export class SyncService {
         const pending = new Set((db.prepare(`SELECT record_id FROM sync_queue
           WHERE table_name=? AND status IN ('pending','processing','failed')`).all(table) as
           { record_id: string }[]).map(r => r.record_id))
-        let blocked = 0
-        let latest = Date.parse(since)
-        const rowErrors = new Set<string>()
+        const lastRowErrors = new Map<string, string>()
         // Retry once after inserting the other parents in a self-referencing table.
         let remaining = rows
         for (let pass = 0; pass < 2; pass++) {
           const retry: Record<string, unknown>[] = []
           for (const row of remaining) {
-            if (pending.has(String(row.id))) {
-              if (pass === 0) blocked++
+            const recordId = String(row.id || this.pullRowIdentity(row))
+            if (pending.has(recordId)) {
+              // The unsent local edit is authoritative. Skipping the older
+              // cloud copy is safe; its successful push will create a newer
+              // cloud change that a later pull will receive.
+              this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
               continue
             }
             try {
@@ -678,7 +716,13 @@ export class SyncService {
                 if (stockConflicts.has(key)) throw new Error('Conflicting duplicate stock balances need reconciliation')
                 const local = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS ?')
                   .get(row.product_id, row.branch_id, row.warehouse_id ?? null) as { id: string } | undefined
-                if (local && pending.has(local.id)) throw new Error('Local stock upload pending')
+                if (local && pending.has(local.id)) {
+                  this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
+                  continue
+                }
+              }
+              if (!Number.isFinite(Date.parse(String(row.updated_at)))) {
+                throw new Error('Cloud row is missing a valid updated_at')
               }
               if (table === 'data_clear_events') {
                 if (String(row.id) !== store.get('last_acknowledged_clear_event_id')) {
@@ -694,6 +738,7 @@ export class SyncService {
                     VALUES (?,'products',?,'deactivate',?,?,?,'pending')
                     ON CONFLICT(id) DO UPDATE SET deleted_at=excluded.deleted_at`).run(
                     `deact_${row.id}`, String(row.id), product.name, product.sku, String(row.updated_at))
+                  this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
                   continue
                 }
               }
@@ -704,6 +749,7 @@ export class SyncService {
                 db.prepare('INSERT OR REPLACE INTO sync_stock_baselines (record_id,quantity,damaged_qty) VALUES (?,?,?)')
                   .run(local.id, Number(row.quantity), Number(row.damaged_qty ?? 0))
               }
+              this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
             } catch (error) {
               // A parent can be absent locally even though its cloud row is
               // older than this device's table cursor (for example after a
@@ -715,6 +761,7 @@ export class SyncService {
                   if (repaired) {
                     this.insertFiltered(db, table, row)
                     if (table === 'stocks') this.recordStockBaseline(db, row)
+                    this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
                     continue
                   }
                 } catch {
@@ -724,25 +771,33 @@ export class SyncService {
                 }
               }
               retry.push(row)
-              if (pass === 1 && rowErrors.size < 3) {
-                const message = error instanceof Error ? error.message : String(error)
-                rowErrors.add(`${String(row.id || 'unknown row')}: ${message}`)
-              }
+              lastRowErrors.set(recordId, error instanceof Error ? error.message : String(error))
             }
           }
           remaining = retry
           if (!retry.length) break
         }
-        blocked += remaining.length
-        if (blocked) throw new Error(`${blocked} record(s) awaiting upload or repair${rowErrors.size ? ': ' + [...rowErrors].join('; ') : ''}`)
-        for (const row of rows) {
-          const timestamp = Date.parse(String(row.updated_at))
-          if (!Number.isFinite(timestamp)) throw new Error('Cloud row missing a valid updated_at')
-          latest = Math.max(latest, timestamp)
+        for (const row of remaining) {
+          const recordId = String(row.id || this.pullRowIdentity(row))
+          this.quarantinePullRow(db, table, recordId, 'UPSERT', row,
+            lastRowErrors.get(recordId) || 'Record could not be applied locally')
         }
-        // Overlap the boundary second. Never use the device clock as a cloud cursor.
-        if (rows.length) cursors[table] = new Date(Math.max(Date.parse(since), latest - 1000)).toISOString()
-        else if (batched?.checkpoint) cursors[table] = new Date(batched.checkpoint).toISOString()
+        if (remaining.length) {
+          console.warn(`[SyncService] Isolated ${remaining.length} ${table} row(s); continuing the sync cycle`)
+        }
+
+        let latest = Date.parse(since)
+        for (const row of freshRows) {
+          const timestamp = Date.parse(String(row.updated_at))
+          if (Number.isFinite(timestamp)) latest = Math.max(latest, timestamp)
+        }
+        // A quarantined payload is already durable, so the cursor is free to
+        // advance. The server checkpoint is preferred because it also covers
+        // malformed rows whose updated_at cannot be parsed.
+        if (batched?.checkpoint) cursors[table] = new Date(batched.checkpoint).toISOString()
+        else if (freshRows.length && latest > Date.parse(since)) {
+          cursors[table] = new Date(latest).toISOString()
+        }
         store.set('sync_table_cursors_v2', cursors)
         delete errors[table]
       } catch (error) {
@@ -756,6 +811,51 @@ export class SyncService {
       store.set('sync_pull_errors', errors)
     }
     if (failures.length) throw new Error(`Cloud sync incomplete: ${failures.join(', ')}`)
+  }
+
+  private pullRowIdentity(row: Record<string, unknown>): string {
+    return `payload-${createHash('sha256').update(JSON.stringify(row)).digest('hex')}`
+  }
+
+  private quarantinePullRow(
+    db: ReturnType<typeof getDb>,
+    table: string,
+    recordId: string,
+    operation: 'UPSERT' | 'DELETE',
+    payload: Record<string, unknown>,
+    error: string
+  ): void {
+    const id = `${operation}:${table}:${recordId}`
+    const previous = db.prepare('SELECT attempts, source_updated_at FROM sync_pull_quarantine WHERE id=?')
+      .get(id) as { attempts: number; source_updated_at: string | null } | undefined
+    const sourceUpdatedAt = String(payload.updated_at || payload.deleted_at || '')
+    const attempts = previous && previous.source_updated_at === sourceUpdatedAt ? previous.attempts + 1 : 1
+    const retrySeconds = Math.min(3600, 15 * (2 ** Math.min(attempts - 1, 8)))
+    db.prepare(`INSERT INTO sync_pull_quarantine
+      (id,table_name,record_id,operation,payload,source_updated_at,attempts,last_error,status,first_seen_at,last_attempt_at,next_attempt_at,resolved_at)
+      VALUES (?,?,?,?,?,?,?,?,'pending',datetime('now'),datetime('now'),datetime('now',?),NULL)
+      ON CONFLICT(id) DO UPDATE SET
+        payload=excluded.payload,
+        source_updated_at=excluded.source_updated_at,
+        attempts=excluded.attempts,
+        last_error=excluded.last_error,
+        status='pending',
+        last_attempt_at=datetime('now'),
+        next_attempt_at=excluded.next_attempt_at,
+        resolved_at=NULL`).run(
+      id, table, recordId, operation, JSON.stringify(payload), sourceUpdatedAt,
+      attempts, error.slice(0, 2000), `+${retrySeconds} seconds`)
+  }
+
+  private resolvePullQuarantine(
+    db: ReturnType<typeof getDb>,
+    table: string,
+    recordId: string,
+    operation: 'UPSERT' | 'DELETE'
+  ): void {
+    db.prepare(`UPDATE sync_pull_quarantine
+      SET status='resolved', resolved_at=datetime('now'), last_attempt_at=datetime('now')
+      WHERE id=? AND status='pending'`).run(`${operation}:${table}:${recordId}`)
   }
 
   // Applies deletion tombstones (see backend/app/api/sync/deletions/route.ts)
@@ -773,30 +873,41 @@ export class SyncService {
   // permanently froze `last_deletion_pull_timestamp`, and since the cursor
   // never advanced, every future cycle re-fetched the exact same batch and
   // hit the exact same conflict again — forever, blocking every OTHER
-  // table's deletions too, surviving even an app restart (the bootstrap-pull
-  // reset only clears `last_pull_timestamp`, never this cursor). Reproduced
+  // table's deletions too, surviving even an app restart. Reproduced
   // live against real production tombstone data during Issue 36's
   // investigation: a single conflicting row blocked all 447 pending
   // deletions in the same batch, indefinitely.
   //
-  // Fix: attempt every entry every cycle (never let one failure block the
-  // rest), and only advance the cursor up to — never past — the first entry
-  // that's still failing, in chronological order. Already-applied entries
-  // being re-sent on a later cycle (because the cursor can't move past an
-  // earlier unresolved failure) is a harmless no-op — DELETE on an
-  // already-gone row affects 0 rows. Once whatever locally referenced the
-  // blocked row is itself cleared, that entry succeeds on some later cycle
-  // and the cursor becomes free to advance again — self-healing, no manual
-  // intervention or extra state needed.
+  // Each tombstone is attempted independently. A blocked deletion is saved
+  // in sync_pull_quarantine, the cloud cursor still advances, and exponential
+  // background retry resolves it after the local references are removed.
   private async pullDeletions(cloud: CloudApi, db: ReturnType<typeof getDb>): Promise<void> {
     const lastPull = store.get('last_deletion_pull_timestamp') as string || '1970-01-01T00:00:00.000Z'
-    let deletions: Array<{ table_name: string; record_id: string; deleted_at: string }> = []
+    let freshDeletions: Array<{ table_name: string; record_id: string; deleted_at: string }> = []
     try {
-      deletions = await cloud.deletions(lastPull)
+      freshDeletions = await cloud.deletions(lastPull)
     } catch (err) {
       if (err instanceof CloudRateLimitError) throw err
       throw err
     }
+    const quarantined = (db.prepare(`SELECT table_name, record_id, payload FROM sync_pull_quarantine
+      WHERE operation='DELETE' AND status='pending'
+        AND datetime(next_attempt_at) <= datetime('now')
+      ORDER BY first_seen_at ASC LIMIT 200`).all() as Array<{ table_name: string; record_id: string; payload: string }>)
+      .flatMap(item => {
+        try { return [JSON.parse(item.payload) as { table_name: string; record_id: string; deleted_at: string }] }
+        catch {
+          db.prepare(`UPDATE sync_pull_quarantine SET attempts=attempts+1,
+            last_error='Stored quarantine payload is invalid JSON', last_attempt_at=datetime('now'),
+            next_attempt_at=datetime('now','+1 hour')
+            WHERE table_name=? AND record_id=? AND operation='DELETE'`).run(item.table_name, item.record_id)
+          return []
+        }
+      })
+    const work = new Map<string, { table_name: string; record_id: string; deleted_at: string }>()
+    for (const deletion of quarantined) work.set(`${deletion.table_name}:${deletion.record_id}`, deletion)
+    for (const deletion of freshDeletions) work.set(`${deletion.table_name}:${deletion.record_id}`, deletion)
+    const deletions = [...work.values()]
     if (deletions.length === 0) return
 
     // Defense in depth: table_name in this response can only ever be one of
@@ -805,11 +916,10 @@ export class SyncService {
     // shape locally before ever interpolating it into SQL.
     const SAFE_TABLE_NAME = /^[a-z][a-z0-9_]*$/
 
-    let advanceTo = lastPull
-    let sawFailure = false
     for (const d of deletions) {
       if (!SAFE_TABLE_NAME.test(d.table_name) || !d.record_id) {
-        console.error('[SyncService] Skipping malformed deletion entry:', d)
+        this.quarantinePullRow(db, d.table_name || 'invalid_table', d.record_id || this.pullRowIdentity(d), 'DELETE', d,
+          'Malformed cloud deletion entry')
         continue
       }
       try {
@@ -840,20 +950,27 @@ export class SyncService {
             })
 
             // Do not silently delete local product! Stage it into pending deletions.
-            if (!sawFailure) advanceTo = d.deleted_at
+            this.resolvePullQuarantine(db, d.table_name, d.record_id, 'DELETE')
             continue
           }
         }
 
         db.prepare(`DELETE FROM ${d.table_name} WHERE id = ?`).run(d.record_id)
-        if (!sawFailure) advanceTo = d.deleted_at
+        this.resolvePullQuarantine(db, d.table_name, d.record_id, 'DELETE')
       } catch (err) {
-        console.error(`[SyncService] Deletion still blocked for ${d.table_name}(${d.record_id}) — see Issue 36; will retry every cycle until it clears:`, err)
-        sawFailure = true
+        console.warn(`[SyncService] Isolated blocked deletion ${d.table_name}(${d.record_id}); background repair will retry it:`, err)
+        const message = err instanceof Error ? err.message : String(err)
+        this.quarantinePullRow(db, d.table_name, d.record_id, 'DELETE', d, message)
       }
     }
-    if (sawFailure) throw new Error('Some cloud deletions await local reference repair')
-    store.set('last_deletion_pull_timestamp', new Date(Math.max(Date.parse(lastPull), Date.parse(advanceTo) - 1000)).toISOString())
+    let latest = Date.parse(lastPull)
+    for (const deletion of freshDeletions) {
+      const timestamp = Date.parse(deletion.deleted_at)
+      if (Number.isFinite(timestamp)) latest = Math.max(latest, timestamp)
+    }
+    if (latest > Date.parse(lastPull)) {
+      store.set('last_deletion_pull_timestamp', new Date(latest).toISOString())
+    }
   }
 
   // Company branding: retry a pending local push first, otherwise pull the
@@ -1203,6 +1320,8 @@ interface SyncItem {
   operation: string
   payload: string
   attempts: number
+  failure_cycles?: number
+  next_retry_at?: string | null
   last_error?: string
   status: string
 }
