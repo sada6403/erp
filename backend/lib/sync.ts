@@ -75,6 +75,38 @@ const RELATED_KEYS: Record<string, Set<string>> = {
   withdrawal_requests:    new Set(['scheme_id']),
 }
 
+// Several tenant tables pre-date complete MySQL foreign-key definitions.
+// Desktop SQLite does enforce these relationships, so accepting an orphan in
+// the cloud makes every other device reject that row during pull. Keep the
+// application-level checks aligned with the desktop relationships that are
+// needed to create a Smart Buy scheme and its immediate catalog parents. The
+// error deliberately follows MySQL's FOREIGN KEY (`column`) shape because the
+// v2.7.14 desktop uses that column name to upload the exact missing parent and
+// retry the child.
+const REQUIRED_SYNC_PARENTS: Record<string, ReadonlyArray<readonly [field: string, table: string]>> = {
+  products: [
+    ['category_id', 'categories'],
+    ['supplier_id', 'suppliers'],
+  ],
+  customers: [
+    ['branch_id', 'branches'],
+  ],
+  agents: [
+    ['branch_id', 'branches'],
+    ['created_by', 'users'],
+  ],
+  chit_scheme_templates: [
+    ['created_by', 'users'],
+  ],
+  chit_schemes: [
+    ['template_id', 'chit_scheme_templates'],
+    ['product_id', 'products'],
+    ['agent_id', 'agents'],
+    ['branch_id', 'branches'],
+    ['created_by', 'users'],
+  ],
+}
+
 export function assertTable(table: unknown): asserts table is string {
   if (typeof table !== 'string' || !ALLOWED_TABLES.has(table)) {
     throw new Error('Unsupported sync table')
@@ -112,6 +144,43 @@ function normalizeValue(value: unknown): unknown {
     return value.slice(0, 19).replace('T', ' ')
   }
   return value
+}
+
+export async function validateRequiredSyncParents(
+  client: QueryClient,
+  table: string,
+  recordId: string,
+  record: Record<string, unknown>,
+  operation: string
+): Promise<void> {
+  const references = REQUIRED_SYNC_PARENTS[table]
+  if (!references || operation === 'DELETE') return
+
+  let current: Record<string, unknown> = {}
+  if (operation === 'UPDATE') {
+    const fields = references.map(([field]) => quoteIdentifier(field)).join(', ')
+    const existing = await client.query<Record<string, unknown>>(
+      `SELECT ${fields} FROM ${quoteIdentifier(table)} WHERE id = ? LIMIT 1`,
+      [String(record.id || recordId)]
+    )
+    current = existing.rows[0] || {}
+  }
+
+  const candidate = { ...current, ...record }
+  for (const [field, parentTable] of references) {
+    const parentId = candidate[field]
+    if (parentId === null || parentId === undefined || parentId === '') continue
+    const parent = await client.query<{ id: string }>(
+      `SELECT id FROM ${quoteIdentifier(parentTable)} WHERE id = ? LIMIT 1`,
+      [String(parentId)]
+    )
+    if (!parent.rows[0]) {
+      throw new Error(
+        `Cannot add or update a child row: FOREIGN KEY (\`${field}\`) ` +
+        `REFERENCES \`${parentTable}\` (\`id\`) is missing`
+      )
+    }
+  }
 }
 
 async function resolveRoleId(client: QueryClient, record: Record<string, unknown>, userId: string): Promise<void> {
@@ -330,6 +399,14 @@ async function applyOperation(
     record.id = current?.id || record.id || randomUUID()
     if (!existing.rows[0] && operation === 'UPDATE') operation = 'INSERT'
   }
+
+  await validateRequiredSyncParents(
+    client,
+    input.table,
+    input.recordId,
+    record,
+    operation
+  )
 
   // A client-created timestamp cannot describe when an offline change arrived.
   // The SQL below assigns updated_at from the database clock on every write.

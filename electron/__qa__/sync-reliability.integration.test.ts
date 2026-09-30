@@ -211,6 +211,32 @@ describe('Sync recovery and durable outbox', () => {
     expect(db.prepare('SELECT status FROM sync_queue WHERE id=?').get(item.id).status).toBe('synced')
   })
 
+  it('repairs a Smart Buy parent referenced only by the full local row during a partial update', async () => {
+    db.prepare(`INSERT INTO chit_scheme_templates
+      (id,scheme_name,monthly_contribution_amount,duration_months,minimum_members,product_value)
+      VALUES ('sync-template-parent','Template',1000,12,10,12000)`).run()
+    db.prepare(`INSERT INTO chit_schemes
+      (id,name,template_id,member_count,cycle_count,contribution_amount,chit_value,start_date,status)
+      VALUES ('sync-scheme-partial','Scheme','sync-template-parent',10,12,1000,12000,'2026-09-01','active')`).run()
+    await enqueue('chit_schemes', 'sync-scheme-partial', 'UPDATE', { id: 'sync-scheme-partial', status: 'cancelled' })
+    const item = db.prepare('SELECT * FROM sync_queue').get()
+    const cloud = { push: vi.fn(async (request: any) => {
+      if (request.table === 'chit_schemes' && cloud.push.mock.calls.filter((call: any[]) => call[0].table === 'chit_schemes').length === 1) {
+        throw new Error('Cannot add or update a child row: FOREIGN KEY (`template_id`) REFERENCES `chit_scheme_templates` (`id`) is missing')
+      }
+    }) }
+
+    await service.syncItem(cloud, item, db)
+
+    expect(cloud.push.mock.calls.map((call: any[]) => call[0].table)).toEqual([
+      'chit_schemes', 'chit_scheme_templates', 'chit_schemes',
+    ])
+    expect(cloud.push.mock.calls[1][0]).toMatchObject({
+      operation: 'INSERT', recordId: 'sync-template-parent', record: { scheme_name: 'Template' },
+    })
+    expect(db.prepare('SELECT status FROM sync_queue WHERE id=?').get(item.id).status).toBe('synced')
+  })
+
   it('does not send a later deletion while its earlier create is failing', async () => {
     await enqueue('products', 'ordered', 'INSERT', { id: 'ordered', name: 'New' })
     const first = db.prepare('SELECT * FROM sync_queue').get()

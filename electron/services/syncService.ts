@@ -564,7 +564,15 @@ export class SyncService {
       }>).find(candidate => candidate.from === missingColumn && candidate.to === 'id')
       if (!foreignKey || !/^[a-z][a-z0-9_]*$/.test(foreignKey.table)) throw error
 
-      const parentIdValue = request.record[missingColumn]
+      // UPDATE queue rows are intentionally partial. If the server detects a
+      // missing parent on an existing cloud row, recover the relationship from
+      // the complete local child instead of giving up because the edited field
+      // itself was not part of this payload.
+      const completeChild = request.record[missingColumn] === undefined
+        ? db.prepare(`SELECT * FROM ${this.quoteLocalIdentifier(request.table)} WHERE id=? LIMIT 1`)
+          .get(request.recordId) as Record<string, unknown> | undefined
+        : undefined
+      const parentIdValue = request.record[missingColumn] ?? completeChild?.[missingColumn]
       if (parentIdValue === null || parentIdValue === undefined || parentIdValue === '') throw error
       const parentId = String(parentIdValue)
       const parentKey = `${foreignKey.table}:${parentId}`
