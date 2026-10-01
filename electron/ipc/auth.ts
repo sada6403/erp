@@ -2,7 +2,7 @@ import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import bcrypt from 'bcryptjs'
 import jwt from 'jsonwebtoken'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import crypto from 'crypto'
 import { sendEmail } from '../services/emailService'
 import { generateSecret, verifyTOTP, generateQrDataUrl } from '../services/totpService'
@@ -15,7 +15,7 @@ import { isAdminTypeRole } from '../services/pinPolicy'
 import { safeHandle } from './ipcHandler'
 import { CloudApi } from '../services/cloudApi'
 
-const store = new Store()
+const store = createCompanyStore()
 
 // In-memory OTP store — intentionally cleared on app restart
 const otpStore = new Map<string, { otp: string; expires: number; userId: string }>()

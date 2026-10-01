@@ -5,10 +5,10 @@ import { sendWhatsApp, testWhatsApp } from '../services/whatsappService'
 import { getDb } from '../database'
 import { createNotification } from './notifications'
 import { runChitPaymentDueSweep, runChitSchemeClosingSweep, notificationAllowed } from '../services/chitNotifications'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store<Record<string, unknown>>()
+const store = createCompanyStore<Record<string, unknown>>()
 
 // Settings are persisted as one nested blob under 'app_settings' (see
 // electron/ipc/settings.ts's settings:update) — a flat store.get('email_enabled')

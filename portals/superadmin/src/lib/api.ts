@@ -166,6 +166,40 @@ export const devices = {
     }),
 }
 
+export type ProductKeyAccessRequest = {
+  id: string
+  company_id: string
+  company_name: string
+  device_id: string
+  device_name: string
+  status: 'pending' | 'approved' | 'denied' | 'consumed' | 'expired'
+  attempts: number
+  expires_at: string
+  approved_at: string | null
+  consumed_at: string | null
+  created_at: string
+  updated_at: string
+  approved_by: string | null
+}
+
+export const productKeyAccess = {
+  list: (status?: ProductKeyAccessRequest['status']) =>
+    request<ProductKeyAccessRequest[]>(
+      `/api/superadmin/product-key-access${status ? `?status=${encodeURIComponent(status)}` : ''}`
+    ),
+  approve: (id: string) =>
+    request<{
+      ok: boolean; status: 'approved'; code: string; expires_at: string
+      company_name: string; device_name: string
+    }>(`/api/superadmin/product-key-access/${id}`, {
+      method: 'PATCH', body: JSON.stringify({ action: 'approve' }),
+    }),
+  deny: (id: string) =>
+    request<{ ok: boolean; status: 'denied' }>(`/api/superadmin/product-key-access/${id}`, {
+      method: 'PATCH', body: JSON.stringify({ action: 'deny' }),
+    }),
+}
+
 // ─── Company Backups ──────────────────────────────────────────────────────────
 export type BackupRow = {
   id: string; backup_type: string; status: string

@@ -158,6 +158,37 @@ export class CloudApi {
     return this.request(`/api/companies/support-token/status?${query.toString()}`)
   }
 
+  async requestProductKeyAccess(deviceName: string): Promise<{
+    request_id: string
+    request_secret: string
+    status: 'pending'
+    expires_at: string
+  }> {
+    return this.request('/api/company/product-key-access/request', {
+      method: 'POST',
+      body: JSON.stringify({ device_name: deviceName }),
+    })
+  }
+
+  async getProductKeyAccessStatus(requestId: string, requestSecret: string): Promise<{
+    status: 'pending' | 'approved' | 'denied' | 'consumed' | 'expired'
+    expires_at: string
+    attempts_remaining: number
+  }> {
+    const query = new URLSearchParams({ request_id: requestId, request_secret: requestSecret })
+    return this.request(`/api/company/product-key-access/status?${query.toString()}`)
+  }
+
+  async verifyProductKeyAccess(requestId: string, requestSecret: string, code: string): Promise<{
+    success: boolean
+    grant_expires_in_seconds?: number
+  }> {
+    return this.request('/api/company/product-key-access/verify', {
+      method: 'POST',
+      body: JSON.stringify({ request_id: requestId, request_secret: requestSecret, code }),
+    })
+  }
+
   // Issue 37 (36c) — cheap "did products/stocks/categories change" check,
   // polled far more often than the full pull cycle so a branch notices an
   // admin edit within a few seconds instead of waiting for the next

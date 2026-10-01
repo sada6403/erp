@@ -2,12 +2,12 @@ import { ipcMain } from 'electron'
 import { getDb } from '../database'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}

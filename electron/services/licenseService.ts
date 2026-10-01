@@ -1,8 +1,8 @@
-import Store from 'electron-store'
+import { createCompanyStore } from './companyWorkspace'
 import { net } from 'electron'
 import { decryptSecret } from '../ipc/settings'
 
-const store = new Store()
+const store = createCompanyStore()
 const LICENSE_KEY = 'license_data'
 // Was 6h — too slow for module/feature toggles (main-process IPC guards read
 // this cache) to take effect in any reasonable time. 5 min keeps enforcement

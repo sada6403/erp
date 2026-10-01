@@ -3,11 +3,11 @@ import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { safeHandle } from './ipcHandler'
 import { createNotification } from './notifications'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function largePayoutThreshold(): number {
   const saved = (store.get('app_settings') as Record<string, unknown> | undefined) || {}

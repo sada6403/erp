@@ -11,13 +11,13 @@ import { issueSmartBuyVoucher, voidSmartBuyVoucher } from './coupons'
 import { notifyWinnerSelected, notifyCustomer } from '../services/chitNotifications'
 import { createNotification } from './notifications'
 import { computeAndRecordCommission } from '../services/commissionEngine'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import * as XLSX from 'xlsx'
 import { safeHandle } from './ipcHandler'
 import { PHONE_RE, EMAIL_RE, NIC_RE, validateContactFields } from '../services/contactValidation'
 import { simulateSmartBuyScheme, findBreakEvenMembers, maxEarlyWinners, type ViabilityInputs } from '../services/smartBuyViability'
 
-const store = new Store()
+const store = createCompanyStore()
 
 // Every draw (chits:draws:conduct, method='manual_pick') must carry a
 // substantive, auditable justification — not just a placeholder word — since

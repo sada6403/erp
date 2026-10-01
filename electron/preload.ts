@@ -531,8 +531,13 @@ const api = {
     getActivationInfo:  () => ipcRenderer.invoke('app:getActivationInfo'),
     getVersion:         () => ipcRenderer.invoke('app:getVersion'),
     verifyCompanyKey:   (payload: unknown) => ipcRenderer.invoke('app:verifyCompanyKey', payload),
+    requestCompanySwitchAccess: () => ipcRenderer.invoke('app:requestCompanySwitchAccess'),
+    getCompanySwitchAccessStatus: () => ipcRenderer.invoke('app:getCompanySwitchAccessStatus'),
+    verifyCompanySwitchCode: (code: string) => ipcRenderer.invoke('app:verifyCompanySwitchCode', code),
+    cancelCompanySwitchAccess: () => ipcRenderer.invoke('app:cancelCompanySwitchAccess'),
     verifySupportPasscode: (passcode: string) => ipcRenderer.invoke('app:verifySupportPasscode', passcode),
     activate:           (payload: unknown) => ipcRenderer.invoke('app:activate', payload),
+    restartForWorkspace:() => ipcRenderer.invoke('app:restartForWorkspace'),
     deactivate:         () => ipcRenderer.invoke('app:deactivate'),
   },
 

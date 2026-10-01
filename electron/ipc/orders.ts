@@ -1,12 +1,12 @@
 import type { IpcMain } from 'electron'
 import crypto from 'crypto'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { getDb } from '../database'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function currentUser() {
   return store.get('auth_user') as Record<string, unknown> | undefined

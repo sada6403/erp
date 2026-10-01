@@ -7,6 +7,8 @@ interface VerifyResult {
   sub_status: string; brand_color: string | null; brand_logo_url: string | null
   active_devices: number; max_devices: number; device_slots_left: number
   branches: Branch[]
+  local_workspace_exists?: boolean
+  will_switch_company?: boolean
 }
 
 type Step = 'key' | 'branch' | 'activating' | 'done'
@@ -19,6 +21,8 @@ interface Props {
   // company-key/branch/activate flow) instead of a second, simplified
   // reactivation form.
   bannerMessage?: string
+  switchingCompany?: boolean
+  onCancel?: () => void
 }
 type VerifyResponse = VerifyResult & { success?: boolean; error?: string }
 
@@ -30,7 +34,7 @@ const DEFAULT_API_URL =
   (import.meta.env.VITE_CLOUD_API_URL as string | undefined)?.trim().replace(/\/+$/, '') ||
   (import.meta.env.DEV ? 'http://localhost:3000' : BUILT_IN_API_URL)
 
-export default function ActivationPage({ onActivated, bannerMessage }: Props) {
+export default function ActivationPage({ onActivated, bannerMessage, switchingCompany = false, onCancel }: Props) {
   const [step, setStep]             = useState<Step>('key')
   const [companyKey, setCompanyKey] = useState('')
   const [apiUrl, setApiUrl]         = useState(DEFAULT_API_URL)
@@ -113,7 +117,7 @@ export default function ActivationPage({ onActivated, bannerMessage }: Props) {
         data = await res.json() as VerifyResponse
         if (!res.ok) { setError(`${data.error ?? 'Verification failed'} (Server: ${serverUrl})`); setLoading(false); return }
       }
-      if (data.device_slots_left <= 0) {
+      if (data.device_slots_left <= 0 && !data.local_workspace_exists) {
         setError(`Device limit reached (${data.active_devices}/${data.max_devices}). Please upgrade your subscription.`)
         setLoading(false); return
       }
@@ -143,7 +147,14 @@ export default function ActivationPage({ onActivated, bannerMessage }: Props) {
         setStep('branch')
       } else {
         setStep('done')
-        setTimeout(() => onActivated(), 2000)
+        localStorage.removeItem('pos-auth')
+        if (res.restart_required) {
+          setTimeout(() => {
+            window.api.app.restartForWorkspace().catch(() => setError('Restart failed. Please close and reopen the app.'))
+          }, 900)
+        } else {
+          setTimeout(() => onActivated(), 1400)
+        }
       }
     } catch (err) {
       setError((err as Error).message)
@@ -217,7 +228,7 @@ export default function ActivationPage({ onActivated, bannerMessage }: Props) {
       </div>
 
       {/* Right panel */}
-      <div className="flex-1 flex items-center justify-center p-8">
+      <div className="flex-1 flex items-center justify-center p-8 relative">
         <div className="w-full max-w-md">
 
           {/* ── Done ── */}
@@ -245,12 +256,23 @@ export default function ActivationPage({ onActivated, bannerMessage }: Props) {
           {/* ── Step 1: Company Key ── */}
           {step === 'key' && (
             <div className="space-y-6">
+              {switchingCompany && onCancel && (
+                <button type="button" onClick={onCancel} className="inline-flex items-center gap-2 text-sm font-semibold text-gray-400 hover:text-white">
+                  <ArrowLeft className="w-4 h-4" /> Back to login
+                </button>
+              )}
               <div>
                 <button type="button" onClick={handleSupportUnlock} className="text-left">
                   <h2 className="text-2xl font-bold text-white mb-1">Device Activation</h2>
                 </button>
                 <p className="text-sm text-gray-400">Enter the Company Key provided by your administrator</p>
               </div>
+
+              {switchingCompany && (
+                <div className="rounded-xl border border-emerald-700/40 bg-emerald-950/25 px-4 py-3 text-sm leading-6 text-emerald-200">
+                  Switching creates or opens a separate company workspace. Your current database, settings, uploads and backups stay unchanged.
+                </div>
+              )}
 
               {bannerMessage && (
                 <div className="rounded-xl border border-red-700/50 bg-red-900/20 px-4 py-3 text-red-300 text-sm">

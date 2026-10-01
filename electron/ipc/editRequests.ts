@@ -4,10 +4,10 @@ import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { createNotification } from './notifications'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 const ALLOWED_TARGET_TABLES = new Set(['invoices', 'stocks', 'products', 'categories'])
 const APPROVAL_WINDOW_HOURS = 48

@@ -8,7 +8,7 @@ import { enqueuSync } from '../services/syncQueue'
 import { syncStockRow } from '../services/stockSync'
 import { insertStockMovement } from '../services/stockMovement'
 import { logAudit } from '../services/auditLog'
-import Store from 'electron-store'
+import { createCompanyStore, getActiveWorkspaceDir } from '../services/companyWorkspace'
 import { CloudApi } from '../services/cloudApi'
 import { uploadFile as s3UploadFile } from '../services/s3Service'
 import type { S3Config } from '../services/s3Service'
@@ -17,7 +17,7 @@ import { buildSku, categoryCodeFromName, normalizeCategoryPath, titleCase } from
 import { safeHandle } from './ipcHandler'
 import { canManageAllBranchStock } from '../services/branchAccess'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function getAuthUser(): Record<string, unknown> | undefined {
   return store.get('auth_user') as Record<string, unknown> | undefined
@@ -500,7 +500,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const fileName = `${crypto.randomUUID()}${ext}`
 
       // Create uploads directory if not exists
-      const userDataPath = app.getPath('userData')
+      const userDataPath = getActiveWorkspaceDir()
       const uploadsDir = path.join(userDataPath, 'uploads')
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true })

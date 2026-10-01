@@ -4,9 +4,10 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { safeHandle } from './ipcHandler'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
+import { getActiveWorkspaceDir } from '../services/companyWorkspace'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
@@ -29,7 +30,7 @@ export function registerMonitorHandlers(): void {
   safeHandle(ipcMain, 'monitor:health', () => {
     const denied = requireAdmin(); if (denied) return denied
       const db = getDb()
-      const userDataPath = app.getPath('userData')
+      const userDataPath = getActiveWorkspaceDir()
       const dbPath = path.join(userDataPath, 'pos-erp.db')
 
       // DB file size

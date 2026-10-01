@@ -2,12 +2,12 @@ import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { insertStockMovement } from '../services/stockMovement'
 import { syncStockRow } from '../services/stockSync'
 import { safeHandleModule } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 const STATUS_TRANSITIONS: Record<string, string[]> = {
   draft: ['approved', 'rejected', 'cancelled'],

@@ -1,12 +1,12 @@
 import type { IpcMain } from 'electron'
 import { getDb } from '../database'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { CloudApi } from '../services/cloudApi'
 import { decryptSecret } from './settings'
 import { safeHandle } from './ipcHandler'
 import { enqueuSync } from '../services/syncQueue'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([

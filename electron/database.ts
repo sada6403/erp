@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
 import { enqueuSync } from './services/syncQueue'
+import { createCompanyStore, getActiveWorkspaceDir } from './services/companyWorkspace'
 
 let db: Database.Database
 
@@ -12,7 +13,8 @@ export function getDb(): Database.Database {
 }
 
 export async function initDatabase(): Promise<void> {
-  const userDataPath = app.getPath('userData')
+  const userDataPath = getActiveWorkspaceDir()
+  fs.mkdirSync(userDataPath, { recursive: true })
   const dbPath = path.join(userDataPath, 'pos-erp.db')
   const schemaPath = app.isPackaged
     ? path.join(process.resourcesPath, 'database', 'schema.sql')
@@ -242,8 +244,7 @@ function runMigrations(): void {
   // only. Queue anything not already represented in sync_queue — gated by a
   // flag so this full-table scan runs once, not on every startup.
   {
-    const Store = require('electron-store')
-    const store = new Store()
+    const store = createCompanyStore()
     const FLAG = 'backfill_invoice_items_payments_credit_ledger_v1'
     if (!store.get(FLAG)) {
       const { randomUUID } = require('crypto')
@@ -1985,9 +1986,8 @@ function runMigrations(): void {
   // mere existence of the row: an operator who has already rotated this
   // password must never be forced to change it again.
   {
-    const Store = require('electron-store')
     const bcrypt = require('bcryptjs')
-    const store = new Store()
+    const store = createCompanyStore()
     const FLAG = 'force_pw_change_default_admin_v1'
     const DEFAULT_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
     if (!store.get(FLAG)) {

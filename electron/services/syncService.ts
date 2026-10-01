@@ -1,5 +1,5 @@
 import { getDb } from '../database'
-import Store from 'electron-store'
+import { createCompanyStore, getWorkspaceDataPath } from './companyWorkspace'
 import fs from 'fs'
 import path from 'path'
 import { createHash } from 'crypto'
@@ -9,7 +9,7 @@ import { CLOUD_BRANDING_KEYS, decryptSecret, pushBrandingToCloud } from '../ipc/
 import { reconcileLocalDefaultRoles } from './roleReconcile'
 import { isDeviceLocked, reportDeviceRevoked } from './licenseService'
 
-const store = new Store()
+const store = createCompanyStore()
 // Issue 36: was 10 — a large bulk push (e.g. a 447-product bulk delete)
 // took ~45 cycles to drain at 10/cycle, since every cycle also pays the
 // full pullChanges() cost regardless. Raised to 50 to cut that roughly 3x;
@@ -445,7 +445,7 @@ export class SyncService {
   private async uploadOfflineImage(cloud: CloudApi, localUrl: string): Promise<string | null> {
     try {
       const fileName = localUrl.replace('app-img://', '')
-      const filePath = path.join(app.getPath('userData'), 'uploads', fileName)
+      const filePath = getWorkspaceDataPath('uploads', fileName)
       if (!fs.existsSync(filePath)) {
         console.warn(`[SyncService] Offline image file not found: ${filePath}`)
         return null

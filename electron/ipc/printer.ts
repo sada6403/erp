@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron'
 import { BrowserWindow, shell, app, dialog } from 'electron'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import path from 'path'
 import fs from 'fs'
 import net from 'net'
@@ -25,7 +25,7 @@ import { buildInstallmentCardHtml } from '../templates/installmentTemplates'
 import { buildCouponHtml, buildSmartBuyVoucherGridHtml } from '../templates/couponTemplates'
 import { buildReceiptText } from '../templates/receiptTemplates'
 
-const store = new Store()
+const store = createCompanyStore()
 
 export function registerPrinterHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'printer:printReceipt', async (_e, payload) => {

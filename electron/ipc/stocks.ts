@@ -4,14 +4,14 @@ import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import fs from 'fs'
 import { insertStockMovement } from '../services/stockMovement'
 import { syncStockRow } from '../services/stockSync'
 import { createNotification } from './notifications'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function isSuperAdmin(user: Record<string, unknown> | undefined): boolean {
   if (!user) return false

@@ -2,12 +2,12 @@ import { ipcMain as realIpcMain } from 'electron'
 import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import crypto, { randomUUID } from 'crypto'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 // Treat balances below half a cent as fully used (float-safe)
 const USED_UP_EPSILON = 0.005

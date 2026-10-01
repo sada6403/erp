@@ -1,7 +1,7 @@
-import Store from 'electron-store'
+import { createCompanyStore } from './companyWorkspace'
 import { net } from 'electron'
 
-const store = new Store<Record<string, unknown>>()
+const store = createCompanyStore<Record<string, unknown>>()
 
 export interface WhatsAppPayload {
   to: string

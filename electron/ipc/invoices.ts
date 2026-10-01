@@ -4,7 +4,7 @@ import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { insertStockMovement } from '../services/stockMovement'
 import { syncStockRow, syncCustomerRow } from '../services/stockSync'
 import { redeemCouponInTransaction, reverseCouponForInvoice, type CouponRedemptionResult } from './coupons'
@@ -19,7 +19,7 @@ import { sendWhatsApp } from '../services/whatsappService'
 import { notificationAllowed } from '../services/chitNotifications'
 import { isDeviceLocked } from '../services/licenseService'
 
-const store = new Store()
+const store = createCompanyStore()
 
 // Best-effort bill/quotation notifications — fired after the sale is already
 // committed and never awaited by the caller, so a slow/failed send can't

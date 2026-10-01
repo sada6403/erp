@@ -1,10 +1,10 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 export type NotifType =
   | 'low_stock' | 'installment_due' | 'installment_overdue'

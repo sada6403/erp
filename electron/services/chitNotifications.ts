@@ -1,10 +1,10 @@
 import type Database from 'better-sqlite3'
-import Store from 'electron-store'
+import { createCompanyStore } from './companyWorkspace'
 import { sendEmail } from './emailService'
 import { sendSms } from './smsService'
 import { sendWhatsApp } from './whatsappService'
 
-const store = new Store<Record<string, unknown>>()
+const store = createCompanyStore<Record<string, unknown>>()
 
 // Settings are persisted as one nested blob under 'app_settings' (see
 // electron/ipc/settings.ts's settings:update) — a flat store.get('email_enabled')

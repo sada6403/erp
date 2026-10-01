@@ -1,13 +1,12 @@
 import path from 'path'
 import fs from 'fs'
-import { app } from 'electron'
 import crypto from 'crypto'
 import { safeStorage } from 'electron'
-import Store from 'electron-store'
+import { createCompanyStore, getWorkspaceDataPath } from './companyWorkspace'
 import { getDb } from '../database'
 import { uploadFile, deleteFile, type S3Config } from './s3Service'
 
-const store = new Store()
+const store = createCompanyStore()
 const FALLBACK_KEY = crypto.createHash('sha256').update('pos-erp-local-settings-key').digest()
 
 export interface BackupInfo {
@@ -26,7 +25,7 @@ function fmtSize(bytes: number): string {
 }
 
 export function getBackupDir(): string {
-  const dir = path.join(app.getPath('userData'), 'backups')
+  const dir = getWorkspaceDataPath('backups')
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
   return dir
 }

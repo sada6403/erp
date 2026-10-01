@@ -1,11 +1,11 @@
 import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { enqueuSync } from '../services/syncQueue'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function getAuthUser() {
   return store.get('auth_user') as Record<string, unknown>

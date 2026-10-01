@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron'
 import { BrowserWindow } from 'electron'
-import Store from 'electron-store'
+import { createCompanyStore, getWorkspaceDataPath } from '../services/companyWorkspace'
 import { app, safeStorage } from 'electron'
 import crypto from 'crypto'
 import fs from 'fs'
@@ -10,7 +10,7 @@ import { CloudApi } from '../services/cloudApi'
 import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 // Company-wide branding keys — synced through the cloud so every activated
 // device of the company shows the same logo/branding.
@@ -266,7 +266,7 @@ function broadcastSettingsUpdated(reason: string, extra: Record<string, unknown>
 async function publishLocalImage(cloud: CloudApi, localUrl: string): Promise<string | null> {
   try {
     const fileName = localUrl.replace('app-img://', '')
-    const filePath = path.join(app.getPath('userData'), 'uploads', fileName)
+    const filePath = getWorkspaceDataPath('uploads', fileName)
     if (!fs.existsSync(filePath)) return null
     const contentTypes: Record<string, string> = {
       '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',

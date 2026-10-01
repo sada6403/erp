@@ -10,7 +10,7 @@ import { logAudit } from '../services/auditLog'
 import { insertStockMovement } from '../services/stockMovement'
 import { syncStockRow } from '../services/stockSync'
 import { validatePin, isAdminTypeRole } from '../services/pinPolicy'
-import Store from 'electron-store'
+import { createCompanyStore, getWorkspaceDataPath } from '../services/companyWorkspace'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import { canManageProcurement } from '../services/branchAccess'
 
@@ -52,7 +52,7 @@ import { decryptSecret } from './settings'
 import { CloudApi } from '../services/cloudApi'
 import type Database from 'better-sqlite3'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}
@@ -2000,7 +2000,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     wipeLocalTransactionalData(getDb())
 
     // Delete all uploaded images (product photos, logos etc.)
-    const uploadsDir = path.join(app.getPath('userData'), 'uploads')
+    const uploadsDir = getWorkspaceDataPath('uploads')
     if (fs.existsSync(uploadsDir)) {
       fs.rmSync(uploadsDir, { recursive: true, force: true })
     }
@@ -2059,7 +2059,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     // backup first in case the trigger turns out to be a false positive
     // (e.g. a transient API-key mismatch) rather than a real deletion.
     try {
-      const backupsDir = path.join(app.getPath('userData'), 'backups')
+      const backupsDir = getWorkspaceDataPath('backups')
       fs.mkdirSync(backupsDir, { recursive: true })
       await db.backup(path.join(backupsDir, `pre-reset-${Date.now()}.db`))
     } catch { /* best-effort — don't block the reset on backup failure */ }
@@ -2081,7 +2081,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     })()
 
     // Delete all uploaded images (product photos, logos etc.)
-    const uploadsDir = path.join(app.getPath('userData'), 'uploads')
+    const uploadsDir = getWorkspaceDataPath('uploads')
     if (fs.existsSync(uploadsDir)) {
       fs.rmSync(uploadsDir, { recursive: true, force: true })
     }

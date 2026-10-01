@@ -151,6 +151,7 @@ export default function App() {
   const { init, refreshSilently } = useAuthStore()
   const navigate   = useNavigate()
   const [activated, setActivated] = useState<boolean | null>(null)
+  const [showCompanyActivation, setShowCompanyActivation] = useState(false)
   const [pendingClearEvent, setPendingClearEvent] = useState<{ locked: boolean; eventId: string | null } | null>(null)
   const [deviceLock, setDeviceLock] = useState<{ locked: boolean; reason: string | null; deviceId: string | null }>({ locked: false, reason: null, deviceId: null })
 
@@ -247,6 +248,22 @@ export default function App() {
   if (activated === null) return <LoadingScreen />
   if (!activated) return <ActivationPage onActivated={() => { finishActivation().catch(() => navigate('/login', { replace: true })) }} />
 
+  if (showCompanyActivation) {
+    return (
+      <ActivationPage
+        switchingCompany
+        onCancel={() => {
+          window.api.app.cancelCompanySwitchAccess?.().catch(() => undefined)
+          setShowCompanyActivation(false)
+        }}
+        onActivated={() => {
+          setShowCompanyActivation(false)
+          finishActivation().catch(() => navigate('/login', { replace: true }))
+        }}
+      />
+    )
+  }
+
   // Phase 1 device-authorization work — a revoked/deactivated device goes
   // straight here, full-stop. No login screen, no dashboard, no cached
   // business data is reachable while this renders (same "nothing else
@@ -264,7 +281,7 @@ export default function App() {
   return (
     <Suspense fallback={<LoadingScreen />}>
     <Routes>
-      <Route path="/login" element={<LoginPage />} />
+      <Route path="/login" element={<LoginPage onChangeCompany={() => setShowCompanyActivation(true)} />} />
       <Route path="/setup" element={<SetupWizardPage />} />
       <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
         <Route index element={<SessionLanding />} />

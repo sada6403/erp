@@ -4,9 +4,9 @@ import fs from 'fs'
 import { app } from 'electron'
 import { runBackup, listBackups, getBackupDir } from '../services/backupService'
 import { safeHandle } from './ipcHandler'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}

@@ -1,8 +1,8 @@
 import nodemailer from 'nodemailer'
-import Store from 'electron-store'
+import { createCompanyStore } from './companyWorkspace'
 import { decryptSecret } from '../ipc/settings'
 
-const store = new Store<Record<string, unknown>>()
+const store = createCompanyStore<Record<string, unknown>>()
 
 export interface EmailPayload {
   to: string | string[]

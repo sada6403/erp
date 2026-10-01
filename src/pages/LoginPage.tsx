@@ -5,7 +5,8 @@ import { useSyncStatus } from '@/hooks/useSyncStatus'
 import {
   ShoppingBag, Lock, Mail, GitBranch, ArrowRight, X, Delete,
   WifiOff, RefreshCw, Shield, CheckCircle, AlertTriangle, Search,
-  Building2, Eye, EyeOff, Zap, Phone, MessageCircleMore,
+  Building2, Eye, EyeOff, Zap, Phone, MessageCircleMore, KeyRound,
+  Database, Sparkles, Settings, Clock3,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLandingRoute } from '@/lib/sessionRouting'
@@ -19,18 +20,23 @@ function redirectBySession(u: unknown) {
 const TERMINAL_BRANCH_KEY = 'pos_terminal_branch'
 const RECENT_USERS_KEY    = 'pos_recent_login_users'
 
-function getStoredBranch(): { id: string; name: string; code: string } | null {
-  try { return JSON.parse(localStorage.getItem(TERMINAL_BRANCH_KEY) || 'null') } catch { return null }
+function tenantKey(base: string, workspaceId: string) {
+  return workspaceId === 'legacy' ? base : `${base}:${workspaceId}`
 }
-function setStoredBranch(b: { id: string; name: string; code: string } | null) {
-  if (b) localStorage.setItem(TERMINAL_BRANCH_KEY, JSON.stringify(b))
-  else localStorage.removeItem(TERMINAL_BRANCH_KEY)
+function getStoredBranch(workspaceId: string): { id: string; name: string; code: string } | null {
+  try { return JSON.parse(localStorage.getItem(tenantKey(TERMINAL_BRANCH_KEY, workspaceId)) || 'null') } catch { return null }
+}
+function setStoredBranch(b: { id: string; name: string; code: string } | null, workspaceId: string) {
+  const key = tenantKey(TERMINAL_BRANCH_KEY, workspaceId)
+  if (b) localStorage.setItem(key, JSON.stringify(b))
+  else localStorage.removeItem(key)
 }
 
-function saveRecentUser(u: { id: string; name: string; roleName: string }) {
-  const list = (() => { try { return JSON.parse(localStorage.getItem(RECENT_USERS_KEY) || '[]') } catch { return [] } })()
+function saveRecentUser(u: { id: string; name: string; roleName: string }, workspaceId: string) {
+  const key = tenantKey(RECENT_USERS_KEY, workspaceId)
+  const list = (() => { try { return JSON.parse(localStorage.getItem(key) || '[]') } catch { return [] } })()
   const filtered = list.filter((x: { id: string }) => x.id !== u.id)
-  localStorage.setItem(RECENT_USERS_KEY, JSON.stringify([u, ...filtered].slice(0, 4)))
+  localStorage.setItem(key, JSON.stringify([u, ...filtered].slice(0, 4)))
 }
 
 const PAD_KEYS = ['1','2','3','4','5','6','7','8','9','C','0','⌫']
@@ -101,7 +107,7 @@ function StatusBar({ online, pending, lastSync, licenseOk, version }: {
 }
 
 // ── Main Login Page ───────────────────────────────────────────────────────────
-export default function LoginPage() {
+export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () => void }) {
   const navigate = useNavigate()
   const { pinLogin, user, init } = useAuthStore()
   const { status: syncStatus } = useSyncStatus()
@@ -114,6 +120,8 @@ export default function LoginPage() {
   const [showPin, setShowPin]           = useState(false)
   const [loading, setLoading]           = useState(false)
   const [loginState, setLoginState]     = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
+  const [workspaceId, setWorkspaceId]   = useState('')
+  const tenantWorkspaceId = workspaceId || 'legacy'
 
   // 2FA
   const [requires2FA, setRequires2FA] = useState(false)
@@ -149,6 +157,11 @@ export default function LoginPage() {
   const [updateInfo, setUpdateInfo] = useState<{ version: string } | null>(null)
   const [updateState, setUpdateState] = useState<'idle' | 'downloading' | 'ready'>('idle')
   const [downloadPct, setDownloadPct] = useState(0)
+  const [keyAccessOpen, setKeyAccessOpen] = useState(false)
+  const [keyAccessStage, setKeyAccessStage] = useState<'idle' | 'requesting' | 'pending' | 'approved' | 'verifying'>('idle')
+  const [keyAccessCode, setKeyAccessCode] = useState('')
+  const [keyAccessError, setKeyAccessError] = useState('')
+  const [keyAccessExpiry, setKeyAccessExpiry] = useState('')
 
   // Branch — never pre-populate; always verify DB first so deleted branches can't bypass
   const [terminalBranch, setTerminalBranch]   = useState<{ id: string; name: string; code: string } | null>(null)
@@ -206,6 +219,9 @@ export default function LoginPage() {
       if (r?.deviceId) setDeviceId(r.deviceId.slice(0, 12).toUpperCase())
     }).catch(() => {})
     window.api.app?.getVersion?.().then((v: string) => setVersion(v)).catch(() => {})
+    window.api.app?.getActivationInfo?.().then((r: { workspace_id?: string }) => {
+      setWorkspaceId(r?.workspace_id || 'legacy')
+    }).catch(() => setWorkspaceId('legacy'))
     const offSettingsUpdated = window.api.on?.('settings:updated', () => { loadBranding().catch(() => undefined) })
     // Paint from the local cache immediately. Refresh company branding only
     // after the login screen is interactive, so a slow/offline cloud endpoint
@@ -236,18 +252,43 @@ export default function LoginPage() {
 
   // Verify stored branch on startup — only restore if still exists in DB
   useEffect(() => {
-    const stored = getStoredBranch()
+    if (!workspaceId) return
+    const stored = getStoredBranch(workspaceId)
     if (stored?.code && window.api) {
       window.api.admin.branches.findByCode(stored.code).then((res: { success: boolean; data?: unknown }) => {
         if (res.success && res.data) setTerminalBranch(stored)
-        else setStoredBranch(null)
+        else setStoredBranch(null, workspaceId)
       }).catch(() => {})
     }
-  }, [])
+  }, [workspaceId])
 
   useEffect(() => { if (user) navigate(redirectBySession(user), { replace: true }) }, [user, navigate])
   useEffect(() => { if (mode === 'email') emailRef.current?.focus() }, [mode])
   useEffect(() => { if (showBranchInput) setTimeout(() => branchCodeRef.current?.focus(), 50) }, [showBranchInput])
+
+  useEffect(() => {
+    if (!keyAccessOpen || keyAccessStage !== 'pending') return
+    let stopped = false
+    const check = async () => {
+      try {
+        const result = await window.api.app.getCompanySwitchAccessStatus()
+        if (stopped || !result?.success) return
+        if (result.status === 'approved') {
+          setKeyAccessStage('approved')
+          setKeyAccessExpiry(result.expires_at || '')
+        } else if (result.status === 'denied') {
+          setKeyAccessStage('idle')
+          setKeyAccessError('Super Admin denied this request.')
+        } else if (result.status === 'expired' || result.status === 'consumed') {
+          setKeyAccessStage('idle')
+          setKeyAccessError('This request expired. Send a new request.')
+        }
+      } catch { /* a brief network outage must not close the dialog */ }
+    }
+    void check()
+    const timer = window.setInterval(() => void check(), 5_000)
+    return () => { stopped = true; window.clearInterval(timer) }
+  }, [keyAccessOpen, keyAccessStage])
 
   useEffect(() => {
     if (!terminalBranch || !window.api?.auth?.loginOptions) return
@@ -285,7 +326,7 @@ export default function LoginPage() {
         await init()
         setLoginState('success')
         const u = useAuthStore.getState().user as Record<string, unknown> | null
-        if (u) saveRecentUser({ id: String(u.id), name: String(u.name), roleName: String((u.role as Record<string,unknown>)?.name || 'Admin') })
+        if (u) saveRecentUser({ id: String(u.id), name: String(u.name), roleName: String((u.role as Record<string,unknown>)?.name || 'Admin') }, tenantWorkspaceId)
         setTimeout(() => navigate(redirectBySession(u), { replace: true }), 400)
       } else {
         setLoginState('error')
@@ -387,7 +428,7 @@ export default function LoginPage() {
       if (res.success && res.data) {
         const b = res.data as { id: string; name: string; code: string }
         const branch = { id: b.id, name: b.name, code: b.code || branchCode.toUpperCase() }
-        setTerminalBranch(branch); setStoredBranch(branch)
+        setTerminalBranch(branch); setStoredBranch(branch, tenantWorkspaceId)
         setShowBranchInput(false); setBranchCode('')
         toast.success(`Branch → ${branch.name}`)
       } else { toast.error('Branch not found. Check the code or PIN.') }
@@ -397,7 +438,7 @@ export default function LoginPage() {
   }
 
   const clearBranch = () => {
-    setTerminalBranch(null); setStoredBranch(null); setPin('')
+    setTerminalBranch(null); setStoredBranch(null, tenantWorkspaceId); setPin('')
     toast.success('Branch cleared')
   }
 
@@ -431,7 +472,7 @@ export default function LoginPage() {
 
   const pickBranchFromList = (b: { id: string; name: string; code: string; branch_pin: string }) => {
     const branch = { id: b.id, name: b.name, code: b.code || b.name.toUpperCase().replace(/\s+/g, '') }
-    setTerminalBranch(branch); setStoredBranch(branch)
+    setTerminalBranch(branch); setStoredBranch(branch, tenantWorkspaceId)
     setShowBranchList(false); setShowBranchInput(false); setBranchCode('')
     toast.success(`Branch → ${branch.name}`)
   }
@@ -487,7 +528,7 @@ export default function LoginPage() {
     if (result.success) {
       setLoginState('success'); setPinSuccess(true)
       const u = useAuthStore.getState().user as Record<string, unknown> | null
-      if (u) saveRecentUser({ id: String(u.id), name: String(u.name), roleName: String((u.role as Record<string,unknown>)?.name || 'Staff') })
+      if (u) saveRecentUser({ id: String(u.id), name: String(u.name), roleName: String((u.role as Record<string,unknown>)?.name || 'Staff') }, tenantWorkspaceId)
       setTimeout(() => navigate(redirectBySession(useAuthStore.getState().user), { replace: true }), 600)
     } else {
       setLoginState('error'); setPinShake(true)
@@ -517,6 +558,47 @@ export default function LoginPage() {
   }, [mode, loading, pin, showBranchInput, terminalBranch, loginState])
 
   // ── Styles ──
+  const requestKeyAccess = async () => {
+    setKeyAccessStage('requesting')
+    setKeyAccessError('')
+    setKeyAccessCode('')
+    try {
+      const result = await window.api.app.requestCompanySwitchAccess()
+      if (!result?.success) throw new Error(result?.error || 'Unable to send request')
+      setKeyAccessExpiry(result.expires_at || '')
+      setKeyAccessStage('pending')
+    } catch (error) {
+      setKeyAccessStage('idle')
+      setKeyAccessError((error as Error).message)
+    }
+  }
+
+  const verifyKeyAccess = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (keyAccessCode.length !== 4) return
+    setKeyAccessStage('verifying')
+    setKeyAccessError('')
+    try {
+      const result = await window.api.app.verifyCompanySwitchCode(keyAccessCode)
+      if (!result?.success) throw new Error(result?.error || 'Approval code was not accepted')
+      setKeyAccessOpen(false)
+      setKeyAccessStage('idle')
+      setKeyAccessCode('')
+      onChangeCompany?.()
+    } catch (error) {
+      setKeyAccessStage('approved')
+      setKeyAccessError((error as Error).message)
+    }
+  }
+
+  const closeKeyAccess = () => {
+    setKeyAccessOpen(false)
+    setKeyAccessStage('idle')
+    setKeyAccessCode('')
+    setKeyAccessError('')
+    window.api.app.cancelCompanySwitchAccess?.().catch(() => undefined)
+  }
+
   const pinDotStyle = (i: number) => {
     if (pinSuccess && i < pin.length) return { background: '#10b981', border: '2px solid #10b981' }
     if (loginState === 'error' && i < pin.length) return { background: '#ef4444', border: '2px solid #ef4444' }
@@ -551,6 +633,12 @@ export default function LoginPage() {
         online={syncStatus.online} pending={syncStatus.pending}
         lastSync={syncStatus.last_sync} licenseOk={licenseOk} version={version || '...'}
       />
+      <button type="button" onClick={() => setKeyAccessOpen(true)}
+        className="fixed left-4 top-10 z-[55] flex h-8 w-8 items-center justify-center rounded-lg border text-slate-500 transition hover:text-slate-200"
+        style={{ background: 'rgba(10,15,25,0.78)', borderColor: 'rgba(148,163,184,0.14)' }}
+        title="Administrator system access" aria-label="Administrator system access">
+        <Settings size={14} />
+      </button>
       {updateInfo && (
         <div className="fixed top-10 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-3 rounded-xl border px-4 py-2 shadow-xl"
           style={{ background: '#111827', borderColor: 'rgb(var(--brand-800-rgb))', color: 'rgb(var(--brand-100-rgb))' }}>
@@ -580,8 +668,47 @@ export default function LoginPage() {
         </div>
       )}
 
-      <div className="flex-1 flex items-center justify-center" style={{ paddingTop: '32px' }}>
-        <div className="w-full max-w-[330px] px-4 space-y-3">
+      <div className="flex-1 overflow-y-auto" style={{ paddingTop: '32px' }}>
+        <div className="min-h-full grid lg:grid-cols-[minmax(360px,0.9fr)_minmax(520px,1.1fr)]">
+          <section className="relative hidden lg:flex flex-col justify-between overflow-hidden border-r p-10 xl:p-14"
+            style={{ borderColor: 'rgba(148,163,184,0.12)', background: 'radial-gradient(circle at 18% 12%, rgb(var(--brand-rgb) / 0.24), transparent 42%), linear-gradient(155deg, #0d1726 0%, #09111d 55%, #070b12 100%)' }}>
+            <div className="absolute -left-28 top-1/3 h-72 w-72 rounded-full blur-3xl" style={{ background: 'rgb(var(--brand-rgb) / 0.12)' }} />
+            <div className="relative">
+              <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold"
+                style={{ borderColor: 'rgb(var(--brand-rgb) / 0.28)', background: 'rgb(var(--brand-rgb) / 0.10)', color: 'rgb(var(--brand-300-rgb))' }}>
+                <Sparkles size={13} /> Secure business workspace
+              </div>
+              <h1 className="mt-7 max-w-xl text-4xl font-bold leading-tight tracking-tight text-white xl:text-5xl">
+                Welcome back to<br /><span style={{ color: 'rgb(var(--brand-400-rgb))' }}>{brandName}</span>
+              </h1>
+              <p className="mt-5 max-w-lg text-base leading-7 text-slate-300">
+                Sign in to your assigned branch and continue selling, inventory, customer and Smart Buy operations from one secure workspace.
+              </p>
+
+              <div className="mt-9 grid gap-3">
+                <div className="flex items-start gap-3 rounded-2xl border p-4" style={{ borderColor: 'rgba(148,163,184,0.12)', background: 'rgba(15,23,42,0.58)' }}>
+                  <Database size={19} className="mt-0.5 text-emerald-400" />
+                  <div><p className="text-sm font-semibold text-slate-100">Company data stays separate</p><p className="mt-1 text-xs leading-5 text-slate-400">Every company key opens its own database, settings, uploads and backups on this computer.</p></div>
+                </div>
+                <div className="flex items-start gap-3 rounded-2xl border p-4" style={{ borderColor: 'rgba(148,163,184,0.12)', background: 'rgba(15,23,42,0.58)' }}>
+                  <Shield size={19} className="mt-0.5" style={{ color: 'rgb(var(--brand-400-rgb))' }} />
+                  <div><p className="text-sm font-semibold text-slate-100">Offline-ready and protected</p><p className="mt-1 text-xs leading-5 text-slate-400">Your current workspace remains available even when the cloud connection is interrupted.</p></div>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative rounded-3xl border p-5" style={{ borderColor: 'rgb(var(--brand-rgb) / 0.28)', background: 'linear-gradient(135deg, rgb(var(--brand-rgb) / 0.14), rgba(15,23,42,0.86))' }}>
+              <div className="flex items-center gap-3">
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl" style={{ background: 'rgb(var(--brand-rgb) / 0.18)', color: 'rgb(var(--brand-300-rgb))' }}><Shield size={21} /></div>
+                <div><p className="text-sm font-bold text-white">Protected company workspace</p><p className="mt-0.5 text-xs text-slate-400">Company changes require Super Admin approval.</p></div>
+              </div>
+              <p className="mt-4 text-xs leading-5 text-slate-400">The active company database, settings, uploads and backups remain isolated on this computer.</p>
+            </div>
+          </section>
+
+          <section className="flex items-center justify-center px-5 py-10 sm:px-10 xl:px-16" style={{ background: 'radial-gradient(circle at 85% 20%, rgba(30,41,59,0.50), transparent 42%)' }}>
+          <div className="w-full max-w-[430px] space-y-4 rounded-[28px] border p-5 shadow-2xl sm:p-7"
+            style={{ borderColor: 'rgba(148,163,184,0.14)', background: 'rgba(10,15,25,0.78)', boxShadow: '0 30px 80px rgba(0,0,0,0.34)', backdropFilter: 'blur(20px)' }}>
 
           {/* ── Company header ── */}
           <div className="flex items-center gap-3 pb-3" style={{ borderBottom: '1px solid #0f1623' }}>
@@ -1113,8 +1240,76 @@ export default function LoginPage() {
             </form>
           )}
 
+          </div>
+          </section>
         </div>
       </div>
+
+      {keyAccessOpen && (
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="key-access-title">
+          <div className="w-full max-w-md rounded-3xl border p-6 shadow-2xl"
+            style={{ borderColor: 'rgba(148,163,184,0.18)', background: '#0d1523' }}>
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl"
+                style={{ background: 'rgb(var(--brand-rgb) / 0.16)', color: 'rgb(var(--brand-300-rgb))' }}>
+                <KeyRound size={21} />
+              </div>
+              <button type="button" onClick={closeKeyAccess} aria-label="Close"
+                className="rounded-lg p-1.5 text-slate-500 transition hover:bg-slate-800 hover:text-white">
+                <X size={18} />
+              </button>
+            </div>
+
+            <h2 id="key-access-title" className="mt-5 text-xl font-bold text-white">Administrator system access</h2>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Opening the company-key screen requires approval from Super Admin. This approval works once on this device and expires automatically.
+            </p>
+
+            {keyAccessError && (
+              <div className="mt-4 rounded-xl border border-red-500/25 bg-red-500/10 px-3.5 py-3 text-sm text-red-300">
+                {keyAccessError}
+              </div>
+            )}
+
+            {(keyAccessStage === 'idle' || keyAccessStage === 'requesting') && (
+              <button type="button" onClick={() => void requestKeyAccess()} disabled={keyAccessStage === 'requesting'}
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+                style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))' }}>
+                {keyAccessStage === 'requesting'
+                  ? <><RefreshCw size={15} className="animate-spin" /> Sending request…</>
+                  : <><Shield size={15} /> Request Super Admin approval</>}
+              </button>
+            )}
+
+            {keyAccessStage === 'pending' && (
+              <div className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5 text-center">
+                <RefreshCw size={24} className="mx-auto animate-spin text-amber-300" />
+                <p className="mt-3 text-sm font-bold text-white">Waiting for Super Admin</p>
+                <p className="mt-1 text-xs leading-5 text-slate-400">The request has been sent. This window checks approval automatically.</p>
+                {keyAccessExpiry && <p className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-slate-500"><Clock3 size={12} />Request expires {new Date(keyAccessExpiry).toLocaleTimeString()}</p>}
+              </div>
+            )}
+
+            {(keyAccessStage === 'approved' || keyAccessStage === 'verifying') && (
+              <form onSubmit={verifyKeyAccess} className="mt-6">
+                <div className="rounded-xl border border-emerald-500/25 bg-emerald-500/10 px-3.5 py-3 text-sm text-emerald-300">
+                  Approved. Enter the 4-digit code shown to Super Admin.
+                </div>
+                <input type="text" inputMode="numeric" autoFocus maxLength={4} value={keyAccessCode}
+                  onChange={e => { setKeyAccessCode(e.target.value.replace(/\D/g, '').slice(0, 4)); setKeyAccessError('') }}
+                  className="mt-4 w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-4 text-center font-mono text-3xl font-bold tracking-[0.5em] text-white outline-none focus:border-emerald-500"
+                  placeholder="0000" aria-label="Four digit approval code" />
+                <button type="submit" disabled={keyAccessCode.length !== 4 || keyAccessStage === 'verifying'}
+                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
+                  {keyAccessStage === 'verifying' ? <><RefreshCw size={15} className="animate-spin" /> Verifying…</> : <><CheckCircle size={15} /> Verify and continue</>}
+                </button>
+              </form>
+            )}
+
+            <p className="mt-5 text-center text-[11px] leading-5 text-slate-500">Codes are device-bound, single-use, valid for 10 minutes, and locked after five incorrect attempts.</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -4,12 +4,13 @@ import { useAuthStore } from '../store/authStore'
 import { auth, settings as settingsApi } from '../lib/api'
 import {
   LayoutDashboard, Building2, Package, Settings, ScrollText,
-  ShieldCheck, LogOut,
+  ShieldCheck, LogOut, KeyRound,
 } from 'lucide-react'
 
 const nav = [
   { to: '/',          label: 'Dashboard',   icon: LayoutDashboard, end: true },
   { to: '/companies', label: 'Companies',   icon: Building2 },
+  { to: '/product-key-access', label: 'Key Access', icon: KeyRound },
   { to: '/packages',  label: 'Packages',    icon: Package },
   { to: '/settings',  label: 'Settings',    icon: Settings },
   { to: '/audit',     label: 'Audit Logs',  icon: ScrollText },

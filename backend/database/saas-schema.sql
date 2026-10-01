@@ -235,6 +235,34 @@ CREATE TABLE IF NOT EXISTS pos_devices (
   INDEX idx_device_status  (status)
 );
 
+-- ─── PRODUCT-KEY ACCESS APPROVALS ─────────────────────────────────────────────
+-- An active POS must receive a short-lived, one-time Super Admin approval
+-- before it can open the company-key screen. Raw request secrets and approval
+-- codes are never stored in this database.
+CREATE TABLE IF NOT EXISTS product_key_access_requests (
+  id                 CHAR(36)     NOT NULL PRIMARY KEY,
+  company_id         CHAR(36)     NOT NULL,
+  device_row_id      CHAR(36)     NOT NULL,
+  device_id          VARCHAR(255) NOT NULL,
+  device_name        VARCHAR(128) NOT NULL,
+  request_token_hash CHAR(64)     NOT NULL,
+  code_hash          CHAR(64),
+  code_salt          CHAR(32),
+  status             ENUM('pending','approved','denied','consumed','expired') NOT NULL DEFAULT 'pending',
+  attempts           INT          NOT NULL DEFAULT 0,
+  approved_by        CHAR(36),
+  approved_at        DATETIME,
+  consumed_at        DATETIME,
+  expires_at         DATETIME     NOT NULL,
+  created_at         DATETIME     NOT NULL DEFAULT NOW(),
+  updated_at         DATETIME     NOT NULL DEFAULT NOW() ON UPDATE NOW(),
+  UNIQUE KEY uq_pkar_request_token (request_token_hash),
+  INDEX idx_pkar_company_status (company_id, status),
+  INDEX idx_pkar_device_status (device_id, status),
+  INDEX idx_pkar_expiry (expires_at),
+  FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
+);
+
 -- ─── SYNC LOGS ────────────────────────────────────────────────────────────────
 -- Tracks every sync push/pull from POS devices to the backend
 CREATE TABLE IF NOT EXISTS sync_logs (

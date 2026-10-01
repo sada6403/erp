@@ -1,5 +1,11 @@
-import { ipcMain } from 'electron'
-import Store from 'electron-store'
+import { app, ipcMain } from 'electron'
+import {
+  activateCompanyWorkspace,
+  createCompanyStore,
+  createWorkspaceStore,
+  getActiveWorkspaceId,
+  planCompanyWorkspace,
+} from '../services/companyWorkspace'
 import os from 'os'
 import { randomUUID, createHash, timingSafeEqual } from 'crypto'
 import { getCachedLicense, getEnabledModules, getMaxBranches, getMaxUsers, OFFLINE_LEASE_MS, isDeviceLocked, getDeviceLockReason } from '../services/licenseService'
@@ -11,7 +17,44 @@ import { reconcileLocalDefaultRoles } from '../services/roleReconcile'
 import { wipeLocalTransactionalData } from './admin'
 import { CloudApi } from '../services/cloudApi'
 
-const store = new Store()
+const store = createCompanyStore()
+
+type CompanySwitchRequest = {
+  requestId: string
+  requestSecret: string
+  expiresAt: number
+}
+
+type CompanySwitchGrant = {
+  companyId: string
+  deviceId: string
+  expiresAt: number
+}
+
+// Deliberately process-memory only. Restarting the app discards both the
+// opaque request secret and any verified grant, so approval cannot become a
+// durable bypass stored in electron-store or renderer localStorage.
+let companySwitchRequest: CompanySwitchRequest | null = null
+let companySwitchGrant: CompanySwitchGrant | null = null
+
+function currentCloud(): CloudApi {
+  const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+  const baseUrl = normalizeApiUrl(String(settings.cloud_api_url || ''))
+  const apiKey = decryptSecret(settings.cloud_api_key).trim()
+  const deviceId = String(store.get('device_id') || getOrCreateDeviceId()).trim()
+  if (!apiKey) throw new Error('This device is not connected to the cloud')
+  return new CloudApi({ baseUrl, apiKey, deviceId })
+}
+
+function hasValidCompanySwitchGrant(): boolean {
+  if (!companySwitchGrant || companySwitchGrant.expiresAt <= Date.now()) {
+    companySwitchGrant = null
+    return false
+  }
+  const companyId = String(store.get('activation_company_id') || '')
+  const deviceId = String(store.get('device_id') || getOrCreateDeviceId())
+  return companySwitchGrant.companyId === companyId && companySwitchGrant.deviceId === deviceId
+}
 
 // Support passcode — unlocks the hidden Cloud API URL settings (activation
 // page + admin settings). DB-backed via app_settings.support_passcode
@@ -48,15 +91,15 @@ function parseJson(text: string): Record<string, unknown> | null {
   }
 }
 
-function activationSessionShape(extra: Record<string, unknown> = {}) {
+function activationSessionShape(extra: Record<string, unknown> = {}, targetStore = store) {
   const cached = getCachedLicense()
   return {
     portal: 'admin' as const,
     scope: { level: 'owner' as const, branchId: null, subBranchId: null },
     branch_id: null,
     sub_branch_id: null,
-    device_id: getOrCreateDeviceId(),
-    licenseId: (store.get('device_license_key') as string | undefined) ?? null,
+    device_id: getOrCreateDeviceId(targetStore),
+    licenseId: (targetStore.get('device_license_key') as string | undefined) ?? null,
     enabledModules: getEnabledModules() ?? cached?.modules ?? [],
     enabledFeatures: [],
     limits: {
@@ -67,11 +110,11 @@ function activationSessionShape(extra: Record<string, unknown> = {}) {
   }
 }
 
-export function getOrCreateDeviceId(): string {
-  let id = store.get('device_uuid') as string | undefined
+export function getOrCreateDeviceId(targetStore = store): string {
+  let id = targetStore.get('device_uuid') as string | undefined
   if (!id) {
     id = randomUUID()
-    store.set('device_uuid', id)
+    targetStore.set('device_uuid', id)
   }
   return id
 }
@@ -176,10 +219,81 @@ export function registerActivationHandlers() {
     os_info:     `${os.type()} ${os.release()}`,
   }))
 
+  safeHandle(ipcMain, 'app:requestCompanySwitchAccess', async () => {
+    if (!store.get('device_activated')) {
+      return { success: false, error: 'This device is not activated yet' }
+    }
+    try {
+      const result = await currentCloud().requestProductKeyAccess(os.hostname())
+      companySwitchGrant = null
+      companySwitchRequest = {
+        requestId: result.request_id,
+        requestSecret: result.request_secret,
+        expiresAt: new Date(result.expires_at).getTime(),
+      }
+      return { success: true, status: result.status, expires_at: result.expires_at }
+    } catch (error) {
+      return { success: false, error: (error as Error).message || 'Unable to send approval request' }
+    }
+  })
+
+  safeHandle(ipcMain, 'app:getCompanySwitchAccessStatus', async () => {
+    if (!companySwitchRequest) return { success: false, status: 'none' }
+    if (companySwitchRequest.expiresAt <= Date.now()) {
+      companySwitchRequest = null
+      return { success: true, status: 'expired' }
+    }
+    try {
+      const result = await currentCloud().getProductKeyAccessStatus(
+        companySwitchRequest.requestId,
+        companySwitchRequest.requestSecret
+      )
+      return { success: true, ...result }
+    } catch (error) {
+      return { success: false, error: (error as Error).message || 'Unable to check approval status' }
+    }
+  })
+
+  safeHandle(ipcMain, 'app:verifyCompanySwitchCode', async (_event, code: string) => {
+    const normalized = String(code || '').trim()
+    if (!/^\d{4}$/.test(normalized)) {
+      return { success: false, error: 'Enter the 4-digit approval code' }
+    }
+    if (!companySwitchRequest) {
+      return { success: false, error: 'Send a new access request first' }
+    }
+    try {
+      const result = await currentCloud().verifyProductKeyAccess(
+        companySwitchRequest.requestId,
+        companySwitchRequest.requestSecret,
+        normalized
+      )
+      if (!result.success) return { success: false, error: 'Approval code was not accepted' }
+      companySwitchGrant = {
+        companyId: String(store.get('activation_company_id') || ''),
+        deviceId: String(store.get('device_id') || getOrCreateDeviceId()),
+        expiresAt: Date.now() + Math.min(Number(result.grant_expires_in_seconds || 300), 300) * 1000,
+      }
+      companySwitchRequest = null
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: (error as Error).message || 'Unable to verify approval code' }
+    }
+  })
+
+  safeHandle(ipcMain, 'app:cancelCompanySwitchAccess', () => {
+    companySwitchRequest = null
+    companySwitchGrant = null
+    return { success: true }
+  })
+
   safeHandle(ipcMain, 'app:verifyCompanyKey', async (_event, payload: {
     company_key?: string
     cloud_api_url: string
   }) => {
+    if (store.get('device_activated') && !hasValidCompanySwitchGrant()) {
+      return { success: false, error: 'Super Admin approval is required before changing the company key' }
+    }
     const companyKey = payload.company_key?.trim()
     if (!companyKey) {
       return { success: false, error: 'Company key is required' }
@@ -203,7 +317,18 @@ export function registerActivationHandlers() {
       return { success: false, error: String(data.error ?? 'Verification failed') }
     }
 
-    return { success: true, ...activationSessionShape(), ...data }
+    const plan = planCompanyWorkspace({
+      companyId: data.company_id ? String(data.company_id) : null,
+      companyKey,
+      companyName: data.company_name ? String(data.company_name) : '',
+    })
+    return {
+      success: true,
+      ...activationSessionShape(),
+      ...data,
+      local_workspace_exists: plan.workspaceExists,
+      will_switch_company: plan.workspaceChanged,
+    }
   })
 
   safeHandle(ipcMain, 'app:activate', async (_event, payload: {
@@ -213,20 +338,40 @@ export function registerActivationHandlers() {
     branch_id?: string | null
     device_name?: string
   }) => {
+    const wasAlreadyActivated = Boolean(store.get('device_activated'))
     const { company_key, license_key, cloud_api_url, branch_id } = payload
     if (!company_key?.trim() && !license_key?.trim()) {
       return { success: false, error: 'Company key or license key is required' }
     }
 
-    const apiUrl    = normalizeApiUrl(cloud_api_url ?? '')
-    const device_id   = getOrCreateDeviceId()
+    const apiUrl = normalizeApiUrl(cloud_api_url ?? '')
+    let verifiedCompany: Record<string, unknown> = {}
+    if (company_key?.trim()) {
+      const verifyUrl = `${apiUrl}/api/activate/verify?company_key=${encodeURIComponent(company_key.trim())}`
+      const verifyRes = await fetch(verifyUrl)
+      const verifyText = await verifyRes.text()
+      verifiedCompany = parseJson(verifyText) ?? {}
+      if (!verifyRes.ok || !Object.keys(verifiedCompany).length) {
+        return { success: false, error: String(verifiedCompany.error ?? 'Company key verification failed') }
+      }
+    }
+    const workspacePlan = planCompanyWorkspace({
+      companyId: verifiedCompany.company_id ? String(verifiedCompany.company_id) : null,
+      companyKey: company_key?.trim() || license_key?.trim() || 'legacy-license',
+      companyName: verifiedCompany.company_name ? String(verifiedCompany.company_name) : '',
+    })
+    if (store.get('device_activated') && workspacePlan.workspaceChanged && !hasValidCompanySwitchGrant()) {
+      return { success: false, error: 'Super Admin approval has expired. Return to login and request access again.' }
+    }
+    const targetStore = createWorkspaceStore(workspacePlan.workspaceId)
+    const device_id   = getOrCreateDeviceId(targetStore)
     const device_name = payload.device_name?.trim() || os.hostname()
     const os_info     = `${os.type()} ${os.release()}`
 
     const device_fingerprint = getDeviceFingerprint()
-    store.set('device_fingerprint', device_fingerprint)
+    targetStore.set('device_fingerprint', device_fingerprint)
 
-    const body: Record<string, unknown> = { device_id, device_name, os_info, app_version: '1.0.0', device_fingerprint }
+    const body: Record<string, unknown> = { device_id, device_name, os_info, app_version: app.getVersion(), device_fingerprint }
     if (company_key?.trim()) body.company_key = company_key.trim()
     else body.license_key = license_key!.trim()
     if (branch_id) body.branch_id = branch_id
@@ -252,36 +397,42 @@ export function registerActivationHandlers() {
     if (!res.ok) return { success: false, error: String(data.error ?? 'Activation failed') }
 
     // Persist activation state
-    store.set('device_activated', true)
-    if (license_key?.trim()) store.set('device_license_key', license_key.trim())
-    else store.delete('device_license_key')
-    if (company_key?.trim()) store.set('device_company_key', company_key.trim())
-    store.set('device_id', device_id)
-    store.set('activation_company_name', data.company_name ?? '')
+    targetStore.set('device_activated', true)
+    if (license_key?.trim()) targetStore.set('device_license_key', license_key.trim())
+    else targetStore.delete('device_license_key')
+    if (company_key?.trim()) targetStore.set('device_company_key', company_key.trim())
+    targetStore.set('device_id', device_id)
+    targetStore.set('activation_company_id', data.company_id ?? verifiedCompany.company_id ?? '')
+    targetStore.set('activation_company_name', data.company_name ?? verifiedCompany.company_name ?? '')
+    // A company switch always returns to that company's login screen. Never
+    // revive a cached user/session from the last time this workspace was open.
+    targetStore.delete('auth_token')
+    targetStore.delete('auth_user')
+    targetStore.delete('support_session')
     const activatedBranchId = data.branch_id || branch_id
-    if (activatedBranchId) store.set('device_branch_id', String(activatedBranchId))
-    else store.delete('device_branch_id')
+    if (activatedBranchId) targetStore.set('device_branch_id', String(activatedBranchId))
+    else targetStore.delete('device_branch_id')
 
     // Phase 1 device-authorization work — a fresh activation (including a
     // RE-activation of a previously-locked/revoked device) always starts a
     // clean authorization state, never restores whatever was there before.
-    store.set('device_authorization_version', 1)
-    store.set('offline_authorization_expires_at', Date.now() + OFFLINE_LEASE_MS)
-    store.delete('device_locked')
-    store.delete('device_lock_reason')
+    targetStore.set('device_authorization_version', 1)
+    targetStore.set('offline_authorization_expires_at', Date.now() + OFFLINE_LEASE_MS)
+    targetStore.delete('device_locked')
+    targetStore.delete('device_lock_reason')
     // Force a full bootstrap re-pull rather than trusting whatever local
     // data/cursor this device already had — matters most for the
     // re-activation case (a previously revoked device coming back).
-    store.delete('last_pull_timestamp')
-    store.delete('sync_table_cursors_v2')
-    store.delete('sync_pull_errors')
-    store.delete('last_successful_sync_v2_at')
-    store.delete('sync_cycle_error')
-    store.delete('last_seen_watermark')
+    targetStore.delete('last_pull_timestamp')
+    targetStore.delete('sync_table_cursors_v2')
+    targetStore.delete('sync_pull_errors')
+    targetStore.delete('last_successful_sync_v2_at')
+    targetStore.delete('sync_cycle_error')
+    targetStore.delete('last_seen_watermark')
 
     // Auto-save api_key + branding into app_settings
-    const current = (store.get('app_settings') as Record<string, unknown>) ?? {}
-    store.set('app_settings', {
+    const current = (targetStore.get('app_settings') as Record<string, unknown>) ?? {}
+    targetStore.set('app_settings', {
       ...current,
       cloud_api_url:   apiUrl,
       cloud_api_key:   data.api_key,
@@ -296,7 +447,7 @@ export function registerActivationHandlers() {
     // copy down as a second, duplicate row (see branchReconcile.ts). Keeps
     // all locally-recorded staff/sales/stock under the branch, just under its
     // real cloud id from here on.
-    if (branch_id) {
+    if (branch_id && !workspacePlan.workspaceChanged) {
       try {
         reconcileLocalMainBranch(getDb(), String(branch_id))
       } catch (err) {
@@ -310,27 +461,41 @@ export function registerActivationHandlers() {
     // tenant's actual role rows and re-point local references onto the
     // real cloud ids, so a later full re-pull never has to fall back to
     // guessing which role a user belongs to.
-    try {
-      const cloud = new CloudApi({ baseUrl: apiUrl, apiKey: String(data.api_key || ''), deviceId: device_id })
-      const cloudRoles = await cloud.changes('roles', '1970-01-01T00:00:00.000Z')
-      const cloudRolesByName: Record<string, string> = {}
-      for (const row of cloudRoles) {
-        const name = String(row.name || '')
-        const id = String(row.id || '')
-        if (name && id) cloudRolesByName[name] = id
+    if (!workspacePlan.workspaceChanged) {
+      try {
+        const cloud = new CloudApi({ baseUrl: apiUrl, apiKey: String(data.api_key || ''), deviceId: device_id })
+        const cloudRoles = await cloud.changes('roles', '1970-01-01T00:00:00.000Z')
+        const cloudRolesByName: Record<string, string> = {}
+        for (const row of cloudRoles) {
+          const name = String(row.name || '')
+          const id = String(row.id || '')
+          if (name && id) cloudRolesByName[name] = id
+        }
+        reconcileLocalDefaultRoles(getDb(), cloudRolesByName)
+      } catch (err) {
+        console.error('[Activation] Role reconciliation failed:', err)
       }
-      reconcileLocalDefaultRoles(getDb(), cloudRolesByName)
-    } catch (err) {
-      console.error('[Activation] Role reconciliation failed:', err)
     }
+
+    activateCompanyWorkspace({
+      ...workspacePlan,
+      companyId: data.company_id ? String(data.company_id) : workspacePlan.companyId,
+      companyName: String(data.company_name || verifiedCompany.company_name || workspacePlan.companyName),
+    })
+
+    // A successful company change consumes the short-lived in-memory grant.
+    // A failed activation keeps it available for a retry until its expiry.
+    if (wasAlreadyActivated) companySwitchGrant = null
 
     // Kick off an immediate full sync so the device shows the company's
     // existing data (users, branches, products, sales, branding) right away.
-    try {
-      const { getSyncService } = await import('../services/syncService')
-      getSyncService().runSoon()
-    } catch (err) {
-      console.warn('[Activation] Could not trigger initial sync:', err)
+    if (!workspacePlan.workspaceChanged) {
+      try {
+        const { getSyncService } = await import('../services/syncService')
+        getSyncService().runSoon()
+      } catch (err) {
+        console.warn('[Activation] Could not trigger initial sync:', err)
+      }
     }
 
     return {
@@ -339,12 +504,22 @@ export function registerActivationHandlers() {
       device_name,
       brand_color:    data.brand_color    ?? null,
       brand_logo_url: data.brand_logo_url ?? null,
+      restart_required: workspacePlan.workspaceChanged,
+      workspace_id: workspacePlan.workspaceId,
       ...activationSessionShape({
         company_id: data.company_id ?? null,
         licenseId: data.api_key ?? null,
         branch_id: data.branch_id ?? null,
-      }),
+      }, targetStore),
     }
+  })
+
+  safeHandle(ipcMain, 'app:restartForWorkspace', () => {
+    setTimeout(() => {
+      app.relaunch()
+      app.exit(0)
+    }, 250)
+    return { success: true }
   })
 
   safeHandle(ipcMain, 'app:deactivate', () => {
@@ -359,5 +534,7 @@ export function registerActivationHandlers() {
     device_id:          getOrCreateDeviceId(),
     device_name:        os.hostname(),
     device_fingerprint: store.get('device_fingerprint') ?? getDeviceFingerprint(),
+    company_id:         store.get('activation_company_id') ?? null,
+    workspace_id:       getActiveWorkspaceId(),
   }))
 }

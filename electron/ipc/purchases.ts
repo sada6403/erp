@@ -3,7 +3,7 @@ import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { syncStockRow } from '../services/stockSync'
 import { insertStockMovement } from '../services/stockMovement'
 import { safeHandleModule } from './ipcHandler'
@@ -11,7 +11,7 @@ import { sendEmail } from '../services/emailService'
 import { sendWhatsApp } from '../services/whatsappService'
 import { canManageProcurement, resolveMainBranchId } from '../services/branchAccess'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function requireMainBranchProcurement(): { user: Record<string, unknown>; mainBranchId: string } {
   const db = getDb()

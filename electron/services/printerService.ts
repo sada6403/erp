@@ -1,13 +1,13 @@
 import { randomUUID } from 'crypto'
 import { BrowserWindow, app } from 'electron'
 import type { WebContentsPrintOptions } from 'electron'
-import Store from 'electron-store'
+import { createCompanyStore } from './companyWorkspace'
 import path from 'path'
 import fs from 'fs'
 import { getDb } from '../database'
 import { getOrCreateDeviceId } from '../ipc/activation'
 
-const store = new Store()
+const store = createCompanyStore()
 
 export type AssignedModule = 'receipt' | 'invoice' | 'label' | 'kitchen'
 export type ConnectionType = 'windows_driver' | 'network_escpos'

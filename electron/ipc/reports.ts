@@ -4,10 +4,10 @@ import path from 'path'
 import * as XLSX from 'xlsx'
 import { getDb } from '../database'
 import { logAudit } from '../services/auditLog'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 interface TxFilters {
   dateFrom?: string

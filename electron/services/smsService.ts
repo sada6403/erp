@@ -1,9 +1,9 @@
-import Store from 'electron-store'
+import { createCompanyStore } from './companyWorkspace'
 import { net } from 'electron'
 import { randomUUID } from 'crypto'
 import { getDb } from '../database'
 
-const store = new Store<Record<string, unknown>>()
+const store = createCompanyStore<Record<string, unknown>>()
 
 export interface SmsPayload {
   to: string | string[]

@@ -1,9 +1,9 @@
 import type { IpcMain } from 'electron'
 import { getDb } from '../database'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import { safeHandle } from './ipcHandler'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function isSuperAdmin(user: Record<string, unknown>): boolean {
   const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>)

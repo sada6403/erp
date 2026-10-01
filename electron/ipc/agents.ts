@@ -5,13 +5,13 @@ import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 import { enqueuSync, enqueueUserRow } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
-import Store from 'electron-store'
+import { createCompanyStore } from '../services/companyWorkspace'
 import * as XLSX from 'xlsx'
 import { safeHandle } from './ipcHandler'
 import { createNotification } from './notifications'
 import { validatePin, isAdminTypeRole } from '../services/pinPolicy'
 
-const store = new Store()
+const store = createCompanyStore()
 
 function authUser(): Record<string, unknown> {
   return (store.get('auth_user') as Record<string, unknown> | undefined) || {}

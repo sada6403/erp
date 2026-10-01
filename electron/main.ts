@@ -39,6 +39,7 @@ import { startAutoBackup, stopAutoBackup } from './services/backupService'
 import { startLicenseChecks, stopLicenseChecks } from './services/licenseService'
 import { type SyncService, getSyncService } from './services/syncService'
 import { type ClaimReminderService, getClaimReminderService } from './services/claimReminderService'
+import { getWorkspaceDataPath } from './services/companyWorkspace'
 
 const isDev = process.env.NODE_ENV === 'development'
 const devPort = process.env.DEV_PORT || '5173'
@@ -162,7 +163,7 @@ async function bootstrap() {
   // disk — e.g. the app's own SQLite DB or OS files. Resolving the final
   // path and verifying it's still inside uploadsDir closes that off; any
   // request that would escape is rejected with 403 instead of served.
-  const uploadsDir = path.join(app.getPath('userData'), 'uploads')
+  const uploadsDir = getWorkspaceDataPath('uploads')
   protocol.handle('app-img', (request) => {
     const urlPath = decodeURIComponent(request.url.replace('app-img://', ''))
     const filePath = path.resolve(uploadsDir, urlPath)

@@ -8,6 +8,7 @@ import CompaniesPage  from './pages/CompaniesPage'
 import PackagesPage   from './pages/PackagesPage'
 import SettingsPage   from './pages/SettingsPage'
 import AuditLogsPage  from './pages/AuditLogsPage'
+import ProductKeyAccessPage from './pages/ProductKeyAccessPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const user = useAuthStore(s => s.user)
@@ -31,6 +32,7 @@ export default function App() {
           <Route path="packages"   element={<PackagesPage />} />
           <Route path="settings"   element={<SettingsPage />} />
           <Route path="audit"      element={<AuditLogsPage />} />
+          <Route path="product-key-access" element={<ProductKeyAccessPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
