@@ -185,42 +185,99 @@ export async function sendTrialExpiryWarning(opts: {
   })
 }
 
-export async function sendWelcomeEmail(opts: {
+export async function sendCompanyOnboardingEmail(opts: {
   companyName: string
   adminEmail: string
   adminName: string
-  tempPassword: string
-  loginUrl?: string
+  adminPassword?: string
+  companyKey: string
+  apiKey: string
+  downloadUrl?: string
+  serverUrl?: string
 }) {
   const branding = await getBrandingSettings()
-  const appName  = branding.app_name || 'POS ERP'
+  const appName  = branding.app_name || 'Enterprise POS ERP'
   const support  = branding.support_email || ''
+  const downloadUrl = opts.downloadUrl || 'http://72.61.115.222/download'
+  const serverUrl = opts.serverUrl || 'http://72.61.115.222:4001'
+  const passwordDisplay = opts.adminPassword || '(Your chosen password)'
 
   return sendEmail({
     to: opts.adminEmail,
-    subject: `Welcome to ${appName} — Your account is ready`,
+    subject: `Welcome to ${appName} — Setup Guide & Account Credentials for ${opts.companyName}`,
     html: `
-      <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1f2937">
-        <div style="background:#1e293b;padding:24px;border-radius:12px 12px 0 0">
-          <h1 style="color:#fff;margin:0;font-size:20px">${appName}</h1>
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #1e293b; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 28px; text-align: center;">
+          <h1 style="color: #ffffff; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.025em;">${appName}</h1>
+          <p style="color: #94a3b8; margin: 6px 0 0; font-size: 14px;">Welcome & PC Onboarding Guide</p>
         </div>
-        <div style="background:#f9fafb;padding:32px;border-radius:0 0 12px 12px;border:1px solid #e5e7eb">
-          <p style="margin-top:0">Hi ${opts.adminName},</p>
-          <p>Welcome to <strong>${appName}</strong>! Your company account <strong>${opts.companyName}</strong> has been created.</p>
-          <p>Here are your login credentials:</p>
-          <div style="background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin:16px 0">
-            <p style="margin:4px 0"><strong>Email:</strong> ${opts.adminEmail}</p>
-            <p style="margin:4px 0"><strong>Password:</strong> <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px">${opts.tempPassword}</code></p>
-            ${opts.loginUrl ? `<p style="margin:4px 0"><strong>Login URL:</strong> <a href="${opts.loginUrl}">${opts.loginUrl}</a></p>` : ''}
+        <div style="padding: 32px 28px;">
+          <p style="margin-top: 0; font-size: 15px; line-height: 1.6;">Hi <strong>${opts.adminName || 'Admin'}</strong>,</p>
+          <p style="font-size: 15px; line-height: 1.6; color: #334155;">
+            Welcome to <strong>${appName}</strong>! Your company account <strong>${opts.companyName}</strong> has been successfully registered. Below are your login credentials and steps to set up your POS terminal on your PC.
+          </p>
+
+          <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 20px; margin: 24px 0;">
+            <h2 style="font-size: 14px; font-weight: 700; text-transform: uppercase; color: #475569; letter-spacing: 0.05em; margin: 0 0 16px;">🔑 Account & Setup Credentials</h2>
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <tr>
+                <td style="padding: 6px 0; color: #64748b; width: 180px;">Admin Email:</td>
+                <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">${opts.adminEmail}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Admin Password:</td>
+                <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">
+                  <code style="background: #e2e8f0; padding: 3px 8px; border-radius: 4px; font-family: monospace; font-size: 14px;">${passwordDisplay}</code>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Company Activation Key:</td>
+                <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">
+                  <code style="background: #e2e8f0; padding: 3px 8px; border-radius: 4px; font-family: monospace; font-size: 13px; word-break: break-all;">${opts.companyKey}</code>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">POS API Key:</td>
+                <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">
+                  <code style="background: #e2e8f0; padding: 3px 8px; border-radius: 4px; font-family: monospace; font-size: 13px; word-break: break-all;">${opts.apiKey}</code>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Cloud Server URL:</td>
+                <td style="padding: 6px 0; font-weight: 600; color: #2563eb;">${serverUrl}</td>
+              </tr>
+            </table>
           </div>
-          <p style="color:#dc2626;font-size:14px">⚠️ Please change your password after first login.</p>
-          <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0" />
-          <p style="color:#9ca3af;font-size:12px;margin:0">
-            ${support ? `Need help? Contact <a href="mailto:${support}" style="color:#2563eb">${support}</a>` : ''}
+
+          <div style="text-align: center; margin: 28px 0;">
+            <a href="${downloadUrl}" style="background: #2563eb; color: #ffffff; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 15px; display: inline-block; box-shadow: 0 4px 6px -1px rgba(37, 99, 235, 0.2);">
+              ⬇️ Download Windows Desktop App
+            </a>
+          </div>
+
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 10px; padding: 20px; margin: 24px 0;">
+            <h3 style="font-size: 14px; font-weight: 700; color: #1e40af; margin: 0 0 12px;">💻 PC Installation & Setup Steps</h3>
+            <ol style="margin: 0; padding-left: 20px; color: #1e3a8a; font-size: 14px; line-height: 1.7;">
+              <li>Download the Windows installer using the button above (or visit <a href="${downloadUrl}" style="color: #2563eb;">${downloadUrl}</a>).</li>
+              <li>Install and open the <strong>${appName}</strong> desktop application.</li>
+              <li>On first launch, enter the <strong>Cloud Server URL</strong> (<code>${serverUrl}</code>) and your <strong>Company Activation Key</strong> to activate the terminal.</li>
+              <li>Log in using your <strong>Admin Email</strong> and <strong>Password</strong>.</li>
+              <li>Navigate to <strong>Settings → Cloud Sync</strong> to verify that synchronization is active.</li>
+            </ol>
+          </div>
+
+          <p style="color: #b91c1c; font-size: 13px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 10px 14px; margin: 20px 0;">
+            ⚠️ <strong>Security Notice:</strong> Please keep these credentials secure and change your password upon initial login.
+          </p>
+
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0;" />
+          <p style="color: #64748b; font-size: 13px; margin: 0; line-height: 1.5;">
+            Need help or have questions? Contact our support team at <a href="mailto:${support || 'support@example.com'}" style="color: #2563eb;">${support || 'support@example.com'}</a>.
           </p>
         </div>
       </div>
     `,
-    text: `Hi ${opts.adminName},\n\nWelcome to ${appName}!\n\nEmail: ${opts.adminEmail}\nPassword: ${opts.tempPassword}\n${opts.loginUrl ? `Login: ${opts.loginUrl}` : ''}\n\nPlease change your password after first login.`,
+    text: `Welcome to ${appName}!\n\nHi ${opts.adminName || 'Admin'},\nYour company account ${opts.companyName} is ready.\n\nCREDENTIALS:\n- Admin Email: ${opts.adminEmail}\n- Admin Password: ${passwordDisplay}\n- Company Activation Key: ${opts.companyKey}\n- POS API Key: ${opts.apiKey}\n- Cloud Server URL: ${serverUrl}\n\nDOWNLOAD APP:\n${downloadUrl}\n\nSTEPS:\n1. Download and run the POS app installer on your PC.\n2. In the activation screen, enter Server URL and Company Activation Key.\n3. Log in with Admin Email & Password.\n4. Go to Settings -> Cloud Sync to confirm connection.\n\n${appName}`,
   })
 }
+

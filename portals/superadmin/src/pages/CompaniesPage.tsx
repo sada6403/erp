@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi, companySecurity as securityApi } from '../lib/api'
 import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield } from 'lucide-react'
+import { buildWhatsAppGuideText, openWhatsApp } from '../lib/onboardingGuide'
 
 type MenuItemDef =
   | { type: 'item'; label: string; icon: React.ComponentType<{ className?: string }>; onClick: () => void; danger?: boolean }
@@ -101,6 +102,7 @@ export default function CompaniesPage() {
   const [showClearDataPw, setShowClearDataPw] = useState<Company | null>(null)
   const [showSupportAccess, setShowSupportAccess] = useState<Company | null>(null)
   const [showCompanyKey, setShowCompanyKey] = useState<Company | null>(null)
+  const [showSendGuide, setShowSendGuide] = useState<Company | null>(null)
   const [error, setError] = useState('')
 
   const limit = 20
@@ -255,6 +257,7 @@ export default function CompaniesPage() {
                       { type: 'item', label: 'POS API Key',            icon: Key,         onClick: () => setShowApiKey(c) },
                       { type: 'item', label: 'POS Devices',            icon: Smartphone,  onClick: () => setShowDevices(c) },
                       { type: 'item', label: 'Reset Admin Password',   icon: KeyRound,    onClick: () => setShowResetPw(c) },
+                      { type: 'item', label: 'Send Setup Guide (Email/WhatsApp)', icon: Send, onClick: () => setShowSendGuide(c) },
                       { type: 'divider' },
                       { type: 'item', label: 'Feature Management',     icon: Settings2,   onClick: () => setShowCapabilities(c) },
                       { type: 'item', label: 'Branding (logo & color)', icon: Palette,    onClick: () => setShowBranding(c) },
@@ -316,6 +319,7 @@ export default function CompaniesPage() {
       {showNotifCreds && <NotificationCredentialsModal company={showNotifCreds} onClose={() => setShowNotifCreds(null)} onSaved={load} />}
       {showClearDataPw && <ClearDataPasswordModal company={showClearDataPw} onClose={() => setShowClearDataPw(null)} />}
       {showSupportAccess && <SupportAccessModal company={showSupportAccess} onClose={() => setShowSupportAccess(null)} />}
+      {showSendGuide && <SendGuideModal company={showSendGuide} onClose={() => setShowSendGuide(null)} />}
     </div>
   )
 }
@@ -333,8 +337,19 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
     maxBranches: '1', maxUsers: '5', maxPosDevices: '2', maxStorageGb: '5',
   })
   const [showAdminPw, setShowAdminPw] = useState(false)
-  const [createdInfo, setCreatedInfo] = useState<{ adminEmail: string; adminPassword: string; apiKey: string; companyKey: string; companyName: string } | null>(null)
+  const [createdInfo, setCreatedInfo] = useState<{
+    adminEmail: string
+    adminPassword: string
+    apiKey: string
+    companyKey: string
+    companyName: string
+    adminName: string
+    phone: string
+  } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+  const [waPhone, setWaPhone] = useState('')
+  const [sendingMail, setSendingMail] = useState(false)
+  const [sendMailStatus, setSendMailStatus] = useState<{ ok: boolean; msg: string } | null>(null)
 
   useEffect(() => {
     settingsApi.get().then(s => {
@@ -385,7 +400,10 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
         apiKey: res.apiKey || '',
         companyKey: res.companyKey || res.company_key || '',
         companyName: form.name,
+        adminName: form.adminName,
+        phone: form.adminPhone || form.phone,
       })
+      setWaPhone(form.adminPhone || form.phone || '')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed')
     }
@@ -395,7 +413,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
   if (createdInfo) {
     return (
       <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-        <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg">
+        <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
           <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
             <h2 className="font-semibold text-white flex items-center gap-2">
               <CheckCircle className="w-5 h-5 text-green-400" /> Company Created
@@ -428,6 +446,103 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
                 </div>
               </div>
             ))}
+
+            {/* ─── Communication / Delivery Options for Super Admin ─── */}
+            <div className="bg-gray-800/90 border border-gray-700/80 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-semibold text-gray-200 uppercase tracking-wider flex items-center gap-1.5">
+                  <Send className="w-3.5 h-3.5 text-blue-400" /> Send Credentials & PC Setup Guide
+                </p>
+                <span className="text-[11px] text-gray-400">Admin delivery choice</span>
+              </div>
+
+              {sendMailStatus && (
+                <div className={`text-xs px-3 py-2 rounded-lg flex items-center justify-between ${
+                  sendMailStatus.ok ? 'bg-green-950/60 text-green-300 border border-green-700/60' : 'bg-red-950/60 text-red-300 border border-red-700/60'
+                }`}>
+                  <span>{sendMailStatus.ok ? '✓ ' : '✗ '}{sendMailStatus.msg}</span>
+                  <button type="button" onClick={() => setSendMailStatus(null)} className="text-gray-400 hover:text-white ml-2">✕</button>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2.5">
+                {/* 1. Email Button */}
+                <button
+                  type="button"
+                  disabled={sendingMail}
+                  onClick={async () => {
+                    setSendingMail(true)
+                    setSendMailStatus(null)
+                    try {
+                      const res = await api.sendOnboarding({
+                        companyName: createdInfo.companyName,
+                        adminName: createdInfo.adminName,
+                        adminEmail: createdInfo.adminEmail,
+                        adminPassword: createdInfo.adminPassword,
+                        companyKey: createdInfo.companyKey,
+                        apiKey: createdInfo.apiKey,
+                      })
+                      if (res.ok) {
+                        setSendMailStatus({ ok: true, msg: `Email sent successfully to ${createdInfo.adminEmail}` })
+                      } else {
+                        setSendMailStatus({ ok: false, msg: res.message || 'Failed to send email. Check SMTP settings.' })
+                      }
+                    } catch (err) {
+                      setSendMailStatus({ ok: false, msg: err instanceof Error ? err.message : 'Failed to send email' })
+                    } finally {
+                      setSendingMail(false)
+                    }
+                  }}
+                  className="btn-primary flex items-center justify-center gap-2 py-2.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500 shadow-md">
+                  <Mail className="w-4 h-4" />
+                  {sendingMail ? 'Sending Email…' : 'Send via Email'}
+                </button>
+
+                {/* 2. WhatsApp Button */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const guideText = buildWhatsAppGuideText(createdInfo)
+                    const targetPhone = waPhone || createdInfo.phone || ''
+                    if (!targetPhone) {
+                      const input = window.prompt('Enter WhatsApp phone number (e.g. 0771234567 or +94771234567):')
+                      if (input) {
+                        setWaPhone(input)
+                        openWhatsApp(input, guideText)
+                      }
+                    } else {
+                      openWhatsApp(targetPhone, guideText)
+                    }
+                  }}
+                  className="btn-primary flex items-center justify-center gap-2 py-2.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 shadow-md text-white">
+                  <Send className="w-4 h-4" />
+                  Send via WhatsApp
+                </button>
+              </div>
+
+              {/* Phone number input & Copy full guide button */}
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="text"
+                  placeholder="WhatsApp phone (e.g. 0771234567)"
+                  value={waPhone}
+                  onChange={e => setWaPhone(e.target.value)}
+                  className="input flex-1 text-xs py-1.5 bg-gray-900 border-gray-700 text-gray-200"
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const text = buildWhatsAppGuideText(createdInfo)
+                    navigator.clipboard.writeText(text)
+                    setCopied('fullGuide')
+                    setTimeout(() => setCopied(null), 2500)
+                  }}
+                  className="btn-ghost text-xs px-3 py-1.5 flex items-center gap-1.5 border border-gray-700 rounded-lg flex-shrink-0">
+                  <Copy className="w-3.5 h-3.5" />
+                  {copied === 'fullGuide' ? 'Copied Full Guide!' : 'Copy Full Guide'}
+                </button>
+              </div>
+            </div>
 
             <div className="bg-blue-900/20 border border-blue-700/40 rounded-lg px-4 py-3 text-xs text-blue-300 space-y-1">
               <p className="font-semibold text-blue-200">Next steps for the company:</p>
@@ -2758,3 +2873,150 @@ function NotificationCredentialsModal({ company, onClose, onSaved }: {
     </div>
   )
 }
+
+// ─── Send Setup Guide Modal (Email / WhatsApp) for Existing Companies ─────────
+function SendGuideModal({ company, onClose }: { company: Company; onClose: () => void }) {
+  const [adminPassword, setAdminPassword] = useState('')
+  const [phone, setPhone] = useState(company.admin_phone || company.phone || '')
+  const [email, setEmail] = useState(company.admin_email || company.email || '')
+  const [sending, setSending] = useState(false)
+  const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null)
+  const [copied, setCopied] = useState<string | null>(null)
+
+  const guideData = {
+    companyName: company.name,
+    adminName: company.admin_name || company.name,
+    adminEmail: email,
+    adminPassword: adminPassword.trim() || undefined,
+    companyKey: company.company_key || '',
+    apiKey: company.api_key || '',
+    adminPhone: phone,
+  }
+
+  const guideText = buildWhatsAppGuideText(guideData)
+
+  async function handleSendEmail() {
+    if (!email) {
+      setStatus({ ok: false, msg: 'Recipient email is required' })
+      return
+    }
+    setSending(true)
+    setStatus(null)
+    try {
+      const res = await api.sendOnboarding({
+        companyId: company.id,
+        companyName: company.name,
+        adminName: company.admin_name || company.name,
+        adminEmail: email,
+        adminPassword: adminPassword.trim() || undefined,
+        companyKey: company.company_key || '',
+        apiKey: company.api_key || '',
+      })
+      if (res.ok) {
+        setStatus({ ok: true, msg: `Setup guide and credentials sent to ${email}!` })
+      } else {
+        setStatus({ ok: false, msg: res.message || 'Failed to send email. Check SMTP configuration.' })
+      }
+    } catch (err) {
+      setStatus({ ok: false, msg: err instanceof Error ? err.message : 'Failed to send email' })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  function handleSendWhatsApp() {
+    if (!phone) {
+      const input = window.prompt('Enter WhatsApp phone number (e.g. 0771234567 or +94771234567):')
+      if (input) {
+        setPhone(input)
+        openWhatsApp(input, guideText)
+      }
+      return
+    }
+    openWhatsApp(phone, guideText)
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+          <h2 className="font-semibold text-white flex items-center gap-2">
+            <Send className="w-5 h-5 text-blue-400" /> Send Setup Guide & Credentials
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
+        </div>
+        <div className="p-5 space-y-4">
+          <p className="text-xs text-gray-400">
+            Send the complete installation guide and access credentials to <strong className="text-white">{company.name}</strong>.
+          </p>
+
+          {status && (
+            <div className={`text-xs px-3 py-2 rounded-lg flex items-center justify-between ${
+              status.ok ? 'bg-green-950/60 text-green-300 border border-green-700/60' : 'bg-red-950/60 text-red-300 border border-red-700/60'
+            }`}>
+              <span>{status.ok ? '✓ ' : '✗ '}{status.msg}</span>
+              <button type="button" onClick={() => setStatus(null)} className="text-gray-400 hover:text-white ml-2">✕</button>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            <div>
+              <label className="label">Recipient Email</label>
+              <input className="input" type="email" value={email} onChange={e => setEmail(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">WhatsApp Phone Number</label>
+              <input className="input" type="text" placeholder="e.g. 0771234567" value={phone} onChange={e => setPhone(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Include Password (Optional)</label>
+              <input className="input" type="text" placeholder="Leave blank to omit or enter password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} />
+              <p className="text-[11px] text-gray-500 mt-1">If blank, it will show "(Your chosen password)".</p>
+            </div>
+          </div>
+
+          {/* Guide Preview */}
+          <div>
+            <label className="label">Message Preview (Exact same for WhatsApp & Email)</label>
+            <pre className="bg-gray-950 border border-gray-800 rounded-lg p-3 text-[11px] text-gray-300 font-mono whitespace-pre-wrap max-h-40 overflow-y-auto">
+              {guideText}
+            </pre>
+          </div>
+
+          {/* Action buttons */}
+          <div className="grid grid-cols-2 gap-3 pt-2">
+            <button
+              type="button"
+              disabled={sending}
+              onClick={handleSendEmail}
+              className="btn-primary flex items-center justify-center gap-2 py-2.5 text-xs font-semibold bg-blue-600 hover:bg-blue-500">
+              <Mail className="w-4 h-4" />
+              {sending ? 'Sending Email…' : 'Send via Email'}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSendWhatsApp}
+              className="btn-primary flex items-center justify-center gap-2 py-2.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white">
+              <Send className="w-4 h-4" />
+              Send via WhatsApp
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => {
+              navigator.clipboard.writeText(guideText)
+              setCopied('modalGuide')
+              setTimeout(() => setCopied(null), 2500)
+            }}
+            className="btn-ghost w-full py-2 text-xs flex items-center justify-center gap-2 border border-gray-700">
+            <Copy className="w-3.5 h-3.5" />
+            {copied === 'modalGuide' ? 'Copied to Clipboard!' : 'Copy Full Message to Clipboard'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
