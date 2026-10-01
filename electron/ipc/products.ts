@@ -421,6 +421,27 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         return { success: false, error: `Cannot permanently delete — this product appears in ${hasInvoiceItems.cnt} invoice(s). Use deactivate instead to preserve financial history.` }
       }
 
+      // Check other historical and audit records to provide clear, actionable feedback
+      const historyChecks = [
+        { table: 'order_items', label: 'held/active order(s)' },
+        { table: 'return_items', label: 'sales return(s)' },
+        { table: 'stock_transfer_history', label: 'stock transfer(s)' },
+        { table: 'grn_items', label: 'goods received note (GRN) item(s)' },
+        { table: 'quotation_items', label: 'quotation(s)' },
+        { table: 'wastage_items', label: 'wastage record(s)' },
+        { table: 'stock_count_items', label: 'stock audit session(s)' },
+      ]
+      for (const check of historyChecks) {
+        try {
+          const row = db.prepare(`SELECT COUNT(*) as cnt FROM ${check.table} WHERE product_id = ?`).get(id) as { cnt: number } | undefined
+          if (row && row.cnt > 0) {
+            return { success: false, error: `Cannot permanently delete — this product has ${row.cnt} ${check.label}. Use deactivate instead to preserve history.` }
+          }
+        } catch {
+          // Table may not exist in this environment, ignore
+        }
+      }
+
       // Smart Buy — a product referenced here is live scheme/commission
       // config or a member's redemption record, not disposable. FK
       // enforcement (foreign_keys=ON) would otherwise surface this as a raw
@@ -448,10 +469,10 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         oldValues: { name: product.name, sku: product.sku, barcode: product.barcode, reason },
       })
 
-      // Remove related stock records then product, atomically — otherwise a
-      // later failure (e.g. an FK constraint from a table not pre-checked
-      // above) leaves stocks deleted with the product still present.
+      // Remove related disposable records (discounts, batches, stocks) then product, atomically
       db.transaction(() => {
+        try { db.prepare(`DELETE FROM discounts WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
+        try { db.prepare(`DELETE FROM product_batches WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
         db.prepare(`DELETE FROM stocks WHERE product_id = ?`).run(id)
         db.prepare(`DELETE FROM products WHERE id = ?`).run(id)
       })()
