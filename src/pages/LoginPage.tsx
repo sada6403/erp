@@ -183,6 +183,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
 
   const branchCodeRef = useRef<HTMLInputElement>(null)
   const emailRef      = useRef<HTMLInputElement>(null)
+  const notifiedBranchRef = useRef<string | null>(null)
 
   const brandName = String(branding.company_name   || 'Enterprise POS')
   const brandLogo = String(branding.login_logo_url || branding.company_logo_url || '')
@@ -291,19 +292,27 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
   }, [keyAccessOpen, keyAccessStage])
 
   useEffect(() => {
-    if (!terminalBranch || !window.api?.auth?.loginOptions) return
+    if (!terminalBranch?.id || !window.api?.auth?.loginOptions) return
     window.api.auth.loginOptions({ branch_id: terminalBranch.id }).then((res: {
       success: boolean
       data?: { users: number; pin_users: number; admin_email?: string }
     }) => {
       if (!res.success || !res.data?.users) return
       if (res.data.pin_users === 0) {
-        if (res.data.admin_email && !email) setEmail(res.data.admin_email)
+        if (res.data.admin_email) {
+          setEmail(prev => (!prev ? res.data!.admin_email! : prev))
+        }
         setMode('email')
-        toast('No PIN users found for this branch. Use admin email login.', { icon: 'ℹ️' })
+        if (notifiedBranchRef.current !== terminalBranch.id) {
+          notifiedBranchRef.current = terminalBranch.id
+          toast('No PIN users found for this branch. Use admin email login.', {
+            id: 'no-pin-users',
+            icon: 'ℹ️',
+          })
+        }
       }
     }).catch(() => {})
-  }, [terminalBranch, email])
+  }, [terminalBranch?.id])
 
   // ── Handlers ──
   const handleSubmit = async (e: React.FormEvent) => {
