@@ -9,17 +9,22 @@ export interface OnboardingGuideData {
   adminPassword?: string
   adminPhone?: string
   companyKey: string
-  apiKey: string
+  apiKey?: string
   downloadUrl?: string
   serverUrl?: string
+  includeTechnicalDetails?: boolean
 }
 
 export function buildWhatsAppGuideText(data: OnboardingGuideData): string {
   const downloadUrl = data.downloadUrl || 'http://72.61.115.222/download'
-  const serverUrl = data.serverUrl || 'http://72.61.115.222:4001'
   const passwordText = data.adminPassword
     ? `\`${data.adminPassword}\` ⚠️ *(First login-க்கு பின் மாற்றவும் / Must change)*`
     : '(Your chosen password)'
+
+  // Technical details (Server IP / API Key) are omitted by default to protect server IP & security
+  const technicalBlock = data.includeTechnicalDetails && data.apiKey
+    ? `⚡ *POS API Key:* \`${data.apiKey}\`\n🌐 *Cloud Server URL:* ${data.serverUrl || 'http://72.61.115.222:4001'}\n`
+    : ''
 
   return `*🎉 Welcome to Enterprise POS ERP!*
 
@@ -31,16 +36,14 @@ Hi *${data.adminName || 'Admin'}*, your company account *${data.companyName}* ha
 📧 *Admin Email:* ${data.adminEmail}
 🔒 *Admin Password:* ${passwordText}
 🏢 *Company Activation Key:* \`${data.companyKey}\`
-⚡ *POS API Key:* \`${data.apiKey}\`
-🌐 *Cloud Server URL:* ${serverUrl}
-📥 *Download POS App:* ${downloadUrl}
+${technicalBlock}📥 *Download POS App:* ${downloadUrl}
 
 ━━━━━━━━━━━━━━━━━━━━━
 *💻 PC SETUP & INSTALLATION STEPS:*
 ━━━━━━━━━━━━━━━━━━━━━
 1️⃣ Download the POS desktop app from the link above.
 2️⃣ Run the installer and open *Enterprise POS ERP*.
-3️⃣ In the activation screen, enter the *Cloud Server URL* and your *Company Activation Key* to activate this PC.
+3️⃣ In the activation screen, enter your *Company Activation Key* to activate this PC.
 4️⃣ Log in using your *Admin Email* and *Admin Password*.
 5️⃣ ⚠️ *CRITICAL:* Login செய்தவுடன் *Settings → Security* சென்று உங்கள் Password-ஐ உடனடியாக மாற்றிக்கொள்ளவும் (Change password immediately).
 6️⃣ Confirm cloud connection status under *Settings → Cloud Sync*.

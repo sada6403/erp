@@ -3029,14 +3029,14 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
               </p>
             </div>
 
-            {/* Custom URLs (Download & Cloud API) */}
+            {/* Custom URLs (Download Link) */}
             <div className="border border-gray-800 rounded-lg p-3 bg-gray-950/40">
               <button
                 type="button"
                 onClick={() => setShowAdvancedUrls(!showAdvancedUrls)}
                 className="text-xs text-gray-400 hover:text-white flex items-center justify-between w-full">
-                <span>🌐 Custom Download Link & Server URL (Domain Settings)</span>
-                <span className="text-[11px] text-blue-400">{showAdvancedUrls ? '▲ Hide' : '▼ Change Links'}</span>
+                <span>🌐 Custom Download Link (Domain Settings)</span>
+                <span className="text-[11px] text-blue-400">{showAdvancedUrls ? '▲ Hide' : '▼ Change Link'}</span>
               </button>
               {showAdvancedUrls && (
                 <div className="space-y-2 pt-3 mt-2 border-t border-gray-800">
@@ -3050,18 +3050,8 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
                       onChange={e => setDownloadUrl(e.target.value)}
                     />
                   </div>
-                  <div>
-                    <label className="text-[11px] text-gray-400">Cloud Server URL</label>
-                    <input
-                      className="input text-xs py-1.5"
-                      type="text"
-                      placeholder="http://72.61.115.222:4001 (or your custom domain)"
-                      value={serverUrl}
-                      onChange={e => setServerUrl(e.target.value)}
-                    />
-                  </div>
                   <p className="text-[10px] text-gray-500">
-                    💡 You can also permanently set your domain in <strong>Settings → Branding</strong>.
+                    💡 Server IP & API Keys are hidden from client messages for security. Only this Download Link is sent.
                   </p>
                 </div>
               )}
