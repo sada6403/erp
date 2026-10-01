@@ -1,8 +1,52 @@
 import type { Metadata } from 'next'
+import { readdir, stat } from 'fs/promises'
+import path from 'path'
+
+export const dynamic = 'force-dynamic'
 
 export const metadata: Metadata = {
   title: 'Download – Enterprise POS ERP',
   description: 'Download the Enterprise POS ERP desktop application for Windows.',
+}
+
+const UPDATES_DIR = process.env.UPDATES_DIR || '/var/www/updates'
+
+function extractVersion(fileName: string): number[] {
+  const match = fileName.match(/(\d+)\.(\d+)\.(\d+)/)
+  return match ? match.slice(1).map(Number) : [0, 0, 0]
+}
+
+function compareVersions(a: string, b: string): number {
+  const va = extractVersion(a)
+  const vb = extractVersion(b)
+  for (let i = 0; i < 3; i++) {
+    if (va[i] !== vb[i]) return va[i] - vb[i]
+  }
+  return 0
+}
+
+async function getLatestRelease() {
+  try {
+    const files = await readdir(UPDATES_DIR)
+    const installer = files
+      .filter(f => f.endsWith('.exe') && !f.includes('blockmap'))
+      .sort(compareVersions)
+      .at(-1)
+
+    if (!installer) {
+      return { version: '2.7.16', sizeFormatted: '91 MB' }
+    }
+
+    const versionMatch = installer.match(/\d+\.\d+\.\d+/)
+    const version = versionMatch ? versionMatch[0] : '2.7.16'
+    const filePath = path.join(UPDATES_DIR, installer)
+    const info = await stat(filePath)
+    const sizeFormatted = `${Math.round(info.size / 1024 / 1024)} MB`
+
+    return { version, sizeFormatted }
+  } catch {
+    return { version: '2.7.16', sizeFormatted: '91 MB' }
+  }
 }
 
 const FEATURES = [
@@ -22,7 +66,9 @@ const STEPS = [
   'Launch the app and enter your Company Code provided by your administrator',
 ]
 
-export default function DownloadPage() {
+export default async function DownloadPage() {
+  const release = await getLatestRelease()
+
   return (
     <>
       <style>{`
@@ -164,7 +210,7 @@ export default function DownloadPage() {
 
         <div className="dl-badge">
           <span style={{ color: '#22c55e' }}>●</span>
-          Windows 10/11 · v2.0.14
+          Windows 10/11 · v{release.version}
         </div>
 
         <h1 className="dl-title">Enterprise POS ERP</h1>
@@ -175,11 +221,11 @@ export default function DownloadPage() {
 
         <div className="dl-chips">
           <div className="dl-chip"><strong>Windows 10/11</strong><span>64-bit only</span></div>
-          <div className="dl-chip"><strong>~120 MB</strong><span>Installer size</span></div>
+          <div className="dl-chip"><strong>~{release.sizeFormatted}</strong><span>Installer size</span></div>
           <div className="dl-chip"><strong>Auto-update</strong><span>Always latest</span></div>
         </div>
 
-        <a className="dl-btn" href="api/download?direct=1">
+        <a className="dl-btn" href="/api/download?direct=1">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="7 10 12 15 17 10"/>
