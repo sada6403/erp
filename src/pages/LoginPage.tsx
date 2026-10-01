@@ -183,7 +183,6 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
 
   const branchCodeRef = useRef<HTMLInputElement>(null)
   const emailRef      = useRef<HTMLInputElement>(null)
-  const notifiedBranchRef = useRef<string | null>(null)
 
   const brandName = String(branding.company_name   || 'Enterprise POS')
   const brandLogo = String(branding.login_logo_url || branding.company_logo_url || '')
@@ -299,17 +298,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
     }) => {
       if (!res.success || !res.data?.users) return
       if (res.data.pin_users === 0) {
-        if (res.data.admin_email) {
-          setEmail(prev => (!prev ? res.data!.admin_email! : prev))
-        }
         setMode('email')
-        if (notifiedBranchRef.current !== terminalBranch.id) {
-          notifiedBranchRef.current = terminalBranch.id
-          toast('No PIN users found for this branch. Use admin email login.', {
-            id: 'no-pin-users',
-            icon: 'ℹ️',
-          })
-        }
       }
     }).catch(() => {})
   }, [terminalBranch?.id])
