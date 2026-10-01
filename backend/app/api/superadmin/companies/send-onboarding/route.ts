@@ -74,8 +74,8 @@ export async function POST(req: NextRequest) {
       adminPassword: adminPassword || undefined,
       companyKey: companyKey || '',
       apiKey: apiKey || '',
-      downloadUrl: downloadUrl || `${process.env.PUBLIC_BASE_URL || 'http://72.61.115.222'}/download`,
-      serverUrl: serverUrl || `${process.env.PUBLIC_BASE_URL || 'http://72.61.115.222'}:4001`,
+      downloadUrl: downloadUrl || undefined,
+      serverUrl: serverUrl || undefined,
     })
 
     if (!emailRes.ok) {

@@ -351,9 +351,12 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
   const [sendingMail, setSendingMail] = useState(false)
   const [sendMailStatus, setSendMailStatus] = useState<{ ok: boolean; msg: string } | null>(null)
 
+  const [brandingUrls, setBrandingUrls] = useState<{ downloadUrl?: string; serverUrl?: string }>({})
+
   useEffect(() => {
     settingsApi.get().then(s => {
-      const d = (s.defaults ?? {}) as Record<string, string>
+      const sett = s as Record<string, Record<string, string>>
+      const d = (sett.defaults ?? {}) as Record<string, string>
       if (d.trial_days || d.default_timezone || d.default_currency || d.default_country) {
         setForm(f => ({
           ...f,
@@ -362,6 +365,13 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
           currency:  d.default_currency  || f.currency,
           country:   d.default_country   || f.country,
         }))
+      }
+      const b = (sett.branding ?? {}) as Record<string, string>
+      if (b.download_url || b.server_url) {
+        setBrandingUrls({
+          downloadUrl: b.download_url || undefined,
+          serverUrl: b.server_url || undefined,
+        })
       }
     }).catch(() => {})
   }, [])
@@ -481,6 +491,8 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
                         adminPassword: createdInfo.adminPassword,
                         companyKey: createdInfo.companyKey,
                         apiKey: createdInfo.apiKey,
+                        downloadUrl: brandingUrls.downloadUrl,
+                        serverUrl: brandingUrls.serverUrl,
                       })
                       if (res.ok) {
                         setSendMailStatus({ ok: true, msg: `Email sent successfully to ${createdInfo.adminEmail}` })
@@ -502,7 +514,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
                 <button
                   type="button"
                   onClick={() => {
-                    const guideText = buildWhatsAppGuideText(createdInfo)
+                    const guideText = buildWhatsAppGuideText({ ...createdInfo, ...brandingUrls })
                     const targetPhone = waPhone || createdInfo.phone || ''
                     if (!targetPhone) {
                       const input = window.prompt('Enter WhatsApp phone number (e.g. 0771234567 or +94771234567):')
@@ -532,7 +544,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
                 <button
                   type="button"
                   onClick={() => {
-                    const text = buildWhatsAppGuideText(createdInfo)
+                    const text = buildWhatsAppGuideText({ ...createdInfo, ...brandingUrls })
                     navigator.clipboard.writeText(text)
                     setCopied('fullGuide')
                     setTimeout(() => setCopied(null), 2500)
@@ -2881,9 +2893,20 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
   )
   const [phone, setPhone] = useState(company.admin_phone || company.phone || '')
   const [email, setEmail] = useState(company.admin_email || company.email || '')
+  const [downloadUrl, setDownloadUrl] = useState('')
+  const [serverUrl, setServerUrl]     = useState('')
+  const [showAdvancedUrls, setShowAdvancedUrls] = useState(false)
   const [sending, setSending] = useState(false)
   const [status, setStatus] = useState<{ ok: boolean; msg: string } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
+
+  useEffect(() => {
+    settingsApi.get().then(s => {
+      const b = ((s as Record<string, unknown>)?.branding ?? {}) as Record<string, string>
+      if (b.download_url) setDownloadUrl(b.download_url)
+      if (b.server_url) setServerUrl(b.server_url)
+    }).catch(console.error)
+  }, [])
 
   const guideData = {
     companyName: company.name,
@@ -2893,6 +2916,8 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
     companyKey: company.company_key || '',
     apiKey: company.api_key || '',
     adminPhone: phone,
+    downloadUrl: downloadUrl.trim() || undefined,
+    serverUrl: serverUrl.trim() || undefined,
   }
 
   const guideText = buildWhatsAppGuideText(guideData)
@@ -2913,6 +2938,8 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
         adminPassword: adminPassword.trim() || undefined,
         companyKey: company.company_key || '',
         apiKey: company.api_key || '',
+        downloadUrl: downloadUrl.trim() || undefined,
+        serverUrl: serverUrl.trim() || undefined,
       })
       if (res.ok) {
         setStatus({ ok: true, msg: `Setup guide and credentials sent to ${email}!` })
@@ -3000,6 +3027,44 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
               <p className="text-[11px] text-amber-400/90 mt-1">
                 ⚠️ This password will be auto-typed into the guide and synchronized with the company database.
               </p>
+            </div>
+
+            {/* Custom URLs (Download & Cloud API) */}
+            <div className="border border-gray-800 rounded-lg p-3 bg-gray-950/40">
+              <button
+                type="button"
+                onClick={() => setShowAdvancedUrls(!showAdvancedUrls)}
+                className="text-xs text-gray-400 hover:text-white flex items-center justify-between w-full">
+                <span>🌐 Custom Download Link & Server URL (Domain Settings)</span>
+                <span className="text-[11px] text-blue-400">{showAdvancedUrls ? '▲ Hide' : '▼ Change Links'}</span>
+              </button>
+              {showAdvancedUrls && (
+                <div className="space-y-2 pt-3 mt-2 border-t border-gray-800">
+                  <div>
+                    <label className="text-[11px] text-gray-400">Download POS App URL</label>
+                    <input
+                      className="input text-xs py-1.5"
+                      type="text"
+                      placeholder="http://72.61.115.222/download (or your custom domain)"
+                      value={downloadUrl}
+                      onChange={e => setDownloadUrl(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-gray-400">Cloud Server URL</label>
+                    <input
+                      className="input text-xs py-1.5"
+                      type="text"
+                      placeholder="http://72.61.115.222:4001 (or your custom domain)"
+                      value={serverUrl}
+                      onChange={e => setServerUrl(e.target.value)}
+                    />
+                  </div>
+                  <p className="text-[10px] text-gray-500">
+                    💡 You can also permanently set your domain in <strong>Settings → Branding</strong>.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
 
