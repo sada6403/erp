@@ -33,13 +33,11 @@ export async function POST(req: NextRequest, { params }: Params) {
     const finalPassword = body.password && String(body.password).trim() ? String(body.password).trim() : generateTempPassword()
     const hash = await bcrypt.hash(finalPassword, 10)
 
-    // Update main companies record if email or name changed
-    if (body.email || body.name) {
-      await pool.query(
-        `UPDATE companies SET admin_email = ?, admin_name = ? WHERE id = ?`,
-        [targetEmail, targetName, companyId]
-      )
-    }
+    // Update main companies record with latest admin email, name, and temporary password
+    await pool.query(
+      `UPDATE companies SET admin_email = ?, admin_name = ?, initial_admin_password = ? WHERE id = ?`,
+      [targetEmail, targetName, finalPassword, companyId]
+    )
 
     const result = await withTenant(companyId, async (client) => {
       // Find user matching targetEmail, or Company Admin role

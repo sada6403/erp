@@ -604,8 +604,8 @@ export async function createTenant(params: {
         db_schema, api_key, company_key, status, trial_ends_at,
         max_branches, max_users, max_pos_devices, max_storage_gb,
         admin_email, admin_name, admin_phone, notes, created_by,
-        clear_data_password_hash)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'trial', DATE_ADD(NOW(), INTERVAL ? DAY),?,?,?,?,?,?,?,?,?,?)`,
+        clear_data_password_hash, initial_admin_password)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'trial', DATE_ADD(NOW(), INTERVAL ? DAY),?,?,?,?,?,?,?,?,?,?,?)`,
     [
       companyId, slug, params.name, params.email, params.phone ?? null, params.address ?? null,
       params.timezone ?? 'Asia/Colombo', params.currency ?? 'LKR', params.country ?? 'LK',
@@ -613,7 +613,7 @@ export async function createTenant(params: {
       maxBranches, maxUsers, maxPosDevices, maxStorageGb,
       params.adminEmail, params.adminName, params.adminPhone ?? null,
       params.notes ?? null, params.createdBy ?? null,
-      clearDataPasswordHash,
+      clearDataPasswordHash, params.adminPassword ?? null,
     ]
   )
 

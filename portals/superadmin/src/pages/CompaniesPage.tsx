@@ -2876,7 +2876,9 @@ function NotificationCredentialsModal({ company, onClose, onSaved }: {
 
 // ─── Send Setup Guide Modal (Email / WhatsApp) for Existing Companies ─────────
 function SendGuideModal({ company, onClose }: { company: Company; onClose: () => void }) {
-  const [adminPassword, setAdminPassword] = useState('')
+  const [adminPassword, setAdminPassword] = useState(
+    company.initial_admin_password || company.admin_password || 'Admin@1234'
+  )
   const [phone, setPhone] = useState(company.admin_phone || company.phone || '')
   const [email, setEmail] = useState(company.admin_email || company.email || '')
   const [sending, setSending] = useState(false)
@@ -2924,16 +2926,23 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
     }
   }
 
-  function handleSendWhatsApp() {
-    if (!phone) {
+  async function handleSendWhatsApp() {
+    const targetPhone = phone.trim()
+    if (!targetPhone) {
       const input = window.prompt('Enter WhatsApp phone number (e.g. 0771234567 or +94771234567):')
       if (input) {
         setPhone(input)
+        if (adminPassword.trim() && company.id) {
+          api.resetAdminPassword(company.id, { password: adminPassword.trim(), email }).catch(console.error)
+        }
         openWhatsApp(input, guideText)
       }
       return
     }
-    openWhatsApp(phone, guideText)
+    if (adminPassword.trim() && company.id) {
+      api.resetAdminPassword(company.id, { password: adminPassword.trim(), email }).catch(console.error)
+    }
+    openWhatsApp(targetPhone, guideText)
   }
 
   return (
@@ -2969,9 +2978,28 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
               <input className="input" type="text" placeholder="e.g. 0771234567" value={phone} onChange={e => setPhone(e.target.value)} />
             </div>
             <div>
-              <label className="label">Include Password (Optional)</label>
-              <input className="input" type="text" placeholder="Leave blank to omit or enter password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} />
-              <p className="text-[11px] text-gray-500 mt-1">If blank, it will show "(Your chosen password)".</p>
+              <div className="flex items-center justify-between mb-1">
+                <label className="label mb-0">Admin Password (Auto-Filled)</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const generated = 'Pass@' + Math.floor(100000 + Math.random() * 900000)
+                    setAdminPassword(generated)
+                  }}
+                  className="text-[11px] text-blue-400 hover:text-blue-300 font-normal">
+                  ⚡ Auto-Generate New Password
+                </button>
+              </div>
+              <input
+                className="input font-mono"
+                type="text"
+                placeholder="Enter admin password"
+                value={adminPassword}
+                onChange={e => setAdminPassword(e.target.value)}
+              />
+              <p className="text-[11px] text-amber-400/90 mt-1">
+                ⚠️ This password will be auto-typed into the guide and synchronized with the company database.
+              </p>
             </div>
           </div>
 

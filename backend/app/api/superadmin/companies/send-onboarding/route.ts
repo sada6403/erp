@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { pool } from '@/lib/db'
+import { withTenant } from '@/lib/tenant'
 import { sendCompanyOnboardingEmail } from '@/lib/email'
+import bcrypt from 'bcryptjs'
 
 export async function POST(req: NextRequest) {
   const auth = requireSuperAdmin(req)
@@ -21,9 +23,9 @@ export async function POST(req: NextRequest) {
       serverUrl,
     } = body
 
-    if (companyId && (!companyName || !companyKey || !apiKey || !adminEmail)) {
+    if (companyId) {
       const { rows } = await pool.query(
-        `SELECT name, email, admin_name, admin_email, company_key, api_key FROM companies WHERE id = ?`,
+        `SELECT name, email, admin_name, admin_email, company_key, api_key, initial_admin_password FROM companies WHERE id = ?`,
         [companyId]
       )
       const c = rows[0] as Record<string, string> | undefined
@@ -33,6 +35,31 @@ export async function POST(req: NextRequest) {
         adminEmail  = adminEmail  || c.admin_email || c.email
         companyKey  = companyKey  || c.company_key
         apiKey      = apiKey      || c.api_key
+        if (!adminPassword && c.initial_admin_password) {
+          adminPassword = c.initial_admin_password
+        }
+      }
+
+      // If adminPassword is provided or updated, keep companies and tenant DB user in sync
+      if (adminPassword) {
+        await pool.query(
+          `UPDATE companies SET initial_admin_password = ? WHERE id = ?`,
+          [adminPassword, companyId]
+        )
+        try {
+          const hash = await bcrypt.hash(String(adminPassword), 10)
+          await withTenant(companyId, async (client) => {
+            await client.query(
+              `UPDATE users u
+               JOIN roles r ON r.id = u.role_id
+               SET u.password_hash = ?, u.updated_at = NOW()
+               WHERE u.is_active = 1 AND (LOWER(u.email) = ? OR r.name = 'Company Admin')`,
+              [hash, String(adminEmail).toLowerCase().trim()]
+            )
+          })
+        } catch (syncErr) {
+          console.warn('[send-onboarding] Tenant password sync warning:', syncErr)
+        }
       }
     }
 

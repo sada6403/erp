@@ -200,7 +200,9 @@ export async function sendCompanyOnboardingEmail(opts: {
   const support  = branding.support_email || ''
   const downloadUrl = opts.downloadUrl || 'http://72.61.115.222/download'
   const serverUrl = opts.serverUrl || 'http://72.61.115.222:4001'
-  const passwordDisplay = opts.adminPassword || '(Your chosen password)'
+  const passwordDisplay = opts.adminPassword
+    ? `${opts.adminPassword} (⚠️ Must change after first login)`
+    : '(Your chosen password)'
 
   return sendEmail({
     to: opts.adminEmail,
@@ -227,7 +229,8 @@ export async function sendCompanyOnboardingEmail(opts: {
               <tr>
                 <td style="padding: 6px 0; color: #64748b;">Admin Password:</td>
                 <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">
-                  <code style="background: #e2e8f0; padding: 3px 8px; border-radius: 4px; font-family: monospace; font-size: 14px;">${passwordDisplay}</code>
+                  <code style="background: #fef3c7; color: #92400e; padding: 4px 10px; border: 1px solid #fde68a; border-radius: 4px; font-family: monospace; font-size: 14px; font-weight: bold;">${opts.adminPassword || '(Your chosen password)'}</code>
+                  ${opts.adminPassword ? '<span style="color: #dc2626; font-size: 12px; margin-left: 8px; font-weight: 600;">(⚠️ Must change upon first login)</span>' : ''}
                 </td>
               </tr>
               <tr>
@@ -261,14 +264,15 @@ export async function sendCompanyOnboardingEmail(opts: {
               <li>Download the Windows installer using the button above (or visit <a href="${downloadUrl}" style="color: #2563eb;">${downloadUrl}</a>).</li>
               <li>Install and open the <strong>${appName}</strong> desktop application.</li>
               <li>On first launch, enter the <strong>Cloud Server URL</strong> (<code>${serverUrl}</code>) and your <strong>Company Activation Key</strong> to activate the terminal.</li>
-              <li>Log in using your <strong>Admin Email</strong> and <strong>Password</strong>.</li>
+              <li>Log in using your <strong>Admin Email</strong> and <strong>Admin Password</strong>.</li>
+              <li><strong style="color: #b91c1c;">Mandatory Security Step:</strong> Go to <strong>Settings → Security / Profile</strong> and change your temporary password immediately.</li>
               <li>Navigate to <strong>Settings → Cloud Sync</strong> to verify that synchronization is active.</li>
             </ol>
           </div>
 
-          <p style="color: #b91c1c; font-size: 13px; background: #fef2f2; border: 1px solid #fecaca; border-radius: 6px; padding: 10px 14px; margin: 20px 0;">
-            ⚠️ <strong>Security Notice:</strong> Please keep these credentials secure and change your password upon initial login.
-          </p>
+          <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; margin: 20px 0; color: #92400e; font-size: 13px; line-height: 1.5;">
+            ⚠️ <strong>முக்கிய பாதுகாப்பு குறிப்பு / Security Requirement:</strong> This Admin Password is a temporary credential. For security reasons, please change your password immediately after logging in for the first time.
+          </div>
 
           <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0;" />
           <p style="color: #64748b; font-size: 13px; margin: 0; line-height: 1.5;">
@@ -277,7 +281,7 @@ export async function sendCompanyOnboardingEmail(opts: {
         </div>
       </div>
     `,
-    text: `Welcome to ${appName}!\n\nHi ${opts.adminName || 'Admin'},\nYour company account ${opts.companyName} is ready.\n\nCREDENTIALS:\n- Admin Email: ${opts.adminEmail}\n- Admin Password: ${passwordDisplay}\n- Company Activation Key: ${opts.companyKey}\n- POS API Key: ${opts.apiKey}\n- Cloud Server URL: ${serverUrl}\n\nDOWNLOAD APP:\n${downloadUrl}\n\nSTEPS:\n1. Download and run the POS app installer on your PC.\n2. In the activation screen, enter Server URL and Company Activation Key.\n3. Log in with Admin Email & Password.\n4. Go to Settings -> Cloud Sync to confirm connection.\n\n${appName}`,
+    text: `Welcome to ${appName}!\n\nHi ${opts.adminName || 'Admin'},\nYour company account ${opts.companyName} is ready.\n\nCREDENTIALS:\n- Admin Email: ${opts.adminEmail}\n- Admin Password: ${passwordDisplay}\n- Company Activation Key: ${opts.companyKey}\n- POS API Key: ${opts.apiKey}\n- Cloud Server URL: ${serverUrl}\n\nDOWNLOAD APP:\n${downloadUrl}\n\nSTEPS:\n1. Download and run the POS app installer on your PC.\n2. In the activation screen, enter Server URL and Company Activation Key.\n3. Log in with Admin Email & Password.\n4. CRITICAL: Go to Settings -> Security and change your temporary Admin Password immediately.\n5. Go to Settings -> Cloud Sync to confirm connection.\n\n${appName}`,
   })
 }
 
