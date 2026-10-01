@@ -275,3 +275,91 @@ export async function sendCompanyOnboardingEmail(opts: {
   })
 }
 
+export async function sendAdminPasswordEmail(opts: {
+  companyName: string
+  adminEmail: string
+  adminName?: string
+  password: string
+  isReset?: boolean
+  companyKey?: string
+  downloadUrl?: string
+}) {
+  const branding = await getBrandingSettings()
+  const appName  = branding.app_name || 'Enterprise POS ERP'
+  const support  = branding.support_email || ''
+  const downloadUrl = opts.downloadUrl || branding.download_url || (process.env.PUBLIC_BASE_URL ? `${process.env.PUBLIC_BASE_URL}/download` : 'http://72.61.115.222/download')
+  const subject = opts.isReset
+    ? `Password Reset — New Admin Login Credentials for ${opts.companyName}`
+    : `Admin Login Credentials for ${opts.companyName}`
+
+  return sendEmail({
+    to: opts.adminEmail,
+    subject: `${subject} — ${appName}`,
+    html: `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 580px; margin: 0 auto; color: #1e293b; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); padding: 26px; text-align: center;">
+          <h1 style="color: #ffffff; margin: 0; font-size: 20px; font-weight: 700;">${appName}</h1>
+          <p style="color: #94a3b8; margin: 6px 0 0; font-size: 13px;">${opts.isReset ? 'Admin Password Reset' : 'Admin Login Credentials'}</p>
+        </div>
+        <div style="padding: 28px 24px;">
+          <p style="margin-top: 0; font-size: 15px; line-height: 1.6;">Hi <strong>${opts.adminName || 'Admin'}</strong>,</p>
+          <p style="font-size: 14px; line-height: 1.6; color: #334155;">
+            ${opts.isReset
+              ? `Your admin password for <strong>${opts.companyName}</strong> has been updated. Below are your new credentials to log into your POS terminal and management portal.`
+              : `Here are your admin login credentials for <strong>${opts.companyName}</strong> on <strong>${appName}</strong>.`}
+          </p>
+
+          <div style="background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; padding: 18px 20px; margin: 20px 0;">
+            <h2 style="font-size: 13px; font-weight: 700; text-transform: uppercase; color: #475569; letter-spacing: 0.05em; margin: 0 0 14px;">🔑 Login Credentials</h2>
+            <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+              <tr>
+                <td style="padding: 6px 0; color: #64748b; width: 140px;">Admin Email:</td>
+                <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">${opts.adminEmail}</td>
+              </tr>
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Password:</td>
+                <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">
+                  <code style="background: #fef3c7; color: #92400e; padding: 4px 10px; border: 1px solid #fde68a; border-radius: 4px; font-family: monospace; font-size: 15px; font-weight: bold;">${opts.password}</code>
+                </td>
+              </tr>
+              ${opts.companyKey ? `
+              <tr>
+                <td style="padding: 6px 0; color: #64748b;">Activation Key:</td>
+                <td style="padding: 6px 0; font-weight: 600; color: #0f172a;">
+                  <code style="background: #e2e8f0; padding: 3px 8px; border-radius: 4px; font-family: monospace; font-size: 13px;">${opts.companyKey}</code>
+                </td>
+              </tr>` : ''}
+            </table>
+          </div>
+
+          <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 14px 18px; margin: 18px 0; font-size: 13px; line-height: 1.6; color: #1e3a8a;">
+            <strong>Quick Login Instructions:</strong>
+            <ol style="margin: 6px 0 0; padding-left: 20px;">
+              <li>Open <strong>${appName}</strong> on your computer.</li>
+              <li>Sign in using your Admin Email and the password above.</li>
+              <li>Go to <strong>Settings → Security</strong> to update your password anytime.</li>
+            </ol>
+          </div>
+
+          <div style="text-align: center; margin: 20px 0;">
+            <a href="${downloadUrl}" style="background: #2563eb; color: #ffffff; padding: 10px 22px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 14px; display: inline-block;">
+              Download POS Desktop App
+            </a>
+          </div>
+
+          <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 10px 14px; margin: 16px 0; color: #92400e; font-size: 12px; line-height: 1.5;">
+            ⚠️ <strong>Security Notice:</strong> Please keep this password safe and do not share it with unauthorized staff.
+          </div>
+
+          <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+          <p style="color: #64748b; font-size: 12px; margin: 0; line-height: 1.5;">
+            Need help? Contact support at <a href="mailto:${support || 'support@example.com'}" style="color: #2563eb;">${support || 'support@example.com'}</a>.
+          </p>
+        </div>
+      </div>
+    `,
+    text: `${subject}\n\nHi ${opts.adminName || 'Admin'},\n\nAdmin Email: ${opts.adminEmail}\nPassword: ${opts.password}\n${opts.companyKey ? `Activation Key: ${opts.companyKey}\n` : ''}\nDownload App: ${downloadUrl}\n\nPlease keep this password secure.\n\n${appName}`,
+  })
+}
+
+

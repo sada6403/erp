@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireSuperAdmin, auditLog } from '@/lib/rbac'
 import { withTenant } from '@/lib/tenant'
 import { pool } from '@/lib/db'
+import { sendAdminPasswordEmail } from '@/lib/email'
 import bcrypt from 'bcryptjs'
 import { randomBytes, randomUUID } from 'crypto'
 
@@ -20,9 +21,9 @@ export async function POST(req: NextRequest, { params }: Params) {
   if ('error' in auth) return auth.error
 
   try {
-    const body = await req.json().catch(() => ({})) as { password?: string; email?: string; name?: string }
+    const body = await req.json().catch(() => ({})) as { password?: string; email?: string; name?: string; sendEmail?: boolean }
     const { rows: companyRows } = await pool.query(
-      `SELECT name, email, admin_email, admin_name FROM companies WHERE id = ?`,
+      `SELECT name, email, admin_email, admin_name, company_key FROM companies WHERE id = ?`,
       [companyId]
     )
     const company = companyRows[0] as Record<string, string> | undefined
@@ -108,13 +109,33 @@ export async function POST(req: NextRequest, { params }: Params) {
       return { tempPassword: finalPassword, adminEmail: admin.email, adminName: admin.name }
     })
 
+    let emailSent = false
+    let emailError: string | undefined
+    if (body.sendEmail) {
+      try {
+        const emailRes = await sendAdminPasswordEmail({
+          companyName: company.name,
+          adminEmail: targetEmail,
+          adminName: targetName,
+          password: finalPassword,
+          isReset: true,
+          companyKey: company.company_key,
+        })
+        emailSent = emailRes.ok
+        if (!emailRes.ok) emailError = emailRes.error
+      } catch (e) {
+        emailError = (e as Error).message
+      }
+    }
+
     await auditLog({
       portal: 'superadmin', actorType: 'superadmin',
       actorId: auth.payload.sub, actorName: auth.payload.name,
       action: 'company.resetAdminPassword', resource: 'companies', resourceId: companyId, companyId,
+      newValues: { to: targetEmail, emailSent },
     })
 
-    return NextResponse.json(result)
+    return NextResponse.json({ ...result, emailSent, emailError })
   } catch (err) {
     console.error('[resetAdminPassword]', err)
     return NextResponse.json({ error: (err as Error).message }, { status: 500 })

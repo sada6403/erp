@@ -65,3 +65,50 @@ export function openWhatsApp(phone: string, text: string) {
   const url = `https://wa.me/${cleaned}?text=${encodeURIComponent(text)}`
   window.open(url, '_blank')
 }
+
+export interface PasswordGuideData {
+  companyName: string
+  adminName?: string
+  adminEmail: string
+  password: string
+  companyKey?: string
+  downloadUrl?: string
+  isReset?: boolean
+}
+
+export function buildWhatsAppPasswordText(data: PasswordGuideData): string {
+  const downloadUrl = data.downloadUrl || 'http://72.61.115.222/download'
+  const title = data.isReset
+    ? '*🔐 Enterprise POS ERP — Password Reset*'
+    : '*🔐 Enterprise POS ERP — Admin Login Credentials*'
+
+  const keyLine = data.companyKey
+    ? `🏢 *Company Activation Key:* \`${data.companyKey}\`\n`
+    : ''
+
+  return `${title}
+
+Hi *${data.adminName || 'Admin'}*,
+
+Here are your Admin login credentials for *${data.companyName}*:
+
+━━━━━━━━━━━━━━━━━━━━━
+📧 *Admin Email:* ${data.adminEmail}
+🔒 *Admin Password:* \`${data.password}\` ⚠️ *(Must change after login)*
+${keyLine}📥 *Download POS App:* ${downloadUrl}
+━━━━━━━━━━━━━━━━━━━━━
+
+*To log into your POS Terminal:*
+1️⃣ Open *Enterprise POS ERP* on your PC.
+2️⃣ Enter your Admin Email and Password above to sign in.
+3️⃣ Go to *Settings → Security* to update your password anytime.
+
+━━━━━━━━━━━━━━━━━━━━━
+⚠️ *SECURITY NOTICE:*
+━━━━━━━━━━━━━━━━━━━━━
+This is your private Admin Password. For security, please keep these credentials confidential.
+
+Need assistance? Contact our support team.
+— *NF Software Solution*`
+}
+

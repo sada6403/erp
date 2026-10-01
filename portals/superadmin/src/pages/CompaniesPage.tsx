@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi, companySecurity as securityApi } from '../lib/api'
 import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield } from 'lucide-react'
-import { buildWhatsAppGuideText, openWhatsApp } from '../lib/onboardingGuide'
+import { buildWhatsAppGuideText, buildWhatsAppPasswordText, openWhatsApp } from '../lib/onboardingGuide'
 
 type MenuItemDef =
   | { type: 'item'; label: string; icon: React.ComponentType<{ className?: string }>; onClick: () => void; danger?: boolean }
@@ -256,7 +256,7 @@ export default function CompaniesPage() {
                       { type: 'item', label: 'Company Activation Key', icon: ShieldCheck, onClick: () => setShowCompanyKey(c) },
                       { type: 'item', label: 'POS API Key',            icon: Key,         onClick: () => setShowApiKey(c) },
                       { type: 'item', label: 'POS Devices',            icon: Smartphone,  onClick: () => setShowDevices(c) },
-                      { type: 'item', label: 'Reset Admin Password',   icon: KeyRound,    onClick: () => setShowResetPw(c) },
+                      { type: 'item', label: 'Admin Password (View / Send / Reset)', icon: KeyRound, onClick: () => setShowResetPw(c) },
                       { type: 'item', label: 'Send Setup Guide (Email/WhatsApp)', icon: Send, onClick: () => setShowSendGuide(c) },
                       { type: 'divider' },
                       { type: 'item', label: 'Feature Management',     icon: Settings2,   onClick: () => setShowCapabilities(c) },
@@ -305,7 +305,15 @@ export default function CompaniesPage() {
       {showCreate && <CreateCompanyModal pkgs={pkgs} onClose={() => setShowCreate(false)} onCreated={load} />}
       {showEdit && <EditCompanyModal company={showEdit} pkgs={pkgs} onClose={() => setShowEdit(null)} onSaved={load} />}
       {showDelete && <DeleteCompanyModal company={showDelete} onClose={() => setShowDelete(null)} onDeleted={load} />}
-      {showResetPw && <ResetAdminPasswordModal company={showResetPw} onClose={() => setShowResetPw(null)} />}
+      {showResetPw && <ResetAdminPasswordModal company={showResetPw} onClose={() => setShowResetPw(null)} onUpdated={(newPw, newEmail, newName) => {
+        setRows(prev => prev.map(r => r.id === showResetPw.id ? {
+          ...r,
+          initial_admin_password: newPw,
+          ...(newEmail ? { admin_email: newEmail } : {}),
+          ...(newName ? { admin_name: newName } : {}),
+        } : r))
+        load()
+      }} />}
       {showApiKey && <ApiKeyModal company={showApiKey} onClose={() => setShowApiKey(null)} onRegenerated={load} />}
       {showCapabilities && <CompanyCapabilitiesModal company={showCapabilities} onClose={() => setShowCapabilities(null)} onSaved={load} />}
       {showDevices && <DevicesModal company={showDevices} onClose={() => setShowDevices(null)} />}
@@ -2219,116 +2227,368 @@ function DeleteCompanyModal({ company, onClose, onDeleted }: {
   )
 }
 
-// ─── Reset Admin Password Modal ───────────────────────────────────────────────
-function ResetAdminPasswordModal({ company, onClose }: { company: Company; onClose: () => void }) {
-  const [adminEmail, setAdminEmail] = useState(company.admin_email || company.email || '')
-  const [adminName, setAdminName]   = useState(company.admin_name || company.name || '')
-  const [customPassword, setCustomPassword] = useState('')
-  const [loading, setLoading]       = useState(false)
-  const [error, setError]           = useState('')
-  const [result, setResult]         = useState<{ tempPassword: string; adminEmail: string; adminName: string } | null>(null)
-  const [copied, setCopied]         = useState(false)
+// ─── Admin Password & Recovery Modal ───────────────────────────────────────────
+function ResetAdminPasswordModal({
+  company,
+  onClose,
+  onUpdated,
+}: {
+  company: Company
+  onClose: () => void
+  onUpdated?: (newPw: string, newEmail?: string, newName?: string) => void
+}) {
+  const [currentPassword, setCurrentPassword] = useState(
+    company.initial_admin_password || company.admin_password || ''
+  )
+  const [showCurrentPw, setShowCurrentPw]     = useState(true)
+  const [adminEmail, setAdminEmail]           = useState(company.admin_email || company.email || '')
+  const [adminName, setAdminName]             = useState(company.admin_name || company.name || '')
+  const [phone, setPhone]                     = useState(company.admin_phone || company.phone || '')
+  const [customPassword, setCustomPassword]   = useState('')
+  const [showCustomPw, setShowCustomPw]       = useState(false)
+  const [autoSendEmail, setAutoSendEmail]     = useState(true)
+  const [loading, setLoading]                 = useState(false)
+  const [sendingCurrent, setSendingCurrent]   = useState(false)
+  const [status, setStatus]                   = useState<{ ok: boolean; msg: string } | null>(null)
+  const [result, setResult]                   = useState<{ tempPassword: string; adminEmail: string; adminName: string; emailSent?: boolean } | null>(null)
+  const [copiedCurrent, setCopiedCurrent]     = useState(false)
+  const [copiedNew, setCopiedNew]             = useState(false)
+  const [downloadUrl, setDownloadUrl]         = useState('')
+
+  useEffect(() => {
+    settingsApi.get().then(s => {
+      const b = ((s as Record<string, unknown>)?.branding ?? {}) as Record<string, string>
+      if (b.download_url) setDownloadUrl(b.download_url)
+    }).catch(console.error)
+  }, [])
+
+  function copyText(text: string, isCurrent: boolean) {
+    navigator.clipboard.writeText(text)
+    if (isCurrent) {
+      setCopiedCurrent(true)
+      setTimeout(() => setCopiedCurrent(false), 2000)
+    } else {
+      setCopiedNew(true)
+      setTimeout(() => setCopiedNew(false), 2000)
+    }
+  }
+
+  function handleSendCurrentWhatsApp() {
+    let targetPhone = phone
+    if (!targetPhone) {
+      const input = window.prompt('Enter WhatsApp phone number for ' + company.name + ':', '')
+      if (!input) return
+      targetPhone = input
+      setPhone(input)
+    }
+    const text = buildWhatsAppPasswordText({
+      companyName: company.name,
+      adminName,
+      adminEmail,
+      password: currentPassword,
+      companyKey: company.company_key,
+      downloadUrl,
+      isReset: false,
+    })
+    openWhatsApp(targetPhone, text)
+    setStatus({ ok: true, msg: `WhatsApp opened for ${targetPhone} with current password!` })
+  }
+
+  async function handleSendCurrentEmail() {
+    if (!adminEmail) {
+      setStatus({ ok: false, msg: 'Recipient admin email is required.' })
+      return
+    }
+    setSendingCurrent(true)
+    setStatus(null)
+    try {
+      const res = await api.sendAdminPassword(company.id, {
+        email: adminEmail,
+        password: currentPassword,
+        isReset: false,
+      })
+      if (res.ok) {
+        setStatus({ ok: true, msg: `Current password successfully sent to ${adminEmail}!` })
+      } else {
+        setStatus({ ok: false, msg: res.message || 'Failed to send password email' })
+      }
+    } catch (err) {
+      setStatus({ ok: false, msg: err instanceof Error ? err.message : 'Failed to send password email' })
+    }
+    setSendingCurrent(false)
+  }
 
   async function handleReset(passwordToSet?: string) {
-    setLoading(true); setError('')
+    setLoading(true)
+    setStatus(null)
     try {
       const r = await api.resetAdminPassword(company.id, {
         email: adminEmail,
         name: adminName,
         password: passwordToSet || customPassword || undefined,
+        sendEmail: autoSendEmail,
       })
       setResult(r)
+      setCurrentPassword(r.tempPassword)
+      if (onUpdated) onUpdated(r.tempPassword, adminEmail, adminName)
+      if (r.emailSent) {
+        setStatus({ ok: true, msg: `Password reset and emailed to ${adminEmail}!` })
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to reset password')
+      setStatus({ ok: false, msg: err instanceof Error ? err.message : 'Failed to reset password' })
     }
     setLoading(false)
   }
 
-  function copyPassword() {
+  function handleSendResetWhatsApp() {
     if (!result) return
-    navigator.clipboard.writeText(result.tempPassword)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    let targetPhone = phone
+    if (!targetPhone) {
+      const input = window.prompt('Enter WhatsApp phone number for ' + company.name + ':', '')
+      if (!input) return
+      targetPhone = input
+      setPhone(input)
+    }
+    const text = buildWhatsAppPasswordText({
+      companyName: company.name,
+      adminName: result.adminName,
+      adminEmail: result.adminEmail,
+      password: result.tempPassword,
+      companyKey: company.company_key,
+      downloadUrl,
+      isReset: true,
+    })
+    openWhatsApp(targetPhone, text)
+    setStatus({ ok: true, msg: `WhatsApp opened for ${targetPhone} with new reset password!` })
+  }
+
+  async function handleSendResetEmail() {
+    if (!result) return
+    setSendingCurrent(true)
+    setStatus(null)
+    try {
+      const res = await api.sendAdminPassword(company.id, {
+        email: result.adminEmail,
+        password: result.tempPassword,
+        isReset: true,
+      })
+      if (res.ok) {
+        setStatus({ ok: true, msg: `New reset password successfully sent to ${result.adminEmail}!` })
+      } else {
+        setStatus({ ok: false, msg: res.message || 'Failed to send password email' })
+      }
+    } catch (err) {
+      setStatus({ ok: false, msg: err instanceof Error ? err.message : 'Failed to send email' })
+    }
+    setSendingCurrent(false)
   }
 
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-md">
+      <div className="bg-gray-900 border border-gray-800 rounded-xl w-full max-w-lg max-h-[92vh] overflow-y-auto">
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
           <div className="flex items-center gap-2">
-            <KeyRound className="w-4 h-4 text-amber-400" />
-            <h2 className="font-semibold text-white">Reset Admin Password — {company.name}</h2>
+            <KeyRound className="w-5 h-5 text-amber-400" />
+            <h2 className="font-semibold text-white">Admin Password Manager — {company.name}</h2>
           </div>
           <button onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-5 space-y-5">
+          {status && (
+            <div className={`text-xs px-3.5 py-2.5 rounded-lg flex items-center justify-between ${
+              status.ok ? 'bg-green-950/60 text-green-300 border border-green-700/60' : 'bg-red-950/60 text-red-300 border border-red-700/60'
+            }`}>
+              <span>{status.ok ? '✓ ' : '✗ '}{status.msg}</span>
+              <button type="button" onClick={() => setStatus(null)} className="text-gray-400 hover:text-white ml-2">✕</button>
+            </div>
+          )}
+
+          {/* ─── OPTION 1: CURRENT SAVED PASSWORD & SEND ─── */}
+          <div className="bg-gray-800/60 border border-gray-700/70 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-amber-300 flex items-center gap-1.5">
+                  <Key className="w-3.5 h-3.5" /> Option 1: Current Saved Password
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  View or send their existing password if they forgot it.
+                </p>
+              </div>
+              {currentPassword && (
+                <button
+                  type="button"
+                  onClick={() => setShowCurrentPw(!showCurrentPw)}
+                  className="text-xs text-gray-400 hover:text-white flex items-center gap-1 bg-gray-800 px-2 py-1 rounded border border-gray-700">
+                  {showCurrentPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  {showCurrentPw ? 'Hide' : 'Reveal'}
+                </button>
+              )}
+            </div>
+
+            {currentPassword ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 bg-gray-950/90 border border-gray-700 rounded-lg px-3 py-2 flex items-center justify-between">
+                    <span className="font-mono font-bold text-amber-300 text-sm tracking-wide">
+                      {showCurrentPw ? currentPassword : '••••••••••••'}
+                    </span>
+                    <span className="text-[10px] text-gray-500 uppercase font-semibold">Saved in DB</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyText(currentPassword, true)}
+                    className="btn-ghost px-3 py-2 text-xs flex items-center gap-1">
+                    <Copy className="w-3.5 h-3.5" />
+                    {copiedCurrent ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleSendCurrentWhatsApp}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-colors">
+                    <Send className="w-3.5 h-3.5" /> Send Current via WhatsApp
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSendCurrentEmail}
+                    disabled={sendingCurrent}
+                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50">
+                    <Mail className="w-3.5 h-3.5" /> {sendingCurrent ? 'Sending…' : 'Send Current via Email'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-gray-400 italic bg-gray-900/60 p-2.5 rounded border border-gray-800">
+                No saved password on file yet. Use the reset section below to set one.
+              </p>
+            )}
+          </div>
+
+          {/* ─── OPTION 2: RESET TO NEW PASSWORD ─── */}
           {!result ? (
-            <>
-              <div className="bg-amber-900/20 border border-amber-700/40 rounded-lg px-4 py-3 text-sm text-amber-300 space-y-1">
-                <p className="font-semibold text-amber-200">Set Company Admin Credentials</p>
-                <p className="text-xs text-amber-300/80">
-                  Set a custom password (like <code>admin123</code>) or auto-generate a random secure password for <strong className="text-amber-200">{company.name}</strong>.
+            <div className="bg-gray-800/40 border border-gray-700/50 rounded-xl p-4 space-y-3.5">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-wider text-blue-300 flex items-center gap-1.5">
+                  <RotateCcw className="w-3.5 h-3.5" /> Option 2: Reset to New Password
+                </p>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Set a new password or auto-generate one. Immediately updates both main and tenant databases.
                 </p>
               </div>
 
-              {error && <p className="text-sm text-red-400">{error}</p>}
-
-              <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">Admin Name</label>
                   <input className="input" value={adminName} onChange={e => setAdminName(e.target.value)} placeholder="Company Admin" />
                 </div>
-
                 <div>
                   <label className="label">Admin Email</label>
                   <input className="input" type="email" value={adminEmail} onChange={e => setAdminEmail(e.target.value)} placeholder="admin@company.com" />
                 </div>
+              </div>
 
-                <div>
-                  <label className="label">Custom Password (optional)</label>
-                  <input className="input" type="text" value={customPassword} onChange={e => setCustomPassword(e.target.value)} placeholder="e.g. admin123 (or leave blank to auto-generate)" />
-                </div>
+              <div>
+                <label className="label">WhatsApp Phone Number</label>
+                <input className="input" type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g. 0764908627" />
+              </div>
 
-                <div className="flex gap-3 pt-2">
-                  <button className="btn-ghost flex-1" onClick={onClose} disabled={loading}>
-                    Cancel
-                  </button>
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label mb-0">New Password (Custom or Auto)</label>
                   <button
-                    className="flex-1 px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-colors disabled:opacity-50"
-                    onClick={() => handleReset(customPassword || undefined)} disabled={loading}>
-                    {loading ? 'Saving…' : customPassword ? 'Set Password' : 'Auto-Generate'}
+                    type="button"
+                    onClick={() => {
+                      const generated = 'Pass@' + Math.floor(100000 + Math.random() * 900000)
+                      setCustomPassword(generated)
+                      setShowCustomPw(true)
+                    }}
+                    className="text-[11px] text-amber-400 hover:text-amber-300 font-normal">
+                    ⚡ Auto-Generate Password
                   </button>
                 </div>
-              </div>
-            </>
-          ) : (
-            <div className="space-y-4">
-              <div className="bg-green-900/20 border border-green-700/40 rounded-lg px-4 py-3 text-sm text-green-300">
-                <p className="font-semibold text-green-200 mb-1">✓ Admin Password Saved Successfully</p>
-                <p className="text-xs text-green-300/80">The admin user can now log into POS and the admin portal with these credentials.</p>
+                <div className="relative">
+                  <input
+                    className="input font-mono pr-10"
+                    type={showCustomPw ? 'text' : 'password'}
+                    value={customPassword}
+                    onChange={e => setCustomPassword(e.target.value)}
+                    placeholder="Enter new password (or leave blank to auto-generate)"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomPw(!showCustomPw)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white">
+                    {showCustomPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
 
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Admin Name</p>
-                <p className="text-sm text-white font-medium">{result.adminName}</p>
+              <label className="flex items-center gap-2 cursor-pointer pt-1">
+                <input
+                  type="checkbox"
+                  checked={autoSendEmail}
+                  onChange={e => setAutoSendEmail(e.target.checked)}
+                  className="rounded border-gray-700 text-blue-600 focus:ring-blue-500 bg-gray-900"
+                />
+                <span className="text-xs text-gray-300">
+                  Automatically send new password to Admin Email upon save
+                </span>
+              </label>
+
+              <div className="flex gap-3 pt-2">
+                <button className="btn-ghost flex-1" onClick={onClose} disabled={loading}>
+                  Cancel
+                </button>
+                <button
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold text-sm transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
+                  onClick={() => handleReset(customPassword || undefined)} disabled={loading}>
+                  <KeyRound className="w-4 h-4" />
+                  {loading ? 'Saving…' : customPassword ? 'Reset & Save Password' : 'Auto-Generate & Save'}
+                </button>
               </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-1">Admin Email</p>
-                <p className="text-sm text-white font-mono">{result.adminEmail}</p>
+            </div>
+          ) : (
+            <div className="bg-emerald-950/30 border border-emerald-700/60 rounded-xl p-4 space-y-4">
+              <div className="flex items-center gap-2 text-emerald-300">
+                <CheckCircle className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+                <div>
+                  <p className="font-semibold text-sm text-emerald-200">Admin Password Reset Successfully!</p>
+                  <p className="text-xs text-emerald-300/80">Database updated. Send the new password below:</p>
+                </div>
               </div>
-              <div>
-                <p className="text-xs text-gray-500 mb-2">Password</p>
-                <div className="flex gap-2">
-                  <code className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-lg font-mono font-bold text-amber-300 tracking-wider text-center">
-                    {result.tempPassword}
-                  </code>
-                  <button className="btn-ghost px-3 text-sm flex-shrink-0 flex items-center gap-1.5"
-                    onClick={copyPassword}>
-                    <Copy className="w-4 h-4" />
-                    {copied ? 'Copied!' : 'Copy'}
+
+              <div className="bg-gray-950/90 border border-emerald-600/40 rounded-lg p-3.5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-400">New Admin Password:</span>
+                  <button
+                    type="button"
+                    onClick={() => copyText(result.tempPassword, false)}
+                    className="text-xs text-emerald-400 hover:text-emerald-300 flex items-center gap-1">
+                    <Copy className="w-3.5 h-3.5" /> {copiedNew ? 'Copied!' : 'Copy Password'}
                   </button>
                 </div>
+                <code className="block bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-base font-mono font-bold text-amber-300 tracking-wider text-center">
+                  {result.tempPassword}
+                </code>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleSendResetWhatsApp}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-colors">
+                  <Send className="w-3.5 h-3.5" /> Send New via WhatsApp
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSendResetEmail}
+                  disabled={sendingCurrent}
+                  className="flex-1 bg-blue-600 hover:bg-blue-500 text-white font-medium text-xs py-2 px-3 rounded-lg flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50">
+                  <Mail className="w-3.5 h-3.5" /> {sendingCurrent ? 'Sending…' : 'Send New via Email'}
+                </button>
               </div>
 
               <button className="btn-primary w-full mt-2" onClick={onClose}>Done</button>
