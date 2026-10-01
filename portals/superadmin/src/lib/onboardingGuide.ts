@@ -18,7 +18,7 @@ export interface OnboardingGuideData {
 export function buildWhatsAppGuideText(data: OnboardingGuideData): string {
   const downloadUrl = data.downloadUrl || 'http://72.61.115.222/download'
   const passwordText = data.adminPassword
-    ? `\`${data.adminPassword}\` ⚠️ *(First login-க்கு பின் மாற்றவும் / Must change)*`
+    ? `\`${data.adminPassword}\` ⚠️ *(Must change after first login)*`
     : '(Your chosen password)'
 
   // Technical details (Server IP / API Key) are omitted by default to protect server IP & security
@@ -45,14 +45,13 @@ ${technicalBlock}📥 *Download POS App:* ${downloadUrl}
 2️⃣ Run the installer and open *Enterprise POS ERP*.
 3️⃣ In the activation screen, enter your *Company Activation Key* to activate this PC.
 4️⃣ Log in using your *Admin Email* and *Admin Password*.
-5️⃣ ⚠️ *CRITICAL:* Login செய்தவுடன் *Settings → Security* சென்று உங்கள் Password-ஐ உடனடியாக மாற்றிக்கொள்ளவும் (Change password immediately).
+5️⃣ ⚠️ *CRITICAL:* Change your temporary Admin Password immediately after your first login (*Settings → Security*).
 6️⃣ Confirm cloud connection status under *Settings → Cloud Sync*.
 
 ━━━━━━━━━━━━━━━━━━━━━
-⚠️ *பாதுகாப்பு குறிப்பு / SECURITY NOTICE:*
+⚠️ *SECURITY NOTICE:*
 ━━━━━━━━━━━━━━━━━━━━━
-இந்த Admin Password தற்காலிகமானது. உங்கள் நிறுவன கணக்கின் பாதுகாப்பிற்காக, முதல் முறை உள்நுழைந்தவுடன் (First Login) உடனடியாக உங்கள் புதிய கடவுச்சொல்லை மாற்றிக்கொள்ளவும்.
-Please keep these credentials strictly confidential and update your temporary password immediately upon first login.
+This Admin Password is a temporary credential. For your account security, you must update your password immediately upon first login. Please keep these credentials confidential.
 
 Need assistance? Contact our support team.
 — *NF Software Solution*`

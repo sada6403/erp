@@ -261,7 +261,7 @@ export async function sendCompanyOnboardingEmail(opts: {
           </div>
 
           <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 12px 16px; margin: 20px 0; color: #92400e; font-size: 13px; line-height: 1.5;">
-            ⚠️ <strong>முக்கிய பாதுகாப்பு குறிப்பு / Security Requirement:</strong> This Admin Password is a temporary credential. For security reasons, please change your password immediately after logging in for the first time.
+            ⚠️ <strong>Security Requirement:</strong> This Admin Password is a temporary credential. For security reasons, please change your password immediately after logging in for the first time.
           </div>
 
           <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0;" />
