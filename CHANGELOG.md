@@ -2,6 +2,13 @@
 
 Internal release log. Not customer-facing.
 
+## 2.7.16 — 2026-10-01 — SuperAdmin English onboarding, password recovery & login stability
+
+- SuperAdmin: Onboarding guides for WhatsApp and Email are 100% English only.
+- SuperAdmin: Added dedicated Password Manager with options to view current saved password, send current password via WhatsApp/Email, or reset to a new password with 1-click delivery.
+- POS Login: Fixed PIN toast notification spam on email typing keystrokes.
+- POS Login: Removed dummy admin email auto-fill / pre-fill on logout.
+
 ## 2.7.14 — 2026-09-29 — Smart Buy payments, sync recovery, and branch-safe scheme creation
 
 - Late Smart Buy payments now show the full cycle balance plus the applicable
