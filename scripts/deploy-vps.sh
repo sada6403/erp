@@ -28,7 +28,10 @@ if [ -d "$SUPERADMIN_DIR" ]; then
   npm ci
 
   echo "[deploy] building superadmin"
-  npm run build
+  if [ -f "$SUPERADMIN_DIR/.env" ]; then
+    sed -i '/VITE_API_URL=http:\/\//d' "$SUPERADMIN_DIR/.env" || true
+  fi
+  VITE_API_URL="" npm run build
 
   echo "[deploy] restarting superadmin"
   pm2 delete pos-superadmin >/dev/null 2>&1 || true

@@ -1,4 +1,33 @@
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3000'
+function getBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim()
+    // 1. If page is loaded over HTTPS, NEVER use an unencrypted http:// URL
+    // (browser Mixed Content policy strictly blocks http from https, causing 'Failed to fetch')
+    if (window.location.protocol === 'https:') {
+      if (envUrl && envUrl.startsWith('https://')) {
+        return envUrl.replace(/\/+$/, '')
+      }
+      return ''
+    }
+
+    // 2. Production or hosted domain/IP: use same-origin relative path unless explicit safe URL
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      if (envUrl && !envUrl.includes('localhost') && !envUrl.startsWith('http://')) {
+        return envUrl.replace(/\/+$/, '')
+      }
+      return ''
+    }
+
+    // 3. Localhost development
+    if (envUrl) {
+      return envUrl.replace(/\/+$/, '')
+    }
+    return ''
+  }
+  return ''
+}
+
+const BASE = getBaseUrl()
 
 let _access = ''
 let _refresh = ''
