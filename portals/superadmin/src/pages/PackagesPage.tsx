@@ -87,6 +87,13 @@ function featureEnabled(pkg: Pkg, key: string) {
   return Boolean(value)
 }
 
+function formatLkr(value: number) {
+  return `Rs. ${Number(value || 0).toLocaleString('en-LK', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
 export default function PackagesPage() {
   const [pkgs, setPkgs] = useState<Pkg[]>([])
   const [catalog, setCatalog] = useState<FeatureDef[]>([])
@@ -147,10 +154,10 @@ export default function PackagesPage() {
 
             <div>
               <p className="text-2xl font-bold text-white">
-                ${pkg.monthly_price}<span className="text-sm font-normal text-gray-400">/mo</span>
+                {formatLkr(pkg.monthly_price)}<span className="text-sm font-normal text-gray-400">/mo</span>
               </p>
               <p className="text-xs text-gray-500">
-                ${pkg.annual_price}/yr · {pkg.trial_days}d trial
+                {formatLkr(pkg.annual_price)}/yr · {pkg.trial_days}d trial
               </p>
             </div>
 
@@ -312,8 +319,8 @@ function CreatePackageModal({ catalog, onClose, onCreated }: { catalog: FeatureD
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div><label className="label">Name</label><input className="input" required value={name} onChange={e => setName(e.target.value)} /></div>
             <div><label className="label">Description</label><input className="input" value={description} onChange={e => setDesc(e.target.value)} /></div>
-            <div><label className="label">Monthly Price ($)</label><input className="input" type="number" step="0.01" value={monthly} onChange={e => setMonthly(e.target.value)} /></div>
-            <div><label className="label">Annual Price ($)</label><input className="input" type="number" step="0.01" value={annual} onChange={e => setAnnual(e.target.value)} /></div>
+            <div><label className="label">Monthly Price (LKR)</label><input className="input" type="number" min="0" step="0.01" value={monthly} onChange={e => setMonthly(e.target.value)} /></div>
+            <div><label className="label">Annual Price (LKR)</label><input className="input" type="number" min="0" step="0.01" value={annual} onChange={e => setAnnual(e.target.value)} /></div>
             <div><label className="label">Max Branches</label><input className="input" type="number" value={maxBranches} onChange={e => setMaxBranches(e.target.value)} /></div>
             <div><label className="label">Max Users</label><input className="input" type="number" value={maxUsers} onChange={e => setMaxUsers(e.target.value)} /></div>
             <div><label className="label">Max Products</label><input className="input" type="number" value={maxProducts} onChange={e => setMaxProducts(e.target.value)} /></div>
@@ -425,8 +432,8 @@ function EditPackageModal({ catalog, pkg, onClose, onSaved }: {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div><label className="label">Name</label><input className="input" required value={form.name} onChange={e => f('name')(e.target.value)} /></div>
             <div><label className="label">Description</label><input className="input" value={form.description} onChange={e => f('description')(e.target.value)} /></div>
-            <div><label className="label">Monthly Price ($)</label><input className="input" type="number" step="0.01" value={form.monthly_price} onChange={e => f('monthly_price')(e.target.value)} /></div>
-            <div><label className="label">Annual Price ($)</label><input className="input" type="number" step="0.01" value={form.annual_price} onChange={e => f('annual_price')(e.target.value)} /></div>
+            <div><label className="label">Monthly Price (LKR)</label><input className="input" type="number" min="0" step="0.01" value={form.monthly_price} onChange={e => f('monthly_price')(e.target.value)} /></div>
+            <div><label className="label">Annual Price (LKR)</label><input className="input" type="number" min="0" step="0.01" value={form.annual_price} onChange={e => f('annual_price')(e.target.value)} /></div>
             <div><label className="label">Max Branches</label><input className="input" type="number" min="1" value={form.max_branches} onChange={e => f('max_branches')(e.target.value)} /></div>
             <div><label className="label">Max Users</label><input className="input" type="number" min="1" value={form.max_users} onChange={e => f('max_users')(e.target.value)} /></div>
             <div><label className="label">Max Products</label><input className="input" type="number" min="1" value={form.max_products} onChange={e => f('max_products')(e.target.value)} /></div>

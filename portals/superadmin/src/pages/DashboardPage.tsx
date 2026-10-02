@@ -3,7 +3,7 @@ import { stats as statsApi } from '../lib/api'
 import {
   Building2, AlertTriangle, Monitor,
   RefreshCw, CheckCircle2, XCircle, ArrowUpRight, Clock,
-  DollarSign, Wifi,
+  Banknote, Wifi,
 } from 'lucide-react'
 
 type StatsData = {
@@ -23,6 +23,9 @@ const STATUS_BADGE: Record<string, string> = {
 }
 
 function fmt(n: number) { return n.toLocaleString() }
+function formatLkr(n: number) {
+  return `Rs. ${n.toLocaleString('en-LK', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
 
 function MetricCard({
   icon: Icon, label, value, sub, color, trend,
@@ -155,8 +158,8 @@ export default function DashboardPage() {
             <p className="text-xs font-semibold uppercase tracking-widest text-gray-500 mb-3">Platform Health</p>
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <MetricCard
-                icon={DollarSign} label="Monthly Recurring Revenue"
-                value={`$${data.revenue.mrr.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                icon={Banknote} label="Monthly Recurring Revenue"
+                value={formatLkr(data.revenue.mrr)}
                 sub="Active subscriptions only"
                 color="bg-emerald-900/40 text-emerald-400"
               />
