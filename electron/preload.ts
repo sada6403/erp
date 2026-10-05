@@ -340,6 +340,7 @@ const api = {
     expenseCategories: { list: () => ipcRenderer.invoke('admin:expenseCategories:list'), create: (p: unknown) => ipcRenderer.invoke('admin:expenseCategories:create', p), delete: (id: string) => ipcRenderer.invoke('admin:expenseCategories:delete', id) },
     expenses:    { list: (filters?: unknown) => ipcRenderer.invoke('admin:expenses:list', filters), create: (p: unknown) => ipcRenderer.invoke('admin:expenses:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:expenses:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:expenses:delete', id) },
     clearAllData:      (password: string) => ipcRenderer.invoke('admin:clearAllData', password),
+    checkDeletedCompany: () => ipcRenderer.invoke('admin:checkDeletedCompany'),
     forceReset:        () => ipcRenderer.invoke('admin:forceReset'),
     isSetupRequired:   () => ipcRenderer.invoke('admin:isSetupRequired'),
     seedLocalDefaults: () => ipcRenderer.invoke('admin:seedLocalDefaults'),

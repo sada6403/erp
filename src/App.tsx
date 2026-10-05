@@ -240,6 +240,31 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activated])
 
+  // Keep checking the activated tenant even on LoginPage. The main process
+  // owns the API key and only resets after three consecutive 401 responses.
+  useEffect(() => {
+    if (activated !== true || !window.api?.admin?.checkDeletedCompany) return
+    let cancelled = false
+    let checking = false
+    const check = async () => {
+      if (checking) return
+      checking = true
+      try {
+        const result = await window.api.admin.checkDeletedCompany() as { success?: boolean; deleted?: boolean }
+        if (!cancelled && result?.success && result.deleted) {
+          setShowCompanyActivation(false)
+          setDeviceLock({ locked: false, reason: null, deviceId: null })
+          setActivated(false)
+          navigate('/login', { replace: true })
+        }
+      } catch { /* offline - keep the current workspace available */ }
+      finally { checking = false }
+    }
+    check()
+    const interval = window.setInterval(check, 10_000)
+    return () => { cancelled = true; window.clearInterval(interval) }
+  }, [activated, navigate])
+
   if (pendingClearEvent === null) return <LoadingScreen />
   if (pendingClearEvent.locked) {
     return <DataClearedLockScreen onUnlocked={() => setPendingClearEvent({ locked: false, eventId: null })} />

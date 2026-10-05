@@ -415,7 +415,6 @@ export default function AppLayout() {
   const [supportSecondsLeft, setSupportSecondsLeft] = useState<number | null>(null)
   const [endingSupportSession, setEndingSupportSession] = useState(false)
   const sidebarNavRef = useRef<HTMLElement | null>(null)
-  const brand401CountRef = useRef(0)
 
   const permissions = (user?.role?.permissions ||
     (user as unknown as Record<string, unknown>)?.permissions) as Record<string, unknown> || {}
@@ -466,17 +465,10 @@ export default function AppLayout() {
           try {
             const resp = await fetch(`${apiUrl}/api/brand`, { headers: { 'x-api-key': apiKey } })
             if (resp.status === 401) {
-              // A single 401 can be a transient blip (DB hiccup, brief key
-              // mismatch) — only treat it as "company permanently deleted"
-              // after several consecutive confirmations, since forceReset
-              // wipes every local table with no way back.
-              brand401CountRef.current += 1
-              if (brand401CountRef.current < 3) return
-              await window.api.admin?.forceReset?.()
-              navigate('/setup', { replace: true })
+              // App performs the secure deleted-company check above all routes,
+              // including LoginPage. Branding refresh stays non-destructive.
               return
             }
-            brand401CountRef.current = 0
             if (!resp.ok) {
               // 5xx / network error — treat as offline, keep cached settings
               return

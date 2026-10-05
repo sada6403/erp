@@ -212,6 +212,64 @@ export function wipeLocalTransactionalData(db: Database.Database): void {
   db.pragma('foreign_keys = ON')
 }
 
+let deletedCompany401Count = 0
+
+async function performDeletedCompanyReset() {
+  const db = getDb()
+
+  // This destroys the local tenant copy, so retain a recovery point first.
+  try {
+    const backupsDir = getWorkspaceDataPath('backups')
+    fs.mkdirSync(backupsDir, { recursive: true })
+    await db.backup(path.join(backupsDir, `pre-reset-${Date.now()}.db`))
+  } catch { /* best-effort - don't block the reset on backup failure */ }
+
+  const tables = [
+    'sync_queue', 'audit_logs', 'loyalty_transactions',
+    'return_items', 'returns', 'installment_payments', 'installment_schedules', 'installments',
+    'order_items', 'orders', 'invoice_items', 'payments', 'invoices',
+    'stock_count_items', 'stock_counts', 'stock_transfer_items', 'stock_transfers',
+    'stock_movements', 'batches', 'stocks', 'purchase_order_items', 'purchase_orders',
+    'expenses', 'supplier_payments', 'customers', 'products', 'notifications', 'categories', 'suppliers',
+  ]
+  db.transaction(() => {
+    try { db.prepare(`UPDATE users SET branch_id = NULL, role_id = NULL`).run() } catch { /* ok */ }
+    for (const t of tables) { try { db.prepare(`DELETE FROM ${t}`).run() } catch { /* skip */ } }
+    try { db.prepare(`DELETE FROM branches`).run() } catch { /* ok */ }
+    try { db.prepare(`DELETE FROM users`).run() } catch { /* ok */ }
+    try { db.prepare(`DELETE FROM roles`).run() } catch { /* ok */ }
+  })()
+
+  const uploadsDir = getWorkspaceDataPath('uploads')
+  if (fs.existsSync(uploadsDir)) fs.rmSync(uploadsDir, { recursive: true, force: true })
+
+  const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+  settings.cloud_api_key = ''
+  settings.cloud_api_url = ''
+  store.set('app_settings', settings)
+
+  store.delete('device_activated')
+  store.delete('device_license_key')
+  store.delete('device_company_key')
+  store.delete('activation_company_id')
+  store.delete('activation_company_name')
+  store.delete('license_data')
+  store.delete('device_locked')
+  store.delete('device_lock_reason')
+  store.delete('offline_authorization_expires_at')
+  store.set('setup_required', true)
+  store.delete('auth_user')
+  store.delete('auth_token')
+  store.delete('last_pull_timestamp')
+  store.delete('sync_table_cursors_v2')
+  store.delete('sync_pull_errors')
+  store.delete('last_successful_sync_v2_at')
+  store.delete('sync_cycle_error')
+  store.delete('last_seen_watermark')
+  deletedCompany401Count = 0
+  return { success: true }
+}
+
 export function registerAdminHandlers(ipcMain: IpcMain) {
   // Runtime migration — add branch_pin column if missing (handles cases where Electron wasn't restarted)
   try {
@@ -2022,6 +2080,45 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // ── Force Reset (called when cloud detects company was deleted by SuperAdmin) ─
   // No permission check — this is triggered by the cloud, not the logged-in user.
+  // Run from the app shell so deletion is detected on LoginPage too. The API
+  // secret never enters the renderer, and three confirmations are required
+  // before local data is reset.
+  safeHandle(ipcMain, 'admin:checkDeletedCompany', async () => {
+    if (!store.get('device_activated')) {
+      deletedCompany401Count = 0
+      return { success: true, deleted: false }
+    }
+
+    const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const apiUrl = String(appSettings.cloud_api_url || '').trim()
+    const apiKey = decryptSecret(appSettings.cloud_api_key).trim()
+    if (!apiUrl || !apiKey) {
+      deletedCompany401Count = 0
+      return { success: true, deleted: false }
+    }
+
+    try {
+      const headers: Record<string, string> = { 'x-api-key': apiKey }
+      const deviceId = String(store.get('device_id') || '').trim()
+      if (deviceId) headers['x-device-id'] = deviceId
+      const resp = await fetch(`${apiUrl}/api/brand`, { headers })
+      if (resp.status !== 401) {
+        deletedCompany401Count = 0
+        return { success: true, deleted: false }
+      }
+
+      deletedCompany401Count += 1
+      if (deletedCompany401Count < 3) {
+        return { success: true, deleted: false, confirmation: deletedCompany401Count }
+      }
+      await performDeletedCompanyReset()
+      return { success: true, deleted: true }
+    } catch {
+      deletedCompany401Count = 0
+      return { success: true, deleted: false }
+    }
+  })
+
   safeHandle(ipcMain, 'admin:forceReset', async () => {
     // This is meant to fire ONLY from AppLayout's own tenant-deletion check
     // (3 consecutive 401s from the cloud /api/brand endpoint) — but any
