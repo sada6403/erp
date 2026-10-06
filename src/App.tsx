@@ -183,9 +183,24 @@ export default function App() {
   // every relaunch even if this device is offline.
   useEffect(() => {
     if (!window.api?.app?.getPendingClearEvent) { setPendingClearEvent({ locked: false, eventId: null }); return }
-    window.api.app.getPendingClearEvent()
-      .then((r: { locked: boolean; eventId: string | null }) => setPendingClearEvent(r))
-      .catch(() => setPendingClearEvent({ locked: false, eventId: null }))
+    let cancelled = false
+    const check = () => window.api.app.getPendingClearEvent()
+      .then((r: { locked: boolean; eventId: string | null }) => {
+        if (!cancelled) setPendingClearEvent(r)
+      })
+      .catch(() => {
+        if (!cancelled) setPendingClearEvent(current => current || { locked: false, eventId: null })
+      })
+    void check()
+    const unsubscribe = window.api.app.onDataClearEvent?.((data: { eventId: string }) => {
+      if (!cancelled) setPendingClearEvent({ locked: true, eventId: data.eventId })
+    })
+    const interval = window.setInterval(check, 5_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+      unsubscribe?.()
+    }
   }, [])
 
   async function finishActivation() {

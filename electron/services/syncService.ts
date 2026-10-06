@@ -30,7 +30,7 @@ const DRAIN_RETRY_MS = 1_500
 // escalating to a targeted pull only when tracked data actually changed.
 const WATERMARK_INTERVAL_MS = 10_000
 const WATERMARK_STARTUP_DELAY_MS = 15_000
-const WATERMARK_TABLES = ['categories', 'products', 'stocks', 'stock_transfers', 'branch_transfers', 'branch_transfer_items']
+const WATERMARK_TABLES = ['categories', 'products', 'stocks', 'stock_transfers', 'branch_transfers', 'branch_transfer_items', 'data_clear_events']
 const DEFAULT_FAILED_RETRY_MINUTES = 2
 
 function sleep(ms: number) {
@@ -65,6 +65,17 @@ function notifyRendererDataChanged() {
     }
   } catch {
     // Renderer may not exist yet during startup sync.
+  }
+}
+
+function notifyDataClearEvent(eventId: string) {
+  try {
+    const wins = BrowserWindow?.getAllWindows ? BrowserWindow.getAllWindows() : []
+    for (const win of wins) {
+      if (!win.isDestroyed()) win.webContents.send('app:dataClearEvent', { eventId })
+    }
+  } catch {
+    // The persisted pending event is also checked at boot and polled by App.tsx.
   }
 }
 
@@ -726,7 +737,9 @@ export class SyncService {
               }
               if (table === 'data_clear_events') {
                 if (String(row.id) !== store.get('last_acknowledged_clear_event_id')) {
-                  store.set('pending_clear_event_id', String(row.id))
+                  const eventId = String(row.id)
+                  store.set('pending_clear_event_id', eventId)
+                  notifyDataClearEvent(eventId)
                 }
               }
               if (table === 'products' && [0, false, '0'].includes(row.is_active as never)) {

@@ -53,7 +53,8 @@ export async function GET(request: NextRequest) {
          (SELECT MAX(updated_at) FROM categories) AS categories,
          (SELECT MAX(updated_at) FROM stock_transfers) AS stock_transfers,
          (SELECT MAX(updated_at) FROM branch_transfers) AS branch_transfers,
-         (SELECT MAX(updated_at) FROM branch_transfer_items) AS branch_transfer_items`
+         (SELECT MAX(updated_at) FROM branch_transfer_items) AS branch_transfer_items,
+         (SELECT MAX(updated_at) FROM data_clear_events) AS data_clear_events`
     )
     // A global MAX can be held ahead by one table (or a future-dated row),
     // hiding later changes in every other table. Keep each table's maximum

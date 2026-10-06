@@ -526,6 +526,11 @@ const api = {
   app: {
     isActivated:        () => ipcRenderer.invoke('app:isActivated'),
     getPendingClearEvent: () => ipcRenderer.invoke('app:getPendingClearEvent'),
+    onDataClearEvent: (cb: (data: { eventId: string }) => void) => {
+      const listener = (_e: unknown, data: { eventId: string }) => cb(data)
+      ipcRenderer.on('app:dataClearEvent', listener)
+      return () => { ipcRenderer.removeListener('app:dataClearEvent', listener) }
+    },
     getDeviceLockStatus: () => ipcRenderer.invoke('app:getDeviceLockStatus'),
     refreshAfterClear:  () => ipcRenderer.invoke('app:refreshAfterClear'),
     getDeviceInfo:      () => ipcRenderer.invoke('app:getDeviceInfo'),

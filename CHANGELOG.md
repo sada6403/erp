@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.7.19 — 2026-10-06 — Company-wide Clear All Data refresh prompt
+
+- Clear All Data events are now included in the fast cloud watermark so every
+  open branch device detects a company-wide reset within seconds.
+- Other devices immediately show a blocking “All Company Data Was Cleared”
+  screen with a Refresh button; a local polling fallback prevents missed IPC
+  events during renderer reloads.
+- Refresh wipes stale local transactional data and starts a full cloud re-pull
+  before allowing the device to continue.
+
+Deployment order: backend watermark first, followed by the 2.7.19 Windows
+installer and auto-updater metadata.
+
+Internal release log. Not customer-facing.
+
 ## 2.7.18 — 2026-10-06 — Main Branch Admin stock correction
 
 - Edit Product now lets the Company Admin manually correct Current Stock Qty

@@ -4,7 +4,11 @@ import os from 'os'
 import path from 'path'
 import { createRequire } from 'module'
 
-const state = vi.hoisted(() => ({ data: {} as Record<string, any>, directory: '' }))
+const state = vi.hoisted(() => ({
+  data: {} as Record<string, any>,
+  directory: '',
+  rendererEvents: [] as Array<{ channel: string; payload: unknown }>,
+}))
 vi.mock('electron-store', () => ({ default: class {
   get(key: string, fallback?: unknown) { return state.data[key] ?? fallback }
   set(key: string, value: unknown) { state.data[key] = value }
@@ -12,7 +16,10 @@ vi.mock('electron-store', () => ({ default: class {
 } }))
 vi.mock('electron', () => ({
   app: { getPath: () => state.directory, isPackaged: false },
-  BrowserWindow: { getAllWindows: () => [] },
+  BrowserWindow: { getAllWindows: () => [{
+    isDestroyed: () => false,
+    webContents: { send: (channel: string, payload: unknown) => state.rendererEvents.push({ channel, payload }) },
+  }] },
 }))
 vi.mock('../ipc/settings', () => ({ decryptSecret: (v: unknown) => String(v || ''), CLOUD_BRANDING_KEYS: [], pushBrandingToCloud: vi.fn() }))
 vi.mock('../services/licenseService', () => ({ isDeviceLocked: () => false, reportDeviceRevoked: vi.fn() }))
@@ -35,8 +42,28 @@ describe('Sync recovery and durable outbox', () => {
   })
   beforeEach(() => {
     state.data = {}
+    state.rendererEvents = []
     db.prepare('DELETE FROM sync_queue').run()
     db.prepare('DELETE FROM sync_pull_quarantine').run()
+  })
+
+  it('persists and immediately notifies the renderer about a company-wide clear event', async () => {
+    const eventId = 'clear-event-company-wide'
+    const cloud = { changes: vi.fn().mockResolvedValue([{
+      id: eventId,
+      cleared_by: 'Company Admin',
+      cleared_at: date,
+      created_at: date,
+      updated_at: date,
+    }]) }
+
+    await service.pullTables(cloud, ['data_clear_events'])
+
+    expect(state.data.pending_clear_event_id).toBe(eventId)
+    expect(state.rendererEvents).toContainEqual({
+      channel: 'app:dataClearEvent',
+      payload: { eventId },
+    })
   })
   afterEach(() => service.stop())
   afterAll(() => { service.stop(); db.close(); fs.rmSync(state.directory, { recursive: true, force: true }) })

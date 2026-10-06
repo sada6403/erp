@@ -33,10 +33,10 @@ export default function DataClearedLockScreen({ onUnlocked }: { onUnlocked: () =
         <div className="mx-auto mb-6 w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center">
           <AlertTriangle size={32} className="text-red-400" />
         </div>
-        <h1 className="text-xl font-bold text-white mb-3">Data Was Cleared</h1>
+        <h1 className="text-xl font-bold text-white mb-3">All Company Data Was Cleared</h1>
         <p className="text-sm text-slate-400 mb-8 leading-relaxed">
-          An administrator cleared all data for this company. This device's local data no longer
-          matches the current state and must be refreshed before it can be used again.
+          An administrator cleared business data across all branches. This device must refresh
+          its local workspace before it can be used again.
         </p>
 
         {error && (
