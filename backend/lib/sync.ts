@@ -284,6 +284,20 @@ async function applyOperation(
       .map(([key, value]) => [key, normalizeValue(value)])
   )
 
+  // Older desktop builds render numeric fields through a text-backed input,
+  // so the HTML max=100 attribute does not stop an out-of-range product tax
+  // from reaching the durable outbox. For an UPDATE, preserve the last valid
+  // cloud value; the row's new updated_at then pulls that value back to the
+  // device and self-heals its local copy. New products have no value to
+  // preserve, so fall back to the safe schema default of zero.
+  if (input.table === 'products' && Object.prototype.hasOwnProperty.call(record, 'tax_rate')) {
+    const taxRate = Number(record.tax_rate)
+    if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
+      if (operation === 'INSERT') record.tax_rate = 0
+      else delete record.tax_rate
+    }
+  }
+
   if (input.table === 'users' && operation === 'UPDATE') {
     // Every local user-CRUD write pushes operation='UPDATE' regardless of
     // whether the row exists in the cloud yet (electron/services/syncQueue.ts'
