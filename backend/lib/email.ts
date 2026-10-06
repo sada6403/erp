@@ -198,8 +198,8 @@ export async function sendCompanyOnboardingEmail(opts: {
   const branding = await getBrandingSettings()
   const appName  = branding.app_name || 'Enterprise POS ERP'
   const support  = branding.support_email || ''
-  const downloadUrl = opts.downloadUrl || branding.download_url || (process.env.PUBLIC_BASE_URL ? `${process.env.PUBLIC_BASE_URL}/download` : 'http://72.61.115.222/download')
-  const serverUrl = opts.serverUrl || branding.server_url || (process.env.PUBLIC_BASE_URL ? `${process.env.PUBLIC_BASE_URL}:4001` : 'http://72.61.115.222:4001')
+  const downloadUrl = opts.downloadUrl || branding.download_url || `${process.env.PUBLIC_BASE_URL || 'https://posadmin.nfplantation.com'}/download`
+  const serverUrl = opts.serverUrl || branding.server_url || process.env.PUBLIC_BASE_URL || 'https://posadmin.nfplantation.com'
   const passwordDisplay = opts.adminPassword
     ? `${opts.adminPassword} (⚠️ Must change after first login)`
     : '(Your chosen password)'
@@ -287,7 +287,7 @@ export async function sendAdminPasswordEmail(opts: {
   const branding = await getBrandingSettings()
   const appName  = branding.app_name || 'Enterprise POS ERP'
   const support  = branding.support_email || ''
-  const downloadUrl = opts.downloadUrl || branding.download_url || (process.env.PUBLIC_BASE_URL ? `${process.env.PUBLIC_BASE_URL}/download` : 'http://72.61.115.222/download')
+  const downloadUrl = opts.downloadUrl || branding.download_url || `${process.env.PUBLIC_BASE_URL || 'https://posadmin.nfplantation.com'}/download`
   const subject = opts.isReset
     ? `Password Reset — New Admin Login Credentials for ${opts.companyName}`
     : `Admin Login Credentials for ${opts.companyName}`

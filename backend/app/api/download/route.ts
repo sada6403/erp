@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Otherwise return metadata
-    const base     = process.env.PUBLIC_BASE_URL || 'http://72.61.115.222'
+    const base     = process.env.PUBLIC_BASE_URL || 'https://posadmin.nfplantation.com'
     return NextResponse.json({
       fileName:    installer,
       size:        info.size,
