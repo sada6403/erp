@@ -7,6 +7,7 @@ import { app, BrowserWindow } from 'electron'
 import { CloudApi, CloudRateLimitError, DeviceRevokedError } from './cloudApi'
 import { CLOUD_BRANDING_KEYS, decryptSecret, pushBrandingToCloud } from '../ipc/settings'
 import { reconcileLocalDefaultRoles } from './roleReconcile'
+import { ensureLocalBranchIdentity, reconcileIncomingBranch } from './branchReconcile'
 import { isDeviceLocked, reportDeviceRevoked } from './licenseService'
 
 const store = createCompanyStore()
@@ -205,6 +206,13 @@ export class SyncService {
 
       this.resetStaleProcessing()
       this.resetFailedForAutoRetry()
+      // A fresh/company-switched workspace seeds an offline Main Branch before
+      // cloud activation. Repair that identity and any double-submit branch
+      // codes before either pushes or pulls can make the duplicates durable.
+      ensureLocalBranchIdentity(
+        getDb(),
+        String(store.get('device_branch_id') || '') || null
+      )
       if (!this.startupReconcileDone) {
         this.startupReconcileDone = true
         await this.reconcileDefaultRolesFromCloud(cloud)
@@ -1128,6 +1136,9 @@ export class SyncService {
     table: string,
     row: Record<string, unknown>
   ): void {
+    if (table === 'branches') {
+      reconcileIncomingBranch(db, String(row.id || ''), row.code)
+    }
     const validColumns = this.getColumns(db, table)
     const localRow: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(row)) {

@@ -212,6 +212,27 @@ describe('Sync recovery and durable outbox', () => {
     expect(db.prepare("SELECT status FROM sync_pull_quarantine WHERE record_id='delete-parent' AND operation='UPSERT'").get().status).toBe('resolved')
   })
 
+  it('merges duplicate branch codes, preserves references, and enforces uniqueness', async () => {
+    const { ensureLocalBranchIdentity, reconcileIncomingBranch } = await import('../services/branchReconcile')
+    db.prepare("INSERT INTO branches(id,name,code) VALUES ('branch-canonical','Branch 1','BR001'),('branch-duplicate','Branch 1','br001')").run()
+    db.prepare("INSERT INTO customers(id,name,branch_id) VALUES ('branch-customer','Customer','branch-duplicate')").run()
+    await enqueue('branches', 'branch-canonical', 'INSERT', { id: 'branch-canonical', name: 'Branch 1', code: 'BR001' })
+    db.prepare("UPDATE sync_queue SET status='synced' WHERE table_name='branches' AND record_id='branch-canonical'").run()
+
+    ensureLocalBranchIdentity(db, null)
+
+    expect(db.prepare("SELECT id FROM branches WHERE UPPER(code)='BR001'").all()).toEqual([{ id: 'branch-canonical' }])
+    expect(db.prepare("SELECT branch_id FROM customers WHERE id='branch-customer'").get().branch_id).toBe('branch-canonical')
+    expect(() => db.prepare("INSERT INTO branches(id,name,code) VALUES ('third','Third','Br001')").run()).toThrow()
+
+    db.prepare("INSERT INTO branches(id,name,code) VALUES ('local-only','Remote Branch','REMOTE')").run()
+    reconcileIncomingBranch(db, 'cloud-remote', 'remote')
+    expect(db.prepare("SELECT id FROM branches WHERE UPPER(code)='REMOTE'").get().id).toBe('cloud-remote')
+
+    db.prepare("DELETE FROM customers WHERE id='branch-customer'").run()
+    db.prepare("DELETE FROM branches WHERE id IN ('branch-canonical','cloud-remote')").run()
+  })
+
   it('does not replace a parent and cascade-delete its local children', () => {
     db.exec('CREATE TABLE sync_parent_test(id TEXT PRIMARY KEY, name TEXT); CREATE TABLE sync_child_test(id TEXT PRIMARY KEY,parent_id TEXT REFERENCES sync_parent_test(id) ON DELETE CASCADE)')
     db.exec("INSERT INTO sync_parent_test VALUES ('p','Old'); INSERT INTO sync_child_test VALUES ('c','p')")

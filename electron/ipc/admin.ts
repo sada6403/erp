@@ -13,6 +13,7 @@ import { validatePin, isAdminTypeRole } from '../services/pinPolicy'
 import { createCompanyStore, getWorkspaceDataPath } from '../services/companyWorkspace'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import { canManageProcurement } from '../services/branchAccess'
+import { ensureLocalBranchIdentity } from '../services/branchReconcile'
 
 /**
  * Builds a safe `SET` clause from a caller-supplied payload.
@@ -326,9 +327,11 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     // process at all (a 4-6 digit PIN is weak against offline brute force
     // of a leaked hash). Callers only ever need to know whether a PIN is
     // set (BranchesPage.tsx's `hasExistingPin`), not the hash itself.
+    const db = getDb()
+    ensureLocalBranchIdentity(db, String(store.get('device_branch_id') || '') || null)
     return {
       success: true,
-      data: getDb().prepare(`
+      data: db.prepare(`
         SELECT b.id, b.name, b.address, b.phone, b.email, b.code, b.is_active,
                b.smartbuy_manager_id, b.created_at, b.updated_at,
                (b.branch_pin IS NOT NULL) as has_branch_pin,
@@ -354,7 +357,14 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     if (!currentPerms(caller).all) return { success: false, error: 'Company Admin access required to create branches' }
 
     const db = getDb()
+    ensureLocalBranchIdentity(db, String(store.get('device_branch_id') || '') || null)
     const id = crypto.randomUUID()
+    const normalizedCode = String(p.code || '').trim().toUpperCase()
+    if (normalizedCode) {
+      const duplicate = db.prepare(`SELECT id FROM branches WHERE UPPER(TRIM(code))=? LIMIT 1`).get(normalizedCode)
+      if (duplicate) return { success: false, error: 'This branch code already exists. Choose a different code.' }
+      p.code = normalizedCode
+    }
     const rawPin = p.branch_pin ? String(p.branch_pin) : ''
     if (rawPin) {
       const dup = await findBranchByPin(rawPin)
@@ -391,7 +401,17 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     if (!currentPerms(caller).all) return { success: false, error: 'Company Admin access required to update branches' }
 
     const db = getDb()
+    ensureLocalBranchIdentity(db, String(store.get('device_branch_id') || '') || null)
     const payload = { ...(p as Record<string, unknown>) }
+    if (payload.code !== undefined && payload.code !== null) {
+      const normalizedCode = String(payload.code).trim().toUpperCase()
+      if (normalizedCode) {
+        const duplicate = db.prepare(`SELECT id FROM branches
+          WHERE UPPER(TRIM(code))=? AND id!=? LIMIT 1`).get(normalizedCode, id)
+        if (duplicate) return { success: false, error: 'This branch code already exists. Choose a different code.' }
+        payload.code = normalizedCode
+      } else payload.code = null
+    }
     const rawPin = payload.branch_pin ? String(payload.branch_pin) : ''
     if (rawPin) {
       const dup = await findBranchByPin(rawPin, id)
