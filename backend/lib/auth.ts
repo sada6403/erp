@@ -1097,6 +1097,12 @@ async function runTenantCompatibility(dbSchema: string) {
        INDEX idx_chit_scheme_branches_branch (branch_id),
        INDEX idx_chit_scheme_branches_status (status)
      )`,
+    // The frozen tenant bootstrap predates the product-to-supplier link used
+    // by desktop product create/update payloads. Without this compatibility
+    // column, sync parent validation itself fails with MySQL's "Unknown
+    // column 'supplier_id'" before the row can be filtered or upserted.
+    `ALTER TABLE products ADD COLUMN supplier_id CHAR(36) NULL`,
+    `ALTER TABLE products ADD INDEX idx_products_supplier (supplier_id)`,
     // Already-provisioned tenants pre-date products.brand.
     `ALTER TABLE products ADD COLUMN brand VARCHAR(128) NULL`,
     `ALTER TABLE products ADD INDEX idx_products_brand (brand)`,
