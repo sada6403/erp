@@ -17,6 +17,21 @@ export async function repairOrphanedSyncData(client: QueryClient): Promise<void>
 
   await client.query('START TRANSACTION')
   try {
+    const archiveAndDelete = async (
+      table: 'stocks' | 'invoice_items' | 'stock_movements',
+      row: Record<string, unknown>,
+      reason: string
+    ) => {
+      await client.query(`INSERT IGNORE INTO sync_orphan_record_archive
+        (table_name,record_id,reason,original_record) VALUES (?,?,?,?)`,
+        [table, row.id, reason, JSON.stringify(row)])
+      await client.query(`INSERT INTO sync_deletions(id,table_name,record_id)
+        SELECT UUID(),?,? WHERE NOT EXISTS (
+          SELECT 1 FROM sync_deletions WHERE table_name=? AND record_id=?)`,
+        [table, row.id, table, row.id])
+      await client.query(`DELETE FROM \`${table}\` WHERE id=?`, [row.id])
+    }
+
     const ensureHistoricalBranch = async (branchId: string) => {
       const suffix = createHash('sha256').update(branchId).digest('hex').slice(0, 12).toUpperCase()
       await client.query(`INSERT INTO branches(id,name,code,is_active)
@@ -83,13 +98,34 @@ export async function repairOrphanedSyncData(client: QueryClient): Promise<void>
       if (!product.rows.length) missing.push('product')
       if (!branch.rows.length) missing.push('branch')
       const reason = `Missing ${missing.join(' and ')} reference`
-      await client.query(`INSERT IGNORE INTO sync_orphan_record_archive
-        (table_name,record_id,reason,original_record) VALUES ('stocks',?,?,?)`,
-        [row.id, reason, JSON.stringify(row)])
-      await client.query(`INSERT INTO sync_deletions(id,table_name,record_id)
-        SELECT UUID(),'stocks',? WHERE NOT EXISTS (
-          SELECT 1 FROM sync_deletions WHERE table_name='stocks' AND record_id=?)`, [row.id, row.id])
-      await client.query('DELETE FROM stocks WHERE id=?', [row.id])
+      await archiveAndDelete('stocks', row, reason)
+    }
+
+    // A stale device can reconnect immediately after Clear All Data and push
+    // child rows whose products/invoices were intentionally removed. Archive
+    // the exact payload, publish a tombstone, and remove only unusable rows.
+    const { rows: orphanInvoiceItems } = await client.query<Record<string, unknown>>(`
+      SELECT ii.* FROM invoice_items ii
+      LEFT JOIN invoices i ON i.id=ii.invoice_id
+      LEFT JOIN products p ON p.id=ii.product_id
+      WHERE i.id IS NULL OR p.id IS NULL
+      FOR UPDATE`)
+    for (const row of orphanInvoiceItems) {
+      const missing: string[] = []
+      const invoice = await client.query('SELECT id FROM invoices WHERE id=? LIMIT 1', [row.invoice_id])
+      const product = await client.query('SELECT id FROM products WHERE id=? LIMIT 1', [row.product_id])
+      if (!invoice.rows.length) missing.push('invoice')
+      if (!product.rows.length) missing.push('product')
+      await archiveAndDelete('invoice_items', row, `Missing ${missing.join(' and ')} reference`)
+    }
+
+    const { rows: orphanStockMovements } = await client.query<Record<string, unknown>>(`
+      SELECT sm.* FROM stock_movements sm
+      LEFT JOIN products p ON p.id=sm.product_id
+      WHERE p.id IS NULL
+      FOR UPDATE`)
+    for (const row of orphanStockMovements) {
+      await archiveAndDelete('stock_movements', row, 'Missing product reference')
     }
     await client.query('COMMIT')
   } catch (error) {

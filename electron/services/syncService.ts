@@ -963,12 +963,17 @@ export class SyncService {
             })
 
             // Do not silently delete local product! Stage it into pending deletions.
+            this.resolvePullQuarantine(db, d.table_name, d.record_id, 'UPSERT')
             this.resolvePullQuarantine(db, d.table_name, d.record_id, 'DELETE')
             continue
           }
         }
 
         db.prepare(`DELETE FROM ${d.table_name} WHERE id = ?`).run(d.record_id)
+        // A cloud tombstone is authoritative for a row that this device may
+        // previously have isolated as a failed incoming UPSERT. Resolve both
+        // directions so the stale payload is not retried forever.
+        this.resolvePullQuarantine(db, d.table_name, d.record_id, 'UPSERT')
         this.resolvePullQuarantine(db, d.table_name, d.record_id, 'DELETE')
       } catch (err) {
         console.warn(`[SyncService] Isolated blocked deletion ${d.table_name}(${d.record_id}); background repair will retry it:`, err)

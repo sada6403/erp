@@ -191,6 +191,9 @@ describe('Sync recovery and durable outbox', () => {
   it('isolates a blocked deletion, advances its cursor, and repairs it later', async () => {
     db.prepare("INSERT INTO branches(id,name) VALUES ('delete-parent','Delete parent')").run()
     db.prepare("INSERT INTO customers(id,name,branch_id) VALUES ('delete-child','Delete child','delete-parent')").run()
+    db.prepare(`INSERT INTO sync_pull_quarantine
+      (id,table_name,record_id,operation,payload,attempts,last_error,status)
+      VALUES ('UPSERT:branches:delete-parent','branches','delete-parent','UPSERT','{}',3,'FOREIGN KEY constraint failed','pending')`).run()
     const deletedAt = '2026-09-27T10:00:00.000Z'
     const cloud = { deletions: vi.fn()
       .mockResolvedValueOnce([{ table_name: 'branches', record_id: 'delete-parent', deleted_at: deletedAt }])
@@ -206,6 +209,7 @@ describe('Sync recovery and durable outbox', () => {
     await service.pullDeletions(cloud, db)
     expect(db.prepare("SELECT id FROM branches WHERE id='delete-parent'").get()).toBeUndefined()
     expect(db.prepare("SELECT status FROM sync_pull_quarantine WHERE record_id='delete-parent' AND operation='DELETE'").get().status).toBe('resolved')
+    expect(db.prepare("SELECT status FROM sync_pull_quarantine WHERE record_id='delete-parent' AND operation='UPSERT'").get().status).toBe('resolved')
   })
 
   it('does not replace a parent and cascade-delete its local children', () => {

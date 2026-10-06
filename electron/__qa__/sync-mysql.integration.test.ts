@@ -19,7 +19,13 @@ mysqlSuite('Sync contract against disposable MySQL database', () => {
       .filter(line => line && !line.startsWith('#') && line.includes('='))
       .map(line => { const i = line.indexOf('='); return [line.slice(0, i).trim(), line.slice(i + 1).trim().replace(/^['"]|['"]$/g, '')] }))
     const mysql = createRequire(path.resolve('backend/package.json'))('mysql2/promise')
-    connection = await mysql.createConnection({ host: env.MYSQL_HOST, port: Number(env.MYSQL_PORT || 3306), user: env.MYSQL_USER, password: env.MYSQL_PASSWORD })
+    const url = env.DATABASE_URL ? new URL(env.DATABASE_URL) : null
+    connection = await mysql.createConnection({
+      host: url?.hostname || env.MYSQL_HOST,
+      port: Number(url?.port || env.MYSQL_PORT || 3306),
+      user: url?.username || env.MYSQL_USER,
+      password: url?.password || env.MYSQL_PASSWORD,
+    })
     await connection.query(`CREATE DATABASE \`${schema}\``)
     await connection.query(`USE \`${schema}\``)
     client = { release() {}, async query(sql: string, values?: unknown[]) { const [rows] = await connection.query(sql, values); return { rows } } }
@@ -27,7 +33,9 @@ mysqlSuite('Sync contract against disposable MySQL database', () => {
       if (table === 'warehouses') continue
       const fields = table === 'stocks'
         ? ',product_id VARCHAR(191),branch_id VARCHAR(191),warehouse_id VARCHAR(191),quantity DECIMAL(12,2),damaged_qty DECIMAL(12,2) DEFAULT 0'
-        : table === 'products' ? ',name VARCHAR(255)'
+        : table === 'stock_movements' ? ',product_id VARCHAR(191),from_branch_id VARCHAR(191)'
+        : table === 'invoice_items' ? ',invoice_id VARCHAR(191),product_id VARCHAR(191)'
+        : table === 'products' ? ',name VARCHAR(255),category_id VARCHAR(191),supplier_id VARCHAR(191)'
         : table === 'branches' ? ',name VARCHAR(255),code VARCHAR(50) UNIQUE,is_active BOOLEAN DEFAULT 1'
         : table === 'roles' ? ',name VARCHAR(255) UNIQUE,permissions JSON,is_system BOOLEAN DEFAULT 0'
         : table === 'users' ? ',branch_id VARCHAR(191),role_id VARCHAR(191),name VARCHAR(255),email VARCHAR(255) UNIQUE,password_hash VARCHAR(255),is_active BOOLEAN DEFAULT 1'
@@ -73,6 +81,19 @@ mysqlSuite('Sync contract against disposable MySQL database', () => {
     expect(stock).toHaveLength(0)
     expect(archive[0].reason).toContain('product and branch')
     expect(tombstone).toHaveLength(1)
+  })
+  it('archives and tombstones stale child rows whose required parents were cleared', async () => {
+    await connection.query("INSERT INTO invoice_items(id,invoice_id,product_id) VALUES ('orphan-item','missing-invoice','missing-product')")
+    await connection.query("INSERT INTO stock_movements(id,product_id,from_branch_id) VALUES ('orphan-movement','missing-product','historical-branch')")
+    await repairOrphanedSyncData(client)
+    await repairOrphanedSyncData(client)
+    const [children] = await connection.query("SELECT id FROM invoice_items WHERE id='orphan-item' UNION ALL SELECT id FROM stock_movements WHERE id='orphan-movement'")
+    const [archive] = await connection.query("SELECT table_name,reason FROM sync_orphan_record_archive WHERE record_id IN ('orphan-item','orphan-movement') ORDER BY table_name")
+    const [tombstones] = await connection.query("SELECT table_name FROM sync_deletions WHERE record_id IN ('orphan-item','orphan-movement') ORDER BY table_name")
+    expect(children).toHaveLength(0)
+    expect(archive).toHaveLength(2)
+    expect(archive.every((row: any) => row.reason.includes('product'))).toBe(true)
+    expect(tombstones.map((row: any) => row.table_name)).toEqual(['invoice_items', 'stock_movements'])
   })
   it('restores inactive historical actors and branches required by financial/audit records', async () => {
     await connection.query("INSERT INTO invoices(id,branch_id,cashier_id) VALUES ('historical-invoice','deleted-branch','deleted-user')")
