@@ -21,6 +21,14 @@ export function canManageAllBranchStock(user: AuthUser | null | undefined): bool
   return isMainBranchRecord(branch) && Boolean(user?.role?.permissions?.inventory || user?.permissions?.inventory)
 }
 
+/** Only the Company Admin may type a stock quantity, and only for Main Branch. */
+export function canManuallyEditMainBranchStock(
+  user: AuthUser | null | undefined,
+  branch: { id?: unknown; code?: unknown; name?: unknown } | null | undefined,
+): boolean {
+  return isCompanyAdmin(user) && isMainBranchRecord(branch)
+}
+
 export function canManageProcurement(user: AuthUser | null | undefined): boolean {
   return canManageAllBranchStock(user)
 }

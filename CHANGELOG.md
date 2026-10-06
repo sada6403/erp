@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.7.18 — 2026-10-06 — Main Branch Admin stock correction
+
+- Edit Product now lets the Company Admin manually correct Current Stock Qty
+  when Main Branch is selected.
+- Manual stock corrections require a reason and create stock movement and audit
+  records. Other roles and non-main branches remain read-only.
+- Stock Count create, edit, import and finalize operations now enforce the same
+  Company Admin + Main Branch restriction.
+- Branch stock totals and manual corrections safely handle multiple warehouse
+  rows without duplicating count items or multiplying quantities.
+
+Deployment order: publish the 2.7.18 Windows installer and auto-updater metadata.
+
+Internal release log. Not customer-facing.
+
 ## 2.7.17 — 2026-10-06 — Company deletion and Clear All Data reliability
 
 - POS now detects a company permanently deleted from SuperAdmin even while the

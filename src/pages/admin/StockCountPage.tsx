@@ -4,13 +4,15 @@ import Modal from '@/components/shared/Modal'
 import { Plus, ArrowLeft, CheckCircle, XCircle, ClipboardList, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
-import { canManageAllBranchStock } from '@/lib/branchAccess'
+import { canManuallyEditMainBranchStock, isCompanyAdmin, isMainBranchRecord } from '@/lib/branchAccess'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 
 type Session = Record<string, unknown>
 type CountItem = Record<string, unknown>
 
 export default function StockCountPage() {
+  const { user } = useAuthStore()
+  const canCreateCount = isCompanyAdmin(user)
   const [sessions, setSessions]       = useState<Session[]>([])
   const [activeSession, setActiveSession] = useState<(Session & { items: CountItem[] }) | null>(null)
   const [showCreate, setShowCreate]   = useState(false)
@@ -86,11 +88,19 @@ export default function StockCountPage() {
     return (
       <SessionDetail
         session={activeSession}
+        canEdit={canManuallyEditMainBranchStock(user, {
+          id: activeSession.branch_id,
+          name: activeSession.branch_name,
+        })}
         onBack={() => setActiveSession(null)}
         onFinalize={handleFinalize}
         onCancel={handleCancel}
         onItemUpdate={async (itemId, qty) => {
-          await window.api.stockCounts.updateItem(activeSession.id as string, itemId, qty)
+          const res = await window.api.stockCounts.updateItem(activeSession.id as string, itemId, qty)
+          if (!res.success) {
+            toast.error(res.error || 'You are not allowed to edit this stock count')
+            return
+          }
           const updated = { ...activeSession }
           updated.items = (activeSession.items as CountItem[]).map(i =>
             (i.id as string) === itemId
@@ -110,9 +120,11 @@ export default function StockCountPage() {
         title="Stock Count"
         subtitle="Physical inventory counting & reconciliation"
         actions={
-          <button onClick={() => setShowCreate(true)} className="btn-primary btn-sm gap-1.5">
-            <Plus size={14} /> New Count
-          </button>
+          canCreateCount ? (
+            <button onClick={() => setShowCreate(true)} className="btn-primary btn-sm gap-1.5">
+              <Plus size={14} /> New Count
+            </button>
+          ) : undefined
         }
       />
 
@@ -180,9 +192,10 @@ export default function StockCountPage() {
 }
 
 function SessionDetail({
-  session, onBack, onFinalize, onCancel, onItemUpdate, onRefresh
+  session, canEdit, onBack, onFinalize, onCancel, onItemUpdate, onRefresh
 }: {
   session: Session & { items: CountItem[] }
+  canEdit: boolean
   onBack: () => void
   onFinalize: (id: string) => void
   onCancel: (id: string) => void
@@ -192,7 +205,7 @@ function SessionDetail({
   const id       = session.id as string
   const status   = session.status as string
   const items    = session.items as CountItem[]
-  const editable = status === 'in_progress' || status === 'draft'
+  const editable = canEdit && (status === 'in_progress' || status === 'draft')
 
   const counted    = items.filter(i => i.counted_qty !== null).length
   const variances  = items.filter(i => i.variance !== null && (i.variance as number) !== 0).length
@@ -394,34 +407,28 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => void }) {
-  const { user } = useAuthStore()
-  const isAdmin = canManageAllBranchStock(user)
-  const myBranchId = String(user?.branch?.id || user?.branch_id || '')
-
   const [notes, setNotes] = useState('')
   const [branches, setBranches] = useState<Record<string, unknown>[]>([])
   const [branchId, setBranchId] = useState('')
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (!isAdmin) return
     window.api.admin.branches.list().then((res: { success: boolean; data?: Record<string, unknown>[] }) => {
       if (res.success) {
-        setBranches(res.data || [])
-        setBranchId(myBranchId || (res.data?.[0]?.id as string) || '')
+        const mainBranches = (res.data || []).filter(isMainBranchRecord)
+        setBranches(mainBranches)
+        setBranchId((mainBranches[0]?.id as string) || '')
       } else {
         toast.error('Failed to load branches')
       }
     }).catch((err: Error) => toast.error(err.message || 'Failed to load branches'))
-  }, [isAdmin, myBranchId])
-
-  const myBranchName = String((user as unknown as { branch?: { name?: string } })?.branch?.name || 'your branch')
+  }, [])
 
   const save = async () => {
-    if (isAdmin && !branchId) { toast.error('Select a branch'); return }
+    if (!branchId) { toast.error('Main Branch is not configured'); return }
     setSaving(true)
     try {
-      const res = await window.api.stockCounts.create({ notes, branch_id: isAdmin ? branchId : undefined })
+      const res = await window.api.stockCounts.create({ notes, branch_id: branchId })
       if (res.success) {
         toast.success('Stock count session created')
         onSave()
@@ -454,15 +461,12 @@ function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => v
         </p>
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Branch</label>
-          {isAdmin ? (
-            <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input">
-              {branches.map(b => (
-                <option key={b.id as string} value={b.id as string}>{b.name as string}</option>
-              ))}
-            </select>
-          ) : (
-            <p className="text-sm text-slate-300">{myBranchName}</p>
-          )}
+          <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input" disabled>
+            {branches.map(b => (
+              <option key={b.id as string} value={b.id as string}>{b.name as string}</option>
+            ))}
+          </select>
+          <p className="text-xs text-slate-500 mt-1">Manual stock counts are restricted to the Company Admin and Main Branch.</p>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Notes (optional)</label>

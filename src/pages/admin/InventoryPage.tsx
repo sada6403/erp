@@ -5,7 +5,7 @@ import Modal from '@/components/shared/Modal'
 import { AlertCircle, ArrowRightLeft, Plus, Lock, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
-import { canManageAllBranchStock } from '@/lib/branchAccess'
+import { canManageAllBranchStock, canManuallyEditMainBranchStock } from '@/lib/branchAccess'
 
 export default function InventoryPage() {
   const { user } = useAuthStore()
@@ -72,6 +72,9 @@ export default function InventoryPage() {
   const totalProducts = catalogTotalProducts || summaryProductCount
   const outOfStock = summaryOutOfStock
   const lowStockCount = summaryLowStockCount
+  const selectedBranch = branches.find(b => String(b.id) === branchId)
+    || (branchId ? { id: branchId } : undefined)
+  const canEditStockManually = canManuallyEditMainBranchStock(user, selectedBranch)
 
   const nextTransferStatus: Record<string, string> = {
     pending: 'approved', pending_approval: 'approved', approved: 'ready_for_dispatch',
@@ -199,11 +202,11 @@ export default function InventoryPage() {
                       : <span className="badge-green">In Stock</span>}
                     </td>
                     <td className="table-cell">
-                      {branchId && canManageAllBranches ? (
+                      {branchId && canEditStockManually ? (
                         <AdjustBtn stockId={s.id as string} productId={s.product_id as string} branchId={branchId} current={s.quantity as number} onDone={load} />
                       ) : (
                         <span className="text-xs" style={{ color: 'var(--text-3)' }}>
-                          {branchId ? 'Transaction controlled' : 'Calculated total'}
+                          {branchId ? 'Admin edit: Main Branch only' : 'Calculated total'}
                         </span>
                       )}
                     </td>

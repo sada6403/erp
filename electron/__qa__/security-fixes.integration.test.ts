@@ -496,15 +496,45 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(invalid.success).toBe(false)
   })
 
-  it('a stock adjustment is branch-scoped and creates an ADJUSTMENT movement', async () => {
+  it('only the Company Admin can manually adjust Main Branch stock', async () => {
+    const mainBranchId = 'b1111111-1111-4111-8111-111111111111'
+    db.prepare(`INSERT OR REPLACE INTO stocks (id, product_id, branch_id, quantity, damaged_qty) VALUES (?,?,?,?,0)`)
+      .run('sec-main-manual-stock', PROD1, mainBranchId, 3)
+
     setSession(admin)
     const before = (db.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT'`).get(PROD1) as { c: number }).c
-    const res = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: BR_A, quantity: 7, reason: 'QA counted stock' })
+    const subBranchAttempt = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: BR_A, quantity: 7, reason: 'must fail' })
+    expect(subBranchAttempt.success).toBe(false)
+
+    const res = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: mainBranchId, quantity: 7, reason: 'QA counted stock' })
     expect(res.success).toBe(true)
     const movement = db.prepare(`SELECT * FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT' ORDER BY created_at DESC LIMIT 1`).get(PROD1) as Record<string, unknown>
     expect(movement.notes).toBe('QA counted stock')
     expect(movement.status).toBe('POSTED')
     expect((db.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT'`).get(PROD1) as { c: number }).c).toBe(before + 1)
+
+    setSession(mgrA)
+    const managerAttempt = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: mainBranchId, quantity: 9, reason: 'must fail' })
+    expect(managerAttempt.success).toBe(false)
+  })
+
+  it('only the Company Admin can enter quantities in a Main Branch stock-count session', async () => {
+    const mainBranchId = 'b1111111-1111-4111-8111-111111111111'
+    setSession(admin)
+    const created = await call('stockCounts:create', { branch_id: mainBranchId, notes: 'Permission regression' })
+    expect(created.success, created.error).toBe(true)
+    const detail = await call('stockCounts:get', created.data.id)
+    expect(detail.success, detail.error).toBe(true)
+    const item = detail.data.items.find((row: Record<string, unknown>) => row.product_id === PROD1)
+    expect(item).toBeTruthy()
+
+    setSession(mgrA)
+    const managerAttempt = await call('stockCounts:updateItem', created.data.id, item.id, 11)
+    expect(managerAttempt.success).toBe(false)
+
+    setSession(admin)
+    const adminUpdate = await call('stockCounts:updateItem', created.data.id, item.id, 11)
+    expect(adminUpdate.success, adminUpdate.error).toBe(true)
   })
 
   it('a sub branch cannot overwrite existing calculated stock through the product-form IPC', async () => {

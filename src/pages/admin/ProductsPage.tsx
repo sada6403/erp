@@ -11,7 +11,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 import { useProductsStore } from '@/store/productsStore'
 import { resolveImageSrc } from '@/lib/imageUrl'
-import { canManageAllBranchStock, DEFAULT_MAIN_BRANCH_ID, isCompanyAdmin as hasCompanyAdminAccess } from '@/lib/branchAccess'
+import { canManageAllBranchStock, canManuallyEditMainBranchStock, DEFAULT_MAIN_BRANCH_ID, isCompanyAdmin as hasCompanyAdminAccess } from '@/lib/branchAccess'
 
 type UOMRow = { id?: string; uom_name: string; conversion_factor: number; is_base: boolean; wastage: number }
 type CatalogAudit = {
@@ -918,6 +918,8 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
 
   const [uoms, setUoms] = useState<UOMRow[]>([{ uom_name: '', conversion_factor: 1, is_base: true, wastage: 0 }])
   const [stockQty, setStockQty]       = useState(Number(product?.stock ?? 0))
+  const [originalStockQty, setOriginalStockQty] = useState(Number(product?.stock ?? 0))
+  const [stockReason, setStockReason] = useState('')
   // Quick per-product discount % — a shortcut that creates/updates a
   // scope:'product', global-branch rule via the same Discounts module used
   // by Admin > Discounts, instead of a separate storage mechanism.
@@ -928,11 +930,12 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
   const [showAddCategory, setShowAddCategory] = useState(false)
   const [localCategories, setLocalCategories] = useState(categories)
   const user = useAuthStore(s => s.user)
-  // Existing stock is changed only through explicit stock transactions
-  // (sale, receipt, transfer, return, or the stock-adjustment workflow).
-  // The product editor may seed opening stock for a brand-new product only.
   const stockIsAggregate = Boolean(product && !stockBranchId)
-  const stockIsReadOnly = Boolean(product) || !canManageAllBranchStock(user)
+  const canEditMainBranchStock = canManuallyEditMainBranchStock(user, stockBranchId
+    ? { id: stockBranchId, name: stockScopeLabel }
+    : undefined)
+  const stockIsReadOnly = stockIsAggregate || !canEditMainBranchStock
+  const stockHasChanged = Boolean(product) && stockQty !== originalStockQty
 
   useEffect(() => { setLocalCategories(categories) }, [categories])
 
@@ -941,11 +944,17 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
       if (product.discount_pct !== undefined) setDiscountPct(product.discount_pct)
       if (stockBranchId) {
         window.api.stocks.get(product.id, stockBranchId).then((res: { success: boolean; data?: unknown; error?: string }) => {
-          if (res.success) setStockQty(Number((res.data as { quantity?: number } | undefined)?.quantity || 0))
+          if (res.success) {
+            const quantity = Number((res.data as { quantity?: number } | undefined)?.quantity || 0)
+            setStockQty(quantity)
+            setOriginalStockQty(quantity)
+          }
           else toast.error(res.error || 'Failed to load stock quantity')
         }).catch((err: unknown) => toast.error('Failed to load stock quantity: ' + String(err)))
       } else {
-        setStockQty(Number(product.stock || 0))
+        const quantity = Number(product.stock || 0)
+        setStockQty(quantity)
+        setOriginalStockQty(quantity)
       }
       window.api.admin.productUom.list(product.id).then((res: { success: boolean; data?: unknown; error?: string }) => {
         if (res.success && res.data) {
@@ -991,6 +1000,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
 
   const save = async () => {
     if (!form.name) { toast.error('Product name is required'); return }
+    if (stockHasChanged && !stockReason.trim()) { toast.error('Enter a reason for the stock correction'); return }
     setSaving(true)
     try {
       const branchId = stockBranchId || user?.branch?.id || user?.branch_id || DEFAULT_MAIN_BRANCH_ID
@@ -1017,16 +1027,23 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
         productId = (res.data as { id: string }).id
         toast.success('Product created')
       }
-      // Existing stock is a calculated projection and is never edited from
-      // the product form. New products may create one audited opening balance.
       const stockPromise = stockIsReadOnly
         ? Promise.resolve({ success: true } as { success: boolean; error?: string })
-        : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: stockQty, reason: 'Opening stock for new product' }) as Promise<{ success: boolean; error?: string }>
+        : product
+          ? stockHasChanged
+            ? window.api.stocks.adjustCorrection({
+                product_id: productId,
+                branch_id: String(branchId),
+                quantity: stockQty,
+                reason: stockReason.trim(),
+              }) as Promise<{ success: boolean; error?: string }>
+            : Promise.resolve({ success: true } as { success: boolean; error?: string })
+          : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: stockQty, reason: 'Opening stock for new product' }) as Promise<{ success: boolean; error?: string }>
       const [stockRes, uomRes] = await Promise.all([
         stockPromise,
         window.api.admin.productUom.save(productId, uoms.filter(u => u.uom_name.trim())) as Promise<{ success: boolean; error?: string }>,
       ])
-      if (!stockRes.success) toast.error(stockRes.error || 'Failed to update stock quantity')
+      if (!stockRes.success) { toast.error(stockRes.error || 'Failed to update stock quantity'); return }
       if (!uomRes.success) toast.error(uomRes.error || 'Failed to save units of measure')
 
       if (discountPct > 0) {
@@ -1339,8 +1356,21 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
                 </p>
               </div>
             ) : (
-              <NumberInput value={stockQty} onChange={e => setStockQty(parseInt(e.target.value)||0)}
-                className="input w-40" min="0" />
+              <div className="space-y-2 max-w-md">
+                <NumberInput value={stockQty} onChange={e => setStockQty(parseInt(e.target.value)||0)}
+                  className="input w-40" min="0" />
+                {product && stockHasChanged && (
+                  <input
+                    value={stockReason}
+                    onChange={e => setStockReason(e.target.value)}
+                    className="input"
+                    placeholder="Reason for stock correction *"
+                  />
+                )}
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                  Company Admin manual correction for Main Branch. Every change is recorded in the stock movement log.
+                </p>
+              </div>
             )}
           </div>
 

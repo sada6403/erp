@@ -20,6 +20,31 @@ function isSuperAdmin(user: Record<string, unknown> | undefined): boolean {
   return Boolean(perms.all) || String(role?.name || '').toLowerCase() === 'admin' || String(role?.name || '').toLowerCase() === 'super admin'
 }
 
+const DEFAULT_MAIN_BRANCH_ID = 'b1111111-1111-4111-8111-111111111111'
+
+function isMainBranchId(db: ReturnType<typeof getDb>, branchId: unknown): boolean {
+  const id = String(branchId || '')
+  if (!id) return false
+  if (id === DEFAULT_MAIN_BRANCH_ID) return true
+  const branch = db.prepare('SELECT code, name FROM branches WHERE id=? AND is_active=1')
+    .get(id) as { code?: string; name?: string } | undefined
+  if (!branch) return false
+  const code = String(branch.code || '').trim().toUpperCase()
+  const name = String(branch.name || '').trim().toLowerCase()
+  return code === 'MAIN' || code === 'CMB' || name.includes('main') ||
+    name.includes('colombo') || name.includes('head office') || name.includes('hq')
+}
+
+function canManuallyEditMainBranchStock(
+  db: ReturnType<typeof getDb>,
+  user: Record<string, unknown> | undefined,
+  branchId: unknown,
+): boolean {
+  const role = user?.role as Record<string, unknown> | undefined
+  const permissions = ((role?.permissions || user?.permissions || {}) as Record<string, unknown>)
+  return Boolean(permissions.all) && isMainBranchId(db, branchId)
+}
+
 function isMainBranchManagerOrAdmin(user: Record<string, unknown> | undefined): boolean {
   if (!user) return false
   if (isSuperAdmin(user)) return true
@@ -237,7 +262,13 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       return { success: false, error: 'Cannot view stock for another branch' }
     }
     const row = db.prepare(`
-      SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?
+      SELECT MIN(id) AS id, product_id, branch_id, MIN(warehouse_id) AS warehouse_id,
+             COALESCE(SUM(quantity), 0) AS quantity,
+             COALESCE(SUM(damaged_qty), 0) AS damaged_qty,
+             MAX(updated_at) AS updated_at
+      FROM stocks
+      WHERE product_id = ? AND branch_id = ?
+      GROUP BY product_id, branch_id
     `).get(productId, branchId)
     return { success: true, data: row }
   })
@@ -246,16 +277,14 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
-      const perms = currentPerms()
-      const isPrivileged = Boolean(perms.all) || isMainBranchManagerOrAdmin(user)
       if (!product_id || !branch_id) throw new Error('Product and branch are required')
       if (branch_id === 'all') throw new Error('All-branches stock is calculated and cannot be adjusted directly')
       if (!String(reason || '').trim()) throw new Error('A reason is required for every stock adjustment')
       if (!Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
         throw new Error('Stock quantity must be zero or greater')
       }
-      if (!isPrivileged) {
-        return { success: false, error: 'Only the main branch can create opening stock; use a stock request instead' }
+      if (!canManuallyEditMainBranchStock(db, user, branch_id)) {
+        return { success: false, error: 'Only the Company Admin can manually edit Main Branch stock' }
       }
       const activeBranch = db.prepare('SELECT id FROM branches WHERE id=? AND is_active=1').get(branch_id)
       if (!activeBranch) throw new Error('Select a valid active branch for this stock adjustment')
@@ -318,10 +347,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
-      const isAdmin = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
+      const isAdmin = canManuallyEditMainBranchStock(db, user, branch_id)
 
       if (!isAdmin) {
-        return { success: false, error: 'Sub branches cannot overwrite stock; create a stock request instead' }
+        return { success: false, error: 'Only the Company Admin can manually edit Main Branch stock' }
       }
       if (!product_id || !branch_id || branch_id === 'all') {
         return { success: false, error: 'A specific branch and product are required' }
@@ -345,7 +374,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
 
       let movement: Record<string, unknown> | null = null
       let previousQty = 0
-      let stockId = ''
+      const changedStockIds: string[] = []
 
       db.transaction(() => {
         if (!isAdmin) {
@@ -360,25 +389,48 @@ export function registerStockHandlers(ipcMain: IpcMain) {
             .run(request.id)
         }
 
-        const existing = db.prepare(`SELECT * FROM stocks WHERE product_id = ? AND branch_id = ?`)
-          .get(product_id, branch_id) as Record<string, unknown> | undefined
+        const existingRows = db.prepare(`
+          SELECT id, warehouse_id, quantity, damaged_qty
+          FROM stocks
+          WHERE product_id = ? AND branch_id = ?
+          ORDER BY CASE WHEN warehouse_id IS NULL THEN 0 ELSE 1 END, id
+        `).all(product_id, branch_id) as Array<{
+          id: string; warehouse_id: string | null; quantity: number; damaged_qty: number
+        }>
+        previousQty = existingRows.reduce((sum, row) => sum + Number(row.quantity || 0), 0)
+        const damagedTotal = existingRows.reduce((sum, row) => sum + Number(row.damaged_qty || 0), 0)
 
-        if (existing && Number(quantity) < Number(existing.damaged_qty || 0)) {
+        if (Number(quantity) < damagedTotal) {
           throw new Error('Stock quantity cannot be lower than the recorded damaged quantity')
         }
 
-        if (existing) {
-          stockId = String(existing.id)
-          db.prepare(`UPDATE stocks SET quantity = ?, updated_at = datetime('now')
-            WHERE product_id = ? AND branch_id = ?`).run(quantity, product_id, branch_id)
-        } else {
-          stockId = crypto.randomUUID()
+        const delta = Number(quantity) - previousQty
+        if (existingRows.length === 0) {
+          const stockId = crypto.randomUUID()
           db.prepare(`INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity)
             VALUES (?, ?, ?, ?, ?)`).run(stockId, product_id, branch_id, warehouse_id || null, quantity)
+          changedStockIds.push(stockId)
+        } else if (delta > 0) {
+          const target = existingRows.find(row => row.warehouse_id === (warehouse_id || null)) || existingRows[0]
+          db.prepare(`UPDATE stocks SET quantity = quantity + ?, updated_at = datetime('now') WHERE id = ?`)
+            .run(delta, target.id)
+          changedStockIds.push(target.id)
+        } else if (delta < 0) {
+          let remaining = Math.abs(delta)
+          for (const row of existingRows) {
+            if (remaining <= 0) break
+            const available = Math.max(0, Number(row.quantity || 0) - Number(row.damaged_qty || 0))
+            const reduction = Math.min(available, remaining)
+            if (reduction <= 0) continue
+            db.prepare(`UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now') WHERE id = ?`)
+              .run(reduction, row.id)
+            changedStockIds.push(row.id)
+            remaining -= reduction
+          }
+        } else {
+          // No stock change; the product details can still be saved.
         }
 
-        previousQty = existing ? Number(existing.quantity || 0) : 0
-        const delta = Number(quantity) - previousQty
         if (delta !== 0) {
           movement = insertStockMovement(db, {
             product_id,
@@ -397,7 +449,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         })
       })()
 
-      await enqueuSync('stocks', stockId, 'UPDATE', { ...payload, id: stockId })
+      for (const stockId of changedStockIds) {
+        const row = db.prepare('SELECT * FROM stocks WHERE id=?').get(stockId) as Record<string, unknown> | undefined
+        if (row) await enqueuSync('stocks', stockId, 'UPDATE', row)
+      }
       if (movement) await enqueuSync('stock_movements', String((movement as Record<string, unknown>).id), 'INSERT', movement)
       if (!isAdmin && payload.edit_request_id) {
         await enqueuSync('edit_requests', payload.edit_request_id, 'UPDATE', { id: payload.edit_request_id, status: 'consumed' })
@@ -1282,12 +1337,10 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'stockCounts:create', async (_e, payload: Record<string, unknown> = {}) => {
     const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown> | undefined
-      const perms = currentPerms()
-      const isPrivileged = Boolean(perms.all) || isMainBranchManagerOrAdmin(user)
-      if (!isPrivileged && !perms.inventory) return { success: false, error: 'Inventory access required' }
-      const isGlobal = isPrivileged
-      // Main branch managers/admins and company admins can target any branch
-      const branchId = isGlobal && payload.branch_id ? String(payload.branch_id) : currentBranchId()
+      const branchId = payload.branch_id ? String(payload.branch_id) : currentBranchId()
+      if (!canManuallyEditMainBranchStock(db, user, branchId)) {
+        return { success: false, error: 'Only the Company Admin can create a Main Branch stock count' }
+      }
       const id = crypto.randomUUID()
       db.transaction(() => {
         db.prepare(`
@@ -1296,10 +1349,11 @@ export function registerStockHandlers(ipcMain: IpcMain) {
         `).run(id, branchId, payload.warehouse_id || null, payload.notes || null, user?.id || null)
 
         const products = db.prepare(`
-          SELECT p.id, COALESCE(s.quantity, 0) as quantity
+          SELECT p.id, COALESCE(SUM(s.quantity), 0) as quantity
           FROM products p
           LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?
           WHERE p.is_active = 1 AND (p.branch_id = ? OR p.branch_id IS NULL)
+          GROUP BY p.id
           ORDER BY p.name
         `).all(branchId, branchId) as { id: string; quantity: number }[]
 
@@ -1358,9 +1412,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (!Number.isFinite(Number(countedQty)) || Number(countedQty) < 0) {
         return { success: false, error: 'Counted quantity must be zero or greater' }
       }
-      const isPrivileged = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
-      if (!isPrivileged && user?.branch_id && session.branch_id !== user.branch_id) {
-        return { success: false, error: 'Cannot update a stock count from another branch' }
+      if (!canManuallyEditMainBranchStock(db, user, session.branch_id)) {
+        return { success: false, error: 'Only the Company Admin can edit a Main Branch stock count' }
       }
       db.prepare(`
         UPDATE stock_count_items SET counted_qty = ?, updated_at = datetime('now')
@@ -1376,13 +1429,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const session = db.prepare('SELECT * FROM stock_count_sessions WHERE id=?').get(id) as Record<string, unknown> | undefined
       if (!session) return { success: false, error: 'Stock count not found' }
       if (session.status === 'completed') return { success: false, error: 'Stock count already completed' }
-      {
-        const perms = currentPerms()
-        const isPrivileged = Boolean(perms.all) || isMainBranchManagerOrAdmin(user)
-        if (!isPrivileged && !perms.inventory) return { success: false, error: 'Inventory access required to finalize a stock count' }
-        if (!isPrivileged && user?.branch_id && session.branch_id !== user.branch_id) {
-          return { success: false, error: 'Cannot finalize a stock count from another branch' }
-        }
+      if (!canManuallyEditMainBranchStock(db, user, session.branch_id)) {
+        return { success: false, error: 'Only the Company Admin can finalize a Main Branch stock count' }
       }
       const items = db.prepare('SELECT * FROM stock_count_items WHERE session_id=? AND counted_qty IS NOT NULL').all(id) as Record<string, unknown>[]
       const movementRecords: Record<string, unknown>[] = []
@@ -1442,9 +1490,8 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const user = store.get('auth_user') as Record<string, unknown> | undefined
     const session = db.prepare('SELECT branch_id FROM stock_count_sessions WHERE id=?').get(id) as { branch_id: unknown } | undefined
     if (!session) return { success: false, error: 'Stock count not found' }
-    const isPrivileged = Boolean(currentPerms().all) || isMainBranchManagerOrAdmin(user)
-    if (!isPrivileged && user?.branch_id && session.branch_id !== user.branch_id) {
-      return { success: false, error: 'Cannot cancel a stock count from another branch' }
+    if (!canManuallyEditMainBranchStock(db, user, session.branch_id)) {
+      return { success: false, error: 'Only the Company Admin can cancel a Main Branch stock count' }
     }
     db.prepare(`UPDATE stock_count_sessions SET status='cancelled', updated_at=datetime('now') WHERE id=?`).run(id)
     await enqueuSync('stock_count_sessions', id, 'UPDATE', { id, status: 'cancelled' })
@@ -1474,6 +1521,13 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   })
 
   safeHandle(ipcMain, 'stockCounts:importCsv', async (_e, sessionId: string) => {
+    const db = getDb()
+    const user = store.get('auth_user') as Record<string, unknown> | undefined
+    const session = db.prepare('SELECT branch_id FROM stock_count_sessions WHERE id=?').get(sessionId) as { branch_id: unknown } | undefined
+    if (!session) return { success: false, error: 'Stock count not found' }
+    if (!canManuallyEditMainBranchStock(db, user, session.branch_id)) {
+      return { success: false, error: 'Only the Company Admin can import a Main Branch stock count' }
+    }
     const { filePaths } = await dialog.showOpenDialog({
         title: 'Import Stock Count CSV',
         filters: [{ name: 'CSV', extensions: ['csv'] }],
@@ -1491,7 +1545,6 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       const countIdx = idx('counted_qty')
       if (countIdx < 0) return { success: false, error: 'CSV must include counted_qty column' }
 
-      const db = getDb()
       let imported = 0
       db.transaction(() => {
         for (const line of lines.slice(1)) {
