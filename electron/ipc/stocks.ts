@@ -673,20 +673,21 @@ export function registerStockHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'stocks:availability', (_e, productId: string) => {
     const rows = getDb().prepare(`
         SELECT
-          COALESCE(s.id, '') AS id,
+          b.id AS id,
           p.id AS product_id,
           b.id AS branch_id,
           b.name AS branch_name,
           b.address AS branch_address,
-          COALESCE(s.quantity, 0) AS quantity,
-          COALESCE(s.damaged_qty, 0) AS damaged_qty,
-          MAX(COALESCE(s.quantity, 0) - COALESCE(s.damaged_qty, 0), 0) AS available_quantity
+          COALESCE(SUM(s.quantity), 0) AS quantity,
+          COALESCE(SUM(s.damaged_qty), 0) AS damaged_qty,
+          MAX(COALESCE(SUM(s.quantity), 0) - COALESCE(SUM(s.damaged_qty), 0), 0) AS available_quantity
         FROM branches b
         CROSS JOIN products p
         LEFT JOIN stocks s
           ON s.branch_id = b.id
          AND s.product_id = p.id
         WHERE p.id = ? AND b.is_active = 1
+        GROUP BY b.id, p.id, b.name, b.address
         ORDER BY
           CASE
             WHEN b.id = 'b1111111-1111-4111-8111-111111111111'

@@ -163,6 +163,27 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
   const mgrB = makeSession({ id: 'u-sec-mgr-b', branchId: BR_B, permissions: { inventory: true, employees: true, chits: true } })
   let destinationTransferId = ''
 
+  it('shows one availability card per branch and totals duplicate stock rows', async () => {
+    const productId = 'sec-prod-availability'
+    seedProduct(productId, 1000)
+    db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,?)`)
+      .run('sec-availability-a1', productId, BR_A, 8, 1)
+    db.prepare(`INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,?)`)
+      .run('sec-availability-a2', productId, BR_A, 5, 2)
+
+    const res = await call('stocks:availability', productId)
+    expect(res.success).toBe(true)
+    const branchRows = (res.data as Array<Record<string, unknown>>)
+      .filter(row => row.branch_id === BR_A)
+    expect(branchRows).toHaveLength(1)
+    expect(branchRows[0]).toMatchObject({
+      id: BR_A,
+      quantity: 13,
+      damaged_qty: 3,
+      available_quantity: 10,
+    })
+  })
+
   it('branchTransfers:create links stock movements to the multi-item branch transfer table', async () => {
     setSession(admin)
     const transferProductId = 'sec-prod-branch-transfer'
