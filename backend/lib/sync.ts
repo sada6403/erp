@@ -298,6 +298,15 @@ async function applyOperation(
     }
   }
 
+  if (input.table === 'edit_requests') {
+    if (operation === 'INSERT' && (record.reason === undefined || record.reason === null || record.reason === '')) {
+      record.reason = (input.record.reason as string) || (input.record.notes as string) || (input.record.review_notes as string) || 'Correction request'
+    }
+    if (operation === 'INSERT' && (record.requested_changes === undefined || record.requested_changes === null || record.requested_changes === '')) {
+      record.requested_changes = '{}'
+    }
+  }
+
   if (input.table === 'users' && operation === 'UPDATE') {
     // Every local user-CRUD write pushes operation='UPDATE' regardless of
     // whether the row exists in the cloud yet (electron/services/syncQueue.ts'

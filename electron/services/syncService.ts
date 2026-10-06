@@ -1344,7 +1344,7 @@ export function getSyncService(): SyncService {
 
 function normalizeForCloud(payload: Record<string, unknown>): Record<string, unknown> {
   // `pin` is the legacy plaintext PIN — never ship it; only pin_hash syncs.
-  const localOnlyFields = ['synced_at', 'items', 'reason', 'payment', 'password', 'pin']
+  const localOnlyFields = ['synced_at', 'items', 'payment', 'password', 'pin']
   const result = { ...payload }
   for (const field of localOnlyFields) delete result[field]
   // Never push empty credentials — they must not blank a real hash in the cloud

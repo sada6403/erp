@@ -1360,8 +1360,8 @@ async function runTenantCompatibility(dbSchema: string) {
        target_record_id    VARCHAR(128) NOT NULL,
        branch_id           CHAR(36)     NULL,
        requested_by        CHAR(36)     NOT NULL,
-       reason              TEXT         NOT NULL,
-       requested_changes   JSON         NOT NULL,
+       reason              TEXT         NULL,
+       requested_changes   JSON         NULL,
        status              VARCHAR(20)  NOT NULL DEFAULT 'pending',
        reviewed_by         CHAR(36)     NULL,
        reviewed_at         DATETIME     NULL,
@@ -1375,6 +1375,9 @@ async function runTenantCompatibility(dbSchema: string) {
        INDEX idx_edit_requests_status (status),
        INDEX idx_edit_requests_requester (requested_by)
      )`,
+
+    `ALTER TABLE edit_requests MODIFY COLUMN reason TEXT NULL`,
+    `ALTER TABLE edit_requests MODIFY COLUMN requested_changes JSON NULL`,
 
     // SmartBuy Scheme Viability Calculator — see the matching SQLite
     // migration in electron/database.ts for full rationale. Planning-only

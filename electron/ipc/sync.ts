@@ -315,7 +315,21 @@ let isRefreshing = false
           // Skip malformed queue records.
         }
       }
-      return { success: true, data: items.length }
+
+      // Also repair edit_requests or items stuck on reason errors
+      const editRequestItems = db.prepare(`
+        SELECT id FROM sync_queue
+        WHERE (table_name='edit_requests' OR last_error LIKE '%reason%') AND status IN ('pending','failed')
+      `).all() as { id: string }[]
+      for (const item of editRequestItems) {
+        db.prepare(`
+          UPDATE sync_queue
+          SET attempts=0, failure_cycles=0, next_retry_at=NULL, status='pending', last_error=NULL
+          WHERE id=?
+        `).run(item.id)
+      }
+
+      return { success: true, data: items.length + editRequestItems.length }
     }
   })
 

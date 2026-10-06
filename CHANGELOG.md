@@ -1,6 +1,15 @@
 # Changelog
 
-## 2.7.19 — 2026-10-06 — Company-wide Clear All Data refresh prompt
+## 2.7.24 — 2026-10-06 — Stock control permissions and edit_requests sync repair
+
+- Fixed sync failure on `edit_requests` where cloud database rejected insert with "Field 'reason' doesn't have a default value":
+  - Kept `reason` in cloud payloads instead of stripping it as a local-only field.
+  - Added server-side fallback values and adjusted MySQL schema so reason and requested changes are nullable.
+  - Fix & Retry now automatically heals and requeues any blocked edit request records.
+- Stock count sessions and manual branch stock corrections are restricted to Main Branch inventory controllers and Company Admin.
+
+Deployment order: backend first, followed by the 2.7.24 Windows installer and auto-updater metadata.
+
 
 - Clear All Data events are now included in the fast cloud watermark so every
   open branch device detects a company-wide reset within seconds.
