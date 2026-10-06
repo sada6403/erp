@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.7.17 — 2026-10-06 — Company deletion and Clear All Data reliability
+
+- POS now detects a company permanently deleted from SuperAdmin even while the
+  device is logged out, then safely resets the deleted workspace and returns to
+  company activation.
+- Clear All Data now removes business and transactional records from the cloud
+  tenant database before wiping the local device, preventing deleted products,
+  invoices, customers and stock from returning on the next sync.
+- Password verification, cloud clearing and the multi-device reset event are
+  handled as one protected server-side flow. Users, roles, branches and company
+  configuration are retained.
+
+Deployment order: backend first, followed by the 2.7.17 Windows installer and
+auto-updater metadata.
+
 Internal release log. Not customer-facing.
 
 ## 2.7.16 — 2026-10-01 — SuperAdmin English onboarding, password recovery & login stability
