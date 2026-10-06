@@ -4,7 +4,7 @@ import Modal from '@/components/shared/Modal'
 import { Plus, ArrowLeft, CheckCircle, XCircle, ClipboardList, Download, Upload } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
-import { canManuallyEditMainBranchStock, isCompanyAdmin, isMainBranchRecord } from '@/lib/branchAccess'
+import { canManageAllBranchStock, canManuallyEditBranchStock } from '@/lib/branchAccess'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 
 type Session = Record<string, unknown>
@@ -12,7 +12,7 @@ type CountItem = Record<string, unknown>
 
 export default function StockCountPage() {
   const { user } = useAuthStore()
-  const canCreateCount = isCompanyAdmin(user)
+  const canCreateCount = canManageAllBranchStock(user)
   const [sessions, setSessions]       = useState<Session[]>([])
   const [activeSession, setActiveSession] = useState<(Session & { items: CountItem[] }) | null>(null)
   const [showCreate, setShowCreate]   = useState(false)
@@ -88,7 +88,7 @@ export default function StockCountPage() {
     return (
       <SessionDetail
         session={activeSession}
-        canEdit={canManuallyEditMainBranchStock(user, {
+        canEdit={canManuallyEditBranchStock(user, {
           id: activeSession.branch_id,
           name: activeSession.branch_name,
         })}
@@ -415,9 +415,9 @@ function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => v
   useEffect(() => {
     window.api.admin.branches.list().then((res: { success: boolean; data?: Record<string, unknown>[] }) => {
       if (res.success) {
-        const mainBranches = (res.data || []).filter(isMainBranchRecord)
-        setBranches(mainBranches)
-        setBranchId((mainBranches[0]?.id as string) || '')
+        const activeBranches = (res.data || []).filter(branch => branch.is_active !== 0)
+        setBranches(activeBranches)
+        setBranchId((activeBranches[0]?.id as string) || '')
       } else {
         toast.error('Failed to load branches')
       }
@@ -425,7 +425,7 @@ function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => v
   }, [])
 
   const save = async () => {
-    if (!branchId) { toast.error('Main Branch is not configured'); return }
+    if (!branchId) { toast.error('Select a branch'); return }
     setSaving(true)
     try {
       const res = await window.api.stockCounts.create({ notes, branch_id: branchId })
@@ -461,12 +461,12 @@ function CreateModal({ onClose, onSave }: { onClose: () => void; onSave: () => v
         </p>
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Branch</label>
-          <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input" disabled>
+          <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input">
             {branches.map(b => (
               <option key={b.id as string} value={b.id as string}>{b.name as string}</option>
             ))}
           </select>
-          <p className="text-xs text-slate-500 mt-1">Manual stock counts are restricted to the Company Admin and Main Branch.</p>
+          <p className="text-xs text-slate-500 mt-1">Main Branch stock controllers can count and correct any selected branch.</p>
         </div>
         <div>
           <label className="block text-xs font-medium text-slate-400 mb-1">Notes (optional)</label>

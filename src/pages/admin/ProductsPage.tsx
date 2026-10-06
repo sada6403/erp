@@ -11,7 +11,7 @@ import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 import { useProductsStore } from '@/store/productsStore'
 import { resolveImageSrc } from '@/lib/imageUrl'
-import { canManageAllBranchStock, canManuallyEditMainBranchStock, DEFAULT_MAIN_BRANCH_ID, isCompanyAdmin as hasCompanyAdminAccess } from '@/lib/branchAccess'
+import { canManageAllBranchStock, canManuallyEditBranchStock, DEFAULT_MAIN_BRANCH_ID, isCompanyAdmin as hasCompanyAdminAccess } from '@/lib/branchAccess'
 
 type UOMRow = { id?: string; uom_name: string; conversion_factor: number; is_base: boolean; wastage: number }
 type CatalogAudit = {
@@ -931,7 +931,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
   const [localCategories, setLocalCategories] = useState(categories)
   const user = useAuthStore(s => s.user)
   const stockIsAggregate = Boolean(product && !stockBranchId)
-  const canEditMainBranchStock = canManuallyEditMainBranchStock(user, stockBranchId
+  const canEditMainBranchStock = canManuallyEditBranchStock(user, stockBranchId
     ? { id: stockBranchId, name: stockScopeLabel }
     : undefined)
   const stockIsReadOnly = stockIsAggregate || !canEditMainBranchStock

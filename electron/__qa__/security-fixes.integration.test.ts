@@ -154,11 +154,13 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     seedProduct(PROD1, 1000)
     seedSupplier(SUPPLIER1)
     seedUser('u-sec-admin', null)
+    seedUser('u-sec-main-mgr', 'b1111111-1111-4111-8111-111111111111')
     seedUser('u-sec-mgr-a', BR_A)
     seedUser('u-sec-mgr-b', BR_B)
   })
 
   const admin = makeSession({ id: 'u-sec-admin', permissions: { all: true } })
+  const mainManager = makeSession({ id: 'u-sec-main-mgr', branchId: 'b1111111-1111-4111-8111-111111111111', permissions: { inventory: true } })
   const mgrA = makeSession({ id: 'u-sec-mgr-a', branchId: BR_A, permissions: { inventory: true, employees: true, chits: true } })
   const mgrB = makeSession({ id: 'u-sec-mgr-b', branchId: BR_B, permissions: { inventory: true, employees: true, chits: true } })
   let destinationTransferId = ''
@@ -517,22 +519,26 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     expect(invalid.success).toBe(false)
   })
 
-  it('only the Company Admin can manually adjust Main Branch stock', async () => {
+  it('Main Branch controllers can manually adjust stock for any branch', async () => {
     const mainBranchId = 'b1111111-1111-4111-8111-111111111111'
     db.prepare(`INSERT OR REPLACE INTO stocks (id, product_id, branch_id, quantity, damaged_qty) VALUES (?,?,?,?,0)`)
       .run('sec-main-manual-stock', PROD1, mainBranchId, 3)
 
     setSession(admin)
     const before = (db.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT'`).get(PROD1) as { c: number }).c
-    const subBranchAttempt = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: BR_A, quantity: 7, reason: 'must fail' })
-    expect(subBranchAttempt.success).toBe(false)
+    const subBranchAttempt = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: BR_A, quantity: 7, reason: 'QA branch count correction' })
+    expect(subBranchAttempt.success, subBranchAttempt.error).toBe(true)
 
     const res = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: mainBranchId, quantity: 7, reason: 'QA counted stock' })
     expect(res.success).toBe(true)
-    const movement = db.prepare(`SELECT * FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT' ORDER BY created_at DESC LIMIT 1`).get(PROD1) as Record<string, unknown>
+    const movement = db.prepare(`SELECT * FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT' AND (from_branch_id=? OR to_branch_id=?) ORDER BY created_at DESC LIMIT 1`).get(PROD1, mainBranchId, mainBranchId) as Record<string, unknown>
     expect(movement.notes).toBe('QA counted stock')
     expect(movement.status).toBe('POSTED')
-    expect((db.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT'`).get(PROD1) as { c: number }).c).toBe(before + 1)
+    expect((db.prepare(`SELECT COUNT(*) c FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT'`).get(PROD1) as { c: number }).c).toBe(before + 2)
+
+    setSession(mainManager)
+    const mainManagerAttempt = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: BR_B, quantity: 6, reason: 'Main Branch controller branch count' })
+    expect(mainManagerAttempt.success, mainManagerAttempt.error).toBe(true)
 
     setSession(mgrA)
     const managerAttempt = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: mainBranchId, quantity: 9, reason: 'must fail' })

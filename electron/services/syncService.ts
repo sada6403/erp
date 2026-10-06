@@ -519,6 +519,17 @@ export class SyncService {
         }
       }
 
+      // Builds before queue payload coalescing was fixed could retain an INSERT
+      // operation but replace its complete payload with a later partial UPDATE
+      // (for example an edit request changing only to status='consumed').
+      // Rehydrate every pending INSERT from the authoritative local row so
+      // required fields such as edit_requests.reason are restored on upgrade.
+      if (item.operation === 'INSERT' && /^[a-z][a-z0-9_]*$/.test(item.table_name)) {
+        const full = db.prepare(`SELECT * FROM ${this.quoteLocalIdentifier(item.table_name)} WHERE id=? LIMIT 1`)
+          .get(item.record_id) as Record<string, unknown> | undefined
+        if (full) Object.assign(payload, full)
+      }
+
       const effectiveOp = (item.table_name === 'stocks' && item.operation === 'UPDATE') ? 'INSERT' : item.operation
       try {
         await this.pushWithParentRepair(cloud, db, {
