@@ -20,10 +20,8 @@ export default function Modal({ title, onClose, children, size = 'md', footer }:
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.45)' }}
-      onClick={onClose}>
+      style={{ background: 'rgba(0,0,0,0.45)' }}>
       <div
-        onClick={e => e.stopPropagation()}
         className={`w-full ${sizes[size]} rounded-xl flex flex-col animate-slide-up`}
         style={{
           background: 'var(--bg-card)',
@@ -36,7 +34,7 @@ export default function Modal({ title, onClose, children, size = 'md', footer }:
         <div className="flex items-center justify-between px-5 py-3.5 flex-shrink-0"
           style={{ borderBottom: '1px solid var(--border)' }}>
           <h2 className="text-base font-semibold" style={{ color: 'var(--text-1)' }}>{title}</h2>
-          <button onClick={onClose}
+          <button onClick={onClose} aria-label="Close"
             className="w-7 h-7 rounded-full flex items-center justify-center transition-colors"
             style={{ color: 'var(--text-3)' }}
             onMouseEnter={e => (e.currentTarget as HTMLElement).style.background = 'var(--bg-page)'}

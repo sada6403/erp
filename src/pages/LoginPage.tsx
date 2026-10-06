@@ -6,7 +6,7 @@ import {
   ShoppingBag, Lock, Mail, GitBranch, ArrowRight, X, Delete,
   WifiOff, RefreshCw, Shield, CheckCircle, AlertTriangle, Search,
   Building2, Eye, EyeOff, Zap, Phone, MessageCircleMore, KeyRound,
-  Database, Sparkles, Settings, Clock3,
+  Database, Sparkles, Settings, Clock3, MapPin,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getLandingRoute } from '@/lib/sessionRouting'
@@ -188,6 +188,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
   const brandLogo = String(branding.login_logo_url || branding.company_logo_url || '')
   const supportPhone = String(branding.company_phone || '')
   const supportEmail = String(branding.company_email || '')
+  const companyAddress = String(branding.company_address || '')
 
   // ── Effects ──
   useEffect(() => {
@@ -205,6 +206,9 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
           prev.company_logo_url === d.company_logo_url
             && prev.login_logo_url === d.login_logo_url
             && prev.company_name === d.company_name
+            && prev.company_phone === d.company_phone
+            && prev.company_email === d.company_email
+            && prev.company_address === d.company_address
             ? prev
             : d
         )
@@ -950,26 +954,6 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
                 </div>
               </div>
 
-              {(supportPhone || supportEmail) && (
-                <div className="mt-2 rounded-xl px-3 py-2" style={{ background: '#0d1117', border: '1px solid #1e293b' }}>
-                  <p className="text-[11px] font-semibold mb-1.5" style={{ color: '#94a3b8' }}>Need help or password reset?</p>
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    {supportPhone && (
-                      <a href={`tel:${supportPhone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgb(var(--brand-rgb) / 0.12)', color: 'rgb(var(--brand-200-rgb))' }}>
-                        <Phone size={11} /> {supportPhone}
-                      </a>
-                    )}
-                    {supportEmail && (
-                      <a href={`mailto:${supportEmail}`} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(16,185,129,0.10)', color: '#a7f3d0' }}>
-                        <MessageCircleMore size={11} /> {supportEmail}
-                      </a>
-                    )}
-                  </div>
-                  <p className="text-[11px] mt-1.5" style={{ color: '#64748b' }}>
-                    If you forgot your password, use Admin Login → Forgot Password or contact your administrator.
-                  </p>
-                </div>
-              )}
             </div>
           )}
 
@@ -1236,6 +1220,33 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
                   : <><CheckCircle size={13} className="mr-1.5" />Set Password &amp; Login</>}
               </button>
             </form>
+          )}
+
+          {(supportPhone || supportEmail || companyAddress) && (
+            <div className="rounded-xl px-3 py-2" style={{ background: '#0d1117', border: '1px solid #1e293b' }}>
+              <p className="text-[11px] font-semibold mb-1.5" style={{ color: '#94a3b8' }}>Company contact</p>
+              <div className="flex flex-wrap gap-2 text-xs">
+                {supportPhone && (
+                  <a href={`tel:${supportPhone.replace(/\s+/g, '')}`} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgb(var(--brand-rgb) / 0.12)', color: 'rgb(var(--brand-200-rgb))' }}>
+                    <Phone size={11} /> {supportPhone}
+                  </a>
+                )}
+                {supportEmail && (
+                  <a href={`mailto:${supportEmail}`} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg" style={{ background: 'rgba(16,185,129,0.10)', color: '#a7f3d0' }}>
+                    <MessageCircleMore size={11} /> {supportEmail}
+                  </a>
+                )}
+              </div>
+              {companyAddress && (
+                <p className="mt-1.5 flex items-start gap-1.5 text-[11px] leading-4" style={{ color: '#64748b' }}>
+                  <MapPin size={11} className="mt-0.5 flex-shrink-0" />
+                  <span>{companyAddress}</span>
+                </p>
+              )}
+              <p className="text-[11px] mt-1.5" style={{ color: '#64748b' }}>
+                If you forgot your password, use Admin Login → Forgot Password or contact your administrator.
+              </p>
+            </div>
           )}
 
           </div>
