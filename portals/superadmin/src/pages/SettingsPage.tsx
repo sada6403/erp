@@ -202,8 +202,8 @@ export default function SettingsPage() {
             <Field label="Tagline"       value={section.tagline ?? ''} onChange={v => set('tagline', v)}       placeholder="The SaaS ERP for modern retail" />
             <Field label="Support Email" value={section.support_email ?? ''} onChange={v => set('support_email', v)} type="email" placeholder="support@yourdomain.com" />
             <Field label="Logo URL"      value={section.logo_url ?? ''} onChange={v => set('logo_url', v)}      placeholder="https://yourdomain.com/logo.png" />
-            <Field label="Public Download URL (Desktop POS App)" value={section.download_url ?? ''} onChange={v => set('download_url', v)} placeholder="http://72.61.115.222/download (or https://yourdomain.com/download)" />
-            <Field label="Cloud Server API URL" value={section.server_url ?? ''} onChange={v => set('server_url', v)} placeholder="http://72.61.115.222:4001 (or https://api.yourdomain.com)" />
+            <Field label="Public Download URL (Desktop POS App)" value={section.download_url ?? ''} onChange={v => set('download_url', v)} placeholder="https://posadmin.nfplantation.com/download" />
+            <Field label="Cloud Server API URL" value={section.server_url ?? ''} onChange={v => set('server_url', v)} placeholder="https://posadmin.nfplantation.com" />
 
             <div>
               <label className="label">Primary Color</label>

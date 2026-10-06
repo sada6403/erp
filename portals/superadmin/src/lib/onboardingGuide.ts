@@ -16,14 +16,14 @@ export interface OnboardingGuideData {
 }
 
 export function buildWhatsAppGuideText(data: OnboardingGuideData): string {
-  const downloadUrl = data.downloadUrl || 'http://72.61.115.222/download'
+  const downloadUrl = data.downloadUrl || 'https://posadmin.nfplantation.com/download'
   const passwordText = data.adminPassword
     ? `\`${data.adminPassword}\` ⚠️ *(Must change after first login)*`
     : '(Your chosen password)'
 
   // Technical details (Server IP / API Key) are omitted by default to protect server IP & security
   const technicalBlock = data.includeTechnicalDetails && data.apiKey
-    ? `⚡ *POS API Key:* \`${data.apiKey}\`\n🌐 *Cloud Server URL:* ${data.serverUrl || 'http://72.61.115.222:4001'}\n`
+    ? `⚡ *POS API Key:* \`${data.apiKey}\`\n🌐 *Cloud Server URL:* ${data.serverUrl || 'https://posadmin.nfplantation.com'}\n`
     : ''
 
   return `*🎉 Welcome to Enterprise POS ERP!*
@@ -77,7 +77,7 @@ export interface PasswordGuideData {
 }
 
 export function buildWhatsAppPasswordText(data: PasswordGuideData): string {
-  const downloadUrl = data.downloadUrl || 'http://72.61.115.222/download'
+  const downloadUrl = data.downloadUrl || 'https://posadmin.nfplantation.com/download'
   const title = data.isReset
     ? '*🔐 Enterprise POS ERP — Password Reset*'
     : '*🔐 Enterprise POS ERP — Admin Login Credentials*'
@@ -111,4 +111,3 @@ This is your private Admin Password. For security, please keep these credentials
 Need assistance? Contact our support team.
 — *NF Software Solution*`
 }
-

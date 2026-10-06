@@ -3305,7 +3305,7 @@ function SendGuideModal({ company, onClose }: { company: Company; onClose: () =>
                     <input
                       className="input text-xs py-1.5"
                       type="text"
-                      placeholder="http://72.61.115.222/download (or your custom domain)"
+                      placeholder="https://posadmin.nfplantation.com/download"
                       value={downloadUrl}
                       onChange={e => setDownloadUrl(e.target.value)}
                     />
