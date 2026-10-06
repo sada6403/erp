@@ -132,6 +132,18 @@ export class CloudApi {
     })
   }
 
+  async clearAllData(password: string, clearedBy: string | null): Promise<{
+    success: boolean
+    error?: string
+    clear_event_id?: string
+  }> {
+    return this.request('/api/company/clear-data', {
+      method: 'POST',
+      body: JSON.stringify({ password, cleared_by: clearedBy }),
+      signal: AbortSignal.timeout(60_000),
+    })
+  }
+
   // Redeems a single-use emergency support-access token (Issue 33). Requires
   // connectivity by design — there is no offline bypass. Returns the target
   // Company Admin user's identity only, never a password.

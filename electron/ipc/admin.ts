@@ -175,31 +175,68 @@ export function wipeLocalTransactionalData(db: Database.Database): void {
     'sync_queue',
     'audit_logs',
     'loyalty_transactions',
+    'coupon_redemptions',
+    'coupons',
     'return_items',
     'returns',
+    'installment_reminders',
     'installment_payments',
     'installment_schedules',
     'installments',
+    'deliveries',
+    'credit_ledger',
     'order_items',
     'orders',
     'invoice_items',
     'payments',
     'invoices',
+    'held_carts',
     'stock_count_items',
     'stock_counts',
     'stock_transfer_items',
     'stock_transfers',
+    'branch_transfer_prints',
+    'branch_transfer_logs',
+    'branch_transfer_mismatches',
+    'branch_transfer_items',
+    'branch_transfers',
     'stock_movements',
     'batches',
     'stocks',
     'purchase_order_items',
     'purchase_orders',
     'expenses',
+    'supplier_payments',
+    'commission_approval_logs',
+    'commission_statement_history',
+    'commission_rule_history',
+    'commission_payouts',
+    'commission_ledger',
+    'smartbuy_wallet_transactions',
+    'smartbuy_transfer_history',
+    'withdrawal_requests',
+    'chit_payment_reminders',
+    'chit_contributions',
+    'chit_draws',
+    'chit_scheme_branches',
+    'chit_members',
+    'agent_remittances',
+    'smartbuy_wallet',
+    'chit_schemes',
+    'agents',
+    'product_uom',
+    'product_batches',
+    'edit_requests',
+    'cash_sessions',
+    'discounts',
     'customers',
     'products',
     'notifications',
     'categories',
     'suppliers',
+    'sync_pull_quarantine',
+    'pending_sync_deletions',
+    'sync_stock_baselines',
   ]
 
   // Disable FK constraints so we can delete in any order
@@ -2022,34 +2059,22 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       return { success: false, error: 'Cannot verify password — this device is not connected to the cloud' }
     }
     const cloud = new CloudApi({ baseUrl: apiUrl, apiKey, deviceId: (store.get('device_id') as string | undefined) ?? null })
+    let clearEventId = ''
     try {
-      const verify = await cloud.verifyClearDataPassword(password || '')
-      if (!verify.success) {
-        return { success: false, error: verify.error || 'Incorrect password' }
+      const result = await cloud.clearAllData(
+        password || '',
+        (caller?.name as string) || (caller?.email as string) || null
+      )
+      if (!result.success) {
+        return { success: false, error: result.error || 'Incorrect password' }
       }
+      clearEventId = String(result.clear_event_id || '')
+      if (!clearEventId) return { success: false, error: 'Cloud clear completed without a reset event id' }
     } catch (err) {
-      return { success: false, error: (err as Error).message || 'Unable to verify password — check your internet connection' }
+      return { success: false, error: (err as Error).message || 'Unable to clear company data — check your internet connection' }
     }
 
-    // Record a company-wide "data cleared" event BEFORE wiping anything
-    // (Issue 30) — this device's own sync_queue is about to be deleted as
-    // part of the wipe, so the event is pushed directly rather than via the
-    // normal local sync_queue (which would never survive to be sent). If
-    // this push fails, abort entirely with no local changes — otherwise
-    // every other device would never learn this device's data no longer
-    // matches reality.
-    const clearEventId = crypto.randomUUID()
-    try {
-      await cloud.push({
-        eventId: `clear-${clearEventId}`,
-        table: 'data_clear_events',
-        operation: 'INSERT',
-        recordId: clearEventId,
-        record: { id: clearEventId, cleared_by: (caller?.name as string) || (caller?.email as string) || null, cleared_at: new Date().toISOString() },
-      })
-    } catch (err) {
-      return { success: false, error: 'Failed to record the clear event — nothing was deleted. ' + ((err as Error).message || '') }
-    }
+    // Cloud data and the company-wide reset event now exist atomically.
     // This device originated the event — mark it acknowledged immediately
     // so its own next sync pull recognizes this exact event as already
     // handled and never shows itself the lock screen.
