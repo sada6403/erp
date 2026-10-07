@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, GitBranch, CheckCircle, XCircle, Trash2, AlertTriangle, Copy } from 'lucide-react'
+import { Plus, Edit2, GitBranch, CheckCircle, XCircle, Trash2, AlertTriangle, Copy, Mail, RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -64,6 +64,26 @@ export default function BranchesPage() {
     setDeleting(false)
   }
 
+  const [resendingId, setResendingId] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+
+  async function handleResend(b: Record<string,unknown>) {
+    setResendingId(String(b.id))
+    try {
+      const res = await window.api.admin.branches.resendManagerCredentials(String(b.id))
+      if (res.success) toast.success(`New login details emailed to ${String(b.manager_email || 'manager')}`)
+      else toast.error(res.error || 'Email could not be sent')
+    } catch (err: any) {
+      toast.error(err.message || 'Email could not be sent')
+    } finally { setResendingId(null) }
+  }
+
+  async function handleRefresh() {
+    setRefreshing(true)
+    await load()
+    setRefreshing(false)
+  }
+
   const isMain = (b: Record<string,unknown>) =>
     String(b.id) === 'b1111111-1111-4111-8111-111111111111'
 
@@ -73,12 +93,17 @@ export default function BranchesPage() {
         title="Branch Management"
         subtitle={`${branches.length} branches`}
         actions={
+          <>
+          <button onClick={handleRefresh} disabled={refreshing} className="btn-secondary btn-sm gap-1.5" title="Refresh">
+            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
+          </button>
           <button
             onClick={() => { setEditing(null); setShowForm(true) }}
             className="btn-primary btn-sm gap-1.5"
           >
             <Plus size={14} /> Add Branch
           </button>
+          </>
         }
       />
 
@@ -143,6 +168,17 @@ export default function BranchesPage() {
                 SmartBuy Manager: {String(b.smartbuy_manager_name || 'Unassigned')}
               </p>
               <p className="text-xs" style={{ color: 'var(--text-3)' }}>{b.address as string || 'No address'}</p>
+              {isAdmin && b.manager_email ? (
+                <button
+                  type="button"
+                  onClick={() => handleResend(b)}
+                  disabled={resendingId === String(b.id)}
+                  className="mt-2 inline-flex items-center gap-1 text-xs text-brand-300 hover:text-brand-200 disabled:opacity-50"
+                  title={`Email new temporary login details to ${String(b.manager_email)}`}
+                >
+                  <Mail size={12} /> {resendingId === String(b.id) ? 'Sending…' : 'Resend manager login email'}
+                </button>
+              ) : null}
               <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                 {`${String(b.phone ?? '')}${b.email ? ` · ${String(b.email)}` : ''}`}
               </p>
@@ -151,7 +187,13 @@ export default function BranchesPage() {
         </div>
       </div>
 
-      {showForm && (
+      {showForm && !editing && (
+        <CreateBranchWizard
+          onClose={() => setShowForm(false)}
+          onDone={() => { setShowForm(false); load() }}
+        />
+      )}
+      {showForm && editing && (
         <BranchForm
           branch={editing}
           users={users}
@@ -195,6 +237,226 @@ export default function BranchesPage() {
         </Modal>
       )}
     </div>
+  )
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const WIZARD_STEPS = ['Manager Details', 'Branch Details', 'Review & Create']
+
+function ReviewRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 py-1.5 text-sm border-b border-slate-700/50 last:border-0">
+      <span className="text-slate-400">{label}</span>
+      <span className="text-slate-100 font-medium text-right break-all">{value || '—'}</span>
+    </div>
+  )
+}
+
+function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+  const [step, setStep] = useState(0)
+  const [saving, setSaving] = useState(false)
+  const [resending, setResending] = useState(false)
+  const [result, setResult] = useState<{ id: string; manager_email: string; email_sent: boolean; email_error: string | null } | null>(null)
+  const [form, setForm] = useState({
+    manager_name: '', manager_email: '',
+    name: '', code: '', branch_pin: '', address: '', phone: '', email: '',
+  })
+  const f = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm(p => ({ ...p, [k]: e.target.value }))
+
+  const validate = (target: number): string | null => {
+    if (target >= 0) {
+      if (!form.manager_name.trim()) return 'Manager name is required'
+      if (!EMAIL_RE.test(form.manager_email.trim())) return 'Enter a valid manager email'
+    }
+    if (target >= 1) {
+      if (!form.name.trim()) return 'Branch name is required'
+      if (!/^\d{4,6}$/.test(form.branch_pin)) return 'Branch PIN must be 4–6 digits'
+      if (form.email.trim() && !EMAIL_RE.test(form.email.trim())) return 'Branch email is not valid'
+    }
+    return null
+  }
+
+  const next = () => {
+    const err = validate(step)
+    if (err) { toast.error(err); return }
+    setStep(s => s + 1)
+  }
+
+  const create = async () => {
+    const err = validate(1)
+    if (err) { toast.error(err); return }
+    setSaving(true)
+    try {
+      const res = await window.api.admin.branches.create({
+        ...form,
+        manager_name: form.manager_name.trim(),
+        manager_email: form.manager_email.trim().toLowerCase(),
+        code: form.code.toUpperCase().trim() || null,
+        is_active: 1,
+      })
+      if (!res.success) { toast.error(res.error || 'Branch could not be created'); return }
+      const data = res.data as { id: string; manager_email: string; email_sent: boolean; email_error: string | null }
+      setResult(data)
+      toast.success('Branch and manager created')
+    } catch (e: any) {
+      toast.error(e.message || 'Branch could not be created')
+    } finally { setSaving(false) }
+  }
+
+  const resend = async () => {
+    if (!result) return
+    setResending(true)
+    try {
+      const res = await window.api.admin.branches.resendManagerCredentials(result.id)
+      if (res.success) setResult({ ...result, email_sent: true, email_error: null })
+      else setResult({ ...result, email_error: res.error || 'Email delivery failed' })
+    } catch (e: any) {
+      setResult({ ...result, email_error: e.message || 'Email delivery failed' })
+    } finally { setResending(false) }
+  }
+
+  if (result) {
+    return (
+      <Modal
+        title="Branch Created"
+        onClose={onDone}
+        footer={<button onClick={onDone} className="btn-primary">Done</button>}
+      >
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 p-3 rounded-lg bg-green-900/20 border border-green-700/30">
+            <CheckCircle size={18} className="text-green-400 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-green-200">
+              Branch <strong>{form.name}</strong> and its manager <strong>{form.manager_name}</strong> were created.
+            </p>
+          </div>
+          {result.email_sent ? (
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/60 border border-slate-700">
+              <Mail size={18} className="text-brand-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-slate-200">
+                Login details were emailed to <strong>{result.manager_email}</strong>. The manager must change the temporary password at first login.
+              </p>
+            </div>
+          ) : (
+            <div className="p-3 rounded-lg bg-amber-900/20 border border-amber-700/30 space-y-2">
+              <div className="flex items-start gap-3">
+                <AlertTriangle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm text-amber-200 font-medium">Email was not delivered to {result.manager_email}</p>
+                  <p className="text-xs text-amber-300/80 mt-1">{result.email_error || 'Check the email (SMTP) settings and resend.'}</p>
+                </div>
+              </div>
+              <button onClick={resend} disabled={resending} className="btn-secondary btn-sm gap-1.5">
+                <Mail size={13} /> {resending ? 'Sending…' : 'Resend login email'}
+              </button>
+            </div>
+          )}
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <Modal
+      title="Add Branch"
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={step === 0 ? onClose : () => setStep(s => s - 1)} className="btn-secondary">
+            {step === 0 ? 'Cancel' : 'Back'}
+          </button>
+          {step < 2
+            ? <button onClick={next} className="btn-primary">Next</button>
+            : <button onClick={create} disabled={saving} className="btn-primary">{saving ? 'Creating…' : 'Create Branch'}</button>}
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-xs">
+          {WIZARD_STEPS.map((label, i) => (
+            <div key={label} className="flex items-center gap-2">
+              <span className={`w-5 h-5 rounded-full flex items-center justify-center font-bold ${i <= step ? 'bg-brand-500 text-white' : 'bg-slate-700 text-slate-400'}`}>{i + 1}</span>
+              <span className={i === step ? 'text-slate-100 font-medium' : 'text-slate-500'}>{label}</span>
+              {i < WIZARD_STEPS.length - 1 && <span className="text-slate-600">›</span>}
+            </div>
+          ))}
+        </div>
+
+        {step === 0 && (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-400">A branch needs a manager first. Login details will be emailed to this address.</p>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Manager Full Name *</label>
+              <input value={form.manager_name} onChange={f('manager_name')} className="input" placeholder="e.g. Nimal Perera" autoFocus />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Manager Email *</label>
+              <input value={form.manager_email} onChange={f('manager_email')} className="input" type="email" placeholder="manager@company.com" />
+            </div>
+          </div>
+        )}
+
+        {step === 1 && (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Branch Name *</label>
+                <input value={form.name} onChange={f('name')} className="input" placeholder="e.g. Kandy Branch" autoFocus />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Branch Code</label>
+                <input value={form.code} onChange={f('code')} className="input font-mono uppercase" placeholder="e.g. KDY" maxLength={10} />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Branch Login PIN * <span className="text-slate-500">(4–6 digits)</span></label>
+              <input
+                value={form.branch_pin}
+                onChange={e => setForm(p => ({ ...p, branch_pin: e.target.value.replace(/\D/g, '').slice(0, 6) }))}
+                className="input font-mono tracking-widest text-center text-lg"
+                placeholder="e.g. 1001" maxLength={6} inputMode="numeric"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-400 mb-1">Address</label>
+              <textarea value={form.address} onChange={f('address')} className="input w-full resize-none" rows={2} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Phone</label>
+                <input value={form.phone} onChange={f('phone')} className="input" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-400 mb-1">Branch Email</label>
+                <input value={form.email} onChange={f('email')} className="input" type="email" />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div className="space-y-4">
+            <div className="rounded-lg p-3 border border-slate-700 bg-slate-800/40">
+              <p className="text-xs font-semibold text-slate-300 mb-1">Manager</p>
+              <ReviewRow label="Name" value={form.manager_name} />
+              <ReviewRow label="Email" value={form.manager_email} />
+            </div>
+            <div className="rounded-lg p-3 border border-slate-700 bg-slate-800/40">
+              <p className="text-xs font-semibold text-slate-300 mb-1">Branch</p>
+              <ReviewRow label="Name" value={form.name} />
+              <ReviewRow label="Code" value={form.code.toUpperCase()} />
+              <ReviewRow label="Branch PIN" value={'•'.repeat(form.branch_pin.length)} />
+              <ReviewRow label="Address" value={form.address} />
+              <ReviewRow label="Phone" value={form.phone} />
+              <ReviewRow label="Email" value={form.email} />
+            </div>
+            <p className="text-xs text-slate-400">
+              The manager and branch are created together. A temporary password is emailed to the manager and must be changed at first login.
+            </p>
+          </div>
+        )}
+      </div>
+    </Modal>
   )
 }
 

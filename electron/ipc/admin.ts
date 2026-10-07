@@ -14,6 +14,7 @@ import { createCompanyStore, getWorkspaceDataPath } from '../services/companyWor
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import { canManageProcurement } from '../services/branchAccess'
 import { ensureLocalBranchIdentity } from '../services/branchReconcile'
+import { sendEmail } from '../services/emailService'
 
 /**
  * Builds a safe `SET` clause from a caller-supplied payload.
@@ -60,11 +61,66 @@ function authUser(): Record<string, unknown> {
 }
 
 const EMAIL_RE_ADMIN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const BRANCH_MANAGER_ROLE_ID = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
 
 function currentPerms(caller: Record<string, unknown> = authUser()): Record<string, unknown> {
   return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
     || (caller.permissions as Record<string, unknown>)
     || {}
+}
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>"']/g, ch => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch] as string
+  ))
+}
+
+function createTemporaryPassword(): string {
+  return `Np@${crypto.randomBytes(8).toString('base64url')}7a`
+}
+
+async function sendBranchManagerCredentials(input: {
+  managerName: string
+  managerEmail: string
+  branchName: string
+  branchCode?: string | null
+  temporaryPassword: string
+}) {
+  const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+  const companyName = String(settings.company_name || 'Enterprise POS ERP')
+  const safe = {
+    companyName: escapeHtml(companyName),
+    managerName: escapeHtml(input.managerName),
+    managerEmail: escapeHtml(input.managerEmail),
+    branchName: escapeHtml(input.branchName),
+    branchCode: escapeHtml(input.branchCode || 'Not assigned'),
+    temporaryPassword: escapeHtml(input.temporaryPassword),
+  }
+
+  return sendEmail({
+    to: input.managerEmail,
+    subject: `${companyName} - Branch Manager Login Details`,
+    html: `<!doctype html>
+<html><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;color:#1f2937">
+  <div style="max-width:600px;margin:32px auto;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+    <div style="background:#166534;padding:24px 30px;color:#fff">
+      <h1 style="margin:0;font-size:21px">${safe.companyName}</h1>
+      <p style="margin:6px 0 0;color:#dcfce7">Branch Manager Account</p>
+    </div>
+    <div style="padding:28px 30px">
+      <p>Dear <strong>${safe.managerName}</strong>,</p>
+      <p>Your branch manager account has been created for <strong>${safe.branchName}</strong> (${safe.branchCode}).</p>
+      <table style="width:100%;border-collapse:collapse;margin:22px 0;background:#f9fafb;border:1px solid #e5e7eb">
+        <tr><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb">Email</td><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb;font-weight:700">${safe.managerEmail}</td></tr>
+        <tr><td style="padding:11px 14px">Temporary password</td><td style="padding:11px 14px;font-family:monospace;font-weight:700">${safe.temporaryPassword}</td></tr>
+      </table>
+      <p style="color:#b45309"><strong>Security notice:</strong> You must change this temporary password immediately after your first login.</p>
+      <p style="margin-top:24px">Regards,<br>${safe.companyName} Administration</p>
+    </div>
+  </div>
+</body></html>`,
+    text: `Dear ${input.managerName},\n\nYour branch manager account for ${input.branchName} (${input.branchCode || 'No code'}) has been created.\n\nEmail: ${input.managerEmail}\nTemporary password: ${input.temporaryPassword}\n\nYou must change this password immediately after your first login.\n\nRegards,\n${companyName} Administration`,
+  })
 }
 
 function defaultBranchId() {
@@ -335,8 +391,17 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         SELECT b.id, b.name, b.address, b.phone, b.email, b.code, b.is_active,
                b.smartbuy_manager_id, b.created_at, b.updated_at,
                (b.branch_pin IS NOT NULL) as has_branch_pin,
+               bm.id as manager_id, bm.name as manager_name, bm.email as manager_email,
                sm.name as smartbuy_manager_name
         FROM branches b
+        LEFT JOIN users bm ON bm.id = (
+          SELECT u.id FROM users u
+          LEFT JOIN roles r ON r.id = u.role_id
+          WHERE u.branch_id = b.id
+            AND (u.role_id = '${BRANCH_MANAGER_ROLE_ID}' OR LOWER(r.name) = 'branch manager')
+            AND u.is_active = 1
+          ORDER BY u.created_at ASC LIMIT 1
+        )
         LEFT JOIN users sm ON sm.id = b.smartbuy_manager_id
         ORDER BY b.name
       `).all(),
@@ -358,43 +423,97 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
     const db = getDb()
     ensureLocalBranchIdentity(db, String(store.get('device_branch_id') || '') || null)
-    const id = crypto.randomUUID()
-    const normalizedCode = String(p.code || '').trim().toUpperCase()
+    const payload = { ...(p as Record<string, unknown>) }
+    const branchName = String(payload.name || '').trim()
+    const managerName = String(payload.manager_name || '').trim()
+    const managerEmail = String(payload.manager_email || '').trim().toLowerCase()
+    const rawPin = String(payload.branch_pin || '').trim()
+    const normalizedCode = String(payload.code || '').trim().toUpperCase()
+
+    if (!managerName) return { success: false, error: 'Branch manager name is required' }
+    if (!EMAIL_RE_ADMIN.test(managerEmail)) return { success: false, error: 'A valid branch manager email is required' }
+    if (!branchName) return { success: false, error: 'Branch name is required' }
+    if (!/^\d{4,6}$/.test(rawPin)) return { success: false, error: 'Branch PIN must be 4-6 digits' }
+
+    const duplicateEmail = db.prepare('SELECT id FROM users WHERE LOWER(email) = ? LIMIT 1').get(managerEmail)
+    if (duplicateEmail) return { success: false, error: 'This manager email is already used by another user' }
     if (normalizedCode) {
       const duplicate = db.prepare(`SELECT id FROM branches WHERE UPPER(TRIM(code))=? LIMIT 1`).get(normalizedCode)
       if (duplicate) return { success: false, error: 'This branch code already exists. Choose a different code.' }
-      p.code = normalizedCode
     }
-    const rawPin = p.branch_pin ? String(p.branch_pin) : ''
-    if (rawPin) {
-      const dup = await findBranchByPin(rawPin)
-      if (dup) return { success: false, error: 'Another branch already uses this PIN. Choose a different PIN.' }
-    }
-    // Store + sync only the bcrypt hash of the branch PIN
-    const pinHash = rawPin ? await bcrypt.hash(rawPin, 10) : null
-    db.prepare(`INSERT INTO branches (id,name,address,phone,email,code,branch_pin) VALUES (?,?,?,?,?,?,?)`)
-      .run(id, p.name, p.address||null, p.phone||null, p.email||null, p.code||null, pinHash)
-    await enqueuSync('branches', id, 'INSERT', { ...p, id, branch_pin: pinHash })
+    const duplicatePin = await findBranchByPin(rawPin)
+    if (duplicatePin) return { success: false, error: 'Another branch already uses this PIN. Choose a different PIN.' }
 
-    // Auto-create Branch Manager for this branch if a branch_pin was provided
-    if (rawPin) {
-      const BRANCH_MANAGER_ROLE_ID = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
-      const codeSlug = String(p.code || p.name).toUpperCase().replace(/\s+/g, '').slice(0, 10)
-      const managerEmail = `manager.${codeSlug.toLowerCase()}@pos.local`
-      const existingManager = db.prepare('SELECT id FROM users WHERE email = ?').get(managerEmail)
-      if (!existingManager) {
-        const userId = crypto.randomUUID()
-        const passwordHash = await bcrypt.hash(rawPin, 10)
-        const managerPinHash = await bcrypt.hash(rawPin, 10)
-        db.prepare(`
-          INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
-          VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-        `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${p.name} Manager`, managerEmail, passwordHash, managerPinHash)
-        await enqueueUserRow(userId, 'INSERT')
-      }
+    const managerRole = db.prepare(`
+      SELECT id FROM roles
+      WHERE id = ? OR LOWER(name) = 'branch manager'
+      ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END LIMIT 1
+    `).get(BRANCH_MANAGER_ROLE_ID, BRANCH_MANAGER_ROLE_ID) as { id: string } | undefined
+    if (!managerRole) return { success: false, error: 'Branch Manager role is not configured. Restore default roles and try again.' }
+
+    const { getMaxUsers } = await import('../services/licenseService')
+    const { cnt: userCount } = db.prepare('SELECT COUNT(*) as cnt FROM users').get() as { cnt: number }
+    if (userCount >= getMaxUsers()) return { success: false, error: 'User limit reached. Upgrade the license before creating another branch manager.' }
+
+    const id = crypto.randomUUID()
+    const managerId = crypto.randomUUID()
+    const temporaryPassword = createTemporaryPassword()
+    const [pinHash, passwordHash] = await Promise.all([
+      bcrypt.hash(rawPin, 10),
+      bcrypt.hash(temporaryPassword, 10),
+    ])
+    const branchRow = {
+      id,
+      name: branchName,
+      address: String(payload.address || '').trim() || null,
+      phone: String(payload.phone || '').trim() || null,
+      email: String(payload.email || '').trim().toLowerCase() || null,
+      code: normalizedCode || null,
+      branch_pin: pinHash,
+      is_active: payload.is_active === 0 ? 0 : 1,
     }
 
-    return { success: true, data: { id } }
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO branches (id,name,address,phone,email,code,branch_pin,is_active)
+        VALUES (@id,@name,@address,@phone,@email,@code,@branch_pin,@is_active)
+      `).run(branchRow)
+      db.prepare(`
+        INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash,is_active,force_password_change)
+        VALUES (?,?,?,?,?,?,NULL,1,1)
+      `).run(managerId, id, managerRole.id, managerName, managerEmail, passwordHash)
+    })()
+
+    await Promise.all([
+      enqueuSync('branches', id, 'INSERT', branchRow),
+      enqueueUserRow(managerId, 'INSERT'),
+    ])
+    logAudit(db, {
+      userId: String(caller.id || '') || null,
+      branchId: id,
+      action: 'BRANCH_AND_MANAGER_CREATED',
+      tableName: 'branches',
+      recordId: id,
+      newValues: { name: branchName, code: normalizedCode || null, manager_id: managerId, manager_email: managerEmail },
+    })
+
+    const delivery = await sendBranchManagerCredentials({
+      managerName,
+      managerEmail,
+      branchName,
+      branchCode: normalizedCode || null,
+      temporaryPassword,
+    })
+    return {
+      success: true,
+      data: {
+        id,
+        manager_id: managerId,
+        manager_email: managerEmail,
+        email_sent: delivery.success,
+        email_error: delivery.error || null,
+      },
+    }
   })
   safeHandle(ipcMain, 'admin:branches:update', async (_e, id: string, p) => {
     const caller = authUser()
@@ -441,42 +560,56 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const safe = Object.fromEntries(Object.entries(payload).filter(([k]) => existingCols.has(k)))
     const fields = Object.keys(safe).map(k => `${k}=@${k}`).join(',')
     if (fields) db.prepare(`UPDATE branches SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({...safe, id})
-    await enqueuSync('branches', id, 'UPDATE', { ...payload, id })
-
-    // If a branch_pin was set and no manager user exists yet, auto-create one
-    if (rawPin) {
-      const BRANCH_MANAGER_ROLE_ID = '4b7c9d0e-2f3a-5b4c-9d0e-2f3a4b7c9d0e'
-      const branch = db.prepare('SELECT name, code FROM branches WHERE id=?').get(id) as { name: string; code: string } | undefined
-      if (branch) {
-        const existingManager = db.prepare(
-          'SELECT id FROM users WHERE branch_id=? AND role_id=?'
-        ).get(id, BRANCH_MANAGER_ROLE_ID) as { id: string } | undefined
-        if (!existingManager) {
-          const userId = crypto.randomUUID()
-          const codeSlug = String(branch.code || branch.name).toUpperCase().replace(/\s+/g, '').slice(0, 10).toLowerCase()
-          const managerEmail = `manager.${codeSlug}@pos.local`
-          const safeEmail = db.prepare('SELECT id FROM users WHERE email=?').get(managerEmail)
-            ? `manager.${codeSlug}.${userId.slice(0,4)}@pos.local`
-            : managerEmail
-          const passwordHash = await bcrypt.hash(rawPin, 10)
-          const managerPinHash = await bcrypt.hash(rawPin, 10)
-          db.prepare(`
-            INSERT INTO users (id, branch_id, role_id, name, email, password_hash, pin_hash, is_active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
-          `).run(userId, id, BRANCH_MANAGER_ROLE_ID, `${branch.name} Manager`, safeEmail, passwordHash, managerPinHash)
-          await enqueueUserRow(userId, 'INSERT')
-        } else {
-          // Manager exists — update their PIN to match the new branch PIN
-          const managerPinHash = await bcrypt.hash(rawPin, 10)
-          db.prepare(`UPDATE users SET pin_hash=?, pin=NULL, updated_at=datetime('now') WHERE branch_id=? AND role_id=?`)
-            .run(managerPinHash, id, BRANCH_MANAGER_ROLE_ID)
-          await enqueueUserRow(existingManager.id)
-        }
-      }
-    }
+    await enqueuSync('branches', id, 'UPDATE', { ...safe, id })
 
     return { success: true }
   })
+  safeHandle(ipcMain, 'admin:branches:resendManagerCredentials', async (_e, branchId: string) => {
+    const caller = authUser()
+    if (!currentPerms(caller).all) return { success: false, error: 'Company Admin access required' }
+
+    const db = getDb()
+    const manager = db.prepare(`
+      SELECT u.id, u.name, u.email, b.name as branch_name, b.code as branch_code
+      FROM users u
+      JOIN branches b ON b.id = u.branch_id
+      LEFT JOIN roles r ON r.id = u.role_id
+      WHERE u.branch_id = ?
+        AND (u.role_id = ? OR LOWER(r.name) = 'branch manager')
+        AND u.is_active = 1
+      ORDER BY u.created_at ASC LIMIT 1
+    `).get(branchId, BRANCH_MANAGER_ROLE_ID) as {
+      id: string; name: string; email: string; branch_name: string; branch_code: string | null
+    } | undefined
+    if (!manager) return { success: false, error: 'No active Branch Manager is assigned to this branch' }
+    if (!EMAIL_RE_ADMIN.test(String(manager.email || ''))) return { success: false, error: 'Branch Manager does not have a valid email address' }
+
+    const temporaryPassword = createTemporaryPassword()
+    const delivery = await sendBranchManagerCredentials({
+      managerName: manager.name,
+      managerEmail: manager.email,
+      branchName: manager.branch_name,
+      branchCode: manager.branch_code,
+      temporaryPassword,
+    })
+    if (!delivery.success) return { success: false, error: delivery.error || 'Email delivery failed. Password was not changed.' }
+
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10)
+    db.prepare(`
+      UPDATE users SET password_hash=?, force_password_change=1, updated_at=datetime('now') WHERE id=?
+    `).run(passwordHash, manager.id)
+    await enqueueUserRow(manager.id)
+    logAudit(db, {
+      userId: String(caller.id || '') || null,
+      branchId,
+      action: 'BRANCH_MANAGER_CREDENTIALS_RESENT',
+      tableName: 'users',
+      recordId: manager.id,
+      newValues: { email: manager.email, force_password_change: true },
+    })
+    return { success: true, data: { email_sent: true, manager_email: manager.email } }
+  })
+
   safeHandle(ipcMain, 'admin:branches:delete', async (_e, id: string) => {
     const caller = authUser()
     const perms = ((caller.role as Record<string,unknown>)?.permissions as Record<string,unknown>) || caller.permissions as Record<string,unknown> || {}
