@@ -246,7 +246,7 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [resending, setResending] = useState(false)
-  const [result, setResult] = useState<{ id: string; manager_email: string; email_sent: boolean; email_error: string | null } | null>(null)
+  const [result, setResult] = useState<{ id: string; manager_email: string; email_sent: boolean; email_error: string | null; admin_email?: string | null; activation_sent?: boolean; activation_error?: string | null } | null>(null)
   const [form, setForm] = useState({
     manager_name: '', manager_email: '',
     name: '', code: '', branch_pin: '', address: '', phone: '', email: '',
@@ -286,7 +286,7 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
         is_active: 1,
       })
       if (!res.success) { toast.error(res.error || 'Branch could not be created'); return }
-      const data = res.data as { id: string; manager_email: string; email_sent: boolean; email_error: string | null }
+      const data = res.data as NonNullable<typeof result>
       setResult(data)
       toast.success('Branch and manager created')
     } catch (e: any) {
@@ -340,6 +340,22 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
               <button onClick={resend} disabled={resending} className="btn-secondary btn-sm gap-1.5">
                 <Mail size={13} /> {resending ? 'Sending…' : 'Resend login email'}
               </button>
+            </div>
+          )}
+          {result.activation_sent ? (
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/60 border border-slate-700">
+              <Mail size={18} className="text-brand-400 flex-shrink-0 mt-0.5" />
+              <p className="text-sm text-slate-200">
+                The POS activation key was emailed to you at <strong>{result.admin_email}</strong>.
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3 p-3 rounded-lg bg-amber-900/20 border border-amber-700/30">
+              <AlertTriangle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm text-amber-200 font-medium">POS activation key email was not sent</p>
+                <p className="text-xs text-amber-300/80 mt-1">{result.activation_error || 'Check the email (SMTP) settings.'}</p>
+              </div>
             </div>
           )}
         </div>

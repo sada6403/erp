@@ -123,6 +123,66 @@ async function sendBranchManagerCredentials(input: {
   })
 }
 
+async function sendBranchActivationKey(input: {
+  adminEmail: string
+  branchId: string
+  branchName: string
+  branchCode?: string | null
+}) {
+  const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+  const companyName = String(settings.company_name || 'Enterprise POS ERP')
+  const companyKey = String(store.get('device_company_key') || '')
+  const licenseKey = String(store.get('device_license_key') || '')
+  const activationKey = companyKey || licenseKey
+  if (!activationKey) {
+    return { success: false, error: 'This device has no activation key stored. Open the company key from the activation portal and share it manually.' }
+  }
+  const apiUrl = String(settings.cloud_api_url || '')
+  const safe = {
+    companyName: escapeHtml(companyName),
+    branchName: escapeHtml(input.branchName),
+    branchCode: escapeHtml(input.branchCode || 'Not assigned'),
+    branchId: escapeHtml(input.branchId),
+    key: escapeHtml(activationKey),
+    keyLabel: companyKey ? 'Company activation key' : 'License key',
+    apiUrl: escapeHtml(apiUrl || 'Not configured'),
+  }
+  return sendEmail({
+    to: input.adminEmail,
+    subject: `${companyName} - POS Activation Key for ${input.branchName}`,
+    html: `<!doctype html>
+<html><body style="margin:0;background:#f3f4f6;font-family:Arial,sans-serif;color:#1f2937">
+  <div style="max-width:600px;margin:32px auto;background:#fff;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">
+    <div style="background:#1e3a8a;padding:24px 30px;color:#fff">
+      <h1 style="margin:0;font-size:21px">${safe.companyName}</h1>
+      <p style="margin:6px 0 0;color:#dbeafe">POS Device Activation</p>
+    </div>
+    <div style="padding:28px 30px">
+      <p>A new branch <strong>${safe.branchName}</strong> (${safe.branchCode}) has been created. Use the details below to activate the POS device for this branch.</p>
+      <table style="width:100%;border-collapse:collapse;margin:22px 0;background:#f9fafb;border:1px solid #e5e7eb">
+        <tr><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb">${safe.keyLabel}</td><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-weight:700">${safe.key}</td></tr>
+        <tr><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb">Branch</td><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb;font-weight:700">${safe.branchName}</td></tr>
+        <tr><td style="padding:11px 14px">Cloud API URL</td><td style="padding:11px 14px;font-family:monospace">${safe.apiUrl}</td></tr>
+      </table>
+      <p>On the new POS device open the activation screen, enter the key and cloud API URL, then select <strong>${safe.branchName}</strong> as the branch.</p>
+      <p style="color:#b45309"><strong>Confidential:</strong> do not share this key outside your organisation.</p>
+      <p style="margin-top:24px">Regards,<br>${safe.companyName} Administration</p>
+    </div>
+  </div>
+</body></html>`,
+    text: `A new branch ${input.branchName} (${input.branchCode || 'No code'}) has been created.
+
+${safe.keyLabel === 'License key' ? 'License key' : 'Company activation key'}: ${activationKey}
+Cloud API URL: ${apiUrl || 'Not configured'}
+
+On the new POS device open the activation screen, enter the key and URL, then select this branch.
+
+Keep this key confidential.
+
+${companyName} Administration`,
+  })
+}
+
 function defaultBranchId() {
   return 'b1111111-1111-4111-8111-111111111111'
 }
@@ -504,6 +564,11 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       branchCode: normalizedCode || null,
       temporaryPassword,
     })
+    const adminRow = db.prepare('SELECT email FROM users WHERE id=?').get(String(authUser().id || '')) as { email?: string } | undefined
+    const adminEmail = String(adminRow?.email || authUser().email || '').trim()
+    const activation = EMAIL_RE_ADMIN.test(adminEmail)
+      ? await sendBranchActivationKey({ adminEmail, branchId: id, branchName, branchCode: normalizedCode || null })
+      : { success: false, error: 'Your admin account has no valid email address' }
     return {
       success: true,
       data: {
@@ -512,6 +577,9 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         manager_email: managerEmail,
         email_sent: delivery.success,
         email_error: delivery.error || null,
+        admin_email: adminEmail || null,
+        activation_sent: activation.success,
+        activation_error: activation.error || null,
       },
     }
   })
