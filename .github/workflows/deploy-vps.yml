@@ -6,10 +6,127 @@ on:
       - main
   workflow_dispatch:
 
+concurrency:
+  group: deploy-vps-production
+  cancel-in-progress: false
+
 jobs:
+  release-check:
+    runs-on: ubuntu-latest
+    outputs:
+      publish: ${{ steps.release.outputs.publish }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check published desktop version
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          published="$(curl --fail --silent --show-error https://updates.nfplantation.com/latest.yml \
+            | sed -nE 's/^version:[[:space:]]*([^[:space:]]+).*/\1/p' \
+            | head -n 1)"
+
+          publish=false
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" || "$published" != "$version" ]]; then
+            publish=true
+          fi
+
+          echo "Current desktop release: ${published:-unknown}"
+          echo "Requested desktop release: $version"
+          echo "publish=$publish" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build-desktop:
+    needs: release-check
+    if: needs.release-check.outputs.publish == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Windows release
+        run: npm run build:win
+
+      - name: Validate release files
+        shell: pwsh
+        run: |
+          $version = '${{ needs.release-check.outputs.version }}'
+          $installer = "release/Enterprise POS ERP Setup $version.exe"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "Missing installer: $installer"
+          }
+          if (-not (Test-Path -LiteralPath 'release/latest.yml')) {
+            throw 'Missing release/latest.yml'
+          }
+          $metadata = Get-Content -LiteralPath 'release/latest.yml' -Raw
+          if ($metadata -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") {
+            throw "latest.yml does not contain version $version"
+          }
+          if ($metadata -notmatch "(?m)^path:\s*$([regex]::Escape((Split-Path $installer -Leaf)))\s*$") {
+            throw 'latest.yml installer path does not match the built file'
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-${{ needs.release-check.outputs.version }}
+          path: |
+            release/Enterprise POS ERP Setup ${{ needs.release-check.outputs.version }}.exe
+            release/latest.yml
+          if-no-files-found: error
+          retention-days: 2
+
   deploy:
     runs-on: self-hosted
     steps:
-      - name: Deploy on VPS
+      - name: Deploy backend and superadmin on VPS
+        run: sudo /usr/local/bin/pos-deploy
+
+  publish-desktop:
+    needs:
+      - release-check
+      - build-desktop
+      - deploy
+    if: >-
+      always() &&
+      needs.release-check.outputs.publish == 'true' &&
+      needs.build-desktop.result == 'success' &&
+      needs.deploy.result == 'success'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-${{ needs.release-check.outputs.version }}
+          path: ${{ runner.temp }}/desktop-release-${{ needs.release-check.outputs.version }}
+
+      - name: Publish desktop release
+        env:
+          RELEASE_DIR: ${{ runner.temp }}/desktop-release-${{ needs.release-check.outputs.version }}
+          RELEASE_VERSION: ${{ needs.release-check.outputs.version }}
         run: |
-          sudo /usr/local/bin/pos-deploy
+          sudo bash "$GITHUB_WORKSPACE/scripts/publish-vps-release.sh" "$RELEASE_DIR" "$RELEASE_VERSION"
+
+      - name: Verify public release
+        env:
+          RELEASE_VERSION: ${{ needs.release-check.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          metadata="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 \
+            https://updates.nfplantation.com/latest.yml)"
+          grep -Eq "^version:[[:space:]]*$RELEASE_VERSION[[:space:]]*$" <<< "$metadata"
+          grep -Fq "path: Enterprise POS ERP Setup $RELEASE_VERSION.exe" <<< "$metadata"
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 \
+            https://updates.nfplantation.com/ >/dev/null
