@@ -333,7 +333,8 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
                 <AlertTriangle size={18} className="text-amber-400 flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="text-sm text-amber-200 font-medium">Email was not delivered to {result.manager_email}</p>
-                  <p className="text-xs text-amber-300/80 mt-1">{result.email_error || 'Check the email (SMTP) settings and resend.'}</p>
+                  <p className="text-xs text-amber-300/80 mt-1">{result.email_error || 'Email delivery failed.'}</p>
+                  <p className="text-xs text-amber-300/80 mt-1">Open <strong>System → Settings → Email (SMTP)</strong>, enable email and enter the SMTP details (use <em>Send test email</em> to verify), then press Resend.</p>
                 </div>
               </div>
               <button onClick={resend} disabled={resending} className="btn-secondary btn-sm gap-1.5">
