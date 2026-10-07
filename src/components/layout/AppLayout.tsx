@@ -416,6 +416,44 @@ export default function AppLayout() {
   const [supportSecondsLeft, setSupportSecondsLeft] = useState<number | null>(null)
   const [endingSupportSession, setEndingSupportSession] = useState(false)
   const sidebarNavRef = useRef<HTMLElement | null>(null)
+  const mainRef = useRef<HTMLElement | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [pageRefreshing, setPageRefreshing] = useState(false)
+
+  const refreshPage = () => {
+    const main = mainRef.current
+    const controls = main
+      ? Array.from(main.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea'))
+          .filter(el => !(el instanceof HTMLInputElement && ['password', 'file', 'button', 'submit'].includes(el.type)))
+      : []
+    const snapshot = controls.map(el => ({
+      value: el.value,
+      checked: el instanceof HTMLInputElement ? el.checked : false,
+    }))
+    setPageRefreshing(true)
+    setRefreshKey(k => k + 1)
+    window.setTimeout(() => {
+      const fresh = mainRef.current
+        ? Array.from(mainRef.current.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input, select, textarea'))
+            .filter(el => !(el instanceof HTMLInputElement && ['password', 'file', 'button', 'submit'].includes(el.type)))
+        : []
+      if (fresh.length === snapshot.length) {
+        fresh.forEach((el, i) => {
+          const saved = snapshot[i]
+          if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio')) {
+            if (el.checked !== saved.checked) el.click()
+            return
+          }
+          if (el.value === saved.value) return
+          const proto = el instanceof HTMLSelectElement ? HTMLSelectElement.prototype
+            : el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype
+          Object.getOwnPropertyDescriptor(proto, 'value')?.set?.call(el, saved.value)
+          el.dispatchEvent(new Event(el instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true }))
+        })
+      }
+      setPageRefreshing(false)
+    }, 150)
+  }
 
   const permissions = (user?.role?.permissions ||
     (user as unknown as Record<string, unknown>)?.permissions) as Record<string, unknown> || {}
@@ -698,6 +736,18 @@ export default function AppLayout() {
           </NavLink>
         )}
 
+        <button
+          type="button"
+          onClick={refreshPage}
+          disabled={pageRefreshing}
+          className="p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors disabled:cursor-wait"
+          style={{ color: 'var(--text-3)' }}
+          title="Refresh this page"
+          aria-label="Refresh this page"
+        >
+          <RefreshCw size={15} className={pageRefreshing ? 'animate-spin' : ''} />
+        </button>
+
         <ThemeToggle />
 
         {isAdmin ? (
@@ -798,7 +848,7 @@ export default function AppLayout() {
           </nav>
         </aside>
 
-        <main className="relative flex-1 overflow-hidden flex flex-col">
+        <main ref={mainRef} className="relative flex-1 overflow-hidden flex flex-col">
           {user?.isSupportSession && supportSecondsLeft !== null && (
             <div className="flex items-center gap-3 px-4 py-2 text-xs font-semibold flex-shrink-0 bg-amber-500/20 text-amber-300 border-b border-amber-500/30">
               <Shield size={13} className="flex-shrink-0" />
@@ -872,7 +922,7 @@ export default function AppLayout() {
             </div>
           )}
 
-          <Outlet />
+          <Outlet key={refreshKey} />
         </main>
       </div>
 

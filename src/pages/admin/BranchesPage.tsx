@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, GitBranch, CheckCircle, XCircle, Trash2, AlertTriangle, Copy, Mail, RefreshCw } from 'lucide-react'
+import { Plus, Edit2, GitBranch, CheckCircle, XCircle, Trash2, AlertTriangle, Copy, Mail } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -65,7 +65,6 @@ export default function BranchesPage() {
   }
 
   const [resendingId, setResendingId] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
 
   async function handleResend(b: Record<string,unknown>) {
     setResendingId(String(b.id))
@@ -78,12 +77,6 @@ export default function BranchesPage() {
     } finally { setResendingId(null) }
   }
 
-  async function handleRefresh() {
-    setRefreshing(true)
-    await load()
-    setRefreshing(false)
-  }
-
   const isMain = (b: Record<string,unknown>) =>
     String(b.id) === 'b1111111-1111-4111-8111-111111111111'
 
@@ -94,9 +87,6 @@ export default function BranchesPage() {
         subtitle={`${branches.length} branches`}
         actions={
           <>
-          <button onClick={handleRefresh} disabled={refreshing} className="btn-secondary btn-sm gap-1.5" title="Refresh">
-            <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
-          </button>
           <button
             onClick={() => { setEditing(null); setShowForm(true) }}
             className="btn-primary btn-sm gap-1.5"
