@@ -92,7 +92,7 @@ export function registerRegionHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'regions:create', async (_e, p: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManageLocations(perms)) return { success: false, error: 'Employee management access required' }
+    if (!perms.all) return { success: false, error: 'Company Admin access required' }
     const name = String(p.name || '').trim()
     if (!name) return { success: false, error: 'Region name is required' }
 
@@ -112,7 +112,7 @@ export function registerRegionHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'regions:update', async (_e, id: string, p: Record<string, unknown>) => {
     const perms = currentPerms()
-    if (!canManageLocations(perms)) return { success: false, error: 'Employee management access required' }
+    if (!perms.all) return { success: false, error: 'Company Admin access required' }
 
     const db = getDb()
     const caller = authUser()

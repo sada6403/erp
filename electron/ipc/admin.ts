@@ -1367,6 +1367,9 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Audit Logs
   safeHandle(ipcMain, 'admin:auditLogs:list', (_e, filters: Record<string,unknown> = {}) => {
+    if (!currentPerms(authUser()).all) {
+      return { success: false, error: 'Company Admin access required' }
+    }
     const db = getDb()
     let sql = `SELECT al.*, u.name as user_name FROM audit_logs al
                LEFT JOIN users u ON u.id = al.user_id WHERE 1=1`

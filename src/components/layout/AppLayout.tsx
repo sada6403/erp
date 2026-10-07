@@ -6,7 +6,7 @@ import {
   Truck, Settings, LogOut, Wifi, WifiOff, AlertCircle, UserCog,
   FileText, ShoppingCart, Receipt, Sun, Moon, ChevronDown,
   ChevronRight, ShoppingBag, Menu, Building2, Shield, HardDrive,
-  Activity, Download, RefreshCw, Ticket, Coins, Percent, type LucideIcon
+  Activity, Download, RefreshCw, Ticket, Coins, Percent, KeyRound, type LucideIcon
 } from 'lucide-react'
 import { useState, useEffect, useRef, memo } from 'react'
 import toast from 'react-hot-toast'
@@ -16,6 +16,7 @@ import ThemeToggle from '@/components/shared/ThemeToggle'
 import { getHomeLabel, getLandingRoute, getSessionProfile, type SessionRoleKind } from '@/lib/sessionRouting'
 import { resolveImageSrc } from '@/lib/imageUrl'
 import ProductSyncModal from '@/components/shared/ProductSyncModal'
+import Modal from '@/components/shared/Modal'
 import { canManageProcurement } from '@/lib/branchAccess'
 import { applyBrandTheme } from '@/lib/brandTheme'
 
@@ -176,7 +177,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/users', label: 'User List', perm: 'employees' },
       { to: '/admin/roles', label: 'Roles & Permissions', perm: 'employees' },
-      { to: '/admin/regions', label: 'Region Management', perm: 'employees' },
+      { to: '/admin/regions', label: 'Region Management', adminOnly: true },
       { to: '/admin/zones', label: 'Zone Management', perm: 'employees' },
     ]
   },
@@ -185,7 +186,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/branches', label: 'Branches', perm: 'branches', adminOnly: true },
       { to: '/admin/branch-inspect', label: 'Branch Inspect', adminOnly: true },
-      { to: '/admin/audit-logs', label: 'Audit Logs', perm: 'branches' },
+      { to: '/admin/audit-logs', label: 'Audit Logs', adminOnly: true },
       { to: '/admin/edit-requests', label: 'Edit Requests', adminOnly: true },
       { to: '/admin/sync', label: 'Sync Monitor', adminOnly: true },
       { to: '/admin/operations', label: 'Operations Hub' },
@@ -543,6 +544,31 @@ export default function AppLayout() {
   }, [])
 
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+  const [showPasswordForm, setShowPasswordForm] = useState(false)
+  const [passwordForm, setPasswordForm] = useState({ current: '', next: '', confirm: '' })
+  const [passwordSaving, setPasswordSaving] = useState(false)
+
+  const changeOwnPassword = async () => {
+    if (!passwordForm.current) { toast.error('Enter your current password'); return }
+    if (passwordForm.next.length < 8) { toast.error('New password must be at least 8 characters'); return }
+    if (passwordForm.next !== passwordForm.confirm) { toast.error('New passwords do not match'); return }
+    setPasswordSaving(true)
+    try {
+      const res = await window.api.auth.changePassword({
+        userId: user?.id,
+        currentPassword: passwordForm.current,
+        newPassword: passwordForm.next,
+      }) as { success: boolean; error?: string }
+      if (!res.success) { toast.error(res.error || 'Password change failed'); return }
+      toast.success('Password changed successfully')
+      setPasswordForm({ current: '', next: '', confirm: '' })
+      setShowPasswordForm(false)
+    } catch (err) {
+      toast.error((err as Error)?.message || 'Password change failed')
+    } finally {
+      setPasswordSaving(false)
+    }
+  }
 
   // Auto-updater state
   const [updateInfo,    setUpdateInfo]    = useState<{ version: string } | null>(null)
@@ -691,6 +717,17 @@ export default function AppLayout() {
         )}
 
         <NotificationPanel />
+
+        <button
+          type="button"
+          onClick={() => setShowPasswordForm(true)}
+          className="p-2 rounded-lg hover:bg-[var(--bg-soft)] transition-colors"
+          style={{ color: 'var(--text-3)' }}
+          title="Change my password"
+          aria-label="Change my password"
+        >
+          <KeyRound size={15} />
+        </button>
 
         <div className="hidden sm:flex items-center gap-2 px-2 py-1 rounded-lg" style={{ color: 'var(--text-2)' }}>
           <div className="w-7 h-7 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold">
@@ -877,6 +914,70 @@ export default function AppLayout() {
             </div>
           </div>
         </div>
+      )}
+
+      {showPasswordForm && (
+        <Modal
+          title="Change My Password"
+          size="sm"
+          onClose={() => {
+            if (passwordSaving) return
+            setShowPasswordForm(false)
+            setPasswordForm({ current: '', next: '', confirm: '' })
+          }}
+          footer={
+            <>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPasswordForm(false)
+                  setPasswordForm({ current: '', next: '', confirm: '' })
+                }}
+                disabled={passwordSaving}
+                className="btn-secondary"
+              >
+                Cancel
+              </button>
+              <button type="button" onClick={changeOwnPassword} disabled={passwordSaving} className="btn-primary">
+                {passwordSaving ? 'Changing...' : 'Change Password'}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <div>
+              <label className="label">Current Password</label>
+              <input
+                type="password"
+                autoComplete="current-password"
+                value={passwordForm.current}
+                onChange={e => setPasswordForm(p => ({ ...p, current: e.target.value }))}
+                className="input"
+              />
+            </div>
+            <div>
+              <label className="label">New Password</label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={passwordForm.next}
+                onChange={e => setPasswordForm(p => ({ ...p, next: e.target.value }))}
+                className="input"
+                placeholder="At least 8 characters"
+              />
+            </div>
+            <div>
+              <label className="label">Confirm New Password</label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={passwordForm.confirm}
+                onChange={e => setPasswordForm(p => ({ ...p, confirm: e.target.value }))}
+                className="input"
+              />
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* ── Product Sync Online Deletion / Deactivation Modal ── */}

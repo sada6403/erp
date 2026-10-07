@@ -346,7 +346,7 @@ export default function App() {
         {/* Agent is now a tab inside Employee Management, not its own page
             (Issue 17) — redirect any old bookmark/link instead of 404ing. */}
         <Route path="/admin/agents" element={<Navigate to="/admin/users" replace />} />
-        <Route path="/admin/regions" element={<RegionsPage />} />
+        <Route path="/admin/regions" element={<RequireSuperAdmin><RegionsPage /></RequireSuperAdmin>} />
         <Route path="/admin/zones" element={<ZonesPage />} />
         <Route path="/admin/categories" element={<CategoriesPage />} />
         <Route path="/admin/suppliers" element={<RequireMainBranch><SuppliersPage /></RequireMainBranch>} />
@@ -370,7 +370,7 @@ export default function App() {
             allows chits∨all to view the catalog; only create/update require
             all, which SchemeMasterPage now gates client-side. */}
         <Route path="/admin/scheme-master" element={<RequireSmartBuyAccess><SchemeMasterPage /></RequireSmartBuyAccess>} />
-        <Route path="/admin/audit-logs" element={<AuditLogsPage />} />
+        <Route path="/admin/audit-logs" element={<RequireSuperAdmin><AuditLogsPage /></RequireSuperAdmin>} />
         <Route path="/admin/edit-requests" element={<RequireSuperAdmin><EditRequestsPage /></RequireSuperAdmin>} />
         <Route path="/admin/operations" element={<OperationsHubPage />} />
         <Route path="/admin/sync" element={<SyncMonitorPage />} />

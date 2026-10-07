@@ -681,8 +681,14 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
   // ── Change own password (requires current password) ───────────────────────
   safeHandle(ipcMain, 'auth:changePassword', async (_e, { userId, currentPassword, newPassword }: { userId: string; currentPassword: string; newPassword: string }) => {
+      const session = store.get('auth_user') as Record<string, unknown> | undefined
+      const sessionUserId = String(session?.id || '')
+      if (!sessionUserId) return { success: false, error: 'Authentication required' }
+      if (userId && String(userId) !== sessionUserId) {
+        return { success: false, error: 'You can only change your own password' }
+      }
       const db = getDb()
-      const user = db.prepare(`SELECT id, password_hash, branch_id FROM users WHERE id = ? AND is_active = 1`).get(userId) as Record<string, unknown> | undefined
+      const user = db.prepare(`SELECT id, password_hash, branch_id FROM users WHERE id = ? AND is_active = 1`).get(sessionUserId) as Record<string, unknown> | undefined
       if (!user) return { success: false, error: 'User not found' }
 
       const valid = await bcrypt.compare(currentPassword, user.password_hash as string)
@@ -691,9 +697,9 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       if (newPassword.length < 8) return { success: false, error: 'Password must be at least 8 characters' }
 
       const hash = await bcrypt.hash(newPassword, 10)
-      db.prepare(`UPDATE users SET password_hash=?, force_password_change=0, updated_at=datetime('now') WHERE id=?`).run(hash, userId)
-      logAudit(db, { userId, branchId: user.branch_id as string, action: 'PASSWORD_CHANGED' })
-      await enqueueUserRow(userId)
+      db.prepare(`UPDATE users SET password_hash=?, force_password_change=0, updated_at=datetime('now') WHERE id=?`).run(hash, sessionUserId)
+      logAudit(db, { userId: sessionUserId, branchId: user.branch_id as string, action: 'PASSWORD_CHANGED' })
+      await enqueueUserRow(sessionUserId)
       return { success: true }
   })
 

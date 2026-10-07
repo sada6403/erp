@@ -17,6 +17,7 @@ import { beforeAll, describe, it, expect, vi } from 'vitest'
 import fs from 'fs'
 import os from 'os'
 import path from 'path'
+import bcrypt from 'bcryptjs'
 
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'security-qa-'))
 
@@ -1138,5 +1139,63 @@ describe('Agent Management as Staff Master — createUserForAgent, live sync, se
     const res = await call('agents:createUserForAgent', otherBranchAgent.data.id, { role_id: 'sec5-agent-role', pin: '6666', is_active: 1 })
     expect(res.success).toBe(false)
     expect(String(res.error)).toMatch(/do not have access/i)
+  })
+})
+
+describe('Requested admin-boundary and own-password regressions', () => {
+  const admin = makeSession({ id: 'u-request-admin', permissions: { all: true } })
+  const manager = makeSession({
+    id: 'u-request-manager',
+    branchId: 'sec-branch-a',
+    permissions: { branches: true, employees: true },
+  })
+
+  beforeAll(() => {
+    seedUser('u-request-admin', null)
+    seedUser('u-request-manager', 'sec-branch-a')
+    seedUser('u-request-victim', 'sec-branch-b')
+  })
+
+  it('keeps Audit Logs and Region mutations company-admin only', async () => {
+    setSession(manager)
+    const auditDenied = await call('admin:auditLogs:list')
+    expect(auditDenied).toMatchObject({ success: false, error: 'Company Admin access required' })
+
+    const regionDenied = await call('regions:create', { name: 'Blocked Region' })
+    expect(regionDenied).toMatchObject({ success: false, error: 'Company Admin access required' })
+
+    // Zone Management remains a separate employee-management capability.
+    const zoneAllowed = await call('zones:create', { name: 'Manager Zone', code: 'MZ' })
+    expect(zoneAllowed.success).toBe(true)
+
+    setSession(admin)
+    expect((await call('admin:auditLogs:list')).success).toBe(true)
+    expect((await call('regions:create', { name: 'Admin Region' })).success).toBe(true)
+  })
+
+  it('auth:changePassword rejects a renderer-supplied different user id', async () => {
+    const managerPassword = 'ManagerOld123!'
+    const victimPassword = 'VictimOld123!'
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?')
+      .run(await bcrypt.hash(managerPassword, 10), 'u-request-manager')
+    db.prepare('UPDATE users SET password_hash=? WHERE id=?')
+      .run(await bcrypt.hash(victimPassword, 10), 'u-request-victim')
+
+    setSession(manager)
+    const denied = await call('auth:changePassword', {
+      userId: 'u-request-victim',
+      currentPassword: victimPassword,
+      newPassword: 'VictimNew123!',
+    })
+    expect(denied).toMatchObject({ success: false, error: 'You can only change your own password' })
+
+    const own = await call('auth:changePassword', {
+      userId: 'u-request-manager',
+      currentPassword: managerPassword,
+      newPassword: 'ManagerNew123!',
+    })
+    expect(own.success).toBe(true)
+    const row = db.prepare('SELECT password_hash FROM users WHERE id=?').get('u-request-manager') as { password_hash: string }
+    expect(await bcrypt.compare('ManagerNew123!', row.password_hash)).toBe(true)
   })
 })

@@ -10,6 +10,8 @@ type NotificationItem = Record<string, unknown>
 
 export default function OperationsHubPage() {
   const { user } = useAuthStore()
+  const permissions = (user?.role?.permissions || user?.permissions || {}) as Record<string, unknown>
+  const isAdmin = Boolean(permissions.all)
   const navigate = useNavigate()
   const { status, triggerSync } = useSyncStatus()
   const [license, setLicense] = useState<Record<string, unknown> | null>(null)
@@ -29,8 +31,8 @@ export default function OperationsHubPage() {
         window.api.printer.listDevices().catch(() => []),
         window.api.notifications.getAll().catch(() => []),
         window.api.notifications.getUnreadCount().catch(() => 0),
-        window.api.admin.branches.list().catch(() => ({ success: false, data: [] })),
-        window.api.admin.users.list().catch(() => ({ success: false, data: [] })),
+        isAdmin ? window.api.admin.branches.list().catch(() => ({ success: false, data: [] })) : Promise.resolve({ success: true, data: [] }),
+        isAdmin ? window.api.admin.users.list().catch(() => ({ success: false, data: [] })) : Promise.resolve({ success: true, data: [] }),
       ])
       setLicense((licenseRes as { success?: boolean; data?: Record<string, unknown> } | null)?.data ?? null)
       setPrinters((deviceRes as Record<string, unknown>[]) ?? [])
@@ -87,6 +89,16 @@ export default function OperationsHubPage() {
   const moduleCount = Array.isArray((license as Record<string, unknown> | null)?.modules)
     ? ((license as Record<string, unknown> | null)?.modules as unknown[]).length
     : 0
+  const quickActions = [
+    ...(isAdmin ? [
+      { title: 'Open Security', desc: 'Password, 2FA, and access controls', href: '/admin/security' },
+      { title: 'Open Settings', desc: 'Company, printing, and integration settings', href: '/admin/settings' },
+      { title: 'Open Audit Logs', desc: 'Track admin activity and changes', href: '/admin/audit-logs' },
+      { title: 'Open Sync Monitor', desc: 'Review queue, failures, and device state', href: '/admin/sync' },
+    ] : []),
+    { title: 'Open Users', desc: 'Manage staff accounts and role assignments', href: '/admin/users' },
+    { title: 'Open Installments', desc: 'Review customer installment records', href: '/admin/installments' },
+  ]
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
@@ -144,7 +156,7 @@ export default function OperationsHubPage() {
             </button>
           </div>
 
-          <div className="card">
+          {isAdmin && <div className="card">
             <p className="text-xs" style={{ color: 'var(--text-3)' }}>Branches</p>
             <div className="flex items-center gap-2 mt-2">
               <GitBranch size={16} className="text-cyan-400" />
@@ -153,7 +165,7 @@ export default function OperationsHubPage() {
             <button onClick={() => navigate('/admin/branches')} className="btn-ghost mt-3 text-xs">
               Open Branches
             </button>
-          </div>
+          </div>}
         </div>
 
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
@@ -171,14 +183,7 @@ export default function OperationsHubPage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {[
-                { title: 'Open Security', desc: 'Password, 2FA, and access controls', href: '/admin/security' },
-                { title: 'Open Settings', desc: 'Company, printing, and integration settings', href: '/admin/settings' },
-                { title: 'Open Audit Logs', desc: 'Track admin activity and changes', href: '/admin/audit-logs' },
-                { title: 'Open Sync Monitor', desc: 'Review queue, failures, and device state', href: '/admin/sync' },
-                { title: 'Open Users', desc: 'Manage staff accounts and role assignments', href: '/admin/users' },
-                { title: 'Open Installments', desc: 'Review customer installment records', href: '/admin/installments' },
-              ].map(card => (
+              {quickActions.map(card => (
                 <button key={card.href} onClick={() => navigate(card.href)} className="text-left rounded-xl border border-gray-800 bg-gray-800/30 px-4 py-3 hover:border-gray-700 transition-colors">
                   <p className="text-sm font-medium text-white">{card.title}</p>
                   <p className="text-xs text-gray-500 mt-1">{card.desc}</p>
@@ -211,7 +216,7 @@ export default function OperationsHubPage() {
             </button>
           </div>
 
-          <div className="card space-y-3">
+          {isAdmin && <div className="card space-y-3">
             <div className="flex items-center gap-2">
               <Users size={14} className="text-slate-400" />
               <h3 className="font-semibold text-sm" style={{ color: 'var(--text-1)' }}>Tenant Snapshot</h3>
@@ -234,7 +239,7 @@ export default function OperationsHubPage() {
                 <span style={{ color: 'var(--text-1)' }}>{printers.length}</span>
               </div>
             </div>
-          </div>
+          </div>}
         </div>
       </div>
     </div>
