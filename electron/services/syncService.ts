@@ -731,7 +731,11 @@ export class SyncService {
         let remaining = rows
         for (let pass = 0; pass < 2; pass++) {
           const retry: Record<string, unknown>[] = []
+          let applied = 0
           for (const row of remaining) {
+            // Row applies are synchronous SQLite writes on the main process;
+            // hand control back regularly so the window keeps painting.
+            if (++applied % 20 === 0) await new Promise<void>(resolve => setImmediate(resolve))
             const recordId = String(row.id || this.pullRowIdentity(row))
             if (pending.has(recordId)) {
               // The unsent local edit is authoritative. Skipping the older
