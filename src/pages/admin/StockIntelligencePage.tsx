@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, RefreshCw, Search, GitBranch, Package, ArrowDownUp, Download, FileText } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import toast from 'react-hot-toast'
+import { useAuthStore } from '@/store/authStore'
+import { canManageAllBranchStock } from '@/lib/branchAccess'
 
 type Row = Record<string, unknown>
 
@@ -12,9 +14,12 @@ function money(n: unknown) {
 }
 
 export default function StockIntelligencePage() {
+  const user = useAuthStore(state => state.user)
+  const canViewAllBranches = canManageAllBranchStock(user)
+  const ownBranchId = String(user?.branch?.id || user?.branch_id || '')
   const [branches, setBranches] = useState<Row[]>([])
   const [branchSummary, setBranchSummary] = useState<Row[]>([])
-  const [branchId, setBranchId] = useState('')
+  const [branchId, setBranchId] = useState(() => canViewAllBranches ? '' : ownBranchId)
   const [branchStock, setBranchStock] = useState<Row[]>([])
   const [movements, setMovements] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
@@ -31,15 +36,20 @@ export default function StockIntelligencePage() {
     })
   }, [])
 
+  useEffect(() => {
+    if (!canViewAllBranches && ownBranchId && branchId !== ownBranchId) setBranchId(ownBranchId)
+  }, [canViewAllBranches, ownBranchId, branchId])
+
   const load = async () => {
     setLoading(true)
     try {
+      const effectiveBranchId = branchId || (canViewAllBranches ? 'all' : ownBranchId)
       const [branchList, summary, stockRes, moveRes] = await Promise.all([
         window.api.admin.branches.list(),
         window.api.stocks.branchSummary(),
-        window.api.stocks.branchDetail(branchId || 'all'),
+        window.api.stocks.branchDetail(effectiveBranchId),
         window.api.stocks.movements({
-          branch_id: branchId || undefined,
+          branch_id: branchId || (canViewAllBranches ? undefined : ownBranchId),
           movement_type: movementType || undefined,
           date_from: dateFrom || undefined,
           date_to: dateTo || undefined,
@@ -60,7 +70,7 @@ export default function StockIntelligencePage() {
     }
   }
 
-  useEffect(() => { load() }, [branchId, movementType, dateFrom, dateTo])
+  useEffect(() => { load() }, [branchId, movementType, dateFrom, dateTo, canViewAllBranches, ownBranchId])
 
   const filteredMovements = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -74,15 +84,18 @@ export default function StockIntelligencePage() {
     ? 'Live product rows for the branch you selected.'
     : 'Branch matrix with stock health, units, and alert counts.'
 
-  const lowStock = useMemo(() => {
-    if (branchStock.length) {
-      return branchStock.filter(row => {
-        const qty = Number(row.quantity ?? 0)
-        return qty >= 1 && qty <= 5
-      })
-    }
-    return branchSummary.filter(row => Number(row.low_stock_count ?? 0) > 0 || Number(row.out_of_stock_count ?? 0) > 0)
-  }, [branchStock, branchSummary])
+  const lowStockProducts = useMemo(() => branchStock.filter(row => {
+    const qty = Number(row.quantity ?? 0)
+    const min = Number(row.min_stock_level ?? 5)
+    return qty > 0 && qty <= min
+  }), [branchStock])
+  const branchAlerts = useMemo(
+    () => branchSummary.filter(row => Number(row.low_stock_count ?? 0) > 0 || Number(row.out_of_stock_count ?? 0) > 0),
+    [branchSummary],
+  )
+  const lowStockCount = branchId
+    ? lowStockProducts.length
+    : branchSummary.reduce((sum, row) => sum + Number(row.low_stock_count ?? 0), 0)
 
   const exportRows = async () => {
     setExporting(true)
@@ -152,8 +165,8 @@ export default function StockIntelligencePage() {
             <label className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>
               Branch
               <select value={branchId} onChange={e => setBranchId(e.target.value)} className="input mt-1 w-full">
-                <option value="">All Branches</option>
-                {branches.map(b => (
+                {canViewAllBranches && <option value="">All Branches</option>}
+                {branches.filter(b => canViewAllBranches || String(b.id) === ownBranchId).map(b => (
                   <option key={String(b.id)} value={String(b.id)}>
                     {String(b.name)}{(b as { is_active?: number | boolean }).is_active === 0 ? ' (Inactive)' : ''}
                   </option>
@@ -187,8 +200,8 @@ export default function StockIntelligencePage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {[
             { label: 'Branches', value: branchSummary.length, icon: GitBranch },
-            { label: 'Low Stock Items', value: lowStock.length, icon: AlertTriangle },
-            { label: 'Current Rows', value: branchStock.length, icon: Package },
+            { label: 'Low Stock Items', value: lowStockCount, icon: AlertTriangle },
+            { label: 'Current Rows', value: currentRows.length, icon: Package },
             { label: 'Movements', value: filteredMovements.length, icon: ArrowDownUp },
           ].map(card => {
             const Icon = card.icon
@@ -302,16 +315,22 @@ export default function StockIntelligencePage() {
           <div className="rounded-lg border p-4" style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
             <h3 className="font-semibold mb-3" style={{ color: 'var(--text-1)' }}>Low Stock Alerts</h3>
             <div className="space-y-2">
-              {lowStock.length === 0 ? (
+              {(branchId ? lowStockProducts : branchAlerts).length === 0 ? (
                 <div className="rounded-lg border p-3 text-sm" style={{ borderColor: 'var(--border)', color: 'var(--text-3)' }}>
                   No low stock items
                 </div>
-              ) : lowStock.slice(0, 12).map(row => (
+              ) : (branchId ? lowStockProducts : branchAlerts).slice(0, 12).map(row => (
                 <div key={String(row.id)} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
                   <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>{String(row.product_name || row.name || '-')}</p>
-                      <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
-                    SKU: {String(row.sku || '-')} · Qty: {Number(row.quantity || row.total_units || 0)} · Range: 1-5 low, 0 out
-                  </p>
+                  {branchId ? (
+                    <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                      SKU: {String(row.sku || '-')} | Qty: {Number(row.quantity || 0)} | Minimum: {Number(row.min_stock_level || 0)}
+                    </p>
+                  ) : (
+                    <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                      Low: {Number(row.low_stock_count || 0)} | Out of stock: {Number(row.out_of_stock_count || 0)}
+                    </p>
+                  )}
                 </div>
               ))}
             </div>

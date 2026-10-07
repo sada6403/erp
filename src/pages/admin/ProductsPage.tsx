@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import NumberInput from '@/components/shared/NumberInput'
@@ -31,6 +31,8 @@ interface BranchItem {
   code?: string
 }
 
+const PRODUCT_PAGE_SIZE = 100
+
 export default function ProductsPage() {
   const { products, categories, suppliers, loading, load: loadProducts } = useProductsStore()
   const { user: currentUser } = useAuthStore()
@@ -56,6 +58,7 @@ export default function ProductsPage() {
   const [normalizing, setNormalizing] = useState(false)
   const [audit, setAudit] = useState<CatalogAudit | null>(null)
   const [auditLoading, setAuditLoading] = useState(false)
+  const [page, setPage] = useState(1)
 
   // Post-mutation refresh (create/update/delete/import/normalize) always
   // forces a real refetch — only the initial mount below uses the cache.
@@ -116,16 +119,27 @@ export default function ProductsPage() {
       .catch((err: unknown) => console.error('Failed to load branch stock:', err))
   }, [branchFilter, catFilter])
 
-  const brands = [...new Set(products.map(p => (p as unknown as Record<string,unknown>).brand as string).filter(Boolean))]
+  const brands = useMemo(
+    () => [...new Set(products.map(p => (p as unknown as Record<string,unknown>).brand as string).filter(Boolean))],
+    [products],
+  )
 
-  const filtered = products.filter(p => {
+  const filtered = useMemo(() => products.filter(p => {
     const pr = p as unknown as Record<string,unknown>
     return (
       (!search || p.name.toLowerCase().includes(search.toLowerCase()) || p.sku.toLowerCase().includes(search.toLowerCase())) &&
       (!catFilter || p.category_id === catFilter) &&
       (!brandFilter || pr.brand === brandFilter)
     )
-  })
+  }), [products, search, catFilter, brandFilter])
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PRODUCT_PAGE_SIZE))
+  const visibleProducts = useMemo(
+    () => filtered.slice((page - 1) * PRODUCT_PAGE_SIZE, page * PRODUCT_PAGE_SIZE),
+    [filtered, page],
+  )
+
+  useEffect(() => { setPage(1) }, [search, catFilter, brandFilter, branchFilter])
+  useEffect(() => { if (page > pageCount) setPage(pageCount) }, [page, pageCount])
 
   const handleImportExcel = async () => {
     try {
@@ -247,16 +261,16 @@ export default function ProductsPage() {
       return next
     })
   }
-  const allVisibleSelected = filtered.length > 0 && filtered.every(p => selectedIds.has(p.id))
+  const allVisibleSelected = visibleProducts.length > 0 && visibleProducts.every(p => selectedIds.has(p.id))
   const toggleSelectAllVisible = () => {
     setSelectedIds(prev => {
       if (allVisibleSelected) {
         const next = new Set(prev)
-        filtered.forEach(p => next.delete(p.id))
+        visibleProducts.forEach(p => next.delete(p.id))
         return next
       }
       const next = new Set(prev)
-      filtered.forEach(p => next.add(p.id))
+      visibleProducts.forEach(p => next.add(p.id))
       return next
     })
   }
@@ -405,7 +419,7 @@ export default function ProductsPage() {
           <tbody>
             {loading ? (
               <tr><td colSpan={11} className="text-center py-16 text-slate-500">Loading...</td></tr>
-            ) : filtered.map(p => {
+            ) : visibleProducts.map(p => {
               const pr = p as unknown as Record<string, unknown>
               const discPct = Number(p.discount_pct || pr.discount_pct || 0)
               return (
@@ -490,6 +504,35 @@ export default function ProductsPage() {
             )}
           </tbody>
         </table>
+        {!loading && filtered.length > 0 && (
+          <div className="sticky bottom-0 flex items-center justify-between gap-3 border-t px-6 py-3"
+            style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+              Showing {(page - 1) * PRODUCT_PAGE_SIZE + 1}-{Math.min(page * PRODUCT_PAGE_SIZE, filtered.length)} of {filtered.length}
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="btn-secondary btn-sm"
+              >
+                Previous
+              </button>
+              <span className="text-xs font-semibold" style={{ color: 'var(--text-2)' }}>
+                Page {page} of {pageCount}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage(p => Math.min(pageCount, p + 1))}
+                disabled={page === pageCount}
+                className="btn-secondary btn-sm"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {showForm && (
