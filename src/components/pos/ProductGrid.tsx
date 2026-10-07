@@ -77,8 +77,7 @@ function CrossBranchModal({
 
   return (
     <div className="fixed inset-0 z-[998] flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}
-      onClick={onClose}>
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
       <div className="w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden"
         style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
         onClick={e => e.stopPropagation()}>
