@@ -59,6 +59,9 @@ function createTransport(cfg = getConfig()) {
     port: cfg.port,
     secure: cfg.secure,
     auth: cfg.user ? { user: cfg.user, pass: cfg.pass } : undefined,
+    connectionTimeout: 10000,
+    greetingTimeout: 10000,
+    socketTimeout: 20000,
   })
 }
 
