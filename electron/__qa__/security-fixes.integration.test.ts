@@ -530,6 +530,12 @@ describe('Security audit regression — cross-branch / IDOR fixes', () => {
     const subBranchAttempt = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: BR_A, quantity: 7, reason: 'QA branch count correction' })
     expect(subBranchAttempt.success, subBranchAttempt.error).toBe(true)
 
+    db.prepare(`INSERT OR REPLACE INTO branches (id, name, code, is_active) VALUES (?, ?, ?, 0)`)
+      .run('inactive-stock-target', 'Recovered historical branch', 'RECOVERED-QA')
+    const inactiveAttempt = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: 'inactive-stock-target', quantity: 7, reason: 'must fail clearly' })
+    expect(inactiveAttempt.success).toBe(false)
+    expect(String(inactiveAttempt.error)).toContain('inactive')
+
     const res = await call('stocks:adjustCorrection', { product_id: PROD1, branch_id: mainBranchId, quantity: 7, reason: 'QA counted stock' })
     expect(res.success).toBe(true)
     const movement = db.prepare(`SELECT * FROM stock_movements WHERE product_id=? AND movement_type='ADJUSTMENT' AND (from_branch_id=? OR to_branch_id=?) ORDER BY created_at DESC LIMIT 1`).get(PROD1, mainBranchId, mainBranchId) as Record<string, unknown>

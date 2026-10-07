@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.7.26 — 2026-10-07 — Cross-branch stock correction fix
+
+- Company Admin can correct stock for any active branch from Edit Product, not only Main Branch.
+- Inactive/recovered historical branches are hidden from the stock target list; the backend now returns a clear "branch is inactive" error instead of a misleading authorization error.
+- "Product updated" toast is shown only after the stock correction succeeds (no more split success).
+
 ## 2.7.24 — 2026-10-06 — Stock control permissions and edit_requests sync repair
 
 - Fixed sync failure on `edit_requests` where cloud database rejected insert with "Field 'reason' doesn't have a default value":

@@ -270,11 +270,12 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (!Number.isFinite(Number(quantity)) || Number(quantity) < 0) {
         throw new Error('Stock quantity must be zero or greater')
       }
-      if (!canManuallyEditBranchStock(db, user, branch_id)) {
+      if (!canManageAllBranchStock(db, user)) {
         return { success: false, error: 'Only an authorized Main Branch user can edit branch stock' }
       }
-      const activeBranch = db.prepare('SELECT id FROM branches WHERE id=? AND is_active=1').get(branch_id)
-      if (!activeBranch) throw new Error('Select a valid active branch for this stock adjustment')
+      const targetBranch = db.prepare('SELECT id, is_active FROM branches WHERE id=?').get(branch_id) as { id: string; is_active: number } | undefined
+      if (!targetBranch) throw new Error('Selected branch no longer exists')
+      if (!targetBranch.is_active) throw new Error('Selected branch is inactive. Activate it before changing stock.')
       if (!db.prepare('SELECT id FROM products WHERE id=? AND is_active=1').get(product_id)) {
         throw new Error('Product not found or inactive')
       }
@@ -334,7 +335,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
     const db = getDb()
       const { product_id, branch_id, warehouse_id, quantity, reason } = payload
       const user = store.get('auth_user') as Record<string, unknown>
-      const isAdmin = canManuallyEditBranchStock(db, user, branch_id)
+      const isAdmin = canManageAllBranchStock(db, user)
 
       if (!isAdmin) {
         return { success: false, error: 'Only an authorized Main Branch user can edit branch stock' }
@@ -348,9 +349,9 @@ export function registerStockHandlers(ipcMain: IpcMain) {
       if (!String(reason || '').trim()) {
         return { success: false, error: 'A reason is required for every stock adjustment' }
       }
-      if (!db.prepare('SELECT id FROM branches WHERE id=? AND is_active=1').get(branch_id)) {
-        throw new Error('Select a valid active branch for this stock adjustment')
-      }
+      const targetBranch = db.prepare('SELECT id, is_active FROM branches WHERE id=?').get(branch_id) as { id: string; is_active: number } | undefined
+      if (!targetBranch) throw new Error('Selected branch no longer exists')
+      if (!targetBranch.is_active) throw new Error('Selected branch is inactive. Activate it before changing stock.')
 
       if (!isAdmin && !payload.edit_request_id) {
         return { success: false, error: 'No approved edit request found — please request approval first' }

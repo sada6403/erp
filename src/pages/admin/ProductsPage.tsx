@@ -29,6 +29,7 @@ interface BranchItem {
   id: string
   name: string
   code?: string
+  is_active?: boolean | number
 }
 
 const PRODUCT_PAGE_SIZE = 100
@@ -89,7 +90,13 @@ export default function ProductsPage() {
     loadProducts() // no force — instant if already cached from a prior visit
     loadAudit()
     window.api.admin.branches.list().then((r: { success: boolean; data?: unknown[] }) => {
-      if (r.success && r.data) setBranches(r.data as BranchItem[])
+      if (r.success && r.data) {
+        const activeBranches = (r.data as BranchItem[]).filter(branch => Boolean(branch.is_active))
+        setBranches(activeBranches)
+        setBranchFilter(current => current && !activeBranches.some(branch => branch.id === current)
+          ? (canManageAllBranches ? '' : ownBranchId)
+          : current)
+      }
     }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -1063,12 +1070,10 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
         const res = await window.api.products.update(product.id, { ...payload, edit_request_id: editRequestId }) as { success: boolean; error?: string }
         if (!res.success) { toast.error(res.error || 'Failed to update product'); return }
         productId = product.id
-        toast.success('Product updated')
       } else {
         const res = await window.api.products.create({ ...payload, edit_request_id: editRequestId })
         if (!res.success) { toast.error(res.error || 'Failed'); return }
         productId = (res.data as { id: string }).id
-        toast.success('Product created')
       }
       const stockPromise = stockIsReadOnly
         ? Promise.resolve({ success: true } as { success: boolean; error?: string })
@@ -1086,8 +1091,11 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
         stockPromise,
         window.api.admin.productUom.save(productId, uoms.filter(u => u.uom_name.trim())) as Promise<{ success: boolean; error?: string }>,
       ])
-      if (!stockRes.success) { toast.error(stockRes.error || 'Failed to update stock quantity'); return }
-      if (!uomRes.success) toast.error(uomRes.error || 'Failed to save units of measure')
+      if (!stockRes.success) {
+        toast.error(`${product ? 'Product details were saved, but' : 'Product was created, but'} stock was not updated: ${stockRes.error || 'Unknown error'}`)
+        return
+      }
+      if (!uomRes.success) { toast.error(uomRes.error || 'Failed to save units of measure'); return }
 
       if (discountPct > 0) {
         const discountRes = existingDiscountId
@@ -1101,6 +1109,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
         await window.api.discounts.toggleActive(existingDiscountId, false)
       }
 
+      toast.success(product ? 'Product and stock updated' : 'Product created')
       onSave()
     } catch (err) {
       toast.error('Failed to save product: ' + String(err))
@@ -1411,7 +1420,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
                   />
                 )}
                 <p className="text-xs" style={{ color: 'var(--text-3)' }}>
-                  Company Admin manual correction for Main Branch. Every change is recorded in the stock movement log.
+                  Company Admin correction for the selected active branch. Every change is recorded in the stock movement log.
                 </p>
               </div>
             )}
