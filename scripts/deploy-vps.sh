@@ -5,6 +5,14 @@ APP_DIR="${APP_DIR:-/var/www/pos-backend}"
 BACKEND_DIR="$APP_DIR/backend"
 SUPERADMIN_DIR="$APP_DIR/portals/superadmin"
 
+if [[ "${1:-}" == "--publish-only" ]]; then
+  artifact_dir="${2:?Artifact directory is required}"
+  release_version="${3:?Release version is required}"
+
+  echo "[deploy] publishing desktop release $release_version"
+  exec bash "$APP_DIR/scripts/publish-vps-release.sh" "$artifact_dir" "$release_version"
+fi
+
 echo "[deploy] app dir: $APP_DIR"
 cd "$APP_DIR"
 

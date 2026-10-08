@@ -116,7 +116,7 @@ jobs:
           RELEASE_DIR: ${{ runner.temp }}/desktop-release-${{ needs.release-check.outputs.version }}
           RELEASE_VERSION: ${{ needs.release-check.outputs.version }}
         run: |
-          sudo bash "$GITHUB_WORKSPACE/scripts/publish-vps-release.sh" "$RELEASE_DIR" "$RELEASE_VERSION"
+          sudo /usr/local/bin/pos-deploy --publish-only "$RELEASE_DIR" "$RELEASE_VERSION"
 
       - name: Verify public release
         env:
