@@ -4,13 +4,28 @@ set -euo pipefail
 APP_DIR="${APP_DIR:-/var/www/pos-backend}"
 BACKEND_DIR="$APP_DIR/backend"
 SUPERADMIN_DIR="$APP_DIR/portals/superadmin"
+DESKTOP_RELEASE_DIR="/tmp/pos-desktop-release"
 
-if [[ "${1:-}" == "--publish-only" ]]; then
-  artifact_dir="${2:?Artifact directory is required}"
-  release_version="${3:?Release version is required}"
+if [[ -f "$DESKTOP_RELEASE_DIR/.publish-request" ]]; then
+  metadata_file="$DESKTOP_RELEASE_DIR/latest.yml"
+  [[ -f "$metadata_file" ]] || {
+    echo "[deploy] desktop release metadata is missing" >&2
+    exit 1
+  }
+
+  release_version="$(sed -nE 's/^version:[[:space:]]*([^[:space:]]+).*/\1/p' "$metadata_file" | head -n 1)"
+  [[ -n "$release_version" ]] || {
+    echo "[deploy] desktop release version is missing" >&2
+    exit 1
+  }
 
   echo "[deploy] publishing desktop release $release_version"
-  exec bash "$APP_DIR/scripts/publish-vps-release.sh" "$artifact_dir" "$release_version"
+  bash "$APP_DIR/scripts/publish-vps-release.sh" "$DESKTOP_RELEASE_DIR" "$release_version"
+
+  installer="Enterprise POS ERP Setup $release_version.exe"
+  rm -f -- "$DESKTOP_RELEASE_DIR/.publish-request" "$metadata_file" "$DESKTOP_RELEASE_DIR/$installer"
+  rmdir "$DESKTOP_RELEASE_DIR" 2>/dev/null || true
+  exit 0
 fi
 
 echo "[deploy] app dir: $APP_DIR"

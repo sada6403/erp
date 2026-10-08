@@ -109,14 +109,15 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: desktop-release-${{ needs.release-check.outputs.version }}
-          path: ${{ runner.temp }}/desktop-release-${{ needs.release-check.outputs.version }}
+          path: /tmp/pos-desktop-release
 
       - name: Publish desktop release
         env:
-          RELEASE_DIR: ${{ runner.temp }}/desktop-release-${{ needs.release-check.outputs.version }}
+          RELEASE_DIR: /tmp/pos-desktop-release
           RELEASE_VERSION: ${{ needs.release-check.outputs.version }}
         run: |
-          sudo /usr/local/bin/pos-deploy --publish-only "$RELEASE_DIR" "$RELEASE_VERSION"
+          : > "$RELEASE_DIR/.publish-request"
+          sudo /usr/local/bin/pos-deploy
 
       - name: Verify public release
         env:
