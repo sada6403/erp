@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.7.27 — 2026-10-09 — Company contact details cloud sync
+
+- Company address, phone, email, website, TIN/registration number and invoice
+  note now sync as company-wide settings across every activated POS device.
+- Login screens refresh the shared company contact details from the cloud.
+- Branding sync now compares the actual cached fields as well as its sync
+  marker, repairing devices whose old cache was incorrectly considered current.
+
+Deployment order: backend first, followed by the 2.7.27 Windows installer and
+auto-updater metadata.
+
 ## 2.7.26 — 2026-10-07 — Cross-branch stock correction fix
 
 - Company Admin can correct stock for any active branch from Edit Product, not only Main Branch.

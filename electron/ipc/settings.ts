@@ -9,15 +9,12 @@ import { getDb } from '../database'
 import { CloudApi } from '../services/cloudApi'
 import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
+import { CLOUD_BRANDING_KEYS } from '../services/companyBranding'
+
+export { CLOUD_BRANDING_KEYS } from '../services/companyBranding'
 
 const store = createCompanyStore()
 
-// Company-wide branding keys — synced through the cloud so every activated
-// device of the company shows the same logo/branding.
-export const CLOUD_BRANDING_KEYS = [
-  'company_name', 'company_logo_url', 'login_logo_url', 'pos_bill_logo_url',
-  'invoice_logo_url', 'favicon_url', 'brand_color', 'footer_text',
-] as const
 const MASKED_SECRET = '********'
 const FALLBACK_KEY = crypto.createHash('sha256').update('pos-erp-local-settings-key').digest()
 

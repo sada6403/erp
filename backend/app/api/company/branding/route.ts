@@ -8,7 +8,9 @@ export const dynamic = 'force-dynamic'
 // Branding keys a POS device may read/write. Company-wide: set once at the
 // main branch, pulled by every activated device during sync.
 const BRANDING_KEYS = [
-  'company_name', 'company_logo_url', 'login_logo_url', 'pos_bill_logo_url',
+  'company_name', 'company_address', 'company_phone', 'company_email',
+  'company_website', 'company_tin', 'invoice_note',
+  'company_logo_url', 'login_logo_url', 'pos_bill_logo_url',
   'invoice_logo_url', 'favicon_url', 'brand_color', 'footer_text',
 ] as const
 
