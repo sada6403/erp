@@ -161,10 +161,9 @@ async function sendBranchActivationKey(input: {
       <p>A new branch <strong>${safe.branchName}</strong> (${safe.branchCode}) has been created. Use the details below to activate the POS device for this branch.</p>
       <table style="width:100%;border-collapse:collapse;margin:22px 0;background:#f9fafb;border:1px solid #e5e7eb">
         <tr><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb">${safe.keyLabel}</td><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb;font-family:monospace;font-weight:700">${safe.key}</td></tr>
-        <tr><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb">Branch</td><td style="padding:11px 14px;border-bottom:1px solid #e5e7eb;font-weight:700">${safe.branchName}</td></tr>
-        <tr><td style="padding:11px 14px">Cloud API URL</td><td style="padding:11px 14px;font-family:monospace">${safe.apiUrl}</td></tr>
+        <tr><td style="padding:11px 14px">Branch</td><td style="padding:11px 14px;font-weight:700">${safe.branchName}</td></tr>
       </table>
-      <p>On the new POS device open the activation screen, enter the key and cloud API URL, then select <strong>${safe.branchName}</strong> as the branch.</p>
+      <p>On the new POS device open the activation screen, enter the key, then select <strong>${safe.branchName}</strong> as the branch.</p>
       <p style="color:#b45309"><strong>Confidential:</strong> do not share this key outside your organisation.</p>
       <p style="margin-top:24px">Regards,<br>${safe.companyName} Administration</p>
     </div>
@@ -173,9 +172,8 @@ async function sendBranchActivationKey(input: {
     text: `A new branch ${input.branchName} (${input.branchCode || 'No code'}) has been created.
 
 ${safe.keyLabel === 'License key' ? 'License key' : 'Company activation key'}: ${activationKey}
-Cloud API URL: ${apiUrl || 'Not configured'}
 
-On the new POS device open the activation screen, enter the key and URL, then select this branch.
+On the new POS device open the activation screen, enter the key, then select this branch.
 
 Keep this key confidential.
 

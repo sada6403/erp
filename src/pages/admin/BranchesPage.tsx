@@ -20,7 +20,6 @@ export function formatWhatsAppMessage(data: {
   temporaryPassword?: string | null
   branchPin?: string | null
   activationKey?: string | null
-  cloudApiUrl?: string | null
 }): string {
   const lines: string[] = []
   lines.push(`🏢 *${data.companyName || 'Enterprise POS ERP'}*`)
@@ -38,9 +37,6 @@ export function formatWhatsAppMessage(data: {
     lines.push(``)
     lines.push(`🔐 *Company Activation Key:*`)
     lines.push(`${data.activationKey}`)
-  }
-  if (data.cloudApiUrl) {
-    lines.push(`🌐 *Cloud API Server:* ${data.cloudApiUrl}`)
   }
   lines.push(``)
   lines.push(`*Steps to Activate Branch POS:*`)
@@ -364,7 +360,6 @@ function WhatsAppShareModal({ branch, onClose }: { branch: Record<string, unknow
     managerEmail: credentials.manager_email,
     temporaryPassword: credentials.temporary_password,
     activationKey: credentials.activation_key,
-    cloudApiUrl: credentials.cloud_api_url,
   }) : ''
 
   function handleSend() {
@@ -572,7 +567,6 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
       temporaryPassword: (result as any).temporary_password,
       branchPin: form.branch_pin,
       activationKey: (result as any).activation_key,
-      cloudApiUrl: (result as any).cloud_api_url,
     })
 
     return (
