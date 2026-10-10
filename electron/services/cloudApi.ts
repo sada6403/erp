@@ -1,4 +1,5 @@
 import fs from 'fs'
+import { net } from 'electron'
 
 export interface CloudConfig {
   baseUrl: string
@@ -234,7 +235,8 @@ export class CloudApi {
   }
 
   private async request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${this.baseUrl}${path}`, {
+    const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
+    const response = await fetchFn(`${this.baseUrl}${path}`, {
       ...init,
       signal: init.signal || AbortSignal.timeout(15_000),
       headers: {

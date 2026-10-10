@@ -346,8 +346,8 @@ export default function App() {
         {/* Agent is now a tab inside Employee Management, not its own page
             (Issue 17) — redirect any old bookmark/link instead of 404ing. */}
         <Route path="/admin/agents" element={<Navigate to="/admin/users" replace />} />
-        <Route path="/admin/regions" element={<RequireSuperAdmin><RegionsPage /></RequireSuperAdmin>} />
-        <Route path="/admin/zones" element={<ZonesPage />} />
+        <Route path="/admin/regions" element={<Navigate to="/admin/users" replace />} />
+        <Route path="/admin/zones" element={<Navigate to="/admin/users" replace />} />
         <Route path="/admin/categories" element={<CategoriesPage />} />
         <Route path="/admin/suppliers" element={<RequireMainBranch><SuppliersPage /></RequireMainBranch>} />
         <Route path="/admin/analytics" element={<AnalyticsPage />} />

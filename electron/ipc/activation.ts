@@ -36,6 +36,11 @@ type CompanySwitchGrant = {
 // durable bypass stored in electron-store or renderer localStorage.
 let companySwitchRequest: CompanySwitchRequest | null = null
 let companySwitchGrant: CompanySwitchGrant | null = null
+let supportUnlockedUntil = 0
+
+export function isSupportUnlocked(): boolean {
+  return supportUnlockedUntil > Date.now()
+}
 
 function currentCloud(): CloudApi {
   const settings = (store.get('app_settings') as Record<string, unknown>) || {}
@@ -47,6 +52,7 @@ function currentCloud(): CloudApi {
 }
 
 function hasValidCompanySwitchGrant(): boolean {
+  if (isSupportUnlocked()) return true
   if (!companySwitchGrant || companySwitchGrant.expiresAt <= Date.now()) {
     companySwitchGrant = null
     return false
@@ -210,7 +216,11 @@ export function registerActivationHandlers() {
 
   // Gate for the hidden server-settings panels (activation page + settings)
   safeHandle(ipcMain, 'app:verifySupportPasscode', (_event, passcode: string) => {
-    return { success: verifySupportPasscode(passcode) }
+    const ok = verifySupportPasscode(passcode)
+    if (ok) {
+      supportUnlockedUntil = Date.now() + 30 * 60 * 1000 // 30 minutes grant
+    }
+    return { success: ok }
   })
 
   safeHandle(ipcMain, 'app:getDeviceInfo', () => ({
@@ -287,13 +297,16 @@ export function registerActivationHandlers() {
     return { success: true }
   })
 
+async function electronFetch(url: string, init?: RequestInit): Promise<Response> {
+  const signal = init?.signal || AbortSignal.timeout(12_000)
+  const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
+  return fetchFn(url, { ...init, signal })
+}
+
   safeHandle(ipcMain, 'app:verifyCompanyKey', async (_event, payload: {
     company_key?: string
     cloud_api_url: string
   }) => {
-    if (store.get('device_activated') && !isDeviceLocked() && !hasValidCompanySwitchGrant()) {
-      return { success: false, error: 'Super Admin approval is required before changing the company key' }
-    }
     const companyKey = payload.company_key?.trim()
     if (!companyKey) {
       return { success: false, error: 'Company key is required' }
@@ -301,8 +314,18 @@ export function registerActivationHandlers() {
 
     const apiUrl = normalizeApiUrl(payload.cloud_api_url ?? '')
     const verifyUrl = `${apiUrl}/api/activate/verify?company_key=${encodeURIComponent(companyKey)}`
-    const res = await (net?.fetch ? net.fetch(verifyUrl) : fetch(verifyUrl))
-    const responseText = await res.text()
+    let res: Response
+    let responseText: string
+    try {
+      res = await electronFetch(verifyUrl)
+      responseText = await res.text()
+    } catch {
+      return {
+        success: false,
+        error: 'Unable to reach the activation server. Please check your internet connection.',
+      }
+    }
+
     const data = parseJson(responseText)
 
     if (!data) {
@@ -322,6 +345,11 @@ export function registerActivationHandlers() {
       companyKey,
       companyName: data.company_name ? String(data.company_name) : '',
     })
+
+    if (store.get('device_activated') && !isDeviceLocked() && plan.workspaceChanged && !hasValidCompanySwitchGrant()) {
+      return { success: false, error: 'Super Admin approval is required before changing the company key' }
+    }
+
     return {
       success: true,
       ...activationSessionShape(),
@@ -348,8 +376,14 @@ export function registerActivationHandlers() {
     let verifiedCompany: Record<string, unknown> = {}
     if (company_key?.trim()) {
       const verifyUrl = `${apiUrl}/api/activate/verify?company_key=${encodeURIComponent(company_key.trim())}`
-      const verifyRes = await (net?.fetch ? net.fetch(verifyUrl) : fetch(verifyUrl))
-      const verifyText = await verifyRes.text()
+      let verifyRes: Response
+      let verifyText: string
+      try {
+        verifyRes = await electronFetch(verifyUrl)
+        verifyText = await verifyRes.text()
+      } catch {
+        return { success: false, error: 'Unable to reach the activation server. Please check your internet connection.' }
+      }
       verifiedCompany = parseJson(verifyText) ?? {}
       if (!verifyRes.ok || !Object.keys(verifiedCompany).length) {
         return { success: false, error: String(verifiedCompany.error ?? 'Company key verification failed') }
@@ -360,7 +394,7 @@ export function registerActivationHandlers() {
       companyKey: company_key?.trim() || license_key?.trim() || 'legacy-license',
       companyName: verifiedCompany.company_name ? String(verifiedCompany.company_name) : '',
     })
-    if (store.get('device_activated') && workspacePlan.workspaceChanged && !hasValidCompanySwitchGrant()) {
+    if (store.get('device_activated') && !isDeviceLocked() && workspacePlan.workspaceChanged && !hasValidCompanySwitchGrant()) {
       return { success: false, error: 'Super Admin approval has expired. Return to login and request access again.' }
     }
     const targetStore = createWorkspaceStore(workspacePlan.workspaceId)
@@ -377,17 +411,19 @@ export function registerActivationHandlers() {
     if (branch_id) body.branch_id = branch_id
 
     const activateUrl = `${apiUrl}/api/activate`
-    const res = await (net?.fetch ? net.fetch(activateUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }) : fetch(activateUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }))
+    let res: Response
+    let responseText: string
+    try {
+      res = await electronFetch(activateUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      responseText = await res.text()
+    } catch {
+      return { success: false, error: 'Unable to reach the activation server. Please check your internet connection.' }
+    }
 
-    const responseText = await res.text()
     const data = parseJson(responseText)
 
     if (!data) {

@@ -316,7 +316,16 @@ const api = {
 
   // Admin
   admin: {
-    branches:    { list: () => ipcRenderer.invoke('admin:branches:list'), findByCode: (code: string) => ipcRenderer.invoke('admin:branches:findByCode', code), create: (p: unknown) => ipcRenderer.invoke('admin:branches:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:branches:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:branches:delete', id), resendManagerCredentials: (branchId: string) => ipcRenderer.invoke('admin:branches:resendManagerCredentials', branchId) },
+    branches:    {
+      list: () => ipcRenderer.invoke('admin:branches:list'),
+      findByCode: (code: string) => ipcRenderer.invoke('admin:branches:findByCode', code),
+      create: (p: unknown) => ipcRenderer.invoke('admin:branches:create', p),
+      update: (id: string, p: unknown) => ipcRenderer.invoke('admin:branches:update', id, p),
+      delete: (id: string) => ipcRenderer.invoke('admin:branches:delete', id),
+      resendManagerCredentials: (branchId: string) => ipcRenderer.invoke('admin:branches:resendManagerCredentials', branchId),
+      getShareCredentials: (branchId: string) => ipcRenderer.invoke('admin:branches:getShareCredentials', branchId),
+      resetAndGetCredentials: (branchId: string) => ipcRenderer.invoke('admin:branches:resetAndGetCredentials', branchId),
+    },
     users:       { list: () => ipcRenderer.invoke('admin:users:list'), create: (p: unknown) => ipcRenderer.invoke('admin:users:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:users:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:users:delete', id), hardDelete: (id: string) => ipcRenderer.invoke('admin:users:hardDelete', id), toggleActive: (id: string, active: boolean) => ipcRenderer.invoke('admin:users:toggleActive', id, active), resetPassword: (id: string, newPassword: string) => ipcRenderer.invoke('admin:users:resetPassword', id, newPassword), forcePasswordChange: (id: string, force: boolean) => ipcRenderer.invoke('admin:users:forcePasswordChange', id, force), importExcel: () => ipcRenderer.invoke('admin:users:importExcel'), downloadTemplate: () => ipcRenderer.invoke('admin:users:downloadTemplate'), getAgentInfo: (userId: string) => ipcRenderer.invoke('admin:users:getAgentInfo', userId), auditUnlinkedUsers: () => ipcRenderer.invoke('agents:auditUnlinkedUsers') },
     roles:       { list: () => ipcRenderer.invoke('admin:roles:list'), create: (p: unknown) => ipcRenderer.invoke('admin:roles:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:roles:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:roles:delete', id) },
     suppliers:   { list: () => ipcRenderer.invoke('admin:suppliers:list'), payments: (id: string) => ipcRenderer.invoke('admin:suppliers:payments', id), payDue: (id: string, p: unknown) => ipcRenderer.invoke('admin:suppliers:payDue', id, p), create: (p: unknown) => ipcRenderer.invoke('admin:suppliers:create', p), update: (id: string, p: unknown) => ipcRenderer.invoke('admin:suppliers:update', id, p), delete: (id: string) => ipcRenderer.invoke('admin:suppliers:delete', id), restore: (id: string) => ipcRenderer.invoke('admin:suppliers:restore', id) },

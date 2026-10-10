@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import { app, dialog } from 'electron'
+import { app, dialog, net } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import bcrypt from 'bcryptjs'
@@ -569,12 +569,29 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const activation = EMAIL_RE_ADMIN.test(adminEmail)
       ? await sendBranchActivationKey({ adminEmail, branchId: id, branchName, branchCode: normalizedCode || null })
       : { success: false, error: 'Your admin account has no valid email address' }
+    const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const companyName = String(appSettings.company_name || 'Enterprise POS ERP')
+    const companyKey = String(store.get('device_company_key') || '')
+    const licenseKey = String(store.get('device_license_key') || '')
+    const activationKey = companyKey || licenseKey
+    const apiUrl = String(appSettings.cloud_api_url || '')
+
     return {
       success: true,
       data: {
         id,
         manager_id: managerId,
+        manager_name: managerName,
         manager_email: managerEmail,
+        temporary_password: temporaryPassword,
+        activation_key: activationKey,
+        company_name: companyName,
+        cloud_api_url: apiUrl,
+        branch_name: branchName,
+        branch_code: normalizedCode || null,
+        branch_phone: String(payload.phone || '').trim(),
+        branch_address: String(payload.address || '').trim(),
+        branch_pin: rawPin,
         email_sent: delivery.success,
         email_error: delivery.error || null,
         admin_email: adminEmail || null,
@@ -675,7 +692,127 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       recordId: manager.id,
       newValues: { email: manager.email, force_password_change: true },
     })
-    return { success: true, data: { email_sent: true, manager_email: manager.email } }
+    const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const companyName = String(appSettings.company_name || 'Enterprise POS ERP')
+    const companyKey = String(store.get('device_company_key') || '')
+    const licenseKey = String(store.get('device_license_key') || '')
+    const activationKey = companyKey || licenseKey
+    const apiUrl = String(appSettings.cloud_api_url || '')
+
+    return {
+      success: true,
+      data: {
+        email_sent: true,
+        manager_id: manager.id,
+        manager_name: manager.name,
+        manager_email: manager.email,
+        temporary_password: temporaryPassword,
+        activation_key: activationKey,
+        company_name: companyName,
+        cloud_api_url: apiUrl,
+        branch_name: manager.branch_name,
+        branch_code: manager.branch_code,
+      },
+    }
+  })
+
+  safeHandle(ipcMain, 'admin:branches:getShareCredentials', async (_e, branchId: string) => {
+    const caller = authUser()
+    if (!currentPerms(caller).all) return { success: false, error: 'Company Admin access required' }
+    const db = getDb()
+    const branch = db.prepare('SELECT id, name, code, phone, address FROM branches WHERE id = ?').get(branchId) as {
+      id: string; name: string; code: string | null; phone: string | null; address: string | null
+    } | undefined
+    if (!branch) return { success: false, error: 'Branch not found' }
+    const manager = db.prepare(`
+      SELECT u.id, u.name, u.email
+      FROM users u
+      LEFT JOIN roles r ON r.id = u.role_id
+      WHERE u.branch_id = ?
+        AND (u.role_id = ? OR LOWER(r.name) = 'branch manager')
+        AND u.is_active = 1
+      ORDER BY u.created_at ASC LIMIT 1
+    `).get(branchId, BRANCH_MANAGER_ROLE_ID) as { id: string; name: string; email: string } | undefined
+
+    const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const companyName = String(appSettings.company_name || 'Enterprise POS ERP')
+    const companyKey = String(store.get('device_company_key') || '')
+    const licenseKey = String(store.get('device_license_key') || '')
+    const activationKey = companyKey || licenseKey
+    const apiUrl = String(appSettings.cloud_api_url || '')
+
+    return {
+      success: true,
+      data: {
+        branch_id: branch.id,
+        branch_name: branch.name,
+        branch_code: branch.code,
+        branch_phone: branch.phone,
+        manager_name: manager?.name || '',
+        manager_email: manager?.email || '',
+        company_name: companyName,
+        activation_key: activationKey,
+        cloud_api_url: apiUrl,
+      },
+    }
+  })
+
+  safeHandle(ipcMain, 'admin:branches:resetAndGetCredentials', async (_e, branchId: string) => {
+    const caller = authUser()
+    if (!currentPerms(caller).all) return { success: false, error: 'Company Admin access required' }
+    const db = getDb()
+    const branch = db.prepare('SELECT id, name, code, phone FROM branches WHERE id = ?').get(branchId) as {
+      id: string; name: string; code: string | null; phone: string | null
+    } | undefined
+    if (!branch) return { success: false, error: 'Branch not found' }
+    const manager = db.prepare(`
+      SELECT u.id, u.name, u.email
+      FROM users u
+      LEFT JOIN roles r ON r.id = u.role_id
+      WHERE u.branch_id = ?
+        AND (u.role_id = ? OR LOWER(r.name) = 'branch manager')
+        AND u.is_active = 1
+      ORDER BY u.created_at ASC LIMIT 1
+    `).get(branchId, BRANCH_MANAGER_ROLE_ID) as { id: string; name: string; email: string } | undefined
+    if (!manager) return { success: false, error: 'No active Branch Manager assigned to this branch' }
+
+    const temporaryPassword = createTemporaryPassword()
+    const passwordHash = await bcrypt.hash(temporaryPassword, 10)
+    db.prepare(`
+      UPDATE users SET password_hash=?, force_password_change=1, updated_at=datetime('now') WHERE id=?
+    `).run(passwordHash, manager.id)
+    await enqueueUserRow(manager.id)
+    logAudit(db, {
+      userId: String(caller.id || '') || null,
+      branchId,
+      action: 'BRANCH_MANAGER_PASSWORD_RESET_FOR_WHATSAPP',
+      tableName: 'users',
+      recordId: manager.id,
+      newValues: { email: manager.email, force_password_change: true },
+    })
+
+    const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const companyName = String(appSettings.company_name || 'Enterprise POS ERP')
+    const companyKey = String(store.get('device_company_key') || '')
+    const licenseKey = String(store.get('device_license_key') || '')
+    const activationKey = companyKey || licenseKey
+    const apiUrl = String(appSettings.cloud_api_url || '')
+
+    return {
+      success: true,
+      data: {
+        branch_id: branch.id,
+        branch_name: branch.name,
+        branch_code: branch.code,
+        branch_phone: branch.phone,
+        manager_name: manager.name,
+        manager_email: manager.email,
+        temporary_password: temporaryPassword,
+        company_name: companyName,
+        activation_key: activationKey,
+        cloud_api_url: apiUrl,
+      },
+    }
   })
 
   safeHandle(ipcMain, 'admin:branches:delete', async (_e, id: string) => {
@@ -2350,7 +2487,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       const headers: Record<string, string> = { 'x-api-key': apiKey }
       const deviceId = String(store.get('device_id') || '').trim()
       if (deviceId) headers['x-device-id'] = deviceId
-      const resp = await fetch(`${apiUrl}/api/brand`, { headers })
+      const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
+      const resp = await fetchFn(`${apiUrl}/api/brand`, { headers, signal: AbortSignal.timeout(10_000) })
       if (resp.status !== 401) {
         deletedCompany401Count = 0
         return { success: true, deleted: false }
@@ -2391,7 +2529,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       return { success: false, error: 'Reset refused: no cloud configuration to verify against' }
     }
     try {
-      const resp = await fetch(`${apiUrl}/api/brand`, { headers: { 'x-api-key': apiKey } })
+      const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
+      const resp = await fetchFn(`${apiUrl}/api/brand`, { headers: { 'x-api-key': apiKey }, signal: AbortSignal.timeout(10_000) })
       if (resp.status !== 401) {
         return { success: false, error: 'Reset refused: cloud did not confirm this tenant is gone' }
       }

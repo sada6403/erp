@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
-import { Plus, Edit2, GitBranch, CheckCircle, XCircle, Trash2, AlertTriangle, Copy, Mail } from 'lucide-react'
+import { Plus, Edit2, GitBranch, CheckCircle, XCircle, Trash2, AlertTriangle, Copy, Mail, MessageSquare, Send, Phone } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 
@@ -9,6 +9,58 @@ function getPerms(u: unknown): Record<string, unknown> {
   const user = u as Record<string, unknown>
   return (user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>
     || user?.permissions as Record<string, unknown> || {}
+}
+
+export function formatWhatsAppMessage(data: {
+  companyName?: string
+  branchName: string
+  branchCode?: string | null
+  managerName?: string | null
+  managerEmail?: string | null
+  temporaryPassword?: string | null
+  branchPin?: string | null
+  activationKey?: string | null
+  cloudApiUrl?: string | null
+}): string {
+  const lines: string[] = []
+  lines.push(`🏢 *${data.companyName || 'Enterprise POS ERP'}*`)
+  lines.push(`📍 *Branch Setup & Activation Details*`)
+  lines.push(``)
+  lines.push(`*Branch:* ${data.branchName}${data.branchCode ? ` (${data.branchCode})` : ''}`)
+  if (data.managerName) lines.push(`*Manager:* ${data.managerName}`)
+  if (data.managerEmail) lines.push(`*Login Email:* ${data.managerEmail}`)
+  if (data.temporaryPassword) {
+    lines.push(`*Temporary Password:* ${data.temporaryPassword}`)
+    lines.push(`_(Note: You must change this temporary password on your first login)_`)
+  }
+  if (data.branchPin) lines.push(`*Branch PIN:* ${data.branchPin}`)
+  if (data.activationKey) {
+    lines.push(``)
+    lines.push(`🔐 *Company Activation Key:*`)
+    lines.push(`${data.activationKey}`)
+  }
+  if (data.cloudApiUrl) {
+    lines.push(`🌐 *Cloud API Server:* ${data.cloudApiUrl}`)
+  }
+  lines.push(``)
+  lines.push(`*Steps to Activate Branch POS:*`)
+  lines.push(`1. Open the POS ERP desktop application.`)
+  lines.push(`2. On the Activation screen, enter the *Company Activation Key* above.`)
+  lines.push(`3. Select branch *${data.branchName}* and click Activate.`)
+  lines.push(`4. Login using your email and password.`)
+
+  return lines.join('\n')
+}
+
+export function openWhatsAppCompose(phone: string, text: string) {
+  let cleanPhone = phone.replace(/\D/g, '')
+  if (cleanPhone.startsWith('0') && cleanPhone.length === 10) {
+    cleanPhone = '94' + cleanPhone.slice(1)
+  }
+  const url = cleanPhone
+    ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`
+    : `https://wa.me/?text=${encodeURIComponent(text)}`
+  window.open(url, '_blank')
 }
 
 export default function BranchesPage() {
@@ -22,6 +74,7 @@ export default function BranchesPage() {
   const [editing,    setEditing]    = useState<Record<string,unknown> | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Record<string,unknown> | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [shareTarget, setShareTarget] = useState<Record<string,unknown> | null>(null)
 
   const load = async () => {
     try {
@@ -158,18 +211,30 @@ export default function BranchesPage() {
                 SmartBuy Manager: {String(b.smartbuy_manager_name || 'Unassigned')}
               </p>
               <p className="text-xs" style={{ color: 'var(--text-3)' }}>{b.address as string || 'No address'}</p>
-              {isAdmin && b.manager_email ? (
-                <button
-                  type="button"
-                  onClick={() => handleResend(b)}
-                  disabled={resendingId === String(b.id)}
-                  className="mt-2 inline-flex items-center gap-1 text-xs text-brand-300 hover:text-brand-200 disabled:opacity-50"
-                  title={`Email new temporary login details to ${String(b.manager_email)}`}
-                >
-                  <Mail size={12} /> {resendingId === String(b.id) ? 'Sending…' : 'Resend manager login email'}
-                </button>
-              ) : null}
-              <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+              {isAdmin && (
+                <div className="mt-2.5 pt-2 border-t border-slate-700/50 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShareTarget(b)}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600/30 border border-emerald-500/30 transition-colors"
+                    title="Send activation key and manager credentials via WhatsApp"
+                  >
+                    <MessageSquare size={13} className="text-emerald-400" /> Share via WhatsApp
+                  </button>
+                  {b.manager_email ? (
+                    <button
+                      type="button"
+                      onClick={() => handleResend(b)}
+                      disabled={resendingId === String(b.id)}
+                      className="inline-flex items-center gap-1 text-xs text-brand-300 hover:text-brand-200 disabled:opacity-50 py-1"
+                      title={`Email new temporary login details to ${String(b.manager_email)}`}
+                    >
+                      <Mail size={12} /> {resendingId === String(b.id) ? 'Sending…' : 'Resend email'}
+                    </button>
+                  ) : null}
+                </div>
+              )}
+              <p className="text-xs mt-1.5" style={{ color: 'var(--text-3)' }}>
                 {`${String(b.phone ?? '')}${b.email ? ` · ${String(b.email)}` : ''}`}
               </p>
             </div>
@@ -226,7 +291,196 @@ export default function BranchesPage() {
           </div>
         </Modal>
       )}
+
+      {shareTarget && (
+        <WhatsAppShareModal
+          branch={shareTarget}
+          onClose={() => setShareTarget(null)}
+        />
+      )}
     </div>
+  )
+}
+
+function WhatsAppShareModal({ branch, onClose }: { branch: Record<string, unknown>; onClose: () => void }) {
+  const [loading, setLoading] = useState(true)
+  const [resetting, setResetting] = useState(false)
+  const [phone, setPhone] = useState(String(branch.phone || ''))
+  const [credentials, setCredentials] = useState<{
+    branch_name: string
+    branch_code?: string | null
+    manager_name?: string | null
+    manager_email?: string | null
+    temporary_password?: string | null
+    activation_key?: string | null
+    company_name?: string | null
+    cloud_api_url?: string | null
+  } | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    window.api.admin.branches.getShareCredentials(String(branch.id))
+      .then((res: { success: boolean; data?: any; error?: string }) => {
+        if (cancelled) return
+        if (res.success && res.data) {
+          setCredentials(res.data)
+          if (res.data.branch_phone && !phone) {
+            setPhone(res.data.branch_phone)
+          }
+        } else {
+          toast.error(res.error || 'Failed to load branch details')
+        }
+      })
+      .catch((err: any) => {
+        if (!cancelled) toast.error(err.message || 'Failed to load branch details')
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [branch.id])
+
+  async function handleResetPassword() {
+    if (!confirm(`Generate a new temporary password for ${credentials?.manager_name || 'the manager'} and send via WhatsApp?`)) return
+    setResetting(true)
+    try {
+      const res = await window.api.admin.branches.resetAndGetCredentials(String(branch.id))
+      if (res.success && res.data) {
+        setCredentials(res.data)
+        toast.success('New temporary password generated!')
+      } else {
+        toast.error(res.error || 'Failed to reset password')
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to reset password')
+    } finally {
+      setResetting(false)
+    }
+  }
+
+  const messageText = credentials ? formatWhatsAppMessage({
+    companyName: credentials.company_name || '',
+    branchName: credentials.branch_name,
+    branchCode: credentials.branch_code,
+    managerName: credentials.manager_name,
+    managerEmail: credentials.manager_email,
+    temporaryPassword: credentials.temporary_password,
+    activationKey: credentials.activation_key,
+    cloudApiUrl: credentials.cloud_api_url,
+  }) : ''
+
+  function handleSend() {
+    if (!phone.trim()) {
+      toast.error('Please enter the manager WhatsApp mobile number')
+      return
+    }
+    openWhatsAppCompose(phone, messageText)
+  }
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(messageText)
+    toast.success('Credentials copied to clipboard!')
+  }
+
+  return (
+    <Modal
+      title="Share via WhatsApp"
+      onClose={onClose}
+      footer={
+        <div className="flex justify-between items-center w-full">
+          <button
+            type="button"
+            onClick={handleCopy}
+            disabled={loading || !credentials}
+            className="btn-secondary btn-sm gap-1.5"
+          >
+            <Copy size={13} /> Copy Details
+          </button>
+          <div className="flex gap-2">
+            <button type="button" onClick={onClose} className="btn-secondary btn-sm">Close</button>
+            <button
+              type="button"
+              onClick={handleSend}
+              disabled={loading || !credentials}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm transition-colors disabled:opacity-50"
+            >
+              <Send size={13} /> Open WhatsApp
+            </button>
+          </div>
+        </div>
+      }
+    >
+      {loading ? (
+        <div className="py-8 text-center text-slate-400 text-sm">Loading branch details…</div>
+      ) : credentials ? (
+        <div className="space-y-4">
+          <div className="p-3 rounded-xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-400">Branch:</span>
+              <span className="text-white font-medium">{credentials.branch_name} {credentials.branch_code ? `(${credentials.branch_code})` : ''}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-400">Manager:</span>
+              <span className="text-white font-medium">{credentials.manager_name || 'Unassigned'}</span>
+            </div>
+            <div className="flex justify-between text-xs">
+              <span className="text-slate-400">Login Email:</span>
+              <span className="text-brand-300 font-mono">{credentials.manager_email || 'None'}</span>
+            </div>
+            <div className="flex justify-between text-xs items-center">
+              <span className="text-slate-400">Company Key:</span>
+              <span className="text-emerald-400 font-mono font-bold text-xs select-all">{credentials.activation_key || 'None'}</span>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-300 mb-1">
+              Branch Manager WhatsApp Mobile Number *
+            </label>
+            <div className="relative">
+              <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+              <input
+                type="text"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+                placeholder="e.g. 0771234567 or +94771234567"
+                className="input pl-9 text-xs py-2 w-full font-mono"
+              />
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">Enter mobile number to compose message directly in WhatsApp.</p>
+          </div>
+
+          <div className="p-3 rounded-xl bg-emerald-950/20 border border-emerald-800/30 flex items-center justify-between">
+            <div>
+              <p className="text-xs text-emerald-200 font-medium">Temporary Password</p>
+              <p className="text-[11px] text-slate-400">
+                {credentials.temporary_password
+                  ? <span className="font-mono text-emerald-300 font-bold">{credentials.temporary_password}</span>
+                  : 'Already created. Generate a new temporary password if needed.'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleResetPassword}
+              disabled={resetting}
+              className="btn-secondary btn-sm text-xs py-1 px-2.5"
+            >
+              {resetting ? 'Generating…' : 'Generate New Password'}
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Message Preview</label>
+            <textarea
+              readOnly
+              rows={7}
+              value={messageText}
+              className="w-full p-2.5 rounded-lg bg-slate-900 border border-slate-700 font-mono text-[11px] text-slate-300 resize-none select-all focus:outline-none"
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="py-6 text-center text-red-400 text-sm">Failed to load branch details</div>
+      )}
+    </Modal>
   )
 }
 
@@ -246,6 +500,7 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [resending, setResending] = useState(false)
+  const [whatsappPhone, setWhatsappPhone] = useState('')
   const [result, setResult] = useState<{ id: string; manager_email: string; email_sent: boolean; email_error: string | null; admin_email?: string | null; activation_sent?: boolean; activation_error?: string | null } | null>(null)
   const [form, setForm] = useState({
     manager_name: '', manager_email: '',
@@ -288,6 +543,7 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
       if (!res.success) { toast.error(res.error || 'Branch could not be created'); return }
       const data = res.data as NonNullable<typeof result>
       setResult(data)
+      setWhatsappPhone(String((data as any).branch_phone || form.phone || ''))
       toast.success('Branch and manager created')
     } catch (e: any) {
       toast.error(e.message || 'Branch could not be created')
@@ -307,11 +563,40 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
   }
 
   if (result) {
+    const shareMessage = formatWhatsAppMessage({
+      companyName: (result as any).company_name || '',
+      branchName: form.name,
+      branchCode: form.code,
+      managerName: form.manager_name,
+      managerEmail: form.manager_email,
+      temporaryPassword: (result as any).temporary_password,
+      branchPin: form.branch_pin,
+      activationKey: (result as any).activation_key,
+      cloudApiUrl: (result as any).cloud_api_url,
+    })
+
     return (
       <Modal
         title="Branch Created"
         onClose={onDone}
-        footer={<button onClick={onDone} className="btn-primary">Done</button>}
+        footer={
+          <div className="flex justify-between items-center w-full">
+            <button
+              type="button"
+              onClick={() => {
+                if (!whatsappPhone.trim()) {
+                  toast.error('Enter manager WhatsApp mobile number')
+                  return
+                }
+                openWhatsAppCompose(whatsappPhone, shareMessage)
+              }}
+              className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs flex items-center gap-1.5 shadow-sm transition-colors"
+            >
+              <MessageSquare size={14} /> Send via WhatsApp
+            </button>
+            <button onClick={onDone} className="btn-primary">Done</button>
+          </div>
+        }
       >
         <div className="space-y-4">
           <div className="flex items-start gap-3 p-3 rounded-lg bg-green-900/20 border border-green-700/30">
@@ -320,6 +605,60 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
               Branch <strong>{form.name}</strong> and its manager <strong>{form.manager_name}</strong> were created.
             </p>
           </div>
+
+          {/* WhatsApp Share Card */}
+          <div className="p-4 rounded-xl bg-emerald-950/30 border border-emerald-700/40 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-emerald-400 font-semibold text-sm">
+                <MessageSquare size={16} /> Send Details to Manager via WhatsApp
+              </div>
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-medium">Quick Share</span>
+            </div>
+            <p className="text-xs text-slate-300">
+              Send the Company Activation Key, Manager Email & Temporary Password directly to the Branch Manager via WhatsApp.
+            </p>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-slate-400">Branch Manager WhatsApp Number</label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    type="text"
+                    value={whatsappPhone}
+                    onChange={e => setWhatsappPhone(e.target.value)}
+                    placeholder="e.g. 0771234567 or +94771234567"
+                    className="input pl-9 text-xs py-2 w-full font-mono"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!whatsappPhone.trim()) {
+                      toast.error('Enter manager WhatsApp number')
+                      return
+                    }
+                    openWhatsAppCompose(whatsappPhone, shareMessage)
+                  }}
+                  className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs flex items-center gap-1.5 whitespace-nowrap shadow-sm transition-colors"
+                >
+                  <Send size={13} /> Open WhatsApp
+                </button>
+              </div>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={async () => {
+                  await navigator.clipboard.writeText(shareMessage)
+                  toast.success('Credentials & activation key copied to clipboard!')
+                }}
+                className="btn-secondary btn-sm text-xs gap-1.5"
+              >
+                <Copy size={12} /> Copy Details
+              </button>
+            </div>
+          </div>
+
           {result.email_sent ? (
             <div className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/60 border border-slate-700">
               <Mail size={18} className="text-brand-400 flex-shrink-0 mt-0.5" />
