@@ -5,7 +5,8 @@ import path from 'path'
 import { createHash } from 'crypto'
 import { app, BrowserWindow } from 'electron'
 import { CloudApi, CloudRateLimitError, DeviceRevokedError } from './cloudApi'
-import { CLOUD_BRANDING_KEYS, decryptSecret, pushBrandingToCloud } from '../ipc/settings'
+import { decryptSecret, pushBrandingToCloud } from '../ipc/settings'
+import { CLOUD_BRANDING_KEYS, hasCloudBrandingDifferences } from './companyBranding'
 import { reconcileLocalDefaultRoles } from './roleReconcile'
 import { ensureLocalBranchIdentity, reconcileIncomingBranch } from './branchReconcile'
 import { isDeviceLocked, reportDeviceRevoked } from './licenseService'
@@ -1036,7 +1037,10 @@ export class SyncService {
 
       const settings = (store.get('app_settings') as Record<string, unknown>) || {}
       const needsSmtpSync = branding.smtp && typeof branding.smtp === 'object' && Boolean((branding.smtp as Record<string, unknown>).host) && !settings.smtp_host
-      if (!needsSmtpSync && incoming === String(store.get('company_branding_synced') || '')) return
+      // The marker can survive a partial or old-version settings cache. Check
+      // the actual fields too, so a device repairs missing contact details.
+      const needsBrandingSync = hasCloudBrandingDifferences(settings, branding)
+      if (!needsSmtpSync && !needsBrandingSync && incoming === String(store.get('company_branding_synced') || '')) return
 
       let changed = false
       for (const key of CLOUD_BRANDING_KEYS) {
