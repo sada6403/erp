@@ -1,4 +1,4 @@
-import { app, ipcMain } from 'electron'
+import { app, ipcMain, net } from 'electron'
 import {
   activateCompanyWorkspace,
   createCompanyStore,
@@ -291,7 +291,7 @@ export function registerActivationHandlers() {
     company_key?: string
     cloud_api_url: string
   }) => {
-    if (store.get('device_activated') && !hasValidCompanySwitchGrant()) {
+    if (store.get('device_activated') && !isDeviceLocked() && !hasValidCompanySwitchGrant()) {
       return { success: false, error: 'Super Admin approval is required before changing the company key' }
     }
     const companyKey = payload.company_key?.trim()
@@ -301,7 +301,7 @@ export function registerActivationHandlers() {
 
     const apiUrl = normalizeApiUrl(payload.cloud_api_url ?? '')
     const verifyUrl = `${apiUrl}/api/activate/verify?company_key=${encodeURIComponent(companyKey)}`
-    const res = await fetch(verifyUrl)
+    const res = await (net?.fetch ? net.fetch(verifyUrl) : fetch(verifyUrl))
     const responseText = await res.text()
     const data = parseJson(responseText)
 
@@ -309,7 +309,7 @@ export function registerActivationHandlers() {
       const detail = htmlSummary(responseText)
       return {
         success: false,
-        error: `Activation server returned HTML instead of JSON (${res.status} ${res.statusText}). Check Cloud API URL: ${verifyUrl}${detail ? ` - ${detail}` : ''}`,
+        error: `Activation server returned invalid response (${res.status} ${res.statusText}).${detail ? ` - ${detail}` : ''}`,
       }
     }
 
@@ -348,7 +348,7 @@ export function registerActivationHandlers() {
     let verifiedCompany: Record<string, unknown> = {}
     if (company_key?.trim()) {
       const verifyUrl = `${apiUrl}/api/activate/verify?company_key=${encodeURIComponent(company_key.trim())}`
-      const verifyRes = await fetch(verifyUrl)
+      const verifyRes = await (net?.fetch ? net.fetch(verifyUrl) : fetch(verifyUrl))
       const verifyText = await verifyRes.text()
       verifiedCompany = parseJson(verifyText) ?? {}
       if (!verifyRes.ok || !Object.keys(verifiedCompany).length) {
@@ -377,11 +377,15 @@ export function registerActivationHandlers() {
     if (branch_id) body.branch_id = branch_id
 
     const activateUrl = `${apiUrl}/api/activate`
-    const res = await fetch(activateUrl, {
+    const res = await (net?.fetch ? net.fetch(activateUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    })
+    }) : fetch(activateUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }))
 
     const responseText = await res.text()
     const data = parseJson(responseText)
@@ -390,7 +394,7 @@ export function registerActivationHandlers() {
       const detail = htmlSummary(responseText)
       return {
         success: false,
-        error: `Activation server returned HTML instead of JSON (${res.status} ${res.statusText}). Check Cloud API URL: ${activateUrl}${detail ? ` - ${detail}` : ''}`,
+        error: `Activation server returned invalid response (${res.status} ${res.statusText}).${detail ? ` - ${detail}` : ''}`,
       }
     }
 

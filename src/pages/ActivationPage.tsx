@@ -34,6 +34,21 @@ const DEFAULT_API_URL =
   (import.meta.env.VITE_CLOUD_API_URL as string | undefined)?.trim().replace(/\/+$/, '') ||
   (import.meta.env.DEV ? 'http://localhost:3000' : BUILT_IN_API_URL)
 
+export function sanitizeErrorMessage(msg?: string): string {
+  if (!msg) return ''
+  const text = String(msg).trim()
+  if (/fetch failed|failed to fetch|networkerror|econnrefused|connect timeout|timeout/i.test(text)) {
+    return 'Unable to reach the activation server. Please check your internet connection.'
+  }
+  return text
+    .replace(/\s*\(Server:[^)]*\)/gi, '')
+    .replace(/https?:\/\/[^\s)]+/gi, '')
+    .replace(/\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?\b/g, '')
+    .replace(/\s*\(\s*\)/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+}
+
 export default function ActivationPage({ onActivated, bannerMessage, switchingCompany = false, onCancel }: Props) {
   const [step, setStep]             = useState<Step>('key')
   const [companyKey, setCompanyKey] = useState('')
@@ -110,12 +125,12 @@ export default function ActivationPage({ onActivated, bannerMessage, switchingCo
           company_key: companyKey.trim(),
           cloud_api_url: serverUrl,
         }) as VerifyResponse
-        if (!data.success) { setError(`${data.error ?? 'Verification failed'} (Server: ${serverUrl})`); setLoading(false); return }
+        if (!data.success) { setError(sanitizeErrorMessage(data.error ?? 'Verification failed')); setLoading(false); return }
       } else {
         const url = `${serverUrl}/api/activate/verify?company_key=${encodeURIComponent(companyKey.trim())}`
         const res = await fetch(url)
         data = await res.json() as VerifyResponse
-        if (!res.ok) { setError(`${data.error ?? 'Verification failed'} (Server: ${serverUrl})`); setLoading(false); return }
+        if (!res.ok) { setError(sanitizeErrorMessage(data.error ?? 'Verification failed')); setLoading(false); return }
       }
       if (data.device_slots_left <= 0 && !data.local_workspace_exists) {
         setError(`Device limit reached (${data.active_devices}/${data.max_devices}). Please upgrade your subscription.`)
@@ -125,8 +140,9 @@ export default function ActivationPage({ onActivated, bannerMessage, switchingCo
       setCompanyName(data.company_name)
       localStorage.setItem('activation_api_url', serverUrl)
       setStep('branch')
-    } catch (err) {
-      setError('Cannot reach the backend. Check the Cloud API URL.')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(sanitizeErrorMessage(msg || 'Unable to reach the activation server. Please check your internet connection.'))
     }
     setLoading(false)
   }
@@ -143,7 +159,7 @@ export default function ActivationPage({ onActivated, bannerMessage, switchingCo
       }) as Record<string, unknown>
 
       if (!res.success) {
-        setError(String(res.error ?? 'Activation failed'))
+        setError(sanitizeErrorMessage(String(res.error ?? 'Activation failed')))
         setStep('branch')
       } else {
         setStep('done')
@@ -156,8 +172,9 @@ export default function ActivationPage({ onActivated, bannerMessage, switchingCo
           setTimeout(() => onActivated(), 1400)
         }
       }
-    } catch (err) {
-      setError((err as Error).message)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(sanitizeErrorMessage(msg || 'Activation failed'))
       setStep('branch')
     }
   }
@@ -276,7 +293,7 @@ export default function ActivationPage({ onActivated, bannerMessage, switchingCo
 
               {bannerMessage && (
                 <div className="rounded-xl border border-red-700/50 bg-red-900/20 px-4 py-3 text-red-300 text-sm">
-                  {bannerMessage}
+                  {sanitizeErrorMessage(bannerMessage)}
                 </div>
               )}
 
@@ -288,7 +305,7 @@ export default function ActivationPage({ onActivated, bannerMessage, switchingCo
                 </div>
               </div>
 
-              {error && <div className="rounded-xl border border-red-700/50 bg-red-900/20 px-4 py-3 text-red-400 text-sm">{error}</div>}
+              {error && <div className="rounded-xl border border-red-700/50 bg-red-900/20 px-4 py-3 text-red-400 text-sm">{sanitizeErrorMessage(error)}</div>}
 
               {showPasscodePrompt && (
                 <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: '#2a2d3a', background: '#12151d' }}>
@@ -395,7 +412,7 @@ export default function ActivationPage({ onActivated, bannerMessage, switchingCo
                 </div>
               </div>
 
-              {error && <div className="rounded-xl border border-red-700/50 bg-red-900/20 px-4 py-3 text-red-400 text-sm">{error}</div>}
+              {error && <div className="rounded-xl border border-red-700/50 bg-red-900/20 px-4 py-3 text-red-400 text-sm">{sanitizeErrorMessage(error)}</div>}
 
               <div>
                 <label className="block text-xs font-medium text-gray-400 mb-2">

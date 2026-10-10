@@ -568,7 +568,31 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       return { success: true, data: localUrl, local_only: true }
   })
 
-  safeHandle(ipcMain, 'products:importExcel', async () => {
+  function findExistingProduct(
+    db: ReturnType<typeof getDb>,
+    sku?: string | null,
+    barcode?: string | null,
+    name?: string | null
+  ): Record<string, unknown> | undefined {
+    if (sku && sku.trim()) {
+      const found = db.prepare('SELECT * FROM products WHERE sku = ? AND is_active = 1 LIMIT 1').get(sku.trim()) as Record<string, unknown> | undefined
+      if (found) return found
+      const anyStatus = db.prepare('SELECT * FROM products WHERE sku = ? LIMIT 1').get(sku.trim()) as Record<string, unknown> | undefined
+      if (anyStatus) return anyStatus
+    }
+    if (barcode && barcode.trim()) {
+      const found = db.prepare('SELECT * FROM products WHERE barcode = ? AND is_active = 1 LIMIT 1').get(barcode.trim()) as Record<string, unknown> | undefined
+      if (found) return found
+    }
+    if (name && name.trim()) {
+      const found = db.prepare('SELECT * FROM products WHERE lower(trim(name)) = lower(trim(?)) AND is_active = 1 ORDER BY updated_at DESC LIMIT 1').get(name.trim()) as Record<string, unknown> | undefined
+      if (found) return found
+    }
+    return undefined
+  }
+
+  safeHandle(ipcMain, 'products:importExcel', async (_event, options?: { duplicateStrategy?: 'override' | 'fill_empty' | 'skip' }) => {
+      const duplicateStrategy = options?.duplicateStrategy || 'fill_empty'
       const { filePaths } = await dialog.showOpenDialog({
         title: 'Select Excel File',
         filters: [{ name: 'Excel', extensions: ['xlsx', 'xls', 'csv'] }],
@@ -646,41 +670,58 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             const minStock = parseInteger(getColumn(row, 'Low stock amount')) || 5
 
             const finalSku = buildSku(db, brand, categoryPaths[0]?.join(' > ') || name, sku)
-            const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(finalSku) as { id: string } | undefined
-            const sameName = !existing
-              ? db.prepare('SELECT id, sku FROM products WHERE lower(name) = lower(?) AND is_active = 1 ORDER BY updated_at DESC LIMIT 1').get(name) as { id: string; sku: string } | undefined
-              : undefined
-            const target = existing || sameName
+            const target = findExistingProduct(db, finalSku, barcode, name)
 
-            if (sameName && sameName.sku !== finalSku) {
-              const skuConflict = db.prepare('SELECT id FROM products WHERE sku = ? AND id <> ?').get(finalSku, sameName.id) as { id: string } | undefined
-              if (skuConflict) {
-                errors.push(`Row ${i + 2}: SKU ${finalSku} already exists on another product`)
-                skipped++
-                continue
-              }
+            if (target && duplicateStrategy === 'skip') {
+              skipped++
+              continue
             }
 
-            const productId = target ? target.id : crypto.randomUUID()
-            const payload = {
-              id: productId,
-              branch_id: importBranchId,
-              name,
-              sku: finalSku,
-              barcode,
-              category_id: categoryId,
-              supplier_id: supplierId,
-              unit: 'pcs',
-              cost_price: 0,
-              selling_price: sellingPrice,
-              tax_rate: 0,
-              min_stock_level: minStock,
-              description,
-              image_url: imageUrl,
-              brand,
-              weight,
-              product_type: wooType === 'variation' ? 'variation' : 'single',
-              not_for_sale: wooType === 'variable' ? 1 : 0,
+            const productId = target ? String(target.id) : crypto.randomUUID()
+            let payload: Record<string, unknown>
+
+            if (target && duplicateStrategy === 'fill_empty') {
+              payload = {
+                id: productId,
+                branch_id: target.branch_id ?? importBranchId,
+                name: (target.name as string) || name,
+                sku: (target.sku as string) || finalSku,
+                barcode: (target.barcode as string | null) || barcode || null,
+                category_id: (target.category_id as string | null) || categoryId || null,
+                supplier_id: (target.supplier_id as string | null) || supplierId || null,
+                unit: (target.unit as string) || 'pcs',
+                cost_price: Number(target.cost_price || 0),
+                selling_price: Number(target.selling_price || 0) > 0 ? Number(target.selling_price) : sellingPrice,
+                tax_rate: Number(target.tax_rate || 0),
+                min_stock_level: (Number(target.min_stock_level || 5) !== 5) ? Number(target.min_stock_level) : (minStock || 5),
+                description: (target.description as string | null) || description || null,
+                image_url: (target.image_url as string | null) || imageUrl || null,
+                brand: productHasBrand ? ((target.brand as string | null) || brand || null) : undefined,
+                weight: productHasWeight ? (Number(target.weight || 0) > 0 ? Number(target.weight) : (weight || null)) : undefined,
+                product_type: (target.product_type as string) || (wooType === 'variation' ? 'variation' : 'single'),
+                not_for_sale: Number(target.not_for_sale ?? (wooType === 'variable' ? 1 : 0)),
+              }
+            } else {
+              payload = {
+                id: productId,
+                branch_id: importBranchId,
+                name: target ? (name || (target.name as string)) : name,
+                sku: target ? (finalSku || (target.sku as string)) : finalSku,
+                barcode: barcode || (target?.barcode as string | null) || null,
+                category_id: categoryId || (target?.category_id as string | null) || null,
+                supplier_id: supplierId || (target?.supplier_id as string | null) || null,
+                unit: 'pcs',
+                cost_price: 0,
+                selling_price: sellingPrice || Number(target?.selling_price || 0),
+                tax_rate: 0,
+                min_stock_level: minStock,
+                description: description || (target?.description as string | null) || null,
+                image_url: imageUrl || (target?.image_url as string | null) || null,
+                brand,
+                weight,
+                product_type: wooType === 'variation' ? 'variation' : 'single',
+                not_for_sale: wooType === 'variable' ? 1 : 0,
+              }
             }
 
             if (target) {
@@ -703,7 +744,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
               if (productHasWeight) updateFields.push('weight=@weight')
               if (productHasProductType) updateFields.push('product_type=@product_type')
               if (productHasNotForSale) updateFields.push('not_for_sale=@not_for_sale')
-              db.prepare(`UPDATE products SET ${updateFields.join(', ')}, updated_at=datetime('now') WHERE id=@id`).run({ ...payload, sku: finalSku })
+              db.prepare(`UPDATE products SET ${updateFields.join(', ')}, updated_at=datetime('now') WHERE id=@id`).run({ ...payload, sku: payload.sku || finalSku })
               syncOps.push({ table: 'products', id: productId, operation: 'UPDATE', data: payload })
               updated++
             } else {
@@ -795,12 +836,18 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             if (!name) { skipped++; continue }
 
             const sku = code || buildSku(db, '', name, '')
-            const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(sku) as { id: string } | undefined
+            const existing = findExistingProduct(db, code || null, null, name)
 
             if (existing) {
-              db.prepare(`UPDATE products SET name=?, is_active=1, updated_at=datetime('now') WHERE id=?`)
-                .run(name, existing.id)
-              await enqueuSync('products', existing.id, 'UPDATE', { id: existing.id, name, is_active: 1 })
+              if (duplicateStrategy === 'skip') {
+                skipped++
+                continue
+              }
+              const finalName = duplicateStrategy === 'fill_empty' ? ((existing.name as string) || name) : name
+              const finalSku = duplicateStrategy === 'fill_empty' ? ((existing.sku as string) || sku) : (sku || (existing.sku as string))
+              db.prepare(`UPDATE products SET name=?, sku=?, is_active=1, updated_at=datetime('now') WHERE id=?`)
+                .run(finalName, finalSku, existing.id)
+              await enqueuSync('products', String(existing.id), 'UPDATE', { id: existing.id, name: finalName, sku: finalSku, is_active: 1 })
               updated++
             } else {
               const productId = crypto.randomUUID()
@@ -839,7 +886,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const catMap = new Map(cats.map(c => [c.name.toLowerCase(), c.id]))
       const supMap = new Map(sups.map(s => [s.name.toLowerCase(), s.id]))
 
-      let imported = 0, skipped = 0
+      let imported = 0, created = 0, updated = 0, skipped = 0
       const errors: string[] = []
 
       for (let i = 0; i < rows.length; i++) {
@@ -886,15 +933,69 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           const importUser = store.get('auth_user') as Record<string, unknown> | undefined
           const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
 
-          // Upsert by SKU
-          const existing = db.prepare('SELECT id FROM products WHERE sku = ?').get(autoSku) as { id: string } | undefined
-          const productId = existing ? existing.id : crypto.randomUUID()
+          // Lookup existing product by SKU, Barcode, or Name — PREVENTS DUPLICATE ENTRY
+          const existing = findExistingProduct(db, sku || autoSku, barcode || null, name)
+
+          if (existing && duplicateStrategy === 'skip') {
+            skipped++
+            continue
+          }
+
+          const productId = existing ? String(existing.id) : crypto.randomUUID()
 
           if (existing) {
+            let finalName: string
+            let finalCategoryId: string | null
+            let finalSupplierId: string | null
+            let finalBarcode: string | null
+            let finalUnit: string
+            let finalCost: number
+            let finalSelling: number
+            let finalTax: number
+            let finalDiscount: number
+            let finalMinStock: number
+            let finalDesc: string | null
+
+            if (duplicateStrategy === 'fill_empty') {
+              // Fill only fields that were empty in previous upload
+              finalName = (existing.name as string) || name
+              finalBarcode = (existing.barcode as string | null) || (barcode || null)
+              finalCategoryId = (existing.category_id as string | null) || categoryId || null
+              finalSupplierId = (existing.supplier_id as string | null) || supplierId || null
+              finalUnit = (existing.unit && existing.unit !== 'pcs') ? (existing.unit as string) : (unit || 'pcs')
+              finalCost = (Number(existing.cost_price || 0) > 0) ? Number(existing.cost_price) : costPrice
+              finalSelling = (Number(existing.selling_price || 0) > 0) ? Number(existing.selling_price) : sellingPrice
+              finalTax = (Number(existing.tax_rate || 0) > 0) ? Number(existing.tax_rate) : taxRate
+              finalDiscount = (Number(existing.discount_pct || 0) > 0) ? Number(existing.discount_pct) : discountPct
+              finalMinStock = (Number(existing.min_stock_level || 5) !== 5) ? Number(existing.min_stock_level) : (minStock || 5)
+              finalDesc = (existing.description as string | null) || (description || null)
+            } else {
+              // Override with new CSV data
+              finalName = name || (existing.name as string)
+              finalBarcode = barcode || (existing.barcode as string | null)
+              finalCategoryId = categoryId || (existing.category_id as string | null)
+              finalSupplierId = supplierId || (existing.supplier_id as string | null)
+              finalUnit = unit || (existing.unit as string) || 'pcs'
+              finalCost = costPrice > 0 ? costPrice : (existing.cost_price as number) || 0
+              finalSelling = sellingPrice > 0 ? sellingPrice : (existing.selling_price as number) || 0
+              finalTax = taxRate > 0 ? taxRate : (existing.tax_rate as number) || 0
+              finalDiscount = discountPct > 0 ? discountPct : (existing.discount_pct as number) || 0
+              finalMinStock = minStock !== 5 ? minStock : (existing.min_stock_level as number) || 5
+              finalDesc = description || (existing.description as string | null)
+            }
+
             db.prepare(`UPDATE products SET name=?, category_id=?, supplier_id=?, barcode=?, unit=?,
-              cost_price=?, selling_price=?, tax_rate=?, discount_pct=?, min_stock_level=?, description=?, updated_at=datetime('now')
-              WHERE id=?`).run(name, categoryId, supplierId, barcode || null, unit,
-              costPrice, sellingPrice, taxRate, discountPct, minStock, description || null, productId)
+              cost_price=?, selling_price=?, tax_rate=?, discount_pct=?, min_stock_level=?, description=?, is_active=1, updated_at=datetime('now')
+              WHERE id=?`).run(finalName, finalCategoryId, finalSupplierId, finalBarcode, finalUnit,
+              finalCost, finalSelling, finalTax, finalDiscount, finalMinStock, finalDesc, productId)
+
+            await enqueuSync('products', productId, 'UPDATE', {
+              id: productId, name: finalName, barcode: finalBarcode, category_id: finalCategoryId,
+              supplier_id: finalSupplierId, unit: finalUnit, cost_price: finalCost,
+              selling_price: finalSelling, tax_rate: finalTax, discount_pct: finalDiscount, min_stock_level: finalMinStock,
+              description: finalDesc, is_active: true
+            })
+            updated++
           } else {
             db.prepare(`INSERT INTO products (id, branch_id, name, sku, barcode, category_id, supplier_id, unit,
               cost_price, selling_price, tax_rate, discount_pct, min_stock_level, description)
@@ -906,6 +1007,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
               selling_price: sellingPrice, tax_rate: taxRate, discount_pct: discountPct, min_stock_level: minStock,
               description: description || null, is_active: true
             })
+            created++
           }
 
           // Sync product discount rule if discountPct > 0
@@ -927,31 +1029,36 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             }
             const branchId = user?.branch_id as string || 'b1111111-1111-4111-8111-111111111111'
             const existingStock = db.prepare('SELECT id, quantity, damaged_qty FROM stocks WHERE product_id=? AND branch_id=?').get(productId, branchId) as { id: string; quantity: number; damaged_qty: number } | undefined
-            if (existingStock && stockQty < Number(existingStock.damaged_qty || 0)) {
-              throw new Error('Imported stock cannot be lower than the recorded damaged quantity')
+            
+            if (duplicateStrategy === 'fill_empty' && existingStock && Number(existingStock.quantity) > 0) {
+              // Keep existing stock untouched
+            } else {
+              if (existingStock && stockQty < Number(existingStock.damaged_qty || 0)) {
+                throw new Error('Imported stock cannot be lower than the recorded damaged quantity')
+              }
+              let stockMovement: Record<string, unknown> | null = null
+              db.transaction(() => {
+                if (existingStock) {
+                  db.prepare(`UPDATE stocks SET quantity=?, updated_at=datetime('now') WHERE product_id=? AND branch_id=?`).run(stockQty, productId, branchId)
+                } else {
+                  db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)`).run(crypto.randomUUID(), productId, branchId, stockQty)
+                }
+                const delta = stockQty - Number(existingStock?.quantity || 0)
+                if (delta !== 0) {
+                  stockMovement = insertStockMovement(db, {
+                    product_id: productId,
+                    from_branch_id: delta < 0 ? branchId : null,
+                    to_branch_id: delta > 0 ? branchId : null,
+                    quantity: Math.abs(delta),
+                    movement_type: 'ADJUSTMENT',
+                    notes: 'Product import opening stock reconciliation',
+                    created_by: (user?.id as string) || null,
+                  })
+                }
+              })()
+              await syncStockRow(db, productId, branchId)
+              if (stockMovement) await enqueuSync('stock_movements', String((stockMovement as Record<string, unknown>).id), 'INSERT', stockMovement)
             }
-            let stockMovement: Record<string, unknown> | null = null
-            db.transaction(() => {
-              if (existingStock) {
-                db.prepare(`UPDATE stocks SET quantity=?, updated_at=datetime('now') WHERE product_id=? AND branch_id=?`).run(stockQty, productId, branchId)
-              } else {
-                db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)`).run(crypto.randomUUID(), productId, branchId, stockQty)
-              }
-              const delta = stockQty - Number(existingStock?.quantity || 0)
-              if (delta !== 0) {
-                stockMovement = insertStockMovement(db, {
-                  product_id: productId,
-                  from_branch_id: delta < 0 ? branchId : null,
-                  to_branch_id: delta > 0 ? branchId : null,
-                  quantity: Math.abs(delta),
-                  movement_type: 'ADJUSTMENT',
-                  notes: 'Product import opening stock reconciliation',
-                  created_by: (user?.id as string) || null,
-                })
-              }
-            })()
-            await syncStockRow(db, productId, branchId)
-            if (stockMovement) await enqueuSync('stock_movements', String((stockMovement as Record<string, unknown>).id), 'INSERT', stockMovement)
           }
 
           imported++
@@ -961,7 +1068,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
       }
 
-      return { success: true, data: { imported, skipped, errors } }
+      return { success: true, data: { imported, created, updated, skipped, errors, mode: 'standard', duplicateStrategy } }
   })
 
   safeHandle(ipcMain, 'products:normalizeCatalog', async () => {

@@ -5,7 +5,8 @@ import NumberInput from '@/components/shared/NumberInput'
 import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
-  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw, Clock, Printer
+  FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw, Clock, Printer,
+  ShieldCheck
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
@@ -60,6 +61,9 @@ export default function ProductsPage() {
   const [audit, setAudit] = useState<CatalogAudit | null>(null)
   const [auditLoading, setAuditLoading] = useState(false)
   const [page, setPage] = useState(1)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [duplicateStrategy, setDuplicateStrategy] = useState<'fill_empty' | 'override' | 'skip'>('fill_empty')
+  const [importing, setImporting] = useState(false)
 
   // Post-mutation refresh (create/update/delete/import/normalize) always
   // forces a real refetch — only the initial mount below uses the cache.
@@ -148,9 +152,11 @@ export default function ProductsPage() {
   useEffect(() => { setPage(1) }, [search, catFilter, brandFilter, branchFilter])
   useEffect(() => { if (page > pageCount) setPage(pageCount) }, [page, pageCount])
 
-  const handleImportExcel = async () => {
+  const handleImportExcel = async (strategy: 'fill_empty' | 'override' | 'skip' = duplicateStrategy) => {
+    setShowImportModal(false)
+    setImporting(true)
     try {
-      const res = await window.api.products.importExcel()
+      const res = await window.api.products.importExcel({ duplicateStrategy: strategy })
       if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Import failed'); return }
       const data = res.data as {
         imported: number
@@ -161,14 +167,16 @@ export default function ProductsPage() {
         errors: string[]
         mode?: string
       }
-      const detail = data.mode === 'woocommerce'
-        ? ` (${data.created || 0} new, ${data.updated || 0} updated${data.deactivatedDuplicates ? `, ${data.deactivatedDuplicates} duplicates inactive` : ''})`
-        : ''
-      toast.success(`Imported ${data.imported} products${detail}${data.skipped ? `, skipped ${data.skipped}` : ''}`)
+      const createdCount = data.created ?? (data.imported - (data.updated ?? 0))
+      const updatedCount = data.updated ?? 0
+      const detail = ` (${createdCount} new, ${updatedCount} updated${data.skipped ? `, ${data.skipped} skipped` : ''})`
+      toast.success(`Import completed: ${data.imported} products processed${detail}`)
       load()
       loadAudit()
     } catch (err) {
       toast.error('Import failed: ' + String(err))
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -333,7 +341,7 @@ export default function ProductsPage() {
             <button onClick={handleDownloadTemplate} className="btn-secondary btn-sm gap-1.5" title="Download Product Bulk Upload Template">
               <Download size={14} /> Download Template
             </button>
-            <button onClick={handleImportExcel} className="btn-secondary btn-sm gap-1.5">
+            <button onClick={() => setShowImportModal(true)} disabled={importing} className="btn-secondary btn-sm gap-1.5">
               <FileSpreadsheet size={14} /> Import CSV / Excel
             </button>
             <button onClick={handleExportCsv} className="btn-secondary btn-sm gap-1.5">
@@ -671,6 +679,169 @@ export default function ProductsPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* CSV / Excel Import Options Modal */}
+      {showImportModal && (
+        <Modal
+          title="Import Products (CSV / Excel)"
+          onClose={() => setShowImportModal(false)}
+          size="md"
+          footer={
+            <div className="flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowImportModal(false)}
+                className="btn-secondary btn-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleImportExcel(duplicateStrategy)}
+                disabled={importing}
+                className="btn-primary btn-sm gap-1.5"
+              >
+                <Upload size={14} />
+                Select File & Import
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm font-semibold text-white">
+                How should existing products be handled?
+              </p>
+              <p className="text-xs text-[var(--text-3)] mt-0.5">
+                Choose what to do when a product in the file already exists in your inventory.
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
+              {/* Option 1: Fill Empty Fields Only (Recommended) */}
+              <div
+                onClick={() => setDuplicateStrategy('fill_empty')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  duplicateStrategy === 'fill_empty'
+                    ? 'border-emerald-500 bg-emerald-500/10'
+                    : 'border-[var(--border)] hover:border-slate-600 bg-[var(--bg-soft)]'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5">
+                    <input
+                      type="radio"
+                      name="importDuplicateStrategy"
+                      checked={duplicateStrategy === 'fill_empty'}
+                      onChange={() => setDuplicateStrategy('fill_empty')}
+                      className="accent-emerald-500"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-white">
+                        Fill Empty Fields Only
+                      </span>
+                      <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
+                        Recommended
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--text-2)] mt-1">
+                      Preserve existing data. Only fill fields that were previously empty or blank (e.g. barcode, description, category, prices).
+                    </p>
+                    <p className="text-[11px] text-[var(--text-3)] mt-0.5 italic">
+                      பழைய தகவல்களை மாற்றாமல், முந்தைய பதிவில் காலியாக இருந்த விவரங்களை மட்டும் நிரப்பும்.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Option 2: Override Existing Data */}
+              <div
+                onClick={() => setDuplicateStrategy('override')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  duplicateStrategy === 'override'
+                    ? 'border-blue-500 bg-blue-500/10'
+                    : 'border-[var(--border)] hover:border-slate-600 bg-[var(--bg-soft)]'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5">
+                    <input
+                      type="radio"
+                      name="importDuplicateStrategy"
+                      checked={duplicateStrategy === 'override'}
+                      onChange={() => setDuplicateStrategy('override')}
+                      className="accent-blue-500"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-white">
+                        Override Existing Data (Update)
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--text-2)] mt-1">
+                      Update existing products with values from the new file.
+                    </p>
+                    <p className="text-[11px] text-[var(--text-3)] mt-0.5 italic">
+                      ஏற்கனவே உள்ள தயாரிப்புகளின் விவரங்களை புதிய கோப்பின் தகவல்களால் மாற்றி அமைக்கும் (Overwrite).
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Option 3: Skip Existing */}
+              <div
+                onClick={() => setDuplicateStrategy('skip')}
+                className={`p-3.5 rounded-xl border cursor-pointer transition-all ${
+                  duplicateStrategy === 'skip'
+                    ? 'border-amber-500 bg-amber-500/10'
+                    : 'border-[var(--border)] hover:border-slate-600 bg-[var(--bg-soft)]'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="mt-0.5">
+                    <input
+                      type="radio"
+                      name="importDuplicateStrategy"
+                      checked={duplicateStrategy === 'skip'}
+                      onChange={() => setDuplicateStrategy('skip')}
+                      className="accent-amber-500"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-white">
+                        Skip Existing Products
+                      </span>
+                    </div>
+                    <p className="text-xs text-[var(--text-2)] mt-1">
+                      Leave existing products untouched. Only add completely new products.
+                    </p>
+                    <p className="text-[11px] text-[var(--text-3)] mt-0.5 italic">
+                      ஏற்கனவே இருக்கும் பொருட்களை மாற்றாமல், புதிய பொருட்களை மட்டுமே சேர்க்கும்.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Guarantee Box */}
+            <div className="rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-3 flex items-start gap-2.5">
+              <ShieldCheck size={18} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-emerald-300">
+                  Zero Duplicate Guarantee (இரட்டைப் பதிவு தடுப்பு)
+                </p>
+                <p className="text-[11px] text-slate-300 mt-0.5">
+                  Products are automatically matched by <strong>SKU</strong>, <strong>Barcode</strong>, and <strong>Product Name</strong>. Double entries are strictly prevented.
+                </p>
+              </div>
+            </div>
+          </div>
+        </Modal>
       )}
 
     </div>
@@ -1441,6 +1612,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
           }}
         />
       )}
+
     </>
   )
 }
