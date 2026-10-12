@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.7.28 — 2026-10-12 — WhatsApp credentials share and branch management updates
+
+- Added "Share via WhatsApp" click-to-chat action to branch cards with pre-filled activation key and manager credentials.
+- WhatsApp compose opens with pre-typed text and waits for manual user confirmation before sending.
+- Fixed SMTP email service configuration persistence for active company workspaces.
+
 ## 2.7.27 — 2026-10-09 — Company contact details cloud sync
 
 - Company address, phone, email, website, TIN/registration number and invoice
