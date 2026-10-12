@@ -61,6 +61,7 @@ export const ALLOWED_TABLES = new Set([
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
+  users:                  new Set(['email']),
   invoice_items:          new Set(['invoice_id']),
   payments:               new Set(['invoice_id']),
   installment_payments:   new Set(['installment_id']),

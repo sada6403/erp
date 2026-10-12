@@ -239,22 +239,38 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const normalizedEmail = String(email || '').trim().toLowerCase()
 
-      const user = db.prepare(`
-        SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
-               b.name as branch_name
-        FROM users u
-        LEFT JOIN roles r ON r.id = u.role_id
-        LEFT JOIN branches b ON b.id = u.branch_id
-        WHERE LOWER(u.email) = ?
-      `).get(normalizedEmail) as Record<string, unknown> | undefined
+      const findLocalUser = () => db.prepare(`
+          SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
+                 b.name as branch_name
+          FROM users u
+          LEFT JOIN roles r ON r.id = u.role_id
+          LEFT JOIN branches b ON b.id = u.branch_id
+          WHERE LOWER(u.email) = ?
+        `).get(normalizedEmail) as Record<string, unknown> | undefined
+
+      let user = findLocalUser()
+      let repairAttempted = false
+      const repairFromCloud = async () => {
+        if (repairAttempted) return false
+        repairAttempted = true
+        const repaired = await getSyncService().repairLoginUser(normalizedEmail, String(password || ''))
+        if (repaired) user = findLocalUser()
+        return repaired
+      }
 
       if (!user) {
-        logAudit(db, { action: 'LOGIN_FAILED', newValues: { email: normalizedEmail, reason: 'User not found' } })
-        return { success: false, error: 'Invalid credentials' }
+        await repairFromCloud()
+        if (!user) {
+          logAudit(db, { action: 'LOGIN_FAILED', newValues: { email: normalizedEmail, reason: 'User not found locally or in cloud' } })
+          return { success: false, error: 'Invalid credentials' }
+        }
       }
 
       // Check account active
-      if (!user.is_active) return { success: false, error: 'Account is disabled. Contact your administrator.' }
+      if (!user.is_active) {
+        await repairFromCloud()
+        if (!user?.is_active) return { success: false, error: 'Account is disabled. Contact your administrator.' }
+      }
 
       // Check account lockout
       if (user.locked_until) {
@@ -268,10 +284,16 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       }
 
       if (!user.password_hash) {
-        return { success: false, error: 'Password is not set for this account. Ask admin to set a password or PIN.' }
+        await repairFromCloud()
+        if (!user?.password_hash) {
+          return { success: false, error: 'Password is not set for this account. Ask admin to set a password or PIN.' }
+        }
       }
 
-      const valid = await bcrypt.compare(String(password || ''), user.password_hash as string)
+      let valid = await bcrypt.compare(String(password || ''), user.password_hash as string)
+      if (!valid && await repairFromCloud() && user?.password_hash) {
+        valid = await bcrypt.compare(String(password || ''), user.password_hash as string)
+      }
       if (!valid) {
         const attempts = (Number(user.login_attempts) || 0) + 1
         const locked = attempts >= 5

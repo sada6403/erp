@@ -3,6 +3,7 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { createRequire } from 'module'
+import bcrypt from 'bcryptjs'
 
 const state = vi.hoisted(() => ({
   data: {} as Record<string, any>,
@@ -64,6 +65,98 @@ describe('Sync recovery and durable outbox', () => {
       channel: 'app:dataClearEvent',
       payload: { eventId },
     })
+  })
+
+  it('repairs a missing local admin from the cloud after verified login credentials', async () => {
+    const password = 'CloudLogin123!'
+    const passwordHash = await bcrypt.hash(password, 4)
+    const user = {
+      id: 'cloud-login-user', branch_id: 'cloud-login-branch', role_id: 'cloud-login-role',
+      name: 'Cloud Admin', email: 'cloud.login@example.test', password_hash: passwordHash,
+      is_active: 1, created_at: date, updated_at: date,
+    }
+    const cloud = {
+      changes: vi.fn(),
+      related: vi.fn(async (table: string) => {
+        if (table === 'users') return [user]
+        if (table === 'roles') return [{ id: 'cloud-login-role', name: 'Cloud Login Admin', permissions: { all: true }, updated_at: date }]
+        return [{ id: 'cloud-login-branch', name: 'Cloud Login Branch', code: 'CLB', is_active: 1, updated_at: date }]
+      }),
+    }
+    const apiSpy = vi.spyOn(service as any, 'getCloudApi').mockReturnValue(cloud)
+
+    await expect(service.repairLoginUser(user.email, password)).resolves.toBe(true)
+    expect(db.prepare('SELECT email FROM users WHERE id=?').get(user.id).email).toBe(user.email)
+    expect(cloud.related).toHaveBeenCalledWith('users', 'email', [user.email])
+    expect(cloud.changes).not.toHaveBeenCalled()
+    expect(cloud.related).toHaveBeenCalledWith('roles', 'id', ['cloud-login-role'])
+    expect(cloud.related).toHaveBeenCalledWith('branches', 'id', ['cloud-login-branch'])
+    apiSpy.mockRestore()
+  })
+
+  it('replaces a stale local and queued password hash with the verified cloud hash', async () => {
+    const oldHash = await bcrypt.hash('OldPassword123!', 4)
+    const password = 'CurrentPassword123!'
+    const cloudHash = await bcrypt.hash(password, 4)
+    db.prepare(`INSERT OR IGNORE INTO branches(id,name) VALUES ('stale-login-branch','Stale Login Branch')`).run()
+    db.prepare(`INSERT OR IGNORE INTO roles(id,name,permissions) VALUES ('stale-login-role','Stale Login Admin','{"all":true}')`).run()
+    db.prepare(`INSERT OR REPLACE INTO users(id,branch_id,role_id,name,email,password_hash,is_active)
+      VALUES ('stale-login-user','stale-login-branch','stale-login-role','Stale Admin','stale.login@example.test',?,1)`).run(oldHash)
+    await enqueue('users', 'stale-login-user', 'UPDATE', {
+      id: 'stale-login-user', name: 'Pending profile edit', password_hash: oldHash,
+    })
+
+    const cloud = {
+      changes: vi.fn(),
+      related: vi.fn().mockResolvedValue([{
+        id: 'stale-login-user', branch_id: 'stale-login-branch', role_id: 'stale-login-role',
+        name: 'Cloud Admin', email: 'stale.login@example.test', password_hash: cloudHash,
+        is_active: 1, created_at: date, updated_at: date,
+      }]),
+    }
+    const apiSpy = vi.spyOn(service as any, 'getCloudApi').mockReturnValue(cloud)
+
+    await expect(service.repairLoginUser('stale.login@example.test', password)).resolves.toBe(true)
+    const local = db.prepare('SELECT password_hash FROM users WHERE id=?').get('stale-login-user') as { password_hash: string }
+    expect(await bcrypt.compare(password, local.password_hash)).toBe(true)
+    const queued = db.prepare("SELECT payload FROM sync_queue WHERE table_name='users' AND record_id=? AND status='pending'")
+      .get('stale-login-user') as { payload: string }
+    expect(await bcrypt.compare(password, JSON.parse(queued.payload).password_hash)).toBe(true)
+    apiSpy.mockRestore()
+  })
+
+  it('self-heals a missed cloud user at startup without overwriting an unsent local edit', async () => {
+    const cloudHash = await bcrypt.hash('StartupRepair123!', 4)
+    const pendingHash = await bcrypt.hash('PendingLocal123!', 4)
+    db.prepare(`INSERT OR IGNORE INTO branches(id,name) VALUES ('startup-login-branch','Startup Login Branch')`).run()
+    db.prepare(`INSERT OR IGNORE INTO roles(id,name,permissions) VALUES ('startup-login-role','Startup Login Admin','{"all":true}')`).run()
+    db.prepare(`INSERT OR REPLACE INTO users(id,branch_id,role_id,name,email,password_hash,is_active)
+      VALUES ('pending-login-user','startup-login-branch','startup-login-role','Pending Local Name','pending.login@example.test',?,1)`).run(pendingHash)
+    await enqueue('users', 'pending-login-user', 'UPDATE', {
+      id: 'pending-login-user', name: 'Pending Local Name', password_hash: pendingHash,
+    })
+
+    const cloud = { changes: vi.fn().mockResolvedValue([
+      {
+        id: 'startup-login-user', branch_id: 'startup-login-branch', role_id: 'startup-login-role',
+        name: 'Startup Cloud Admin', email: 'startup.login@example.test', password_hash: cloudHash,
+        is_active: 1, created_at: date, updated_at: date,
+      },
+      {
+        id: 'pending-login-user', branch_id: 'startup-login-branch', role_id: 'startup-login-role',
+        name: 'Cloud Name', email: 'pending.login@example.test', password_hash: cloudHash,
+        is_active: 1, created_at: date, updated_at: date,
+      },
+    ]) }
+
+    await service.reconcileUserRolesFromCloud(cloud)
+
+    expect(db.prepare('SELECT email FROM users WHERE id=?').get('startup-login-user').email)
+      .toBe('startup.login@example.test')
+    const pending = db.prepare('SELECT name,password_hash FROM users WHERE id=?').get('pending-login-user') as
+      { name: string; password_hash: string }
+    expect(pending.name).toBe('Pending Local Name')
+    expect(await bcrypt.compare('PendingLocal123!', pending.password_hash)).toBe(true)
   })
   afterEach(() => service.stop())
   afterAll(() => { service.stop(); db.close(); fs.rmSync(state.directory, { recursive: true, force: true }) })

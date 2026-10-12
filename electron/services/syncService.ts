@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { createHash } from 'crypto'
 import { app, BrowserWindow } from 'electron'
+import bcrypt from 'bcryptjs'
 import { CloudApi, CloudRateLimitError, DeviceRevokedError } from './cloudApi'
 import { decryptSecret, pushBrandingToCloud } from '../ipc/settings'
 import { CLOUD_BRANDING_KEYS, hasCloudBrandingDifferences } from './companyBranding'
@@ -279,6 +280,90 @@ export class SyncService {
     this.scheduleSoon(250)
   }
 
+  // Admin login is normally local-first. If one device missed the cloud user
+  // row or an updated password hash, repair just that verified identity from
+  // the cloud and let the caller retry the local login. The password never
+  // leaves the main process and no cloud hash is exposed to the renderer.
+  async repairLoginUser(email: string, password: string): Promise<boolean> {
+    if (isDeviceLocked()) return false
+    const cloud = this.getCloudApi()
+    if (!cloud) return false
+
+    const normalizedEmail = String(email || '').trim().toLowerCase()
+    if (!normalizedEmail || !password) return false
+
+    try {
+      let cloudUsers: Record<string, unknown>[]
+      try {
+        // Current servers support an indexed, exact identity lookup. Keep the
+        // epoch fallback so a desktop update remains compatible during a
+        // rolling backend deployment.
+        cloudUsers = await cloud.related('users', 'email', [normalizedEmail])
+      } catch {
+        cloudUsers = await cloud.changes('users', '1970-01-01T00:00:00.000Z')
+      }
+      const cloudUser = cloudUsers.find(row =>
+        String(row.email || '').trim().toLowerCase() === normalizedEmail
+        && ![0, false, '0'].includes(row.is_active as never)
+      )
+      const cloudHash = String(cloudUser?.password_hash || '')
+      if (!cloudUser || !cloudHash || !await bcrypt.compare(password, cloudHash)) return false
+
+      const db = getDb()
+      const cloudRoleId = String(cloudUser.role_id || '')
+      if (!cloudRoleId) return false
+
+      let localRole = db.prepare('SELECT id, name FROM roles WHERE id=? LIMIT 1').get(cloudRoleId) as
+        { id: string; name: string } | undefined
+      if (!localRole) {
+        const role = (await cloud.related('roles', 'id', [cloudRoleId]))[0]
+        if (!role) return false
+        this.insertFiltered(db, 'roles', role)
+        localRole = db.prepare('SELECT id, name FROM roles WHERE id=? OR name=? LIMIT 1')
+          .get(cloudRoleId, String(role.name || '')) as { id: string; name: string } | undefined
+      }
+      if (!localRole) return false
+
+      const branchId = cloudUser.branch_id ? String(cloudUser.branch_id) : null
+      if (branchId && !db.prepare('SELECT id FROM branches WHERE id=? LIMIT 1').get(branchId)) {
+        const branch = (await cloud.related('branches', 'id', [branchId]))[0]
+        if (!branch) return false
+        this.insertFiltered(db, 'branches', branch)
+      }
+
+      const repairedUser = { ...cloudUser, role_id: localRole.id }
+      this.insertFiltered(db, 'users', repairedUser)
+
+      // A legacy queued profile edit may contain the old full-row password
+      // hash. Keep the edit, but replace its credentials with the hash that
+      // was just verified so the next upload cannot undo this repair for all
+      // other devices.
+      const queued = db.prepare(`SELECT id, payload FROM sync_queue
+        WHERE table_name='users' AND record_id=? AND status IN ('pending','processing','failed')`)
+        .all(String(cloudUser.id)) as Array<{ id: string; payload: string }>
+      for (const item of queued) {
+        try {
+          const payload = JSON.parse(item.payload) as Record<string, unknown>
+          payload.password_hash = cloudHash
+          if (cloudUser.pin_hash) payload.pin_hash = cloudUser.pin_hash
+          else delete payload.pin_hash
+          db.prepare('UPDATE sync_queue SET payload=? WHERE id=?').run(JSON.stringify(payload), item.id)
+        } catch {
+          // A malformed queue row remains available to normal diagnostics.
+        }
+      }
+
+      const repaired = db.prepare('SELECT password_hash FROM users WHERE id=? LIMIT 1')
+        .get(String(cloudUser.id)) as { password_hash?: string } | undefined
+      const valid = Boolean(repaired?.password_hash && await bcrypt.compare(password, repaired.password_hash))
+      if (valid) notifyRendererDataChanged()
+      return valid
+    } catch (error) {
+      console.warn('[SyncService] Online login identity repair failed:', error)
+      return false
+    }
+  }
+
   private scheduleSoon(ms: number): void {
     if (this.drainTimer) return
     this.drainTimer = setTimeout(() => {
@@ -425,6 +510,24 @@ export class SyncService {
         const id = String(cu.id || '')
         const cloudRoleId = String(cu.role_id || '')
         if (!id || !cloudRoleId) continue
+        const hasPendingLocalEdit = db.prepare(`SELECT 1 FROM sync_queue
+          WHERE table_name='users' AND record_id=? AND status IN ('pending','processing','failed') LIMIT 1`)
+          .get(id)
+
+        // The normal incremental cursor cannot recover a cloud user row that
+        // was missed or corrupted before the cursor advanced. A startup epoch
+        // read is already being performed here, so use it to refresh the
+        // local login directory as long as there is no unsent local edit to
+        // protect. Parent rows are pulled before users during normal sync; if
+        // one is still absent, defer this row to that normal repair path.
+        if (!hasPendingLocalEdit) {
+          try {
+            this.insertFiltered(db, 'users', cu)
+          } catch (error) {
+            console.warn(`[SyncService] Startup user repair deferred for ${String(cu.email || id)}:`, error)
+          }
+        }
+
         const localUser = db.prepare(`SELECT role_id, email FROM users WHERE id = ?`).get(id) as
           { role_id?: string; email?: string } | undefined
         if (!localUser?.role_id || localUser.role_id === cloudRoleId) continue
