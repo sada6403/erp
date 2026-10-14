@@ -4,15 +4,16 @@ import { useAuthStore } from '../store/authStore'
 import { auth, settings as settingsApi } from '../lib/api'
 import {
   ShieldCheck, LogOut, Menu, X, ChevronRight,
+  LayoutDashboard, Building2, KeyRound, Package, Sliders, FileText, MoreHorizontal
 } from 'lucide-react'
 
 const nav = [
-  { to: '/',                   label: 'Dashboard',   emoji: '📊', desc: 'Realtime stats & overview', end: true },
-  { to: '/companies',          label: 'Companies',   emoji: '🏢', desc: 'Tenants, branches & limits' },
-  { to: '/product-key-access', label: 'Key Access',  emoji: '🔑', desc: 'Product keys & activations' },
-  { to: '/packages',           label: 'Packages',    emoji: '📦', desc: 'Plan tiers & limits' },
-  { to: '/settings',           label: 'Settings',    emoji: '⚙️', desc: 'System, cloud & branding' },
-  { to: '/audit',              label: 'Audit Logs',  emoji: '📜', desc: 'Security tracking & history' },
+  { to: '/',                   label: 'Dashboard',   icon: LayoutDashboard, desc: 'Realtime stats & overview', end: true },
+  { to: '/companies',          label: 'Companies',   icon: Building2,       desc: 'Tenants, branches & limits' },
+  { to: '/product-key-access', label: 'Key Access',  icon: KeyRound,        desc: 'Product keys & activations' },
+  { to: '/packages',           label: 'Packages',    icon: Package,         desc: 'Plan tiers & device quotas' },
+  { to: '/settings',           label: 'Settings',    icon: Sliders,         desc: 'System, cloud & branding' },
+  { to: '/audit',              label: 'Audit Logs',  icon: FileText,        desc: 'Security tracking & history' },
 ]
 
 export default function Layout() {
@@ -113,10 +114,10 @@ export default function Layout() {
               </button>
             </div>
 
-            {/* Nav list with Big Emojis */}
+            {/* Nav list with Real Icons */}
             <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
               <p className="px-3 text-[10px] uppercase font-bold text-gray-500 tracking-wider mb-2">Navigation</p>
-              {nav.map(({ to, label, emoji, desc, end }) => (
+              {nav.map(({ to, label, icon: Icon, desc, end }) => (
                 <NavLink
                   key={to}
                   to={to}
@@ -131,9 +132,9 @@ export default function Layout() {
                   style={({ isActive }) => isActive ? { borderColor: `${accentColor}60`, background: `${accentColor}25` } : {}}
                 >
                   <div className="flex items-center gap-3.5">
-                    <span className="text-2xl flex-shrink-0 group-hover:scale-115 transition-transform duration-200">
-                      {emoji}
-                    </span>
+                    <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-800/90 text-gray-300 group-hover:bg-blue-600/20 group-hover:text-blue-400 transition-colors flex-shrink-0">
+                      <Icon className="w-4 h-4" />
+                    </div>
                     <div>
                       <p className="text-sm font-semibold leading-tight">{label}</p>
                       <p className="text-[10px] text-gray-400 font-normal mt-0.5 leading-tight">{desc}</p>
@@ -154,7 +155,7 @@ export default function Layout() {
                 onClick={handleLogout}
                 className="flex items-center justify-center gap-2 w-full px-3 py-2.5 rounded-xl text-sm font-semibold text-red-400 hover:text-white hover:bg-red-900/40 border border-red-800/40 transition-colors"
               >
-                <span className="text-lg">🚪</span>
+                <LogOut className="w-4 h-4" />
                 <span>Sign Out</span>
               </button>
             </div>
@@ -188,16 +189,16 @@ export default function Layout() {
           </div>
         </div>
 
-        {/* Navigation List with Eye-Catching Big Emojis */}
+        {/* Navigation List with Professional Lucide Icons */}
         <nav className="flex-1 px-3 py-4 space-y-1.5 overflow-y-auto">
           <p className="px-3 text-[10px] uppercase font-bold text-gray-500 tracking-wider mb-2">Main Menu</p>
-          {nav.map(({ to, label, emoji, desc, end }) => (
+          {nav.map(({ to, label, icon: Icon, desc, end }) => (
             <NavLink
               key={to}
               to={to}
               end={end}
               className={({ isActive }) =>
-                `group flex items-center gap-3.5 px-3.5 py-3 rounded-xl text-sm transition-all ${
+                `group flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-sm transition-all ${
                   isActive
                     ? 'font-bold text-white shadow-md shadow-blue-500/10 border'
                     : 'text-gray-400 hover:text-white hover:bg-gray-800/80 border border-transparent'
@@ -209,10 +210,9 @@ export default function Layout() {
                 background: `linear-gradient(135deg, ${accentColor}25, ${accentColor}10)`
               } : {}}
             >
-              {/* Big Emoji with animated scaling */}
-              <span className="text-2xl flex-shrink-0 group-hover:scale-120 group-hover:-rotate-3 transition-transform duration-200">
-                {emoji}
-              </span>
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-800/90 text-gray-300 group-hover:bg-blue-600/20 group-hover:text-blue-400 group-hover:scale-105 transition-all flex-shrink-0">
+                <Icon className="w-4 h-4" />
+              </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold leading-tight text-white group-hover:text-blue-300 transition-colors">
                   {label}
@@ -254,7 +254,7 @@ export default function Layout() {
 
       {/* ── Mobile Bottom Navigation Bar (Thumb Friendly) ─────────────────── */}
       <nav className="md:hidden fixed bottom-0 inset-x-0 z-30 bg-gray-900/95 backdrop-blur-md border-t border-gray-800 px-2 py-1 flex items-center justify-around shadow-2xl">
-        {nav.slice(0, 4).map(({ to, label, emoji, end }) => (
+        {nav.slice(0, 4).map(({ to, label, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}
@@ -267,7 +267,7 @@ export default function Layout() {
               }`
             }
           >
-            <span className="text-xl mb-0.5">{emoji}</span>
+            <Icon className="w-5 h-5 mb-0.5" />
             <span className="text-[10px] tracking-tight">{label}</span>
           </NavLink>
         ))}
@@ -278,7 +278,7 @@ export default function Layout() {
           onClick={() => setMobileMenuOpen(true)}
           className="flex flex-col items-center justify-center py-1.5 px-3 rounded-xl text-gray-400 hover:text-gray-200"
         >
-          <span className="text-xl mb-0.5">⚡</span>
+          <MoreHorizontal className="w-5 h-5 mb-0.5" />
           <span className="text-[10px] tracking-tight">More</span>
         </button>
       </nav>

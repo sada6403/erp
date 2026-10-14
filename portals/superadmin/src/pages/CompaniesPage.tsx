@@ -1,11 +1,11 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi, companySecurity as securityApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield, X, ChevronRight } from 'lucide-react'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield, X, ChevronRight, ArrowLeft, PackageCheck, Building2, Sparkles } from 'lucide-react'
 import { buildWhatsAppGuideText, buildWhatsAppPasswordText, openWhatsApp } from '../lib/onboardingGuide'
 
-interface CompanyHubModalProps {
+interface CompanyDetailViewProps {
   company: Company
-  onClose: () => void
+  onBack: () => void
   onEdit: () => void
   onToggleStatus: () => void
   onCompanyKey: () => void
@@ -24,9 +24,9 @@ interface CompanyHubModalProps {
   onDelete: () => void
 }
 
-function CompanyHubModal({
+function CompanyDetailView({
   company: c,
-  onClose,
+  onBack,
   onEdit,
   onToggleStatus,
   onCompanyKey,
@@ -43,286 +43,394 @@ function CompanyHubModal({
   onExports,
   onToggleLock,
   onDelete,
-}: CompanyHubModalProps) {
+}: CompanyDetailViewProps) {
   const isLocked = c.admin_locked === '1' || c.admin_locked === 'true'
   const isActive = c.status === 'active'
 
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
-
   const actionSections = [
     {
-      title: 'Security & Access Keys',
-      emoji: '🔑',
+      title: 'Security & Access Credentials',
+      icon: ShieldCheck,
+      iconColor: 'text-blue-400',
       items: [
         {
-          emoji: '🛡️',
+          icon: ShieldCheck,
           label: 'Company Activation Key',
-          desc: 'Offline license file & product key for registration',
-          color: 'hover:border-blue-500/50 hover:bg-blue-950/20 text-blue-400',
-          onClick: () => { onClose(); onCompanyKey() }
+          desc: 'Offline registration key & customer license file',
+          badge: 'License',
+          color: 'text-blue-400 bg-blue-500/10 border-blue-500/20 hover:border-blue-500/50',
+          onClick: onCompanyKey,
         },
         {
-          emoji: '🔑',
+          icon: Key,
           label: 'POS API Key',
           desc: 'Cloud sync token for desktop & mobile registers',
-          color: 'hover:border-amber-500/50 hover:bg-amber-950/20 text-amber-400',
-          onClick: () => { onClose(); onApiKey() }
+          badge: 'API Token',
+          color: 'text-amber-400 bg-amber-500/10 border-amber-500/20 hover:border-amber-500/50',
+          onClick: onApiKey,
         },
         {
-          emoji: '🔐',
-          label: 'Admin Password Hub',
-          desc: 'View initial password, reset or send to client',
-          color: 'hover:border-emerald-500/50 hover:bg-emerald-950/20 text-emerald-400',
-          onClick: () => { onClose(); onResetPw() }
+          icon: KeyRound,
+          label: 'Admin Password Management',
+          desc: 'View initial password, reset or dispatch via WhatsApp',
+          badge: 'Auth',
+          color: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20 hover:border-emerald-500/50',
+          onClick: onResetPw,
         },
         {
-          emoji: '📱',
+          icon: Smartphone,
           label: 'POS Hardware Devices',
-          desc: 'View authorized terminals, printers & registers',
-          color: 'hover:border-purple-500/50 hover:bg-purple-950/20 text-purple-400',
-          onClick: () => { onClose(); onDevices() }
+          desc: 'Manage authorized registers, printers & terminals',
+          badge: `${c.max_pos_devices ?? 2} Devices`,
+          color: 'text-purple-400 bg-purple-500/10 border-purple-500/20 hover:border-purple-500/50',
+          onClick: onDevices,
         },
         {
-          emoji: '🚀',
-          label: 'Send Setup Guide',
-          desc: 'Dispatch onboarding steps via WhatsApp or Email',
-          color: 'hover:border-sky-500/50 hover:bg-sky-950/20 text-sky-400',
-          onClick: () => { onClose(); onSendGuide() }
+          icon: Send,
+          label: 'Dispatch Setup Guide',
+          desc: 'Send automated onboarding instructions to client via WhatsApp / Email',
+          badge: 'Guide',
+          color: 'text-sky-400 bg-sky-500/10 border-sky-500/20 hover:border-sky-500/50',
+          onClick: onSendGuide,
         },
-      ]
+      ],
     },
     {
-      title: 'Configuration & Branding',
-      emoji: '⚙️',
+      title: 'Configuration & Customization',
+      icon: Sliders,
+      iconColor: 'text-indigo-400',
       items: [
         {
-          emoji: '🎛️',
+          icon: Settings2,
           label: 'Feature Management',
-          desc: 'Toggle ERP capabilities, modules & permissions',
-          color: 'hover:border-indigo-500/50 hover:bg-indigo-950/20 text-indigo-400',
-          onClick: () => { onClose(); onCapabilities() }
+          desc: 'Toggle ERP modules, inventory controls & pos capabilities',
+          badge: 'Modules',
+          color: 'text-indigo-400 bg-indigo-500/10 border-indigo-500/20 hover:border-indigo-500/50',
+          onClick: onCapabilities,
         },
         {
-          emoji: '🎨',
+          icon: Palette,
           label: 'Branding & Theme',
-          desc: 'Custom business logo, bill header & app colors',
-          color: 'hover:border-pink-500/50 hover:bg-pink-950/20 text-pink-400',
-          onClick: () => { onClose(); onBranding() }
+          desc: 'Custom business logo, bill receipt header & accent colors',
+          badge: 'White-label',
+          color: 'text-pink-400 bg-pink-500/10 border-pink-500/20 hover:border-pink-500/50',
+          onClick: onBranding,
         },
         {
-          emoji: '📧',
-          label: 'Notification Gateway',
-          desc: 'SMTP email server & SMS alert credentials',
-          color: 'hover:border-cyan-500/50 hover:bg-cyan-950/20 text-cyan-400',
-          onClick: () => { onClose(); onNotifCreds() }
+          icon: Mail,
+          label: 'Notification Credentials',
+          desc: 'Configure custom SMTP mail server & SMS alert gateway',
+          badge: 'SMTP / SMS',
+          color: 'text-cyan-400 bg-cyan-500/10 border-cyan-500/20 hover:border-cyan-500/50',
+          onClick: onNotifCreds,
         },
-      ]
+      ],
     },
     {
       title: 'Data & Maintenance',
-      emoji: '💾',
+      icon: Database,
+      iconColor: 'text-teal-400',
       items: [
         {
-          emoji: '🔒',
-          label: 'Clear Data Master PIN',
-          desc: 'Security authorization to reset or wipe store sales',
-          color: 'hover:border-orange-500/50 hover:bg-orange-950/20 text-orange-400',
-          onClick: () => { onClose(); onClearDataPw() }
+          icon: Lock,
+          label: 'Clear-All-Data Master PIN',
+          desc: 'Master security PIN required to reset store sales & data',
+          badge: 'Security',
+          color: 'text-orange-400 bg-orange-500/10 border-orange-500/20 hover:border-orange-500/50',
+          onClick: onClearDataPw,
         },
         {
-          emoji: '🛡️',
+          icon: Shield,
           label: 'Technician Support Access',
-          desc: 'Generate temporary passcode for remote technician',
-          color: 'hover:border-teal-500/50 hover:bg-teal-950/20 text-teal-400',
-          onClick: () => { onClose(); onSupportAccess() }
+          desc: 'Generate temporary one-time passcode for remote support technician',
+          badge: 'Support',
+          color: 'text-teal-400 bg-teal-500/10 border-teal-500/20 hover:border-teal-500/50',
+          onClick: onSupportAccess,
         },
         {
-          emoji: '💾',
+          icon: Database,
           label: 'Database Backups',
-          desc: 'Create manual snapshot or download auto-backups',
-          color: 'hover:border-blue-500/50 hover:bg-blue-950/20 text-blue-400',
-          onClick: () => { onClose(); onBackups() }
+          desc: 'Generate on-demand snapshot or download auto-scheduled archives',
+          badge: 'Backups',
+          color: 'text-blue-400 bg-blue-500/10 border-blue-500/20 hover:border-blue-500/50',
+          onClick: onBackups,
         },
         {
-          emoji: '📥',
+          icon: FileDown,
           label: 'Export Company Data',
-          desc: 'Download CSV / JSON data dumps of products & sales',
-          color: 'hover:border-violet-500/50 hover:bg-violet-950/20 text-violet-400',
-          onClick: () => { onClose(); onExports() }
+          desc: 'Download complete CSV or JSON data export for accounting',
+          badge: 'CSV / JSON',
+          color: 'text-violet-400 bg-violet-500/10 border-violet-500/20 hover:border-violet-500/50',
+          onClick: onExports,
         },
-      ]
+      ],
     },
     {
-      title: 'Tenant Control & Danger Zone',
-      emoji: '⚡',
+      title: 'Tenant Controls & Danger Zone',
+      icon: AlertTriangle,
+      iconColor: 'text-red-400',
       items: [
         {
-          emoji: '✏️',
+          icon: Edit2,
           label: 'Edit Company Profile',
-          desc: 'Update tenant name, contact, tier & max limits',
-          color: 'hover:border-gray-500/50 hover:bg-gray-800/60 text-gray-200',
-          onClick: () => { onClose(); onEdit() }
+          desc: 'Modify business details, admin contact, limits & plan tier',
+          badge: 'Settings',
+          color: 'text-gray-200 bg-gray-800/80 border-gray-750 hover:border-gray-500',
+          onClick: onEdit,
         },
         {
-          emoji: isLocked ? '🔓' : '🔒',
-          label: isLocked ? `Unlock Tenant (${c.lock_reason || 'Locked'})` : 'Lock Tenant (Freeze changes)',
-          desc: isLocked ? 'Resume staff & permission syncing' : 'Halt sync while allowing local sales',
-          color: isLocked ? 'hover:border-amber-500/50 hover:bg-amber-950/30 text-amber-300' : 'hover:border-yellow-500/50 hover:bg-yellow-950/30 text-yellow-300',
-          onClick: () => { onClose(); onToggleLock() }
+          icon: isLocked ? Unlock : Lock,
+          label: isLocked ? `Unlock Tenant (${c.lock_reason || 'Locked'})` : 'Lock Tenant (Freeze Changes)',
+          desc: isLocked ? 'Resume automatic cloud syncing of staff and permissions' : 'Halt changes from modifying local registers during maintenance',
+          badge: isLocked ? 'Locked' : 'Unlocked',
+          color: isLocked ? 'text-amber-300 bg-amber-500/10 border-amber-500/30 hover:border-amber-500' : 'text-yellow-300 bg-yellow-500/10 border-yellow-500/30 hover:border-yellow-500',
+          onClick: onToggleLock,
         },
         {
-          emoji: isActive ? '⏸️' : '▶️',
-          label: isActive ? 'Suspend Company' : 'Activate Company',
-          desc: isActive ? 'Disable POS login and show suspension notice' : 'Restore full operational access',
-          color: isActive ? 'hover:border-amber-500/50 hover:bg-amber-950/30 text-amber-400' : 'hover:border-green-500/50 hover:bg-green-950/30 text-green-400',
-          onClick: () => { onClose(); onToggleStatus() }
+          icon: isActive ? Ban : CheckCircle,
+          label: isActive ? 'Suspend Tenant Access' : 'Activate Tenant Access',
+          desc: isActive ? 'Disable POS terminal logins and present suspension notice' : 'Restore full operational access across all devices',
+          badge: c.status,
+          color: isActive ? 'text-amber-400 bg-amber-500/10 border-amber-500/30 hover:border-amber-500' : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30 hover:border-emerald-500',
+          onClick: onToggleStatus,
         },
         {
-          emoji: '🗑️',
-          label: 'Delete Company & All Data',
-          desc: 'Permanently purge tenant, databases and device binds',
-          color: 'hover:border-red-500/50 hover:bg-red-950/40 text-red-400 border-red-900/30',
-          onClick: () => { onClose(); onDelete() }
+          icon: Trash2,
+          label: 'Delete Tenant & Purge Data',
+          desc: 'Permanently destroy tenant, cloud database, transactions & device binds',
+          badge: 'Destructive',
+          color: 'text-red-400 bg-red-950/30 border-red-900/40 hover:border-red-600',
+          onClick: onDelete,
         },
-      ]
-    }
+      ],
+    },
   ]
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
-      <div
-        className="w-full sm:max-w-2xl bg-gray-900 border border-gray-800 sm:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[88vh] overflow-hidden animate-in slide-in-from-bottom duration-250"
-        onClick={e => e.stopPropagation()}
-      >
-        {/* Hub Header */}
-        <div className="p-4 sm:p-5 border-b border-gray-800/80 bg-gradient-to-r from-gray-950/90 via-gray-900 to-gray-950/90 flex-shrink-0">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 flex items-center justify-center text-xl font-black text-white shadow-lg shadow-blue-600/30 flex-shrink-0 border border-white/10">
-                {(c.name || 'C').charAt(0).toUpperCase()}
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h2 className="text-lg sm:text-xl font-bold text-white truncate tracking-tight">{c.name}</h2>
-                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
-                    c.status === 'active' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                    c.status === 'trial' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-                    'bg-red-500/20 text-red-400 border border-red-500/30'
-                  }`}>
-                    {c.status}
-                  </span>
-                  {isLocked && (
-                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                      🔒 Locked
-                    </span>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5 flex-wrap">
-                  <span className="font-mono text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded text-[11px]">slug: {c.slug}</span>
-                  <span>•</span>
-                  <span className="truncate">{c.email}</span>
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={onClose}
-              className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors flex-shrink-0"
-              title="Close Hub"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-
-          {/* Quick Stats Ribbon */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-3 border-t border-gray-800/60">
-            <div className="bg-gray-800/50 rounded-xl p-2.5 border border-gray-750 flex items-center gap-2.5">
-              <span className="text-xl">🏢</span>
-              <div className="min-w-0">
-                <p className="text-[10px] text-gray-400 uppercase font-semibold">Branches</p>
-                <p className="text-xs font-bold text-white">{c.max_branches ?? 1} Max</p>
-              </div>
-            </div>
-
-            <div className="bg-gray-800/50 rounded-xl p-2.5 border border-gray-750 flex items-center gap-2.5">
-              <span className="text-xl">👥</span>
-              <div className="min-w-0">
-                <p className="text-[10px] text-gray-400 uppercase font-semibold">Staff Users</p>
-                <p className="text-xs font-bold text-white">{c.max_users ?? 5} Max</p>
-              </div>
-            </div>
-
-            <div className="bg-gray-800/50 rounded-xl p-2.5 border border-gray-750 flex items-center gap-2.5">
-              <span className="text-xl">🖥️</span>
-              <div className="min-w-0">
-                <p className="text-[10px] text-gray-400 uppercase font-semibold">POS Devices</p>
-                <p className="text-xs font-bold text-white">{c.max_pos_devices ?? 2} Terminals</p>
-              </div>
-            </div>
-
-            <div className="bg-gray-800/50 rounded-xl p-2.5 border border-gray-750 flex items-center gap-2.5">
-              <span className="text-xl">📦</span>
-              <div className="min-w-0">
-                <p className="text-[10px] text-gray-400 uppercase font-semibold">Package Tier</p>
-                <p className="text-xs font-bold text-blue-400 truncate">{c.package_name || 'Standard'}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Scrollable Actions Body */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
-          {actionSections.map((sec, idx) => (
-            <div key={idx} className="space-y-2">
-              <div className="flex items-center gap-2 px-1">
-                <span className="text-lg">{sec.emoji}</span>
-                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">{sec.title}</h3>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {sec.items.map((item, i) => (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={item.onClick}
-                    className={`group flex items-start gap-3 p-3 rounded-xl bg-gray-800/60 hover:bg-gray-800 border border-gray-750 text-left transition-all active:scale-98 ${item.color}`}
-                  >
-                    <span className="text-2xl flex-shrink-0 group-hover:scale-115 transition-transform duration-200">
-                      {item.emoji}
-                    </span>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-gray-100 group-hover:text-white leading-tight">
-                        {item.label}
-                      </p>
-                      <p className="text-[11px] text-gray-400 font-normal mt-0.5 leading-snug">
-                        {item.desc}
-                      </p>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300 group-hover:translate-x-0.5 transition-all flex-shrink-0 self-center" />
-                  </button>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Modal Footer */}
-        <div className="p-3 bg-gray-950/80 border-t border-gray-800/80 flex items-center justify-between px-5 flex-shrink-0">
-          <span className="text-[11px] text-gray-500">
-            Subscription: {c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : 'Continuous'}
-          </span>
+    <div className="space-y-6 animate-in fade-in duration-200">
+      {/* ── Breadcrumb & Top Bar ───────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-gray-800/80">
+        <div className="flex items-center gap-3">
           <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-bold text-gray-300 transition-colors"
+            onClick={onBack}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl bg-gray-900 hover:bg-gray-800 text-gray-300 hover:text-white border border-gray-800 text-xs font-semibold transition-all shadow-sm active:scale-95"
           >
-            Close
+            <ArrowLeft className="w-4 h-4" />
+            <span>Back to Companies</span>
+          </button>
+          <div className="h-4 w-px bg-gray-800 hidden sm:block" />
+          <div className="flex items-center gap-2 text-xs text-gray-400">
+            <span className="cursor-pointer hover:text-white transition-colors" onClick={onBack}>Companies</span>
+            <span>/</span>
+            <span className="font-semibold text-white truncate max-w-[200px]">{c.name}</span>
+          </div>
+        </div>
+
+        {/* Quick actions top right */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={onEdit}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-200 text-xs font-semibold border border-gray-700 transition-colors"
+          >
+            <Edit2 className="w-3.5 h-3.5" />
+            <span>Edit Profile</span>
+          </button>
+
+          {isActive ? (
+            <button
+              onClick={onToggleStatus}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-yellow-950/40 hover:bg-yellow-900/50 text-yellow-400 text-xs font-semibold border border-yellow-800/40 transition-colors"
+            >
+              <Ban className="w-3.5 h-3.5" />
+              <span>Suspend</span>
+            </button>
+          ) : (
+            <button
+              onClick={onToggleStatus}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-400 text-xs font-semibold border border-emerald-800/40 transition-colors"
+            >
+              <CheckCircle className="w-3.5 h-3.5" />
+              <span>Activate</span>
+            </button>
+          )}
+
+          <button
+            onClick={onDelete}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-950/30 hover:bg-red-900/40 text-red-400 text-xs font-semibold border border-red-900/40 transition-colors"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+            <span>Delete</span>
           </button>
         </div>
+      </div>
+
+      {/* ── Hero Tenant Overview Card ──────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-gray-900 via-gray-900/90 to-gray-950 border border-gray-800 p-6 shadow-xl">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/5 rounded-full blur-3xl pointer-events-none" />
+
+        <div className="relative flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="flex items-start gap-4 min-w-0">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-600 flex items-center justify-center text-2xl font-black text-white shadow-xl shadow-blue-600/20 flex-shrink-0 border border-white/10">
+              {(c.name || 'C').charAt(0).toUpperCase()}
+            </div>
+
+            <div className="min-w-0 space-y-1.5">
+              <div className="flex items-center gap-2.5 flex-wrap">
+                <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight truncate">{c.name}</h1>
+                <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider ${
+                  c.status === 'active' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                  c.status === 'trial' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                  'bg-red-500/20 text-red-400 border border-red-500/30'
+                }`}>
+                  {c.status}
+                </span>
+                {isLocked && (
+                  <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                    <Lock className="w-3 h-3" />
+                    <span>Locked</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
+                <span className="font-mono bg-gray-800 text-gray-300 px-2 py-0.5 rounded border border-gray-750">
+                  slug: {c.slug}
+                </span>
+                <span className="flex items-center gap-1 text-gray-300">
+                  <Mail className="w-3.5 h-3.5 text-gray-500" />
+                  <span>{c.email}</span>
+                </span>
+                {c.admin_email && c.admin_email !== c.email && (
+                  <span className="flex items-center gap-1 text-gray-400">
+                    <UserCheck className="w-3.5 h-3.5 text-gray-500" />
+                    <span>Admin: {c.admin_email}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row md:flex-col items-start md:items-end gap-2 flex-shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-gray-800">
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400">
+              <PackageCheck className="w-4 h-4" />
+              <span className="text-xs font-bold uppercase tracking-wider">{c.package_name || 'Standard Plan'}</span>
+            </div>
+            <p className="text-[11px] text-gray-400 font-medium">
+              Subscription Renewal: <span className="text-gray-200">{c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : 'Continuous / Lifetime'}</span>
+            </p>
+          </div>
+        </div>
+
+        {/* ── 4 KPI Stat Cards (No Emojis, Real Lucide Icons) ────────────── */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-6 pt-6 border-t border-gray-800/80">
+          <div className="p-3.5 rounded-xl bg-gray-950/60 border border-gray-800 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 flex-shrink-0">
+              <GitBranch className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Branch Limit</p>
+              <p className="text-sm font-bold text-white">{c.max_branches ?? 1} Max</p>
+              <p className="text-[10px] text-gray-500">Store locations</p>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-gray-950/60 border border-gray-800 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center text-emerald-400 flex-shrink-0">
+              <Users className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Staff Limit</p>
+              <p className="text-sm font-bold text-white">{c.max_users ?? 5} Users</p>
+              <p className="text-[10px] text-gray-500">Active accounts</p>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-gray-950/60 border border-gray-800 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-400 flex-shrink-0">
+              <Monitor className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">POS Devices</p>
+              <p className="text-sm font-bold text-white">{c.max_pos_devices ?? 2} Terminals</p>
+              <p className="text-[10px] text-gray-500">Billing hardware</p>
+            </div>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-gray-950/60 border border-gray-800 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 flex-shrink-0">
+              <CalendarClock className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Expires</p>
+              <p className="text-sm font-bold text-white truncate">
+                {c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : 'Continuous'}
+              </p>
+              <p className="text-[10px] text-gray-500">Valid license</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Categorized Action Cards Grid (Enterprise SaaS Layout) ─────── */}
+      <div className="space-y-6">
+        {actionSections.map((sec, idx) => {
+          const SecIcon = sec.icon
+          return (
+            <div key={idx} className="space-y-3">
+              <div className="flex items-center gap-2.5 px-1">
+                <SecIcon className={`w-4 h-4 ${sec.iconColor}`} />
+                <h2 className="text-xs font-bold text-gray-300 uppercase tracking-wider">{sec.title}</h2>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {sec.items.map((item, i) => {
+                  const ItemIcon = item.icon
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      onClick={item.onClick}
+                      className={`group flex items-start gap-3.5 p-4 rounded-2xl bg-gray-900/90 hover:bg-gray-850 border border-gray-800 text-left transition-all duration-150 active:scale-98 shadow-sm ${item.color}`}
+                    >
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-gray-800/80 group-hover:scale-105 transition-transform flex-shrink-0">
+                        <ItemIcon className="w-5 h-5" />
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-sm font-semibold text-white leading-tight group-hover:text-blue-300 transition-colors">
+                            {item.label}
+                          </p>
+                          {item.badge && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-gray-800 text-gray-400 flex-shrink-0">
+                              {item.badge}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-gray-400 font-normal mt-1 leading-snug">
+                          {item.desc}
+                        </p>
+                      </div>
+
+                      <ChevronRight className="w-4 h-4 text-gray-600 group-hover:text-gray-300 group-hover:translate-x-0.5 transition-all flex-shrink-0 self-center" />
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* ── Bottom Return Button ───────────────────────────────────────── */}
+      <div className="pt-4 flex justify-start">
+        <button
+          onClick={onBack}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 text-gray-300 hover:text-white border border-gray-800 text-xs font-semibold transition-all shadow-sm active:scale-95"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Return to Companies List</span>
+        </button>
       </div>
     </div>
   )
@@ -344,7 +452,7 @@ export default function CompaniesPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading]   = useState(false)
   const [pkgs, setPkgs]         = useState<Pkg[]>([])
-  const [showHub, setShowHub]   = useState<Company | null>(null)
+  const [selectedCompany, setSelectedCompany] = useState<Company | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [showEdit, setShowEdit] = useState<Company | null>(null)
   const [showDelete, setShowDelete] = useState<Company | null>(null)
@@ -373,6 +481,10 @@ export default function CompaniesPage() {
       if (statusFilter) q.status = statusFilter
       const d = await api.list(q) as { rows: Company[]; total: number }
       setRows(d.rows); setTotal(d.total)
+      if (selectedCompany) {
+        const found = d.rows.find(r => r.id === selectedCompany.id)
+        if (found) setSelectedCompany(found)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load companies')
     }
@@ -414,284 +526,302 @@ export default function CompaniesPage() {
 
   return (
     <div className="p-4 sm:p-6 space-y-4 max-w-7xl mx-auto">
-      {/* Page Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
-            <span>🏢</span> Companies
-          </h1>
-          <p className="text-xs sm:text-sm text-gray-400">{total} total registered tenants</p>
-        </div>
-        <button
-          className="btn-primary flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl shadow-lg shadow-blue-600/20 active:scale-95 transition-transform"
-          onClick={() => setShowCreate(true)}
-        >
-          <Plus className="w-4 h-4" /> New Company
-        </button>
-      </div>
-
-      {/* Filters Bar */}
-      <div className="flex flex-col sm:flex-row gap-2.5">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-          <input
-            className="input pl-9 w-full"
-            placeholder="Search company name, email, slug…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && (setPage(1), load())}
-          />
-        </div>
-        <div className="flex gap-2">
-          <select
-            className="input flex-1 sm:w-44"
-            value={statusFilter}
-            onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
-          >
-            <option value="">All statuses</option>
-            <option value="trial">Trial</option>
-            <option value="active">Active</option>
-            <option value="suspended">Suspended</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-          <button className="btn-ghost flex items-center gap-2 px-3.5" onClick={load} title="Refresh company list">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-        </div>
-      </div>
-
-      {/* ── Mobile Cards View (< md) ─────────────────────────────────────── */}
-      <div className="block md:hidden space-y-3">
-        {rows.map(c => (
-          <div key={c.id} className="card p-4 space-y-3 border border-gray-800 hover:border-gray-700 transition-colors shadow-lg">
-            <div className="flex items-start justify-between gap-2">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 flex items-center justify-center font-black text-white text-base flex-shrink-0 shadow-md">
-                  {(c.name || 'C').charAt(0).toUpperCase()}
+      {selectedCompany ? (
+        <CompanyDetailView
+          company={selectedCompany}
+          onBack={() => setSelectedCompany(null)}
+          onEdit={() => setShowEdit(selectedCompany)}
+          onToggleStatus={() => changeStatus(selectedCompany.id, selectedCompany.status === 'active' ? 'suspended' : 'active')}
+          onCompanyKey={() => setShowCompanyKey(selectedCompany)}
+          onApiKey={() => setShowApiKey(selectedCompany)}
+          onDevices={() => setShowDevices(selectedCompany)}
+          onResetPw={() => setShowResetPw(selectedCompany)}
+          onSendGuide={() => setShowSendGuide(selectedCompany)}
+          onCapabilities={() => setShowCapabilities(selectedCompany)}
+          onBranding={() => setShowBranding(selectedCompany)}
+          onNotifCreds={() => setShowNotifCreds(selectedCompany)}
+          onClearDataPw={() => setShowClearDataPw(selectedCompany)}
+          onSupportAccess={() => setShowSupportAccess(selectedCompany)}
+          onBackups={() => setShowBackups(selectedCompany)}
+          onExports={() => setShowExports(selectedCompany)}
+          onToggleLock={() => toggleLock(selectedCompany)}
+          onDelete={() => setShowDelete(selectedCompany)}
+        />
+      ) : (
+        <>
+          {/* Page Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-600/15 border border-blue-500/25 flex items-center justify-center text-blue-400">
+                  <Building2 className="w-5 h-5" />
                 </div>
-                <div className="min-w-0">
-                  <h2 className="text-base font-bold text-white truncate">{c.name}</h2>
-                  <p className="text-xs text-gray-400 font-mono truncate">slug: {c.slug}</p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <span className={STATUS_BADGE[c.status] ?? ''}>
-                  {c.status}
-                </span>
-                {(c.admin_locked === '1' || c.admin_locked === 'true') && (
-                  <span className="badge-yellow text-[10px] px-1.5 py-0.5" title={c.lock_reason ? `Locked — ${c.lock_reason}` : 'Locked'}>
-                    🔒 Locked
-                  </span>
-                )}
-              </div>
+                <span>Companies</span>
+              </h1>
+              <p className="text-xs sm:text-sm text-gray-400">{total} total registered tenants</p>
             </div>
+            <button
+              className="btn-primary flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl shadow-lg shadow-blue-600/20 active:scale-95 transition-transform"
+              onClick={() => setShowCreate(true)}
+            >
+              <Plus className="w-4 h-4" /> New Company
+            </button>
+          </div>
 
-            <div className="grid grid-cols-2 gap-2 text-xs bg-gray-900/60 p-2.5 rounded-xl border border-gray-800/80">
-              <div>
-                <span className="text-[10px] text-gray-500 uppercase font-semibold block">Package</span>
-                <span className="font-semibold text-blue-400 truncate block">{c.package_name ?? 'Standard'}</span>
-              </div>
-              <div>
-                <span className="text-[10px] text-gray-500 uppercase font-semibold block">Limits</span>
-                <span className="text-gray-300 font-medium">
-                  {c.max_branches ?? 1} Br · {c.max_users ?? 5} Usr · {c.max_pos_devices ?? 2} POS
-                </span>
-              </div>
-              <div className="col-span-2 pt-1 border-t border-gray-800/50 flex items-center justify-between text-gray-400 text-[11px]">
-                <span className="truncate">{c.email}</span>
-                <span>{c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : 'Continuous'}</span>
-              </div>
+          {/* Filters Bar */}
+          <div className="flex flex-col sm:flex-row gap-2.5">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+              <input
+                className="input pl-9 w-full"
+                placeholder="Search company name, email, slug…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && (setPage(1), load())}
+              />
             </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <button
-                onClick={() => setShowEdit(c)}
-                className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-200 transition-colors"
-                title="Edit Company"
+            <div className="flex gap-2">
+              <select
+                className="input flex-1 sm:w-44"
+                value={statusFilter}
+                onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
               >
-                <Edit2 className="w-3.5 h-3.5" />
-                <span>Edit</span>
-              </button>
-
-              {c.status !== 'active' ? (
-                <button
-                  onClick={() => changeStatus(c.id, 'active')}
-                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-green-950/40 hover:bg-green-900/40 text-xs font-semibold text-green-400 border border-green-800/30 transition-colors"
-                  title="Activate Tenant"
-                >
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  <span>Activate</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => changeStatus(c.id, 'suspended')}
-                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-yellow-950/40 hover:bg-yellow-900/40 text-xs font-semibold text-yellow-400 border border-yellow-800/30 transition-colors"
-                  title="Suspend Tenant"
-                >
-                  <Ban className="w-3.5 h-3.5" />
-                  <span>Suspend</span>
-                </button>
-              )}
-
-              <button
-                onClick={() => setShowHub(c)}
-                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/40 text-xs font-bold transition-all active:scale-95 shadow-sm"
-                title="Open 3-Dot Actions Hub"
-              >
-                <span className="text-sm">⚡</span>
-                <span>Actions Hub (3-Dot)</span>
-                <MoreVertical className="w-3.5 h-3.5 ml-auto" />
+                <option value="">All statuses</option>
+                <option value="trial">Trial</option>
+                <option value="active">Active</option>
+                <option value="suspended">Suspended</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+              <button className="btn-ghost flex items-center gap-2 px-3.5" onClick={load} title="Refresh company list">
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                <span className="hidden sm:inline">Refresh</span>
               </button>
             </div>
           </div>
-        ))}
 
-        {rows.length === 0 && !loading && !error && (
-          <div className="card text-center py-12 text-gray-500 text-sm">No companies found</div>
-        )}
-        {error && (
-          <div className="card text-center py-8 text-red-400 text-sm">{error}</div>
-        )}
-      </div>
-
-      {/* ── Desktop Table View (>= md) ───────────────────────────────────── */}
-      <div className="hidden md:block card p-0 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead className="border-b border-gray-800">
-            <tr>
-              {['Company','Slug','Email','Package','Limits','Status','Trial / Sub ends','Actions'].map(h => (
-                <th key={h} className="text-left text-gray-400 font-medium px-4 py-3">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
+          {/* ── Mobile Cards View (< md) ─────────────────────────────────────── */}
+          <div className="block md:hidden space-y-3">
             {rows.map(c => (
-              <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/20">
-                <td className="px-4 py-3 font-medium text-white">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center font-bold text-white text-xs flex-shrink-0">
+              <div key={c.id} className="card p-4 space-y-3 border border-gray-800 hover:border-gray-700 transition-colors shadow-lg">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3 min-w-0 cursor-pointer" onClick={() => setSelectedCompany(c)}>
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 flex items-center justify-center font-black text-white text-base flex-shrink-0 shadow-md">
                       {(c.name || 'C').charAt(0).toUpperCase()}
                     </div>
-                    <span className="truncate">{c.name}</span>
+                    <div className="min-w-0">
+                      <h2 className="text-base font-bold text-white truncate hover:text-blue-400 transition-colors">{c.name}</h2>
+                      <p className="text-xs text-gray-400 font-mono truncate">slug: {c.slug}</p>
+                    </div>
                   </div>
-                </td>
-                <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.slug}</td>
-                <td className="px-4 py-3 text-gray-400">{c.email}</td>
-                <td className="px-4 py-3 text-gray-400">{c.package_name ?? '—'}</td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2 text-xs text-gray-400">
-                    <span className="flex items-center gap-0.5" title="Max Branches">
-                      <GitBranch className="w-3 h-3" />{c.max_branches ?? 1}
-                    </span>
-                    <span className="flex items-center gap-0.5" title="Max Users">
-                      <Users className="w-3 h-3" />{c.max_users ?? 5}
-                    </span>
-                    <span className="flex items-center gap-0.5" title="Max POS Devices">
-                      <Monitor className="w-3 h-3" />{c.max_pos_devices ?? 2}
-                    </span>
-                  </div>
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className={STATUS_BADGE[c.status] ?? ''}
-                      title={c.status === 'suspended' && c.suspension_reason ? `Reason: ${c.suspension_reason}` : undefined}>
+
+                  <div className="flex items-center gap-1.5 flex-shrink-0">
+                    <span className={STATUS_BADGE[c.status] ?? ''}>
                       {c.status}
                     </span>
                     {(c.admin_locked === '1' || c.admin_locked === 'true') && (
-                      <span className="badge-yellow" title={c.lock_reason ? `Locked — ${c.lock_reason}` : 'Locked'}>
-                        🔒 Locked
+                      <span className="badge-yellow text-[10px] px-1.5 py-0.5 flex items-center gap-1" title={c.lock_reason ? `Locked — ${c.lock_reason}` : 'Locked'}>
+                        <Lock className="w-2.5 h-2.5" />
+                        <span>Locked</span>
                       </span>
                     )}
                   </div>
-                </td>
-                <td className="px-4 py-3 text-gray-400 text-xs">
-                  {c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : '—'}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-1.5">
-                    <button title="Edit Company (Info / Limits / Subscription)" className="p-1.5 rounded hover:bg-gray-700/60 text-gray-300 transition-colors"
-                      onClick={() => setShowEdit(c)}>
-                      <Edit2 className="w-3.5 h-3.5" />
-                    </button>
+                </div>
 
-                    {c.status !== 'active' ? (
-                      <button title="Activate" className="p-1.5 rounded hover:bg-green-900/40 text-green-400 transition-colors"
-                        onClick={() => changeStatus(c.id, 'active')}>
-                        <CheckCircle className="w-3.5 h-3.5" />
-                      </button>
-                    ) : (
-                      <button title="Suspend" className="p-1.5 rounded hover:bg-yellow-900/40 text-yellow-400 transition-colors"
-                        onClick={() => changeStatus(c.id, 'suspended')}>
-                        <Ban className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-
-                    <button
-                      title="More Actions & Details Hub (3-Dot)"
-                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 hover:text-blue-300 border border-blue-500/30 text-xs font-semibold transition-all active:scale-95"
-                      onClick={() => setShowHub(c)}
-                    >
-                      <MoreVertical className="w-3.5 h-3.5" />
-                      <span>Actions</span>
-                    </button>
+                <div className="grid grid-cols-2 gap-2 text-xs bg-gray-900/60 p-2.5 rounded-xl border border-gray-800/80 cursor-pointer" onClick={() => setSelectedCompany(c)}>
+                  <div>
+                    <span className="text-[10px] text-gray-500 uppercase font-semibold block">Package</span>
+                    <span className="font-semibold text-blue-400 truncate block">{c.package_name ?? 'Standard'}</span>
                   </div>
-                </td>
-              </tr>
+                  <div>
+                    <span className="text-[10px] text-gray-500 uppercase font-semibold block">Limits</span>
+                    <span className="text-gray-300 font-medium">
+                      {c.max_branches ?? 1} Br · {c.max_users ?? 5} Usr · {c.max_pos_devices ?? 2} POS
+                    </span>
+                  </div>
+                  <div className="col-span-2 pt-1 border-t border-gray-800/50 flex items-center justify-between text-gray-400 text-[11px]">
+                    <span className="truncate">{c.email}</span>
+                    <span>{c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : 'Continuous'}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={() => setShowEdit(c)}
+                    className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-200 transition-colors"
+                    title="Edit Company"
+                  >
+                    <Edit2 className="w-3.5 h-3.5" />
+                    <span>Edit</span>
+                  </button>
+
+                  {c.status !== 'active' ? (
+                    <button
+                      onClick={() => changeStatus(c.id, 'active')}
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-green-950/40 hover:bg-green-900/40 text-xs font-semibold text-green-400 border border-green-800/30 transition-colors"
+                      title="Activate Tenant"
+                    >
+                      <CheckCircle className="w-3.5 h-3.5" />
+                      <span>Activate</span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => changeStatus(c.id, 'suspended')}
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-yellow-950/40 hover:bg-yellow-900/40 text-xs font-semibold text-yellow-400 border border-yellow-800/30 transition-colors"
+                      title="Suspend Tenant"
+                    >
+                      <Ban className="w-3.5 h-3.5" />
+                      <span>Suspend</span>
+                    </button>
+                  )}
+
+                  <button
+                    onClick={() => setSelectedCompany(c)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-blue-600/15 hover:bg-blue-600/25 text-blue-400 border border-blue-500/30 text-xs font-bold transition-all active:scale-95 shadow-sm"
+                    title="Manage Tenant & Open Full Page"
+                  >
+                    <Settings2 className="w-3.5 h-3.5" />
+                    <span>Manage</span>
+                    <ChevronRight className="w-3.5 h-3.5 ml-auto text-blue-400/80" />
+                  </button>
+                </div>
+              </div>
             ))}
+
             {rows.length === 0 && !loading && !error && (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500">No companies found</td></tr>
+              <div className="card text-center py-12 text-gray-500 text-sm">No companies found</div>
             )}
             {error && (
-              <tr><td colSpan={8} className="px-4 py-10 text-center text-red-400">{error}</td></tr>
+              <div className="card text-center py-8 text-red-400 text-sm">{error}</div>
             )}
-          </tbody>
-        </table>
-      </div>
-
-      {/* Pagination (shared for mobile & desktop) */}
-      {total > limit && (
-        <div className="flex items-center justify-between px-4 py-3 card border border-gray-800">
-          <span className="text-xs text-gray-500">
-            {(page-1)*limit+1}–{Math.min(page*limit, total)} of {total}
-          </span>
-          <div className="flex gap-2">
-            <button className="btn-ghost text-xs py-1.5 px-3 rounded-lg" disabled={page===1}
-              onClick={() => setPage(p => p-1)}>Prev</button>
-            <button className="btn-ghost text-xs py-1.5 px-3 rounded-lg" disabled={page*limit>=total}
-              onClick={() => setPage(p => p+1)}>Next</button>
           </div>
-        </div>
+
+          {/* ── Desktop Table View (>= md) ───────────────────────────────────── */}
+          <div className="hidden md:block card p-0 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="border-b border-gray-800">
+                <tr>
+                  {['Company','Slug','Email','Package','Limits','Status','Trial / Sub ends','Actions'].map(h => (
+                    <th key={h} className="text-left text-gray-400 font-medium px-4 py-3">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(c => (
+                  <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/20 transition-colors">
+                    <td className="px-4 py-3 font-medium text-white cursor-pointer" onClick={() => setSelectedCompany(c)}>
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center font-bold text-white text-xs flex-shrink-0">
+                          {(c.name || 'C').charAt(0).toUpperCase()}
+                        </div>
+                        <span className="truncate hover:text-blue-400 transition-colors">{c.name}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.slug}</td>
+                    <td className="px-4 py-3 text-gray-400">{c.email}</td>
+                    <td className="px-4 py-3 text-gray-400">{c.package_name ?? '—'}</td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2 text-xs text-gray-400">
+                        <span className="flex items-center gap-0.5" title="Max Branches">
+                          <GitBranch className="w-3 h-3" />{c.max_branches ?? 1}
+                        </span>
+                        <span className="flex items-center gap-0.5" title="Max Users">
+                          <Users className="w-3 h-3" />{c.max_users ?? 5}
+                        </span>
+                        <span className="flex items-center gap-0.5" title="Max POS Devices">
+                          <Monitor className="w-3 h-3" />{c.max_pos_devices ?? 2}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className={STATUS_BADGE[c.status] ?? ''}
+                          title={c.status === 'suspended' && c.suspension_reason ? `Reason: ${c.suspension_reason}` : undefined}>
+                          {c.status}
+                        </span>
+                        {(c.admin_locked === '1' || c.admin_locked === 'true') && (
+                          <span className="badge-yellow text-xs flex items-center gap-1" title={c.lock_reason ? `Locked — ${c.lock_reason}` : 'Locked'}>
+                            <Lock className="w-3 h-3" />
+                            <span>Locked</span>
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-gray-400 text-xs">
+                      {c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <button title="Edit Company" className="p-1.5 rounded hover:bg-gray-700/60 text-gray-300 transition-colors"
+                          onClick={() => setShowEdit(c)}>
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {c.status !== 'active' ? (
+                          <button title="Activate" className="p-1.5 rounded hover:bg-green-900/40 text-green-400 transition-colors"
+                            onClick={() => changeStatus(c.id, 'active')}>
+                            <CheckCircle className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <button title="Suspend" className="p-1.5 rounded hover:bg-yellow-900/40 text-yellow-400 transition-colors"
+                            onClick={() => changeStatus(c.id, 'suspended')}>
+                            <Ban className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        <button
+                          title="Manage Tenant & Open Full Page"
+                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/15 hover:bg-blue-600/25 text-blue-400 hover:text-blue-300 border border-blue-500/30 text-xs font-semibold transition-all active:scale-95 shadow-sm"
+                          onClick={() => setSelectedCompany(c)}
+                        >
+                          <Settings2 className="w-3.5 h-3.5" />
+                          <span>Manage</span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && !loading && !error && (
+                  <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-500">No companies found</td></tr>
+                )}
+                {error && (
+                  <tr><td colSpan={8} className="px-4 py-10 text-center text-red-400">{error}</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Pagination (shared for mobile & desktop) */}
+          {total > limit && (
+            <div className="flex items-center justify-between px-4 py-3 card border border-gray-800">
+              <span className="text-xs text-gray-500">
+                {(page-1)*limit+1}–{Math.min(page*limit, total)} of {total}
+              </span>
+              <div className="flex gap-2">
+                <button className="btn-ghost text-xs py-1.5 px-3 rounded-lg" disabled={page===1}
+                  onClick={() => setPage(p => p-1)}>Prev</button>
+                <button className="btn-ghost text-xs py-1.5 px-3 rounded-lg" disabled={page*limit>=total}
+                  onClick={() => setPage(p => p+1)}>Next</button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* ── Modals & Dialogs ─────────────────────────────────────────────── */}
-      {showHub && (
-        <CompanyHubModal
-          company={showHub}
-          onClose={() => setShowHub(null)}
-          onEdit={() => setShowEdit(showHub)}
-          onToggleStatus={() => changeStatus(showHub.id, showHub.status === 'active' ? 'suspended' : 'active')}
-          onCompanyKey={() => setShowCompanyKey(showHub)}
-          onApiKey={() => setShowApiKey(showHub)}
-          onDevices={() => setShowDevices(showHub)}
-          onResetPw={() => setShowResetPw(showHub)}
-          onSendGuide={() => setShowSendGuide(showHub)}
-          onCapabilities={() => setShowCapabilities(showHub)}
-          onBranding={() => setShowBranding(showHub)}
-          onNotifCreds={() => setShowNotifCreds(showHub)}
-          onClearDataPw={() => setShowClearDataPw(showHub)}
-          onSupportAccess={() => setShowSupportAccess(showHub)}
-          onBackups={() => setShowBackups(showHub)}
-          onExports={() => setShowExports(showHub)}
-          onToggleLock={() => toggleLock(showHub)}
-          onDelete={() => setShowDelete(showHub)}
-        />
-      )}
-
+      {/* ── Sub-Modals & Dialogs (shared for list and detail page) ──────── */}
       {showCreate && <CreateCompanyModal pkgs={pkgs} onClose={() => setShowCreate(false)} onCreated={load} />}
-      {showEdit && <EditCompanyModal company={showEdit} pkgs={pkgs} onClose={() => setShowEdit(null)} onSaved={load} />}
-      {showDelete && <DeleteCompanyModal company={showDelete} onClose={() => setShowDelete(null)} onDeleted={load} />}
+      {showEdit && <EditCompanyModal company={showEdit} pkgs={pkgs} onClose={() => setShowEdit(null)} onSaved={() => {
+        load()
+        if (selectedCompany && showEdit && selectedCompany.id === showEdit.id) {
+          api.list({ search: selectedCompany.slug }).then((d: any) => {
+            const found = d.rows?.find((r: any) => r.id === selectedCompany.id)
+            if (found) setSelectedCompany(found)
+          }).catch(() => {})
+        }
+      }} />}
+      {showDelete && <DeleteCompanyModal company={showDelete} onClose={() => setShowDelete(null)} onDeleted={() => {
+        if (selectedCompany?.id === showDelete.id) setSelectedCompany(null)
+        load()
+      }} />}
       {showResetPw && <ResetAdminPasswordModal company={showResetPw} onClose={() => setShowResetPw(null)} onUpdated={(newPw, newEmail, newName) => {
         setRows(prev => prev.map(r => r.id === showResetPw.id ? {
           ...r,
@@ -699,6 +829,14 @@ export default function CompaniesPage() {
           ...(newEmail ? { admin_email: newEmail } : {}),
           ...(newName ? { admin_name: newName } : {}),
         } : r))
+        if (selectedCompany && selectedCompany.id === showResetPw.id) {
+          setSelectedCompany(prev => prev ? {
+            ...prev,
+            initial_admin_password: newPw,
+            ...(newEmail ? { admin_email: newEmail } : {}),
+            ...(newName ? { admin_name: newName } : {}),
+          } : null)
+        }
         load()
       }} />}
       {showApiKey && <ApiKeyModal company={showApiKey} onClose={() => setShowApiKey(null)} onRegenerated={load} />}
@@ -708,6 +846,9 @@ export default function CompaniesPage() {
       {showExports && <ExportsModal company={showExports} onClose={() => setShowExports(null)} />}
       {showBranding && <BrandingModal company={showBranding} onClose={() => setShowBranding(null)} onSaved={updates => {
         setRows(prev => prev.map(r => r.id === showBranding.id ? { ...r, ...updates } : r))
+        if (selectedCompany && selectedCompany.id === showBranding.id) {
+          setSelectedCompany(prev => prev ? { ...prev, ...updates } : null)
+        }
         load()
       }} />}
       {showCompanyKey && <CompanyKeyModal company={showCompanyKey} onClose={() => setShowCompanyKey(null)} onUpdated={load} />}
