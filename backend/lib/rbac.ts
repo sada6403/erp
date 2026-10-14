@@ -87,6 +87,23 @@ export const ROLES = {
 
 export type RoleName = keyof typeof ROLES
 
+// ─── Client metadata extraction helper ────────────────────────────────────────
+export function getClientMeta(req: NextRequest) {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || undefined
+  const userAgent = req.headers.get('user-agent') || undefined
+  let pcName: string | undefined = undefined
+  const rawPc = req.headers.get('x-client-pc-name')
+  if (rawPc) {
+    try {
+      pcName = decodeURIComponent(rawPc).trim().slice(0, 100)
+    } catch {
+      pcName = rawPc.trim().slice(0, 100)
+    }
+  }
+  const sessionId = req.headers.get('x-client-session-id')?.trim().slice(0, 64) || undefined
+  return { ip, userAgent, pcName, sessionId }
+}
+
 // ─── Audit log helper ────────────────────────────────────────────────────────
 import { pool } from './db'
 import { randomUUID } from 'crypto'
@@ -95,13 +112,40 @@ export async function auditLog(params: {
   portal: string; actorType: string; actorId: string; actorName?: string
   companyId?: string | null; action: string; resource?: string; resourceId?: string
   oldValues?: unknown; newValues?: unknown; ip?: string; userAgent?: string
+  pcName?: string; req?: NextRequest
 }) {
   try {
+    let resolvedPc = params.pcName
+    let resolvedIp = params.ip
+    let resolvedUa = params.userAgent
+
+    if (params.req) {
+      const meta = getClientMeta(params.req)
+      if (!resolvedPc) resolvedPc = meta.pcName
+      if (!resolvedIp) resolvedIp = meta.ip
+      if (!resolvedUa) resolvedUa = meta.userAgent
+    }
+
+    // If pcName is still not resolved, lookup from active sessions
+    if (!resolvedPc && params.actorId) {
+      try {
+        const { rows } = await pool.query(
+          `SELECT pc_name FROM saas_active_sessions 
+           WHERE user_id = ? AND last_seen_at >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)
+           ORDER BY last_seen_at DESC LIMIT 1`,
+          [params.actorId]
+        )
+        if (rows.length && rows[0]?.pc_name) {
+          resolvedPc = rows[0].pc_name
+        }
+      } catch { /* ignore fallback query error */ }
+    }
+
     await pool.query(
       `INSERT INTO saas_audit_logs
          (id, portal, actor_type, actor_id, actor_name, company_id, action,
-          resource, resource_id, old_values, new_values, ip_address, user_agent)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+          resource, resource_id, old_values, new_values, ip_address, user_agent, pc_name)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         randomUUID(),
         params.portal, params.actorType, params.actorId, params.actorName ?? null,
@@ -109,8 +153,30 @@ export async function auditLog(params: {
         params.resourceId ?? null,
         params.oldValues ? JSON.stringify(params.oldValues) : null,
         params.newValues ? JSON.stringify(params.newValues) : null,
-        params.ip ?? null, params.userAgent ?? null,
+        resolvedIp ?? null, resolvedUa ?? null,
+        resolvedPc ?? null,
       ]
     )
-  } catch { /* non-blocking */ }
+  } catch {
+    // Fallback if pc_name column has not been migrated yet
+    try {
+      await pool.query(
+        `INSERT INTO saas_audit_logs
+           (id, portal, actor_type, actor_id, actor_name, company_id, action,
+            resource, resource_id, old_values, new_values, ip_address, user_agent)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [
+          randomUUID(),
+          params.portal, params.actorType, params.actorId, params.actorName ?? null,
+          params.companyId ?? null, params.action, params.resource ?? null,
+          params.resourceId ?? null,
+          params.oldValues ? JSON.stringify(params.oldValues) : null,
+          params.newValues ? JSON.stringify(params.newValues) : null,
+          params.ip ?? null, params.userAgent ?? null,
+        ]
+      )
+    } catch { /* non-blocking */ }
+  }
 }
+
+

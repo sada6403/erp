@@ -1,3 +1,5 @@
+import { getPCName, getSessionId } from './device'
+
 function getBaseUrl(): string {
   if (typeof window !== 'undefined') {
     const envUrl = (import.meta.env.VITE_API_URL as string | undefined)?.trim()
@@ -71,6 +73,8 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${_access}`,
+        'X-Client-PC-Name': encodeURIComponent(getPCName()),
+        'X-Client-Session-Id': getSessionId(),
         ...(opts.headers as Record<string,string> ?? {}),
       },
     })
@@ -90,11 +94,19 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const auth = {
-  login:  (email: string, password: string) =>
-    fetch(`${BASE}/api/auth/superadmin`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    }).then(async r => { if (!r.ok) throw new Error((await r.json()).error); return r.json() }),
+  login:  (email: string, password: string, pcName?: string) => {
+    const pc = pcName || getPCName()
+    const sessionId = getSessionId()
+    return fetch(`${BASE}/api/auth/superadmin`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Client-PC-Name': encodeURIComponent(pc),
+        'X-Client-Session-Id': sessionId,
+      },
+      body: JSON.stringify({ email, password, pcName: pc, sessionId }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json()).error); return r.json() })
+  },
   forgotPassword: (email: string) =>
     fetch(`${BASE}/api/auth/superadmin/forgot-password`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -385,7 +397,42 @@ export const dbInfo = {
   }>('/api/superadmin/db-info'),
 }
 
-// ─── Audit logs ───────────────────────────────────────────────────────────────
+// ─── Audit logs & Active PC Sessions ──────────────────────────────────────────
+export type ActiveSession = {
+  id: string
+  portal: string
+  user_id: string
+  user_name: string
+  user_email: string
+  pc_name: string
+  ip_address: string | null
+  user_agent: string | null
+  logged_in_at: string
+  last_seen_at: string
+  last_action: string
+  current_path: string
+  seconds_ago: number
+  is_online: number
+}
+
 export const audit = {
-  list: (p?: Record<string,string>) => request<{rows:unknown[];total:number;page:number;limit:number}>('/api/superadmin/audit?' + new URLSearchParams(p).toString()),
+  list: (p?: Record<string,string>) =>
+    request<{ rows: unknown[]; total: number; page: number; limit: number; distinctPcs?: string[] }>(
+      '/api/superadmin/audit?' + new URLSearchParams(p).toString()
+    ),
+  sessions: () => request<{ sessions: ActiveSession[] }>('/api/superadmin/audit/sessions'),
+  heartbeat: (action?: string, path?: string) =>
+    request<{ ok: boolean }>('/api/superadmin/audit/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        pcName: getPCName(),
+        sessionId: getSessionId(),
+        action: action || 'Active in SuperAdmin',
+        path: path || (typeof window !== 'undefined' ? window.location.pathname : '/'),
+      }),
+    }),
+  terminateSession: (sessionId: string) =>
+    request<{ ok: boolean; message?: string }>(`/api/superadmin/audit/sessions?id=${encodeURIComponent(sessionId)}`, {
+      method: 'DELETE',
+    }),
 }

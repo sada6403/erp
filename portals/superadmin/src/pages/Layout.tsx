@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
-import { auth, settings as settingsApi } from '../lib/api'
+import { auth, audit, settings as settingsApi } from '../lib/api'
+import { getPCName, setPCName } from '../lib/device'
 import {
   ShieldCheck, LogOut, Menu, X, ChevronRight,
-  LayoutDashboard, Building2, KeyRound, Package, Sliders, FileText, MoreHorizontal
+  LayoutDashboard, Building2, KeyRound, Package, Sliders, FileText, MoreHorizontal,
+  Monitor, Edit2, Check
 } from 'lucide-react'
 
 const nav = [
@@ -22,6 +24,9 @@ export default function Layout() {
   const location = useLocation()
   const [branding, setBranding] = useState<{ app_name?: string; logo_url?: string; primary_color?: string }>({})
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [currentPc, setCurrentPc] = useState(() => getPCName())
+  const [editingPc, setEditingPc] = useState(false)
+  const [pcDraft, setPcDraft] = useState('')
 
   useEffect(() => {
     settingsApi.get().then(s => {
@@ -35,6 +40,27 @@ export default function Layout() {
     setMobileMenuOpen(false)
   }, [location.pathname])
 
+  // Heartbeat to keep active PC session online with current page activity
+  useEffect(() => {
+    const getActionForPath = (path: string) => {
+      if (path === '/') return 'Viewing Dashboard'
+      if (path.startsWith('/companies')) return 'Managing Companies'
+      if (path.startsWith('/product-key-access')) return 'Viewing Product Keys'
+      if (path.startsWith('/packages')) return 'Managing Packages'
+      if (path.startsWith('/settings')) return 'Viewing System Settings'
+      if (path.startsWith('/audit')) return 'Monitoring Audit Logs'
+      return 'Active in SuperAdmin'
+    }
+
+    const sendBeat = () => {
+      audit.heartbeat(getActionForPath(location.pathname), location.pathname).catch(() => {})
+    }
+
+    sendBeat()
+    const interval = setInterval(sendBeat, 40000)
+    return () => clearInterval(interval)
+  }, [location.pathname, currentPc])
+
   const accentColor = branding.primary_color || '#2563eb'
   const appName     = branding.app_name      || 'POS ERP'
 
@@ -43,6 +69,16 @@ export default function Layout() {
     logout()
     navigate('/login')
   }
+
+  function handleSavePcName(e: React.FormEvent) {
+    e.preventDefault()
+    if (!pcDraft.trim()) return
+    const updated = setPCName(pcDraft)
+    setCurrentPc(updated)
+    setEditingPc(false)
+    audit.heartbeat(`Renamed PC to "${updated}"`, location.pathname).catch(() => {})
+  }
+
 
   return (
     <div className="flex flex-col md:flex-row h-screen bg-gray-950 text-gray-100 overflow-hidden font-sans">
@@ -72,6 +108,16 @@ export default function Layout() {
         </div>
 
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { setPcDraft(currentPc); setEditingPc(true) }}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-gray-800/80 border border-gray-700/80 text-xs text-gray-300 hover:text-white hover:border-blue-500/50 transition-colors"
+            title="Click to rename this computer"
+          >
+            <Monitor className="w-3.5 h-3.5 text-blue-400" />
+            <span className="font-mono text-[11px] max-w-[85px] truncate">{currentPc}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setMobileMenuOpen(o => !o)}
@@ -147,6 +193,26 @@ export default function Layout() {
 
             {/* User info & Logout */}
             <div className="p-3 border-t border-gray-800 bg-gray-950/60">
+              {/* Mobile PC Station Badge */}
+              <div className="px-3 py-2 bg-gray-800/60 rounded-xl mb-2 border border-gray-750 flex items-center justify-between">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="w-7 h-7 rounded-lg bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+                    <Monitor className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">This PC Station</p>
+                    <p className="text-xs font-semibold text-white truncate">{currentPc}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setPcDraft(currentPc); setEditingPc(true) }}
+                  className="p-1 rounded-lg hover:bg-gray-700 text-gray-400 hover:text-blue-400"
+                  title="Rename station"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
               <div className="px-3 py-2 bg-gray-800/60 rounded-xl mb-2 border border-gray-750">
                 <p className="text-xs font-semibold text-gray-200 truncate">{user?.name || 'Administrator'}</p>
                 <p className="text-[10px] text-gray-400 truncate">{user?.email}</p>
@@ -227,6 +293,29 @@ export default function Layout() {
 
         {/* User Card & Logout */}
         <div className="p-3 border-t border-gray-800/80 bg-gray-950/40">
+          {/* Active PC Station Card */}
+          <div className="px-3 py-2 bg-gray-800/40 rounded-xl border border-gray-800/80 mb-2 flex items-center justify-between hover:border-blue-500/40 transition-colors">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-7 h-7 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+                <Monitor className="w-3.5 h-3.5" />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider">This Computer</p>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                </div>
+                <p className="text-xs font-semibold text-gray-200 truncate">{currentPc}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => { setPcDraft(currentPc); setEditingPc(true) }}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition-colors"
+              title="Rename this station"
+            >
+              <Edit2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
           <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-gray-800/50 border border-gray-800 mb-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center font-bold text-white text-xs shadow-sm">
               {(user?.name || 'A').charAt(0).toUpperCase()}
@@ -282,6 +371,67 @@ export default function Layout() {
           <span className="text-[10px] tracking-tight">More</span>
         </button>
       </nav>
+
+      {/* ── Rename PC Station Modal ───────────────────────────────────────── */}
+      {editingPc && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-sm p-5 shadow-2xl animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center">
+                  <Monitor className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Rename This Computer</h3>
+                  <p className="text-[11px] text-gray-400">Used for staff audit tracking</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingPc(false)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSavePcName} className="space-y-4">
+              <div>
+                <label className="label text-xs">Computer / Station Name</label>
+                <input
+                  type="text"
+                  className="input text-sm font-medium"
+                  value={pcDraft}
+                  onChange={e => setPcDraft(e.target.value)}
+                  placeholder="e.g. Manager Laptop, Cashier 1, Office PC"
+                  autoFocus
+                  required
+                />
+                <p className="text-[11px] text-gray-500 mt-1">
+                  When multiple staff share the superadmin login, this name identifies which machine executed each action.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingPc(false)}
+                  className="btn-ghost text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary text-xs flex items-center gap-1.5"
+                >
+                  <Check className="w-3.5 h-3.5" />
+                  Save Station Name
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+

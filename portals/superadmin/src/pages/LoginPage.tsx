@@ -2,12 +2,14 @@ import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { auth } from '../lib/api'
-import { ShieldCheck, ArrowLeft, KeyRound, Mail, CheckCircle2 } from 'lucide-react'
+import { getPCName, setPCName } from '../lib/device'
+import { ShieldCheck, ArrowLeft, KeyRound, Mail, CheckCircle2, Monitor } from 'lucide-react'
 
 export default function LoginPage() {
   const [mode, setMode]               = useState<'login' | 'forgot' | 'reset'>('login')
   const [email, setEmail]             = useState('')
   const [password, setPassword]       = useState('')
+  const [pcName, setPcNameState]      = useState(() => getPCName())
   const [otp, setOtp]                 = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -23,7 +25,8 @@ export default function LoginPage() {
     e.preventDefault()
     setError(''); setMessage(''); setLoading(true)
     try {
-      const d = await auth.login(email, password) as { accessToken: string; refreshToken: string; user: { id: string; name: string; email: string } }
+      const activePc = setPCName(pcName)
+      const d = await auth.login(email, password, activePc) as { accessToken: string; refreshToken: string; user: { id: string; name: string; email: string } }
       setUser({ ...d.user, portal: 'superadmin' }, d.accessToken, d.refreshToken)
       localStorage.setItem('sa_user', JSON.stringify({ ...d.user, portal: 'superadmin' }))
       navigate('/')
@@ -33,6 +36,7 @@ export default function LoginPage() {
       setLoading(false)
     }
   }
+
 
   async function handleSendOtp(e: FormEvent) {
     e.preventDefault()
@@ -160,10 +164,35 @@ export default function LoginPage() {
                   onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
               </div>
 
+              {/* PC / Computer Station Identifier */}
+              <div className="pt-1">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="label flex items-center gap-1.5 text-xs text-gray-300">
+                    <Monitor className="w-3.5 h-3.5 text-blue-400" />
+                    Computer / PC Station Name
+                  </label>
+                  <span className="text-[10px] text-blue-400 font-medium">Audit Tracking</span>
+                </div>
+                <div className="relative">
+                  <input
+                    className="input text-sm font-medium bg-gray-900/90 border-gray-700 focus:border-blue-500 pl-3"
+                    type="text"
+                    value={pcName}
+                    onChange={e => setPcNameState(e.target.value)}
+                    placeholder="e.g. Manager Laptop, Office PC 1, Cashier 1"
+                    required
+                  />
+                </div>
+                <p className="text-[11px] text-gray-500 mt-1">
+                  Identifies this computer in the Audit Logs so everyone using this login is tracked separately.
+                </p>
+              </div>
+
               <button className="btn-primary w-full mt-2" type="submit" disabled={loading}>
                 {loading ? 'Signing in…' : 'Sign in'}
               </button>
             </form>
+
           )}
 
           {/* Mode 2: Forgot Password Form */}
