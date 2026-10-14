@@ -129,17 +129,18 @@ export async function auditLog(params: {
     // If pcName is still not resolved, lookup from active sessions
     if (!resolvedPc && params.actorId) {
       try {
-        const { rows } = await pool.query(
+        const { rows } = await pool.query<{ pc_name: string }>(
           `SELECT pc_name FROM saas_active_sessions 
            WHERE user_id = ? AND last_seen_at >= DATE_SUB(NOW(), INTERVAL 30 MINUTE)
            ORDER BY last_seen_at DESC LIMIT 1`,
           [params.actorId]
         )
-        if (rows.length && rows[0]?.pc_name) {
-          resolvedPc = rows[0].pc_name
+        if (rows.length > 0 && rows[0]?.pc_name) {
+          resolvedPc = String(rows[0].pc_name)
         }
       } catch { /* ignore fallback query error */ }
     }
+
 
     await pool.query(
       `INSERT INTO saas_audit_logs
