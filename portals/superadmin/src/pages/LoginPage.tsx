@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
 import { auth } from '../lib/api'
 import { getPCName, setPCName } from '../lib/device'
-import { ShieldCheck, ArrowLeft, KeyRound, Mail, CheckCircle2, Monitor } from 'lucide-react'
+import { ShieldCheck, ArrowLeft, KeyRound, Mail, CheckCircle2, Monitor, Lock } from 'lucide-react'
 
 export default function LoginPage() {
   const [mode, setMode]               = useState<'login' | 'forgot' | 'reset'>('login')
@@ -164,29 +164,31 @@ export default function LoginPage() {
                   onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
               </div>
 
-              {/* PC / Computer Station Identifier */}
+              {/* PC / Computer Station Identifier (Fixed / Non-Editable) */}
               <div className="pt-1">
                 <div className="flex items-center justify-between mb-1">
                   <label className="label flex items-center gap-1.5 text-xs text-gray-300">
                     <Monitor className="w-3.5 h-3.5 text-blue-400" />
                     Computer / PC Station Name
                   </label>
-                  <span className="text-[10px] text-blue-400 font-medium">Audit Tracking</span>
+                  <span className="inline-flex items-center gap-1 text-[10px] text-blue-400 font-medium">
+                    <Lock className="w-3 h-3" /> Auto Detected
+                  </span>
                 </div>
-                <div className="relative">
-                  <input
-                    className="input text-sm font-medium bg-gray-900/90 border-gray-700 focus:border-blue-500 pl-3"
-                    type="text"
-                    value={pcName}
-                    onChange={e => setPcNameState(e.target.value)}
-                    placeholder="e.g. Manager Laptop, Office PC 1, Cashier 1"
-                    required
-                  />
+                <div className="flex items-center justify-between px-3.5 py-2.5 rounded-xl bg-gray-900/90 border border-gray-700/80 text-sm select-none">
+                  <div className="flex items-center gap-2 font-mono font-bold text-white tracking-wide">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>{pcName}</span>
+                  </div>
+                  <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider bg-gray-800 px-2 py-0.5 rounded border border-gray-700">
+                    Locked
+                  </span>
                 </div>
                 <p className="text-[11px] text-gray-500 mt-1">
-                  Identifies this computer in the Audit Logs so everyone using this login is tracked separately.
+                  Auto-assigned to this computer. Recorded in Audit Logs for security tracking.
                 </p>
               </div>
+
 
               <button className="btn-primary w-full mt-2" type="submit" disabled={loading}>
                 {loading ? 'Signing in…' : 'Sign in'}
