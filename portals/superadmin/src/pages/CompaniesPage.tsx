@@ -1,74 +1,330 @@
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi, companySecurity as securityApi } from '../lib/api'
-import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield } from 'lucide-react'
+import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield, X, ChevronRight } from 'lucide-react'
 import { buildWhatsAppGuideText, buildWhatsAppPasswordText, openWhatsApp } from '../lib/onboardingGuide'
 
-type MenuItemDef =
-  | { type: 'item'; label: string; icon: React.ComponentType<{ className?: string }>; onClick: () => void; danger?: boolean }
-  | { type: 'divider' }
+interface CompanyHubModalProps {
+  company: Company
+  onClose: () => void
+  onEdit: () => void
+  onToggleStatus: () => void
+  onCompanyKey: () => void
+  onApiKey: () => void
+  onDevices: () => void
+  onResetPw: () => void
+  onSendGuide: () => void
+  onCapabilities: () => void
+  onBranding: () => void
+  onNotifCreds: () => void
+  onClearDataPw: () => void
+  onSupportAccess: () => void
+  onBackups: () => void
+  onExports: () => void
+  onToggleLock: () => void
+  onDelete: () => void
+}
 
-function ActionsMenu({ items }: { items: MenuItemDef[] }) {
-  const [open, setOpen] = useState(false)
-  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
-  const btnRef  = useRef<HTMLButtonElement>(null)
-  const menuRef = useRef<HTMLDivElement>(null)
+function CompanyHubModal({
+  company: c,
+  onClose,
+  onEdit,
+  onToggleStatus,
+  onCompanyKey,
+  onApiKey,
+  onDevices,
+  onResetPw,
+  onSendGuide,
+  onCapabilities,
+  onBranding,
+  onNotifCreds,
+  onClearDataPw,
+  onSupportAccess,
+  onBackups,
+  onExports,
+  onToggleLock,
+  onDelete,
+}: CompanyHubModalProps) {
+  const isLocked = c.admin_locked === '1' || c.admin_locked === 'true'
+  const isActive = c.status === 'active'
 
   useEffect(() => {
-    if (!open) return
-    function onDocClick(e: MouseEvent) {
-      const t = e.target as Node
-      if (menuRef.current?.contains(t) || btnRef.current?.contains(t)) return
-      setOpen(false)
-    }
-    function onEscape(e: KeyboardEvent) { if (e.key === 'Escape') setOpen(false) }
-    function onReposition() { setOpen(false) }
-    document.addEventListener('mousedown', onDocClick)
-    document.addEventListener('keydown', onEscape)
-    window.addEventListener('scroll', onReposition, true)
-    window.addEventListener('resize', onReposition)
-    return () => {
-      document.removeEventListener('mousedown', onDocClick)
-      document.removeEventListener('keydown', onEscape)
-      window.removeEventListener('scroll', onReposition, true)
-      window.removeEventListener('resize', onReposition)
-    }
-  }, [open])
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
-  function toggle() {
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect()
-      const menuWidth = 250
-      const left = Math.max(8, Math.min(r.right - menuWidth, window.innerWidth - menuWidth - 8))
-      setPos({ top: r.bottom + 4, left })
+  const actionSections = [
+    {
+      title: 'Security & Access Keys',
+      emoji: '🔑',
+      items: [
+        {
+          emoji: '🛡️',
+          label: 'Company Activation Key',
+          desc: 'Offline license file & product key for registration',
+          color: 'hover:border-blue-500/50 hover:bg-blue-950/20 text-blue-400',
+          onClick: () => { onClose(); onCompanyKey() }
+        },
+        {
+          emoji: '🔑',
+          label: 'POS API Key',
+          desc: 'Cloud sync token for desktop & mobile registers',
+          color: 'hover:border-amber-500/50 hover:bg-amber-950/20 text-amber-400',
+          onClick: () => { onClose(); onApiKey() }
+        },
+        {
+          emoji: '🔐',
+          label: 'Admin Password Hub',
+          desc: 'View initial password, reset or send to client',
+          color: 'hover:border-emerald-500/50 hover:bg-emerald-950/20 text-emerald-400',
+          onClick: () => { onClose(); onResetPw() }
+        },
+        {
+          emoji: '📱',
+          label: 'POS Hardware Devices',
+          desc: 'View authorized terminals, printers & registers',
+          color: 'hover:border-purple-500/50 hover:bg-purple-950/20 text-purple-400',
+          onClick: () => { onClose(); onDevices() }
+        },
+        {
+          emoji: '🚀',
+          label: 'Send Setup Guide',
+          desc: 'Dispatch onboarding steps via WhatsApp or Email',
+          color: 'hover:border-sky-500/50 hover:bg-sky-950/20 text-sky-400',
+          onClick: () => { onClose(); onSendGuide() }
+        },
+      ]
+    },
+    {
+      title: 'Configuration & Branding',
+      emoji: '⚙️',
+      items: [
+        {
+          emoji: '🎛️',
+          label: 'Feature Management',
+          desc: 'Toggle ERP capabilities, modules & permissions',
+          color: 'hover:border-indigo-500/50 hover:bg-indigo-950/20 text-indigo-400',
+          onClick: () => { onClose(); onCapabilities() }
+        },
+        {
+          emoji: '🎨',
+          label: 'Branding & Theme',
+          desc: 'Custom business logo, bill header & app colors',
+          color: 'hover:border-pink-500/50 hover:bg-pink-950/20 text-pink-400',
+          onClick: () => { onClose(); onBranding() }
+        },
+        {
+          emoji: '📧',
+          label: 'Notification Gateway',
+          desc: 'SMTP email server & SMS alert credentials',
+          color: 'hover:border-cyan-500/50 hover:bg-cyan-950/20 text-cyan-400',
+          onClick: () => { onClose(); onNotifCreds() }
+        },
+      ]
+    },
+    {
+      title: 'Data & Maintenance',
+      emoji: '💾',
+      items: [
+        {
+          emoji: '🔒',
+          label: 'Clear Data Master PIN',
+          desc: 'Security authorization to reset or wipe store sales',
+          color: 'hover:border-orange-500/50 hover:bg-orange-950/20 text-orange-400',
+          onClick: () => { onClose(); onClearDataPw() }
+        },
+        {
+          emoji: '🛡️',
+          label: 'Technician Support Access',
+          desc: 'Generate temporary passcode for remote technician',
+          color: 'hover:border-teal-500/50 hover:bg-teal-950/20 text-teal-400',
+          onClick: () => { onClose(); onSupportAccess() }
+        },
+        {
+          emoji: '💾',
+          label: 'Database Backups',
+          desc: 'Create manual snapshot or download auto-backups',
+          color: 'hover:border-blue-500/50 hover:bg-blue-950/20 text-blue-400',
+          onClick: () => { onClose(); onBackups() }
+        },
+        {
+          emoji: '📥',
+          label: 'Export Company Data',
+          desc: 'Download CSV / JSON data dumps of products & sales',
+          color: 'hover:border-violet-500/50 hover:bg-violet-950/20 text-violet-400',
+          onClick: () => { onClose(); onExports() }
+        },
+      ]
+    },
+    {
+      title: 'Tenant Control & Danger Zone',
+      emoji: '⚡',
+      items: [
+        {
+          emoji: '✏️',
+          label: 'Edit Company Profile',
+          desc: 'Update tenant name, contact, tier & max limits',
+          color: 'hover:border-gray-500/50 hover:bg-gray-800/60 text-gray-200',
+          onClick: () => { onClose(); onEdit() }
+        },
+        {
+          emoji: isLocked ? '🔓' : '🔒',
+          label: isLocked ? `Unlock Tenant (${c.lock_reason || 'Locked'})` : 'Lock Tenant (Freeze changes)',
+          desc: isLocked ? 'Resume staff & permission syncing' : 'Halt sync while allowing local sales',
+          color: isLocked ? 'hover:border-amber-500/50 hover:bg-amber-950/30 text-amber-300' : 'hover:border-yellow-500/50 hover:bg-yellow-950/30 text-yellow-300',
+          onClick: () => { onClose(); onToggleLock() }
+        },
+        {
+          emoji: isActive ? '⏸️' : '▶️',
+          label: isActive ? 'Suspend Company' : 'Activate Company',
+          desc: isActive ? 'Disable POS login and show suspension notice' : 'Restore full operational access',
+          color: isActive ? 'hover:border-amber-500/50 hover:bg-amber-950/30 text-amber-400' : 'hover:border-green-500/50 hover:bg-green-950/30 text-green-400',
+          onClick: () => { onClose(); onToggleStatus() }
+        },
+        {
+          emoji: '🗑️',
+          label: 'Delete Company & All Data',
+          desc: 'Permanently purge tenant, databases and device binds',
+          color: 'hover:border-red-500/50 hover:bg-red-950/40 text-red-400 border-red-900/30',
+          onClick: () => { onClose(); onDelete() }
+        },
+      ]
     }
-    setOpen(o => !o)
-  }
+  ]
 
   return (
-    <>
-      <button ref={btnRef} title="More actions" type="button"
-        className={`p-1.5 rounded hover:bg-gray-700/60 text-gray-400 hover:text-white ${open ? 'bg-gray-700/60 text-white' : ''}`}
-        onClick={toggle}>
-        <MoreVertical className="w-3.5 h-3.5" />
-      </button>
-      {open && pos && (
-        <div ref={menuRef} style={{ position: 'fixed', top: pos.top, left: pos.left, width: 250, zIndex: 50 }}
-          className="rounded-lg border border-gray-700 bg-gray-900 shadow-xl py-1.5">
-          {items.map((it, i) => it.type === 'divider'
-            ? <div key={i} className="my-1.5 border-t border-gray-800" />
-            : (
-              <button key={i} type="button"
-                onClick={() => { setOpen(false); it.onClick() }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left text-sm ${
-                  it.danger ? 'text-red-400 hover:bg-red-950/40 hover:text-red-300' : 'text-gray-200 hover:bg-gray-800 hover:text-white'
-                }`}>
-                <it.icon className="w-4 h-4 flex-shrink-0" />
-                {it.label}
-              </button>
-            ))}
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <div
+        className="w-full sm:max-w-2xl bg-gray-900 border border-gray-800 sm:rounded-2xl rounded-t-2xl shadow-2xl flex flex-col max-h-[92vh] sm:max-h-[88vh] overflow-hidden animate-in slide-in-from-bottom duration-250"
+        onClick={e => e.stopPropagation()}
+      >
+        {/* Hub Header */}
+        <div className="p-4 sm:p-5 border-b border-gray-800/80 bg-gradient-to-r from-gray-950/90 via-gray-900 to-gray-950/90 flex-shrink-0">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 flex items-center justify-center text-xl font-black text-white shadow-lg shadow-blue-600/30 flex-shrink-0 border border-white/10">
+                {(c.name || 'C').charAt(0).toUpperCase()}
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-lg sm:text-xl font-bold text-white truncate tracking-tight">{c.name}</h2>
+                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+                    c.status === 'active' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
+                    c.status === 'trial' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
+                    'bg-red-500/20 text-red-400 border border-red-500/30'
+                  }`}>
+                    {c.status}
+                  </span>
+                  {isLocked && (
+                    <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      🔒 Locked
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-400 mt-0.5 flex-wrap">
+                  <span className="font-mono text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded text-[11px]">slug: {c.slug}</span>
+                  <span>•</span>
+                  <span className="truncate">{c.email}</span>
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors flex-shrink-0"
+              title="Close Hub"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Quick Stats Ribbon */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-4 pt-3 border-t border-gray-800/60">
+            <div className="bg-gray-800/50 rounded-xl p-2.5 border border-gray-750 flex items-center gap-2.5">
+              <span className="text-xl">🏢</span>
+              <div className="min-w-0">
+                <p className="text-[10px] text-gray-400 uppercase font-semibold">Branches</p>
+                <p className="text-xs font-bold text-white">{c.max_branches ?? 1} Max</p>
+              </div>
+            </div>
+
+            <div className="bg-gray-800/50 rounded-xl p-2.5 border border-gray-750 flex items-center gap-2.5">
+              <span className="text-xl">👥</span>
+              <div className="min-w-0">
+                <p className="text-[10px] text-gray-400 uppercase font-semibold">Staff Users</p>
+                <p className="text-xs font-bold text-white">{c.max_users ?? 5} Max</p>
+              </div>
+            </div>
+
+            <div className="bg-gray-800/50 rounded-xl p-2.5 border border-gray-750 flex items-center gap-2.5">
+              <span className="text-xl">🖥️</span>
+              <div className="min-w-0">
+                <p className="text-[10px] text-gray-400 uppercase font-semibold">POS Devices</p>
+                <p className="text-xs font-bold text-white">{c.max_pos_devices ?? 2} Terminals</p>
+              </div>
+            </div>
+
+            <div className="bg-gray-800/50 rounded-xl p-2.5 border border-gray-750 flex items-center gap-2.5">
+              <span className="text-xl">📦</span>
+              <div className="min-w-0">
+                <p className="text-[10px] text-gray-400 uppercase font-semibold">Package Tier</p>
+                <p className="text-xs font-bold text-blue-400 truncate">{c.package_name || 'Standard'}</p>
+              </div>
+            </div>
+          </div>
         </div>
-      )}
-    </>
+
+        {/* Scrollable Actions Body */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
+          {actionSections.map((sec, idx) => (
+            <div key={idx} className="space-y-2">
+              <div className="flex items-center gap-2 px-1">
+                <span className="text-lg">{sec.emoji}</span>
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">{sec.title}</h3>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {sec.items.map((item, i) => (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={item.onClick}
+                    className={`group flex items-start gap-3 p-3 rounded-xl bg-gray-800/60 hover:bg-gray-800 border border-gray-750 text-left transition-all active:scale-98 ${item.color}`}
+                  >
+                    <span className="text-2xl flex-shrink-0 group-hover:scale-115 transition-transform duration-200">
+                      {item.emoji}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-100 group-hover:text-white leading-tight">
+                        {item.label}
+                      </p>
+                      <p className="text-[11px] text-gray-400 font-normal mt-0.5 leading-snug">
+                        {item.desc}
+                      </p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-500 group-hover:text-gray-300 group-hover:translate-x-0.5 transition-all flex-shrink-0 self-center" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="p-3 bg-gray-950/80 border-t border-gray-800/80 flex items-center justify-between px-5 flex-shrink-0">
+          <span className="text-[11px] text-gray-500">
+            Subscription: {c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : 'Continuous'}
+          </span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-bold text-gray-300 transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -88,6 +344,7 @@ export default function CompaniesPage() {
   const [statusFilter, setStatusFilter] = useState('')
   const [loading, setLoading]   = useState(false)
   const [pkgs, setPkgs]         = useState<Pkg[]>([])
+  const [showHub, setShowHub]   = useState<Company | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [showEdit, setShowEdit] = useState<Company | null>(null)
   const [showDelete, setShowDelete] = useState<Company | null>(null)
@@ -156,39 +413,151 @@ export default function CompaniesPage() {
 
 
   return (
-    <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+    <div className="p-4 sm:p-6 space-y-4 max-w-7xl mx-auto">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold text-white">Companies</h1>
-          <p className="text-sm text-gray-400">{total} total tenants</p>
+          <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
+            <span>🏢</span> Companies
+          </h1>
+          <p className="text-xs sm:text-sm text-gray-400">{total} total registered tenants</p>
         </div>
-        <button className="btn-primary flex items-center gap-2" onClick={() => setShowCreate(true)}>
+        <button
+          className="btn-primary flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl shadow-lg shadow-blue-600/20 active:scale-95 transition-transform"
+          onClick={() => setShowCreate(true)}
+        >
           <Plus className="w-4 h-4" /> New Company
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3">
-        <div className="relative flex-1 max-w-xs">
+      {/* Filters Bar */}
+      <div className="flex flex-col sm:flex-row gap-2.5">
+        <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-          <input className="input pl-9" placeholder="Search name, email, slug…" value={search}
+          <input
+            className="input pl-9 w-full"
+            placeholder="Search company name, email, slug…"
+            value={search}
             onChange={e => setSearch(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && (setPage(1), load())} />
+            onKeyDown={e => e.key === 'Enter' && (setPage(1), load())}
+          />
         </div>
-        <select className="input w-40" value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1) }}>
-          <option value="">All statuses</option>
-          <option value="trial">Trial</option>
-          <option value="active">Active</option>
-          <option value="suspended">Suspended</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-        <button className="btn-ghost flex items-center gap-2" onClick={load}>
-          <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
-        </button>
+        <div className="flex gap-2">
+          <select
+            className="input flex-1 sm:w-44"
+            value={statusFilter}
+            onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
+          >
+            <option value="">All statuses</option>
+            <option value="trial">Trial</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+          <button className="btn-ghost flex items-center gap-2 px-3.5" onClick={load} title="Refresh company list">
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <span className="hidden sm:inline">Refresh</span>
+          </button>
+        </div>
       </div>
 
-      {/* Table */}
-      <div className="card p-0 overflow-hidden">
+      {/* ── Mobile Cards View (< md) ─────────────────────────────────────── */}
+      <div className="block md:hidden space-y-3">
+        {rows.map(c => (
+          <div key={c.id} className="card p-4 space-y-3 border border-gray-800 hover:border-gray-700 transition-colors shadow-lg">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 via-indigo-600 to-purple-700 flex items-center justify-center font-black text-white text-base flex-shrink-0 shadow-md">
+                  {(c.name || 'C').charAt(0).toUpperCase()}
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-base font-bold text-white truncate">{c.name}</h2>
+                  <p className="text-xs text-gray-400 font-mono truncate">slug: {c.slug}</p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                <span className={STATUS_BADGE[c.status] ?? ''}>
+                  {c.status}
+                </span>
+                {(c.admin_locked === '1' || c.admin_locked === 'true') && (
+                  <span className="badge-yellow text-[10px] px-1.5 py-0.5" title={c.lock_reason ? `Locked — ${c.lock_reason}` : 'Locked'}>
+                    🔒 Locked
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs bg-gray-900/60 p-2.5 rounded-xl border border-gray-800/80">
+              <div>
+                <span className="text-[10px] text-gray-500 uppercase font-semibold block">Package</span>
+                <span className="font-semibold text-blue-400 truncate block">{c.package_name ?? 'Standard'}</span>
+              </div>
+              <div>
+                <span className="text-[10px] text-gray-500 uppercase font-semibold block">Limits</span>
+                <span className="text-gray-300 font-medium">
+                  {c.max_branches ?? 1} Br · {c.max_users ?? 5} Usr · {c.max_pos_devices ?? 2} POS
+                </span>
+              </div>
+              <div className="col-span-2 pt-1 border-t border-gray-800/50 flex items-center justify-between text-gray-400 text-[11px]">
+                <span className="truncate">{c.email}</span>
+                <span>{c.sub_ends_at ? new Date(c.sub_ends_at).toLocaleDateString() : 'Continuous'}</span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={() => setShowEdit(c)}
+                className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-gray-800 hover:bg-gray-700 text-xs font-semibold text-gray-200 transition-colors"
+                title="Edit Company"
+              >
+                <Edit2 className="w-3.5 h-3.5" />
+                <span>Edit</span>
+              </button>
+
+              {c.status !== 'active' ? (
+                <button
+                  onClick={() => changeStatus(c.id, 'active')}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-green-950/40 hover:bg-green-900/40 text-xs font-semibold text-green-400 border border-green-800/30 transition-colors"
+                  title="Activate Tenant"
+                >
+                  <CheckCircle className="w-3.5 h-3.5" />
+                  <span>Activate</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => changeStatus(c.id, 'suspended')}
+                  className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-yellow-950/40 hover:bg-yellow-900/40 text-xs font-semibold text-yellow-400 border border-yellow-800/30 transition-colors"
+                  title="Suspend Tenant"
+                >
+                  <Ban className="w-3.5 h-3.5" />
+                  <span>Suspend</span>
+                </button>
+              )}
+
+              <button
+                onClick={() => setShowHub(c)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/40 text-xs font-bold transition-all active:scale-95 shadow-sm"
+                title="Open 3-Dot Actions Hub"
+              >
+                <span className="text-sm">⚡</span>
+                <span>Actions Hub (3-Dot)</span>
+                <MoreVertical className="w-3.5 h-3.5 ml-auto" />
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {rows.length === 0 && !loading && !error && (
+          <div className="card text-center py-12 text-gray-500 text-sm">No companies found</div>
+        )}
+        {error && (
+          <div className="card text-center py-8 text-red-400 text-sm">{error}</div>
+        )}
+      </div>
+
+      {/* ── Desktop Table View (>= md) ───────────────────────────────────── */}
+      <div className="hidden md:block card p-0 overflow-hidden">
         <table className="w-full text-sm">
           <thead className="border-b border-gray-800">
             <tr>
@@ -200,7 +569,14 @@ export default function CompaniesPage() {
           <tbody>
             {rows.map(c => (
               <tr key={c.id} className="border-b border-gray-800/50 hover:bg-gray-800/20">
-                <td className="px-4 py-3 font-medium text-white">{c.name}</td>
+                <td className="px-4 py-3 font-medium text-white">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center font-bold text-white text-xs flex-shrink-0">
+                      {(c.name || 'C').charAt(0).toUpperCase()}
+                    </div>
+                    <span className="truncate">{c.name}</span>
+                  </div>
+                </td>
                 <td className="px-4 py-3 text-gray-400 font-mono text-xs">{c.slug}</td>
                 <td className="px-4 py-3 text-gray-400">{c.email}</td>
                 <td className="px-4 py-3 text-gray-400">{c.package_name ?? '—'}</td>
@@ -235,44 +611,31 @@ export default function CompaniesPage() {
                 </td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-1.5">
-                    <button title="Edit Company (Info / Limits / Subscription)" className="p-1.5 rounded hover:bg-gray-700/60 text-gray-300"
+                    <button title="Edit Company (Info / Limits / Subscription)" className="p-1.5 rounded hover:bg-gray-700/60 text-gray-300 transition-colors"
                       onClick={() => setShowEdit(c)}>
                       <Edit2 className="w-3.5 h-3.5" />
                     </button>
 
                     {c.status !== 'active' ? (
-                      <button title="Activate" className="p-1.5 rounded hover:bg-green-900/40 text-green-400"
+                      <button title="Activate" className="p-1.5 rounded hover:bg-green-900/40 text-green-400 transition-colors"
                         onClick={() => changeStatus(c.id, 'active')}>
                         <CheckCircle className="w-3.5 h-3.5" />
                       </button>
                     ) : (
-                      <button title="Suspend" className="p-1.5 rounded hover:bg-yellow-900/40 text-yellow-400"
+                      <button title="Suspend" className="p-1.5 rounded hover:bg-yellow-900/40 text-yellow-400 transition-colors"
                         onClick={() => changeStatus(c.id, 'suspended')}>
                         <Ban className="w-3.5 h-3.5" />
                       </button>
                     )}
 
-                    <ActionsMenu items={[
-                      { type: 'item', label: 'Company Activation Key', icon: ShieldCheck, onClick: () => setShowCompanyKey(c) },
-                      { type: 'item', label: 'POS API Key',            icon: Key,         onClick: () => setShowApiKey(c) },
-                      { type: 'item', label: 'POS Devices',            icon: Smartphone,  onClick: () => setShowDevices(c) },
-                      { type: 'item', label: 'Admin Password (View / Send / Reset)', icon: KeyRound, onClick: () => setShowResetPw(c) },
-                      { type: 'item', label: 'Send Setup Guide (Email/WhatsApp)', icon: Send, onClick: () => setShowSendGuide(c) },
-                      { type: 'divider' },
-                      { type: 'item', label: 'Feature Management',     icon: Settings2,   onClick: () => setShowCapabilities(c) },
-                      { type: 'item', label: 'Branding (logo & color)', icon: Palette,    onClick: () => setShowBranding(c) },
-                      { type: 'item', label: 'Notification Credentials (SMTP/SMS)', icon: Mail, onClick: () => setShowNotifCreds(c) },
-                      { type: 'item', label: 'Clear-All-Data Password', icon: Lock, onClick: () => setShowClearDataPw(c) },
-                      { type: 'item', label: 'Generate Support Access', icon: Shield, onClick: () => setShowSupportAccess(c) },
-                      { type: 'item', label: 'Backups',                icon: Database,    onClick: () => setShowBackups(c) },
-                      { type: 'item', label: 'Export Data',            icon: FileDown,    onClick: () => setShowExports(c) },
-                      { type: 'divider' },
-                      (c.admin_locked === '1' || c.admin_locked === 'true')
-                        ? { type: 'item', label: `Unlock${c.lock_reason ? ' — ' + c.lock_reason : ''}`, icon: Lock,   onClick: () => toggleLock(c) }
-                        : { type: 'item', label: 'Lock (freeze staff/permission changes)',               icon: Unlock, onClick: () => toggleLock(c) },
-                      { type: 'divider' },
-                      { type: 'item', label: 'Delete Company + All Data', icon: Trash2, danger: true, onClick: () => setShowDelete(c) },
-                    ]} />
+                    <button
+                      title="More Actions & Details Hub (3-Dot)"
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 hover:text-blue-300 border border-blue-500/30 text-xs font-semibold transition-all active:scale-95"
+                      onClick={() => setShowHub(c)}
+                    >
+                      <MoreVertical className="w-3.5 h-3.5" />
+                      <span>Actions</span>
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -285,22 +648,46 @@ export default function CompaniesPage() {
             )}
           </tbody>
         </table>
-
-        {/* Pagination */}
-        {total > limit && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-800">
-            <span className="text-xs text-gray-500">
-              {(page-1)*limit+1}–{Math.min(page*limit, total)} of {total}
-            </span>
-            <div className="flex gap-2">
-              <button className="btn-ghost text-xs py-1 px-2" disabled={page===1}
-                onClick={() => setPage(p => p-1)}>Prev</button>
-              <button className="btn-ghost text-xs py-1 px-2" disabled={page*limit>=total}
-                onClick={() => setPage(p => p+1)}>Next</button>
-            </div>
-          </div>
-        )}
       </div>
+
+      {/* Pagination (shared for mobile & desktop) */}
+      {total > limit && (
+        <div className="flex items-center justify-between px-4 py-3 card border border-gray-800">
+          <span className="text-xs text-gray-500">
+            {(page-1)*limit+1}–{Math.min(page*limit, total)} of {total}
+          </span>
+          <div className="flex gap-2">
+            <button className="btn-ghost text-xs py-1.5 px-3 rounded-lg" disabled={page===1}
+              onClick={() => setPage(p => p-1)}>Prev</button>
+            <button className="btn-ghost text-xs py-1.5 px-3 rounded-lg" disabled={page*limit>=total}
+              onClick={() => setPage(p => p+1)}>Next</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modals & Dialogs ─────────────────────────────────────────────── */}
+      {showHub && (
+        <CompanyHubModal
+          company={showHub}
+          onClose={() => setShowHub(null)}
+          onEdit={() => setShowEdit(showHub)}
+          onToggleStatus={() => changeStatus(showHub.id, showHub.status === 'active' ? 'suspended' : 'active')}
+          onCompanyKey={() => setShowCompanyKey(showHub)}
+          onApiKey={() => setShowApiKey(showHub)}
+          onDevices={() => setShowDevices(showHub)}
+          onResetPw={() => setShowResetPw(showHub)}
+          onSendGuide={() => setShowSendGuide(showHub)}
+          onCapabilities={() => setShowCapabilities(showHub)}
+          onBranding={() => setShowBranding(showHub)}
+          onNotifCreds={() => setShowNotifCreds(showHub)}
+          onClearDataPw={() => setShowClearDataPw(showHub)}
+          onSupportAccess={() => setShowSupportAccess(showHub)}
+          onBackups={() => setShowBackups(showHub)}
+          onExports={() => setShowExports(showHub)}
+          onToggleLock={() => toggleLock(showHub)}
+          onDelete={() => setShowDelete(showHub)}
+        />
+      )}
 
       {showCreate && <CreateCompanyModal pkgs={pkgs} onClose={() => setShowCreate(false)} onCreated={load} />}
       {showEdit && <EditCompanyModal company={showEdit} pkgs={pkgs} onClose={() => setShowEdit(null)} onSaved={load} />}
