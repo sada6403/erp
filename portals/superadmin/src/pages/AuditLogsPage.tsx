@@ -86,7 +86,7 @@ export default function AuditLogsPage() {
 
   // Auto-refresh state
   const [autoRefresh, setAutoRefresh] = useState(true)
-  const autoRefreshTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const autoRefreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const limit = 50
   const [loadError, setLoadError] = useState('')
