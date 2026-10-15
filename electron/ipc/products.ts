@@ -886,6 +886,91 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const catMap = new Map(cats.map(c => [c.name.toLowerCase(), c.id]))
       const supMap = new Map(sups.map(s => [s.name.toLowerCase(), s.id]))
 
+      // Pre-load all branches for branch-wise stock mapping
+      const allBranches = db.prepare('SELECT id, name, code, is_active FROM branches').all() as { id: string; name: string; code?: string; is_active: number }[]
+      const importUser = store.get('auth_user') as Record<string, unknown> | undefined
+      const defaultBranchId = (importUser?.branch_id as string) || (allBranches.find(b => b.is_active)?.id) || 'b1111111-1111-4111-8111-111111111111'
+
+      // Standard product columns to protect from false-positive branch matching
+      const standardCols = new Set([
+        'name', 'productname', 'sku', 'productcode', 'code', 'category', 'categoryname',
+        'price', 'sellingprice', 'cost', 'costprice', 'barcode', 'supplier', 'suppliername',
+        'unit', 'tax', 'taxrate', 'vat', 'discount', 'discountpct', 'discountpercentage',
+        'discountpercent', 'minstock', 'minstocklevel', 'reorder', 'reorderlevel',
+        'description', 'desc', 'notes', 'isactive', 'status', 'brand'
+      ])
+      const normClean = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/]+/g, '')
+
+      // Helper to extract stock counts for all branches from row columns
+      const extractRowBranchStocks = (row: Record<string, unknown>): Map<string, { qty: number; branchName: string }> => {
+        const result = new Map<string, { qty: number; branchName: string }>()
+        const rowKeys = Object.keys(row)
+
+        for (const branch of allBranches) {
+          const bClean = normClean(branch.name)
+          const bCodeClean = branch.code ? normClean(branch.code) : ''
+
+          for (const key of rowKeys) {
+            const kNorm = norm(key)
+            if (standardCols.has(kNorm)) continue
+
+            const kClean = normClean(key)
+            const isMatch =
+              kClean === `stock${bClean}` ||
+              kClean === `${bClean}stock` ||
+              kClean === `qty${bClean}` ||
+              kClean === `${bClean}qty` ||
+              kClean === `quantity${bClean}` ||
+              kClean === `${bClean}quantity` ||
+              (bCodeClean && (
+                kClean === `stock${bCodeClean}` ||
+                kClean === `${bCodeClean}stock` ||
+                kClean === `qty${bCodeClean}` ||
+                kClean === `${bCodeClean}qty` ||
+                kClean === `quantity${bCodeClean}` ||
+                kClean === `${bCodeClean}quantity` ||
+                kClean === bCodeClean
+              )) ||
+              (kClean === bClean)
+
+            if (isMatch) {
+              const valStr = String(row[key] ?? '').trim()
+              if (valStr !== '') {
+                const parsed = parseInt(valStr, 10)
+                if (!isNaN(parsed) && parsed >= 0) {
+                  result.set(branch.id, { qty: parsed, branchName: branch.name })
+                }
+              }
+            }
+          }
+        }
+
+        // Fallback: If no branch-specific columns matched in this row, check for generic Stock column and optional Branch column
+        if (result.size === 0) {
+          const branchVal = colMap(row, 'branch', 'branchname', 'branch name', 'branchcode', 'branch code', 'location')
+          const stockVal = colMap(row, 'stock', 'quantity', 'qty', 'opening stock', 'openingstock')
+
+          if (stockVal !== '') {
+            const parsed = parseInt(stockVal, 10)
+            if (!isNaN(parsed) && parsed >= 0) {
+              let targetBranch: { id: string; name: string; code?: string } | undefined
+              if (branchVal) {
+                const bValNorm = norm(branchVal)
+                targetBranch = allBranches.find(b => norm(b.name) === bValNorm || (b.code && norm(b.code) === bValNorm))
+              }
+              if (!targetBranch) {
+                targetBranch = allBranches.find(b => b.id === defaultBranchId) || allBranches[0]
+              }
+              if (targetBranch) {
+                result.set(targetBranch.id, { qty: parsed, branchName: targetBranch.name })
+              }
+            }
+          }
+        }
+
+        return result
+      }
+
       let imported = 0, created = 0, updated = 0, skipped = 0
       const errors: string[] = []
 
@@ -903,7 +988,6 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           const taxRate      = parseFloat(colMap(row, 'tax', 'taxrate', 'tax rate', 'vat') || '0') || 0
           const minStock     = parseInt(colMap(row, 'minstock', 'min stock', 'reorder', 'reorder level') || '5') || 5
           const description  = colMap(row, 'description', 'desc', 'notes')
-          const stockQty     = parseInt(colMap(row, 'stock', 'quantity', 'qty', 'opening stock', 'openingstock') || '0') || 0
           const discountVal  = colMap(row, 'discount', 'discountpct', 'discountpercentage', 'discountpercent', 'discount_pct', 'discount_percentage', 'discount %', 'discount percentage')
 
           if (!name) { skipped++; continue }
@@ -1021,29 +1105,35 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             }
           }
 
-          // Set opening stock
-          if (stockQty > 0) {
+          // Set opening stock branch-wise for all branches specified in row
+          const branchStocks = extractRowBranchStocks(row)
+
+          if (branchStocks.size > 0) {
             const user = store.get('auth_user') as Record<string, unknown>
             if (!canManageAllBranchStock(db, user)) {
               throw new Error('Only main-branch inventory managers can import stock quantities')
             }
-            const branchId = user?.branch_id as string || 'b1111111-1111-4111-8111-111111111111'
-            const existingStock = db.prepare('SELECT id, quantity, damaged_qty FROM stocks WHERE product_id=? AND branch_id=?').get(productId, branchId) as { id: string; quantity: number; damaged_qty: number } | undefined
-            
-            if (duplicateStrategy === 'fill_empty' && existingStock && Number(existingStock.quantity) > 0) {
-              // Keep existing stock untouched
-            } else {
-              if (existingStock && stockQty < Number(existingStock.damaged_qty || 0)) {
-                throw new Error('Imported stock cannot be lower than the recorded damaged quantity')
+
+            for (const [branchId, { qty: branchStockQty, branchName }] of branchStocks.entries()) {
+              const existingStock = db.prepare('SELECT id, quantity, damaged_qty FROM stocks WHERE product_id=? AND branch_id=?').get(productId, branchId) as { id: string; quantity: number; damaged_qty: number } | undefined
+
+              if (duplicateStrategy === 'fill_empty' && existingStock && Number(existingStock.quantity) > 0) {
+                // Keep existing stock untouched
+                continue
               }
+
+              if (existingStock && branchStockQty < Number(existingStock.damaged_qty || 0)) {
+                throw new Error(`Imported stock for branch "${branchName}" cannot be lower than the recorded damaged quantity (${existingStock.damaged_qty})`)
+              }
+
               let stockMovement: Record<string, unknown> | null = null
               db.transaction(() => {
                 if (existingStock) {
-                  db.prepare(`UPDATE stocks SET quantity=?, updated_at=datetime('now') WHERE product_id=? AND branch_id=?`).run(stockQty, productId, branchId)
+                  db.prepare(`UPDATE stocks SET quantity=?, updated_at=datetime('now') WHERE product_id=? AND branch_id=?`).run(branchStockQty, productId, branchId)
                 } else {
-                  db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)`).run(crypto.randomUUID(), productId, branchId, stockQty)
+                  db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?,?,?,?)`).run(crypto.randomUUID(), productId, branchId, branchStockQty)
                 }
-                const delta = stockQty - Number(existingStock?.quantity || 0)
+                const delta = branchStockQty - Number(existingStock?.quantity || 0)
                 if (delta !== 0) {
                   stockMovement = insertStockMovement(db, {
                     product_id: productId,
@@ -1051,7 +1141,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
                     to_branch_id: delta > 0 ? branchId : null,
                     quantity: Math.abs(delta),
                     movement_type: 'ADJUSTMENT',
-                    notes: 'Product import opening stock reconciliation',
+                    notes: `Product import opening stock (${branchName})`,
                     created_by: (user?.id as string) || null,
                   })
                 }
@@ -1190,34 +1280,70 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const authUser = getAuthUser()
       const superAdmin = isSuperAdmin(authUser)
       const branchId = authUser?.branch_id as string | undefined
+      const canManageAll = canManageAllBranchStock(db, authUser)
+
+      const branches = db.prepare('SELECT id, name, code FROM branches WHERE is_active = 1 ORDER BY name ASC').all() as { id: string; name: string; code?: string }[]
+
+      const allStocks = db.prepare('SELECT product_id, branch_id, quantity FROM stocks').all() as { product_id: string; branch_id: string; quantity: number }[]
+      const stockMap = new Map<string, number>()
+      for (const s of allStocks) {
+        stockMap.set(`${s.product_id}:${s.branch_id}`, Number(s.quantity) || 0)
+      }
 
       let sql = `
-        SELECT p.sku, p.barcode, p.name, c.name as category, sp.name as supplier,
+        SELECT p.id, p.sku, p.barcode, p.name, c.name as category, sp.name as supplier,
                p.unit, p.cost_price, p.selling_price, p.discount_pct as discount_percentage, p.tax_rate, p.min_stock_level,
-               p.description, p.is_active, COALESCE(s.quantity, 0) as stock
+               p.description, p.is_active
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
         LEFT JOIN suppliers sp ON sp.id = p.supplier_id
-        LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?
         WHERE 1=1
       `
-      const params: unknown[] = [branchId || null]
-      if (!superAdmin && branchId) {
+      const params: unknown[] = []
+      if (!superAdmin && branchId && !canManageAll) {
         sql += ' AND (p.branch_id = ? OR p.branch_id IS NULL)'
         params.push(branchId)
       }
       sql += ' ORDER BY p.name'
 
       const rows = db.prepare(sql).all(...params) as Record<string, unknown>[]
-      const headers = [
-        'sku', 'barcode', 'name', 'category', 'supplier', 'unit', 'cost_price',
-        'selling_price', 'discount_percentage', 'tax_rate', 'min_stock_level', 'stock', 'description', 'is_active'
-      ]
-      const csv = [
-        headers.join(','),
-        ...rows.map(row => headers.map(h => csvCell(row[h])).join(','))
-      ].join('\r\n')
 
+      const branchHeaders = canManageAll && branches.length > 0
+        ? branches.map(b => `Stock (${b.name})`)
+        : ['Stock']
+
+      const headers = [
+        'Product Name', 'SKU', 'Category', 'Cost Price', 'Selling Price',
+        ...branchHeaders,
+        'Discount Percentage', 'Barcode', 'Supplier', 'Unit', 'Tax Rate', 'Min Stock Level', 'Description', 'Is Active'
+      ]
+
+      const csvRows = rows.map(row => {
+        const prodId = String(row.id || '')
+        const branchStockValues = canManageAll && branches.length > 0
+          ? branches.map(b => String(stockMap.get(`${prodId}:${b.id}`) ?? 0))
+          : [String(stockMap.get(`${prodId}:${branchId || ''}`) ?? 0)]
+
+        const line = [
+          csvCell(row.name),
+          csvCell(row.sku),
+          csvCell(row.category),
+          csvCell(row.cost_price),
+          csvCell(row.selling_price),
+          ...branchStockValues.map(v => csvCell(v)),
+          csvCell(row.discount_percentage),
+          csvCell(row.barcode),
+          csvCell(row.supplier),
+          csvCell(row.unit),
+          csvCell(row.tax_rate),
+          csvCell(row.min_stock_level),
+          csvCell(row.description),
+          csvCell(row.is_active ? '1' : '0')
+        ]
+        return line.join(',')
+      })
+
+      const csv = [headers.join(','), ...csvRows].join('\r\n')
       fs.writeFileSync(result.filePath, csv, 'utf8')
       return { success: true, data: { path: result.filePath, exported: rows.length } }
   })
@@ -1230,13 +1356,27 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       })
       if (result.canceled || !result.filePath) return { success: false, error: 'Cancelled' }
 
+      const db = getDb()
+      const branches = db.prepare('SELECT id, name, code FROM branches WHERE is_active = 1 ORDER BY name ASC').all() as { id: string; name: string; code?: string }[]
+
+      const branchStockHeaders = branches.length > 0
+        ? branches.map(b => `Stock (${b.name})`)
+        : ['Stock (Main Branch)', 'Stock (Branch 2)']
+
       const headers = [
-        'Product Name', 'SKU', 'Category', 'Cost Price', 'Selling Price', 'Stock', 'Discount Percentage',
-        'Barcode', 'Supplier', 'Unit', 'Tax Rate', 'Min Stock Level', 'Description'
+        'Product Name', 'SKU', 'Category', 'Cost Price', 'Selling Price',
+        ...branchStockHeaders,
+        'Discount Percentage', 'Barcode', 'Supplier', 'Unit', 'Tax Rate', 'Min Stock Level', 'Description'
       ]
+
+      const sampleCounts1 = branches.length > 0 ? branches.map((_, i) => String(Math.max(5, 20 - i * 5))) : ['20', '15']
+      const sampleCounts2 = branches.length > 0 ? branches.map((_, i) => String(Math.max(2, 10 - i * 3))) : ['10', '5']
+      const sampleCounts3 = branches.length > 0 ? branches.map((_, i) => String(Math.max(10, 50 - i * 15))) : ['50', '30']
+
       const sampleRows = [
-        ['Chair', 'C001', 'Furniture', '5000', '7500', '20', '10', '4791234567801', 'Local Supplier', 'pcs', '0', '5', 'Ergonomic wooden chair'],
-        ['Table', 'T001', 'Furniture', '10000', '15000', '10', '15', '4791234567802', 'Local Supplier', 'pcs', '0', '5', 'Dining wooden table'],
+        ['Chair', 'C001', 'Furniture', '5000', '7500', ...sampleCounts1, '10', '4791234567801', 'Local Supplier', 'pcs', '0', '5', 'Ergonomic wooden chair'],
+        ['Table', 'T001', 'Furniture', '10000', '15000', ...sampleCounts2, '15', '4791234567802', 'Local Supplier', 'pcs', '0', '5', 'Dining wooden table'],
+        ['Ponni Rice 5kg', 'NP-RICE-5KG', 'Groceries', '850', '980', ...sampleCounts3, '0', '4791234567890', 'Local Supplier', 'pcs', '0', '10', 'Premium ponni boiled rice 5kg bag'],
       ]
 
       const csvContent = [

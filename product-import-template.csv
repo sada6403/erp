@@ -1,5 +1,5 @@
-Product Name,SKU,Category,Cost Price,Selling Price,Stock,Discount Percentage,Barcode,Supplier,Unit,Tax Rate,Min Stock Level,Description
-Chair,C001,Furniture,5000,7500,20,10,4791234567801,Local Supplier,pcs,0,5,Ergonomic wooden chair
-Table,T001,Furniture,10000,15000,10,15,4791234567802,Local Supplier,pcs,0,5,Dining wooden table
-Ponni Rice 5kg,NP-RICE-5KG,Groceries,850,980,50,0,4791234567890,Local Supplier,pcs,0,10,Premium ponni boiled rice 5kg bag
-White Sugar 1kg,NP-SUGAR-1KG,Groceries,210,245,80,5,4791234567891,Local Supplier,pcs,0,15,Refined white sugar 1kg
+Product Name,SKU,Category,Cost Price,Selling Price,Stock (Main Branch),Stock (Branch 2),Discount Percentage,Barcode,Supplier,Unit,Tax Rate,Min Stock Level,Description
+Chair,C001,Furniture,5000,7500,20,15,10,4791234567801,Local Supplier,pcs,0,5,Ergonomic wooden chair
+Table,T001,Furniture,10000,15000,10,5,15,4791234567802,Local Supplier,pcs,0,5,Dining wooden table
+Ponni Rice 5kg,NP-RICE-5KG,Groceries,850,980,50,30,0,4791234567890,Local Supplier,pcs,0,10,Premium ponni boiled rice 5kg bag
+White Sugar 1kg,NP-SUGAR-1KG,Groceries,210,245,80,40,5,4791234567891,Local Supplier,pcs,0,15,Refined white sugar 1kg

@@ -709,6 +709,31 @@ export default function ProductsPage() {
           }
         >
           <div className="space-y-4">
+            {/* Multi-Branch Stock Import Banner */}
+            <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3.5 flex items-start gap-3">
+              <Package size={18} className="text-sky-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold text-sky-300">
+                    Multi-Branch Stock Import (அனைத்து கிளைகளின் இருப்பு)
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleDownloadTemplate}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-sky-300 hover:text-white underline hover:no-underline"
+                  >
+                    <Download size={12} /> Download Template
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-300 mt-1">
+                  You can specify stock counts for each branch in a single file! Use column headers like <code>Stock (Main Branch)</code>, <code>Stock (Branch 2)</code> or <code>Stock - Branch Name</code>.
+                </p>
+                <p className="text-[10px] text-sky-200/70 mt-0.5 italic">
+                  ஒரே CSV கோப்பில் ஒவ்வொரு கிளைக்கும் தனித்தனி Stock நெடுவரிசை அமைத்து அனைத்து கிளைகளின் இருப்பையும் ஒரே நேரத்தில் பதிவேற்றலாம்.
+                </p>
+              </div>
+            </div>
+
             <div>
               <p className="text-sm font-semibold text-white">
                 How should existing products be handled?
