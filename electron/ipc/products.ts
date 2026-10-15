@@ -288,7 +288,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const category = rest?.category_id
         ? db.prepare('SELECT name FROM categories WHERE id=?').get(rest.category_id) as { name?: string } | undefined
         : undefined
-      const sku = buildSku(db, (rest as Record<string, unknown>)?.brand || '', category?.name || (rest as Record<string, unknown>)?.name || '', (rest as Record<string, unknown>)?.sku)
+      const rawSku = String((rest as Record<string, unknown>)?.sku || '').trim()
+      const rawBarcode = String((rest as Record<string, unknown>)?.barcode || '').trim()
+      const sku = rawSku || (rawBarcode ? rawBarcode : `NO-SKU-${id.slice(0, 8).toUpperCase()}`)
 
       db.transaction(() => {
         if (!isAdmin) {
@@ -343,10 +345,8 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const { edit_request_id, ...rest } = payload as Record<string, unknown> & { edit_request_id?: string }
       const nextPayload = { ...rest }
       if (!String(nextPayload.sku || '').trim()) {
-        const category = nextPayload.category_id
-          ? db.prepare('SELECT name FROM categories WHERE id=?').get(nextPayload.category_id) as { name?: string } | undefined
-          : undefined
-        nextPayload.sku = buildSku(db, nextPayload.brand || '', category?.name || nextPayload.name || '', nextPayload.sku)
+        const rawBarcode = String(nextPayload.barcode || '').trim()
+        nextPayload.sku = rawBarcode || `NO-SKU-${id.slice(0, 8).toUpperCase()}`
       }
 
       const caller = getAuthUser()
@@ -828,6 +828,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
         let imported = 0, created = 0, updated = 0, skipped = 0
         const errors: string[] = []
+        const warnings: string[] = []
 
         for (let i = 0; i < raw.length; i++) {
           try {
@@ -835,7 +836,10 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             const name = String(raw[i][1] ?? '').trim()
             if (!name) { skipped++; continue }
 
-            const sku = code || buildSku(db, '', name, '')
+            if (!code) {
+              warnings.push(`Row ${i + 1}: "${name}" — Code / SKU வழங்கப்படவில்லை (No Code/SKU provided)`)
+            }
+            const sku = code || `NO-SKU-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
             const existing = findExistingProduct(db, code || null, null, name)
 
             if (existing) {
@@ -866,7 +870,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           }
         }
 
-        return { success: true, data: { imported, created, updated, skipped, errors, mode: 'code_name_list' } }
+        return { success: true, data: { imported, created, updated, skipped, errors, warnings, mode: 'code_name_list' } }
       }
 
       // Flexible column mapping (case-insensitive, trim)
@@ -973,13 +977,14 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       let imported = 0, created = 0, updated = 0, skipped = 0
       const errors: string[] = []
+      const warnings: string[] = []
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i]
         try {
           const name         = colMap(row, 'name', 'productname', 'product name', 'item name', 'itemname')
-          const sku          = colMap(row, 'sku', 'code', 'itemcode', 'item code', 'product code')
-          const barcode      = colMap(row, 'barcode', 'ean', 'upc')
+          const rawSku       = colMap(row, 'sku', 'code', 'itemcode', 'item code', 'product code').trim()
+          const rawBarcode   = colMap(row, 'barcode', 'ean', 'upc', 'gtin', 'isbn').trim()
           const categoryName = colMap(row, 'category', 'categoryname', 'category name')
           const supplierName = colMap(row, 'supplier', 'suppliername', 'supplier name', 'vendor')
           const unit         = colMap(row, 'unit', 'uom', 'measure') || 'pcs'
@@ -991,6 +996,16 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           const discountVal  = colMap(row, 'discount', 'discountpct', 'discountpercentage', 'discountpercent', 'discount_pct', 'discount_percentage', 'discount %', 'discount percentage')
 
           if (!name) { skipped++; continue }
+
+          const hasSku = rawSku !== ''
+          const hasBarcode = rawBarcode !== ''
+
+          if (!hasSku) {
+            warnings.push(`Row ${i + 2}: "${name}" — SKU வழங்கப்படவில்லை (No SKU provided in CSV)`)
+          }
+          if (!hasBarcode) {
+            warnings.push(`Row ${i + 2}: "${name}" — Barcode வழங்கப்படவில்லை (No Barcode provided in CSV)`)
+          }
 
           let discountPct = 0
           if (discountVal !== '') {
@@ -1009,7 +1024,6 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           }
 
           const normalizedCategory = normalizeCategoryPath(categoryName)
-          const autoSku = buildSku(db, '', normalizedCategory || categoryName || name, sku)
           const categoryId = normalizedCategory ? (catMap.get(titleCase(normalizedCategory).toLowerCase()) || null) : null
           const supplierId  = supplierName ? (supMap.get(supplierName.toLowerCase()) || null) : null
 
@@ -1017,8 +1031,8 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           const importUser = store.get('auth_user') as Record<string, unknown> | undefined
           const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
 
-          // Lookup existing product by SKU, Barcode, or Name — PREVENTS DUPLICATE ENTRY
-          const existing = findExistingProduct(db, sku || autoSku, barcode || null, name)
+          // Lookup existing product by user-supplied SKU, Barcode, or Name — PREVENTS DUPLICATE ENTRY
+          const existing = findExistingProduct(db, hasSku ? rawSku : null, hasBarcode ? rawBarcode : null, name)
 
           if (existing && duplicateStrategy === 'skip') {
             skipped++
@@ -1027,11 +1041,20 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
           const productId = existing ? String(existing.id) : crypto.randomUUID()
 
+          // Exactly what the user provided, NO auto-generated category/brand SKUs!
+          const finalBarcode = hasBarcode ? rawBarcode : (existing ? (existing.barcode as string | null) : null)
+          const finalSku = hasSku
+            ? rawSku
+            : (existing
+                ? (existing.sku as string)
+                : (hasBarcode ? rawBarcode : `NO-SKU-${productId.slice(0, 8).toUpperCase()}`))
+
           if (existing) {
             let finalName: string
             let finalCategoryId: string | null
             let finalSupplierId: string | null
-            let finalBarcode: string | null
+            let updatedBarcode: string | null
+            let updatedSku: string
             let finalUnit: string
             let finalCost: number
             let finalSelling: number
@@ -1043,7 +1066,8 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             if (duplicateStrategy === 'fill_empty') {
               // Fill only fields that were empty in previous upload
               finalName = (existing.name as string) || name
-              finalBarcode = (existing.barcode as string | null) || (barcode || null)
+              updatedSku = hasSku ? ((existing.sku as string) || rawSku) : (existing.sku as string)
+              updatedBarcode = (existing.barcode as string | null) || (hasBarcode ? rawBarcode : null)
               finalCategoryId = (existing.category_id as string | null) || categoryId || null
               finalSupplierId = (existing.supplier_id as string | null) || supplierId || null
               finalUnit = (existing.unit && existing.unit !== 'pcs') ? (existing.unit as string) : (unit || 'pcs')
@@ -1056,7 +1080,8 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             } else {
               // Override with new CSV data
               finalName = name || (existing.name as string)
-              finalBarcode = barcode || (existing.barcode as string | null)
+              updatedSku = hasSku ? rawSku : (existing.sku as string)
+              updatedBarcode = hasBarcode ? rawBarcode : (existing.barcode as string | null)
               finalCategoryId = categoryId || (existing.category_id as string | null)
               finalSupplierId = supplierId || (existing.supplier_id as string | null)
               finalUnit = unit || (existing.unit as string) || 'pcs'
@@ -1068,13 +1093,13 @@ export function registerProductHandlers(ipcMain: IpcMain) {
               finalDesc = description || (existing.description as string | null)
             }
 
-            db.prepare(`UPDATE products SET name=?, category_id=?, supplier_id=?, barcode=?, unit=?,
+            db.prepare(`UPDATE products SET name=?, sku=?, category_id=?, supplier_id=?, barcode=?, unit=?,
               cost_price=?, selling_price=?, tax_rate=?, discount_pct=?, min_stock_level=?, description=?, is_active=1, updated_at=datetime('now')
-              WHERE id=?`).run(finalName, finalCategoryId, finalSupplierId, finalBarcode, finalUnit,
+              WHERE id=?`).run(finalName, updatedSku, finalCategoryId, finalSupplierId, updatedBarcode, finalUnit,
               finalCost, finalSelling, finalTax, finalDiscount, finalMinStock, finalDesc, productId)
 
             await enqueuSync('products', productId, 'UPDATE', {
-              id: productId, name: finalName, barcode: finalBarcode, category_id: finalCategoryId,
+              id: productId, name: finalName, sku: updatedSku, barcode: updatedBarcode, category_id: finalCategoryId,
               supplier_id: finalSupplierId, unit: finalUnit, cost_price: finalCost,
               selling_price: finalSelling, tax_rate: finalTax, discount_pct: finalDiscount, min_stock_level: finalMinStock,
               description: finalDesc, is_active: true
@@ -1083,10 +1108,10 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           } else {
             db.prepare(`INSERT INTO products (id, branch_id, name, sku, barcode, category_id, supplier_id, unit,
               cost_price, selling_price, tax_rate, discount_pct, min_stock_level, description)
-              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(productId, importBranchId, name, autoSku, barcode || null,
+              VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(productId, importBranchId, name, finalSku, finalBarcode,
               categoryId, supplierId, unit, costPrice, sellingPrice, taxRate, discountPct, minStock, description || null)
             await enqueuSync('products', productId, 'INSERT', {
-              id: productId, branch_id: importBranchId, name, sku: autoSku, barcode: barcode || null,
+              id: productId, branch_id: importBranchId, name, sku: finalSku, barcode: finalBarcode,
               category_id: categoryId, supplier_id: supplierId, unit, cost_price: costPrice,
               selling_price: sellingPrice, tax_rate: taxRate, discount_pct: discountPct, min_stock_level: minStock,
               description: description || null, is_active: true
@@ -1158,7 +1183,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
       }
 
-      return { success: true, data: { imported, created, updated, skipped, errors, mode: 'standard', duplicateStrategy } }
+      return { success: true, data: { imported, created, updated, skipped, errors, warnings, mode: 'standard', duplicateStrategy } }
   })
 
   safeHandle(ipcMain, 'products:normalizeCatalog', async () => {
@@ -1223,14 +1248,14 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const missingSku = db.prepare(`
         SELECT COUNT(*) AS count
         FROM products
-        WHERE is_active = 1 AND (sku IS NULL OR TRIM(sku) = '')
+        WHERE is_active = 1 AND (sku IS NULL OR TRIM(sku) = '' OR sku LIKE 'NO-SKU-%' OR sku LIKE 'PENDING-%')
       `).get() as { count: number }
 
       const duplicateSkuGroups = db.prepare(`
         SELECT COUNT(*) AS count FROM (
           SELECT sku
           FROM products
-          WHERE is_active = 1 AND sku IS NOT NULL AND TRIM(sku) != ''
+          WHERE is_active = 1 AND sku IS NOT NULL AND TRIM(sku) != '' AND sku NOT LIKE 'NO-SKU-%' AND sku NOT LIKE 'PENDING-%'
           GROUP BY sku
           HAVING COUNT(*) > 1
         )

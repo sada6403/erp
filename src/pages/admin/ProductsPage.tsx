@@ -6,7 +6,7 @@ import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
   FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw, Clock, Printer,
-  ShieldCheck
+  ShieldCheck, AlertCircle, CheckCircle2
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
@@ -64,6 +64,14 @@ export default function ProductsPage() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [duplicateStrategy, setDuplicateStrategy] = useState<'fill_empty' | 'override' | 'skip'>('fill_empty')
   const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{
+    imported: number
+    created?: number
+    updated?: number
+    skipped: number
+    errors: string[]
+    warnings?: string[]
+  } | null>(null)
 
   // Post-mutation refresh (create/update/delete/import/normalize) always
   // forces a real refetch — only the initial mount below uses the cache.
@@ -165,14 +173,19 @@ export default function ProductsPage() {
         skipped: number
         deactivatedDuplicates?: number
         errors: string[]
+        warnings?: string[]
         mode?: string
       }
-      const createdCount = data.created ?? (data.imported - (data.updated ?? 0))
-      const updatedCount = data.updated ?? 0
-      const detail = ` (${createdCount} new, ${updatedCount} updated${data.skipped ? `, ${data.skipped} skipped` : ''})`
-      toast.success(`Import completed: ${data.imported} products processed${detail}`)
       load()
       loadAudit()
+      if ((data.warnings && data.warnings.length > 0) || (data.errors && data.errors.length > 0)) {
+        setImportResult(data)
+      } else {
+        const createdCount = data.created ?? (data.imported - (data.updated ?? 0))
+        const updatedCount = data.updated ?? 0
+        const detail = ` (${createdCount} new, ${updatedCount} updated${data.skipped ? `, ${data.skipped} skipped` : ''})`
+        toast.success(`Import completed: ${data.imported} products processed${detail}`)
+      }
     } catch (err) {
       toast.error('Import failed: ' + String(err))
     } finally {
@@ -453,7 +466,15 @@ export default function ProductsPage() {
                         : <Package size={14} style={{ color: 'var(--text-3)' }} />}
                     </div>
                   </td>
-                  <td className="table-cell px-3 font-mono text-xs text-slate-400">{p.sku}</td>
+                  <td className="table-cell px-3 font-mono text-xs text-slate-400">
+                    {p.sku?.startsWith('NO-SKU-') ? (
+                      <span className="text-amber-400 font-sans text-[11px] italic bg-amber-400/10 px-1.5 py-0.5 rounded border border-amber-400/20" title="No SKU provided in import">
+                        No SKU
+                      </span>
+                    ) : (
+                      p.sku || '-'
+                    )}
+                  </td>
                   <td className="table-cell px-3">
                     <div className="flex items-center gap-1.5">
                       <Package size={12} className="text-brand-400 flex-shrink-0" />
@@ -865,6 +886,93 @@ export default function ProductsPage() {
                 </p>
               </div>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Import Result & Warnings Summary Modal */}
+      {importResult && (
+        <Modal
+          title="Import Summary & Warnings (பதிவேற்ற விவரம்)"
+          onClose={() => setImportResult(null)}
+          size="lg"
+          footer={
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setImportResult(null)}
+                className="btn-primary btn-sm px-4"
+              >
+                Close
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            {/* Counts */}
+            <div className="grid grid-cols-4 gap-2.5">
+              <div className="rounded-xl border p-3 bg-slate-900/60 border-slate-700/60 text-center">
+                <p className="text-[11px] text-[var(--text-3)] font-semibold uppercase">Total</p>
+                <p className="text-xl font-bold text-white mt-0.5">{importResult.imported}</p>
+              </div>
+              <div className="rounded-xl border p-3 bg-emerald-950/20 border-emerald-800/40 text-center">
+                <p className="text-[11px] text-emerald-400 font-semibold uppercase">Created</p>
+                <p className="text-xl font-bold text-emerald-400 mt-0.5">{importResult.created ?? 0}</p>
+              </div>
+              <div className="rounded-xl border p-3 bg-sky-950/20 border-sky-800/40 text-center">
+                <p className="text-[11px] text-sky-400 font-semibold uppercase">Updated</p>
+                <p className="text-xl font-bold text-sky-400 mt-0.5">{importResult.updated ?? 0}</p>
+              </div>
+              <div className="rounded-xl border p-3 bg-amber-950/20 border-amber-800/40 text-center">
+                <p className="text-[11px] text-amber-400 font-semibold uppercase">Skipped</p>
+                <p className="text-xl font-bold text-amber-400 mt-0.5">{importResult.skipped ?? 0}</p>
+              </div>
+            </div>
+
+            {/* Warnings: Missing SKU / Barcode */}
+            {importResult.warnings && importResult.warnings.length > 0 && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 space-y-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={16} className="text-amber-400 flex-shrink-0" />
+                  <span className="text-xs font-bold text-amber-300">
+                    Warnings: Missing SKU / Barcode ({importResult.warnings.length})
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  தயாரிப்புகள் அனைத்தும் அவற்றின் இருப்பு (Stock) மற்றும் விவரங்களுடன் வெற்றிகரமாக சேர்க்கப்பட்டன. ஆனால் கீழ்வரும் தயாரிப்புகளுக்கு நீங்கள் கோப்பில் SKU அல்லது Barcode வழங்கவில்லை:
+                </p>
+                <div className="max-h-48 overflow-y-auto space-y-1 pr-1 text-xs">
+                  {importResult.warnings.map((w, idx) => (
+                    <div key={idx} className="flex items-start gap-1.5 text-amber-200/90 bg-amber-950/40 px-2.5 py-1 rounded border border-amber-500/20 font-mono text-[11px]">
+                      <span>⚠️</span>
+                      <span>{w}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[10px] text-amber-300/70 italic">
+                  குறிப்பு: ஆட்டோ-ஜெனரேட் செய்யப்படவில்லை. தேவைப்படும் போது தயாரிப்பை Edit செய்து நேரடி SKU / Barcode-ஐ நீங்கள் உள்ளிட்டுக் கொள்ளலாம்.
+                </p>
+              </div>
+            )}
+
+            {/* Errors */}
+            {importResult.errors && importResult.errors.length > 0 && (
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 space-y-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={16} className="text-red-400 flex-shrink-0" />
+                  <span className="text-xs font-bold text-red-300">
+                    Errors ({importResult.errors.length})
+                  </span>
+                </div>
+                <div className="max-h-40 overflow-y-auto space-y-1 pr-1 text-xs">
+                  {importResult.errors.map((e, idx) => (
+                    <div key={idx} className="text-red-300 bg-red-950/40 px-2.5 py-1 rounded border border-red-500/20 text-[11px]">
+                      {e}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </Modal>
       )}
