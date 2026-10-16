@@ -423,9 +423,15 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       // Check other historical and audit records to provide clear, actionable feedback
       const historyChecks = [
+        { table: 'stock_movements', label: 'stock movement ledger record(s)' },
+        { table: 'purchase_items', label: 'purchase order item(s)' },
+        { table: 'damaged_items', label: 'damaged stock record(s)' },
         { table: 'order_items', label: 'held/active order(s)' },
+        { table: 'customer_order_items', label: 'customer order item(s)' },
         { table: 'return_items', label: 'sales return(s)' },
         { table: 'stock_transfer_history', label: 'stock transfer(s)' },
+        { table: 'stock_transfers', label: 'pending/active stock transfer(s)' },
+        { table: 'branch_transfer_items', label: 'branch transfer item(s)' },
         { table: 'grn_items', label: 'goods received note (GRN) item(s)' },
         { table: 'quotation_items', label: 'quotation(s)' },
         { table: 'wastage_items', label: 'wastage record(s)' },
@@ -469,10 +475,11 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         oldValues: { name: product.name, sku: product.sku, barcode: product.barcode, reason },
       })
 
-      // Remove related disposable records (discounts, batches, stocks) then product, atomically
+      // Remove related disposable records (discounts, batches, uom, stocks) then product, atomically
       db.transaction(() => {
         try { db.prepare(`DELETE FROM discounts WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
         try { db.prepare(`DELETE FROM product_batches WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
+        try { db.prepare(`DELETE FROM product_uom WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
         db.prepare(`DELETE FROM stocks WHERE product_id = ?`).run(id)
         db.prepare(`DELETE FROM products WHERE id = ?`).run(id)
       })()

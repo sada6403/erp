@@ -148,27 +148,74 @@ let isRefreshing = false
       db.transaction(() => {
         for (const item of pending) {
           if (item.table_name === 'products') {
-            // Check historical invoice references — Requirement 10, 19, 36:
-            // Deleting/deactivating a product must NOT destroy historical invoices!
-            const hasInvoices = (db.prepare(`
-              SELECT COUNT(*) as cnt FROM invoice_items WHERE product_id = ?
-            `).get(item.record_id) as { cnt: number })?.cnt > 0
+            const productId = item.record_id
 
-            const hasChits = (db.prepare(`
-              SELECT COUNT(*) as cnt FROM chit_schemes WHERE product_id = ?
-            `).get(item.record_id) as { cnt: number })?.cnt > 0
+            // Check if product has ANY historical or transactional references that must preserve data integrity
+            let hasReferences = item.action === 'deactivate'
 
-            if (hasInvoices || hasChits || item.action === 'deactivate') {
-              // Soft-deactivate to protect financial integrity
+            if (!hasReferences) {
+              const checkTables = [
+                'invoice_items',
+                'stock_movements',
+                'stock_transfers',
+                'branch_transfer_items',
+                'purchase_items',
+                'damaged_items',
+                'stock_adjustments',
+                'customer_order_items',
+                'inventory_count_items',
+                'chit_schemes',
+                'chit_members',
+                'commission_rules',
+                'quotation_items',
+              ]
+
+              for (const tbl of checkTables) {
+                try {
+                  const check = db.prepare(`SELECT 1 FROM ${tbl} WHERE product_id = ? LIMIT 1`).get(productId)
+                  if (check) {
+                    hasReferences = true
+                    break
+                  }
+                } catch {
+                  // Table might not exist in this environment, ignore
+                }
+              }
+            }
+
+            if (hasReferences) {
+              // Soft-deactivate to protect financial and historical integrity
               db.prepare(`
                 UPDATE products
                 SET is_active = 0, updated_at = datetime('now')
                 WHERE id = ?
-              `).run(item.record_id)
+              `).run(productId)
+
+              // Zero out stock in active branches so no phantom inventory remains
+              try {
+                db.prepare(`UPDATE stocks SET quantity = 0, updated_at = datetime('now') WHERE product_id = ?`).run(productId)
+              } catch {
+                // ignore
+              }
             } else {
-              // No invoices or references: safe to delete stocks and product
-              db.prepare('DELETE FROM stocks WHERE product_id = ?').run(item.record_id)
-              db.prepare('DELETE FROM products WHERE id = ?').run(item.record_id)
+              // No historical references: safe to delete child records and product
+              try { db.prepare('DELETE FROM discounts WHERE product_id = ?').run(productId) } catch {}
+              try { db.prepare('DELETE FROM product_batches WHERE product_id = ?').run(productId) } catch {}
+              try { db.prepare('DELETE FROM product_uom WHERE product_id = ?').run(productId) } catch {}
+              try { db.prepare('DELETE FROM stocks WHERE product_id = ?').run(productId) } catch {}
+
+              try {
+                db.prepare('DELETE FROM products WHERE id = ?').run(productId)
+              } catch (delErr) {
+                // If ANY unforeseen foreign key reference exists, fallback gracefully to soft-deactivate!
+                console.warn(`[Sync:Refresh] Foreign key constraint on product delete (${productId}), soft-deactivating:`, delErr)
+                db.prepare(`
+                  UPDATE products
+                  SET is_active = 0, updated_at = datetime('now')
+                  WHERE id = ?
+                `).run(productId)
+                try { db.prepare(`UPDATE stocks SET quantity = 0, updated_at = datetime('now') WHERE product_id = ?`).run(productId) } catch {}
+              }
             }
 
             db.prepare(`
@@ -181,6 +228,21 @@ let isRefreshing = false
             if (item.deleted_at > latestDeletedAt) {
               latestDeletedAt = item.deleted_at
             }
+          } else {
+            // Non-product deletion
+            try {
+              db.prepare(`DELETE FROM ${item.table_name} WHERE id = ?`).run(item.record_id)
+            } catch {
+              try {
+                db.prepare(`UPDATE ${item.table_name} SET is_active = 0 WHERE id = ?`).run(item.record_id)
+              } catch {}
+            }
+            db.prepare(`
+              UPDATE pending_sync_deletions
+              SET status = 'applied'
+              WHERE id = ?
+            `).run(item.id)
+            appliedCount++
           }
         }
       })()
