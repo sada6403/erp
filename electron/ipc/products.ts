@@ -421,9 +421,26 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         return { success: false, error: `Cannot permanently delete — this product appears in ${hasInvoiceItems.cnt} invoice(s). Use deactivate instead to preserve financial history.` }
       }
 
+      // Check commercial transaction movements (sales, transfers, receipts, or linked to orders/transfers).
+      // Opening stock adjustments on test/new products with no sales/purchases can be cleanly deleted with the product.
+      try {
+        const commercialMovements = db.prepare(`
+          SELECT COUNT(*) as cnt FROM stock_movements 
+          WHERE product_id = ? 
+            AND (movement_type IN ('SALE', 'TRANSFER', 'RECEIVE') 
+                 OR reference_order_id IS NOT NULL 
+                 OR reference_transfer_id IS NOT NULL 
+                 OR reference_branch_transfer_id IS NOT NULL)
+        `).get(id) as { cnt: number } | undefined
+        if (commercialMovements && commercialMovements.cnt > 0) {
+          return { success: false, error: `Cannot permanently delete — this product has ${commercialMovements.cnt} sales/transfer movement record(s). Use deactivate instead to preserve history.` }
+        }
+      } catch {
+        // Table or columns may not exist in this environment, ignore
+      }
+
       // Check other historical and audit records to provide clear, actionable feedback
       const historyChecks = [
-        { table: 'stock_movements', label: 'stock movement ledger record(s)' },
         { table: 'purchase_items', label: 'purchase order item(s)' },
         { table: 'damaged_items', label: 'damaged stock record(s)' },
         { table: 'order_items', label: 'held/active order(s)' },
@@ -475,11 +492,12 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         oldValues: { name: product.name, sku: product.sku, barcode: product.barcode, reason },
       })
 
-      // Remove related disposable records (discounts, batches, uom, stocks) then product, atomically
+      // Remove related disposable records (discounts, batches, uom, stock_movements, stocks) then product, atomically
       db.transaction(() => {
         try { db.prepare(`DELETE FROM discounts WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
         try { db.prepare(`DELETE FROM product_batches WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
         try { db.prepare(`DELETE FROM product_uom WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
+        try { db.prepare(`DELETE FROM stock_movements WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
         db.prepare(`DELETE FROM stocks WHERE product_id = ?`).run(id)
         db.prepare(`DELETE FROM products WHERE id = ?`).run(id)
       })()

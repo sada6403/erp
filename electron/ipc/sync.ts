@@ -156,7 +156,6 @@ let isRefreshing = false
             if (!hasReferences) {
               const checkTables = [
                 'invoice_items',
-                'stock_movements',
                 'stock_transfers',
                 'branch_transfer_items',
                 'purchase_items',
@@ -181,6 +180,21 @@ let isRefreshing = false
                   // Table might not exist in this environment, ignore
                 }
               }
+
+              if (!hasReferences) {
+                try {
+                  const check = db.prepare(`
+                    SELECT 1 FROM stock_movements 
+                    WHERE product_id = ? 
+                      AND (movement_type IN ('SALE', 'TRANSFER', 'RECEIVE') 
+                           OR reference_order_id IS NOT NULL 
+                           OR reference_transfer_id IS NOT NULL 
+                           OR reference_branch_transfer_id IS NOT NULL) 
+                    LIMIT 1
+                  `).get(productId)
+                  if (check) hasReferences = true
+                } catch {}
+              }
             }
 
             if (hasReferences) {
@@ -202,6 +216,7 @@ let isRefreshing = false
               try { db.prepare('DELETE FROM discounts WHERE product_id = ?').run(productId) } catch {}
               try { db.prepare('DELETE FROM product_batches WHERE product_id = ?').run(productId) } catch {}
               try { db.prepare('DELETE FROM product_uom WHERE product_id = ?').run(productId) } catch {}
+              try { db.prepare('DELETE FROM stock_movements WHERE product_id = ?').run(productId) } catch {}
               try { db.prepare('DELETE FROM stocks WHERE product_id = ?').run(productId) } catch {}
 
               try {

@@ -445,6 +445,13 @@ async function applyOperation(
       `INSERT INTO sync_deletions (id, table_name, record_id) VALUES (UUID(), ?, ?)`,
       [input.table, input.recordId]
     )
+    if (input.table === 'products') {
+      await client.query(`DELETE FROM discounts WHERE product_id = ?`, [input.recordId]).catch(() => {})
+      await client.query(`DELETE FROM product_batches WHERE product_id = ?`, [input.recordId]).catch(() => {})
+      await client.query(`DELETE FROM product_uom WHERE product_id = ?`, [input.recordId]).catch(() => {})
+      await client.query(`DELETE FROM stock_movements WHERE product_id = ?`, [input.recordId]).catch(() => {})
+      await client.query(`DELETE FROM stocks WHERE product_id = ?`, [input.recordId]).catch(() => {})
+    }
     await client.query(
       `DELETE FROM ${quoteIdentifier(input.table)} WHERE id = ?`,
       [input.recordId]
