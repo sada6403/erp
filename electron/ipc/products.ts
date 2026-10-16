@@ -1376,7 +1376,17 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       })
 
       const csv = [headers.join(','), ...csvRows].join('\r\n')
-      fs.writeFileSync(result.filePath, csv, 'utf8')
+      try {
+        fs.writeFileSync(result.filePath, csv, 'utf8')
+      } catch (err: any) {
+        if (err?.code === 'EBUSY' || err?.code === 'EPERM' || String(err?.message || err).includes('EBUSY')) {
+          return {
+            success: false,
+            error: `File is locked or open in Excel: "${path.basename(result.filePath)}". Please close it in Excel and try again, or save with a different filename.`
+          }
+        }
+        throw err
+      }
       return { success: true, data: { path: result.filePath, exported: rows.length } }
   })
 
@@ -1416,7 +1426,17 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         ...sampleRows.map(row => row.map(cell => csvCell(cell)).join(','))
       ].join('\r\n')
 
-      fs.writeFileSync(result.filePath, csvContent, 'utf8')
+      try {
+        fs.writeFileSync(result.filePath, csvContent, 'utf8')
+      } catch (err: any) {
+        if (err?.code === 'EBUSY' || err?.code === 'EPERM' || String(err?.message || err).includes('EBUSY')) {
+          return {
+            success: false,
+            error: `File is locked or open in Excel: "${path.basename(result.filePath)}". Please close it in Excel and try again, or save with a different filename.`
+          }
+        }
+        throw err
+      }
       return { success: true, data: { path: result.filePath } }
   })
 }
