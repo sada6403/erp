@@ -42,6 +42,12 @@ const DEFAULTS = {
   company_website: '',
   company_tin: '',
   invoice_note: 'Goods once sold will not be taken back or exchanged.',
+  // Business Type & Industry configuration
+  business_type: 'retail', // 'retail' | 'supermarket' | 'furniture'
+  allow_negative_stock: false,
+  auto_print_thermal: false,
+  weighing_scale_barcode: true,
+  counter_prefix: '',
   // Branch
   branch_id: 'b1111111-1111-4111-8111-111111111111',
   branch_name: 'Main Branch',

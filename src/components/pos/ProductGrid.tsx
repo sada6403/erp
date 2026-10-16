@@ -304,7 +304,7 @@ function ProductCard({ product, pack, isFocused, onFocus, onSelect, onCheckBranc
     <div
       ref={ref}
       tabIndex={0}
-      onClick={outOfStock ? undefined : onSelect}
+      onClick={onSelect}
       onFocus={onFocus}
       className={`pos-product-card ${isFocused ? 'selected' : ''} ${outOfStock ? 'out-of-stock' : ''}`}
     >

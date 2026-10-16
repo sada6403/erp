@@ -565,6 +565,7 @@ export async function createTenant(params: {
   adminEmail: string; adminName: string; adminPhone?: string; adminPassword?: string
   timezone?: string; currency?: string; country?: string
   packageId?: string; trialDays?: number; createdBy?: string; notes?: string
+  businessType?: string
   maxBranches?: number; maxUsers?: number; maxPosDevices?: number; maxStorageGb?: number
   clearDataPassword: string
 }): Promise<{ companyId: string; slug: string; dbSchema: string; apiKey: string; companyKey: string }> {
@@ -604,8 +605,8 @@ export async function createTenant(params: {
         db_schema, api_key, company_key, status, trial_ends_at,
         max_branches, max_users, max_pos_devices, max_storage_gb,
         admin_email, admin_name, admin_phone, notes, created_by,
-        clear_data_password_hash, initial_admin_password)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'trial', DATE_ADD(NOW(), INTERVAL ? DAY),?,?,?,?,?,?,?,?,?,?,?)`,
+        clear_data_password_hash, initial_admin_password, business_type)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'trial', DATE_ADD(NOW(), INTERVAL ? DAY),?,?,?,?,?,?,?,?,?,?,?,?)`,
     [
       companyId, slug, params.name, params.email, params.phone ?? null, params.address ?? null,
       params.timezone ?? 'Asia/Colombo', params.currency ?? 'LKR', params.country ?? 'LK',
@@ -614,6 +615,7 @@ export async function createTenant(params: {
       params.adminEmail, params.adminName, params.adminPhone ?? null,
       params.notes ?? null, params.createdBy ?? null,
       clearDataPasswordHash, params.adminPassword ?? null,
+      params.businessType ?? 'retail',
     ]
   )
 

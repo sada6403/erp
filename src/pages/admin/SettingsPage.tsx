@@ -56,6 +56,11 @@ export default function SettingsPage() {
     company_tin: '',
     invoice_note: 'Goods once sold will not be taken back or exchanged.',
     branch_name: '',
+    business_type: 'retail',
+    allow_negative_stock: false,
+    auto_print_thermal: false,
+    weighing_scale_barcode: true,
+    counter_prefix: '',
     currency: 'LKR',
     currency_symbol: 'Rs.',
     tax_label: 'VAT',
@@ -515,6 +520,86 @@ function GeneralSettings({ form, f, setForm }: { form: Record<string, any>; f: (
         <Field label="Low Stock Alert Threshold">
           <NumberInput value={form.low_stock_threshold} onChange={f('low_stock_threshold')} className="input w-32" min="0" />
         </Field>
+      </Section>
+
+      <Section title="Business Type & Supermarket / Food City Settings">
+        <p className="text-xs -mt-1 mb-2" style={{ color: 'var(--text-3)' }}>
+          Configures workflow rules for Supermarkets/Food Cities, Retail Stores, or Showrooms.
+        </p>
+        <Field label="Business Type">
+          <select
+            value={form.business_type || 'retail'}
+            onChange={e => {
+              const btype = e.target.value
+              setForm((p: Record<string, any>) => ({
+                ...p,
+                business_type: btype,
+                ...(btype === 'supermarket' ? {
+                  allow_negative_stock: true,
+                  auto_print_thermal: true,
+                  weighing_scale_barcode: true,
+                  invoice_active_design: 'thermal',
+                } : {})
+              }))
+            }}
+            className="input max-w-sm"
+          >
+            <option value="retail">General Retail / Showroom</option>
+            <option value="supermarket">Supermarket / Food City / Grocery</option>
+            <option value="furniture">Furniture & Electronics Store</option>
+          </select>
+        </Field>
+
+        <div className="grid grid-cols-2 gap-4 mt-3">
+          <label className="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border border-slate-700/50 hover:bg-slate-800/30">
+            <input
+              type="checkbox"
+              checked={Boolean(form.allow_negative_stock)}
+              onChange={e => setForm((p: any) => ({ ...p, allow_negative_stock: e.target.checked }))}
+              className="mt-1"
+            />
+            <div>
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>Allow Selling Out-of-Stock (Negative Stock)</p>
+              <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>Prevents cashier checkout delays when newly received items reach shelves before inventory is entered.</p>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border border-slate-700/50 hover:bg-slate-800/30">
+            <input
+              type="checkbox"
+              checked={Boolean(form.auto_print_thermal)}
+              onChange={e => setForm((p: any) => ({ ...p, auto_print_thermal: e.target.checked }))}
+              className="mt-1"
+            />
+            <div>
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>Instant Auto-Print 80mm Bill</p>
+              <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>Automatically sends the thermal bill to the printer and pops the cash drawer immediately upon payment confirmation.</p>
+            </div>
+          </label>
+
+          <label className="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border border-slate-700/50 hover:bg-slate-800/30">
+            <input
+              type="checkbox"
+              checked={form.weighing_scale_barcode !== false}
+              onChange={e => setForm((p: any) => ({ ...p, weighing_scale_barcode: e.target.checked }))}
+              className="mt-1"
+            />
+            <div>
+              <p className="text-xs font-semibold" style={{ color: 'var(--text-1)' }}>Weighing Scale Barcode Reader (20xxxx / 21xxxx)</p>
+              <p className="text-[11px]" style={{ color: 'var(--text-3)' }}>Automatically decodes weight/quantity from electronic vegetable/fruit weighing scale sticker barcodes.</p>
+            </div>
+          </label>
+
+          <div className="p-3 rounded-xl border border-slate-700/50">
+            <p className="text-xs font-semibold mb-1" style={{ color: 'var(--text-1)' }}>Counter / Terminal Prefix (Multi-Counter)</p>
+            <input
+              value={form.counter_prefix || ''}
+              onChange={f('counter_prefix')}
+              className="input text-xs"
+              placeholder="e.g. C1, C2, POS-1 (Prevents duplicate bill collision across counters)"
+            />
+          </div>
+        </div>
       </Section>
 
       <Section title="Self-Hosted Cloud Sync">

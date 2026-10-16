@@ -865,7 +865,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
   pkgs: Pkg[]; onClose: () => void; onCreated: () => void
 }) {
   const [form, setForm] = useState({
-    name: '', email: '', phone: '', address: '',
+    name: '', email: '', phone: '', address: '', businessType: 'retail',
     adminName: '', adminEmail: '', adminPhone: '',
     adminPassword: '', confirmPassword: '',
     clearDataPassword: '', confirmClearDataPassword: '',
@@ -932,6 +932,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
     try {
       const res = await api.create({
         ...form,
+        businessType:  form.businessType,
         trialDays:     Number(form.trialDays),
         packageId:     form.packageId || undefined,
         maxBranches:   Number(form.maxBranches),
@@ -1122,6 +1123,14 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
             <div><label className="label">Company Name *</label><input className="input" required value={form.name} onChange={e => set('name', e.target.value)} /></div>
             <div><label className="label">Company Email *</label><input className="input" type="email" required value={form.email} onChange={e => set('email', e.target.value)} /></div>
             <div><label className="label">Phone</label><input className="input" value={form.phone} onChange={e => set('phone', e.target.value)} /></div>
+            <div><label className="label">Business Type / Industry</label>
+              <select className="input" value={form.businessType} onChange={e => set('businessType', e.target.value)}>
+                <option value="retail">General Retail / Showroom</option>
+                <option value="supermarket">Supermarket / Food City</option>
+                <option value="furniture">Furniture & Electronics</option>
+                <option value="chit_fund">Chit Fund & Investments</option>
+              </select>
+            </div>
             <div><label className="label">Package</label>
               <select className="input" value={form.packageId} onChange={e => set('packageId', e.target.value)}>
                 <option value="">No package (trial)</option>

@@ -96,17 +96,20 @@ const BILL_PREFIX: Record<BillType, string> = {
   CREDIT:    'CR',
 }
 
-// Atomic sequence counter: {BRANCH_CODE}-{PREFIX}-{YEAR}-{SEQ:0004}
+// Atomic sequence counter: {BRANCH_CODE}-{COUNTER_PREFIX}-{PREFIX}-{YEAR}-{SEQ:0004}
 export function getNextBillNumber(branchId: string, billType: BillType): string {
   const db = getDb()
   const year = new Date().getFullYear()
   const prefix = BILL_PREFIX[billType]
+  const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+  const rawPrefix = String(settings.counter_prefix || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const counterPart = rawPrefix ? `${rawPrefix}-` : ''
 
   const branch = db.prepare('SELECT code, name FROM branches WHERE id = ?').get(branchId) as
     { code: string | null; name: string } | undefined
   const branchCode = (branch?.code || branch?.name?.slice(0, 4) || 'BR').toUpperCase().replace(/\s+/g, '')
 
-  const seqId = `${branchId}-${billType}-${year}`
+  const seqId = `${branchId}-${rawPrefix ? rawPrefix + '-' : ''}${billType}-${year}`
   let row = db.prepare('SELECT last_seq FROM bill_sequences WHERE branch_id=? AND bill_type=? AND year=?')
     .get(branchId, billType, year) as { last_seq: number } | undefined
 
@@ -126,7 +129,7 @@ export function getNextBillNumber(branchId: string, billType: BillType): string 
   }
 
   const seq = String(row.last_seq).padStart(4, '0')
-  return `${branchCode}-${prefix}-${year}-${seq}`
+  return `${branchCode}-${counterPart}${prefix}-${year}-${seq}`
 }
 
 function getAuthUser() {
@@ -197,8 +200,8 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const priceByProduct = new Map<string, { selling_price: number; tax_rate: number }>()
       for (const item of (payload.items || [])) {
         const qty = Number(item.quantity)
-        if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
-          return { success: false, error: 'Every item must have a whole-number quantity greater than zero' }
+        if (!Number.isFinite(qty) || qty <= 0) {
+          return { success: false, error: 'Every item must have a quantity greater than zero' }
         }
         const productId = String(item.product_id || '')
         if (!priceByProduct.has(productId)) {
@@ -419,12 +422,26 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
 
           // QUOTATION: do NOT deduct stock. RETAIL and CREDIT: deduct immediately.
           if (billType !== 'QUOTATION') {
-            const changed = db.prepare(`
-              UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now')
-              WHERE product_id = ? AND branch_id = ? AND quantity - COALESCE(damaged_qty,0) >= ?
-            `).run(item.quantity, item.product_id, branchId, item.quantity)
-            if (!changed.changes) {
-              throw new Error(`Insufficient branch stock for product ${item.product_id}`)
+            const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+            const allowNegativeStock = Boolean(settings.allow_negative_stock || settings.business_type === 'supermarket')
+
+            if (allowNegativeStock) {
+              const stockRow = db.prepare('SELECT id, quantity FROM stocks WHERE product_id = ? AND branch_id = ?').get(item.product_id, branchId) as { id: string; quantity: number } | undefined
+              if (stockRow) {
+                db.prepare(`UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now') WHERE product_id = ? AND branch_id = ?`)
+                  .run(item.quantity, item.product_id, branchId)
+              } else {
+                db.prepare(`INSERT INTO stocks (id, product_id, branch_id, quantity, damaged_qty, updated_at) VALUES (?, ?, ?, ?, 0, datetime('now'))`)
+                  .run(crypto.randomUUID(), item.product_id, branchId, -item.quantity)
+              }
+            } else {
+              const changed = db.prepare(`
+                UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now')
+                WHERE product_id = ? AND branch_id = ? AND quantity - COALESCE(damaged_qty,0) >= ?
+              `).run(item.quantity, item.product_id, branchId, item.quantity)
+              if (!changed.changes) {
+                throw new Error(`Insufficient branch stock for product ${item.product_id}`)
+              }
             }
             movementRecords.push(insertStockMovement(db, {
               product_id: item.product_id,

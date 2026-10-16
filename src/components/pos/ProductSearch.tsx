@@ -230,8 +230,8 @@ export default function ProductSearch({ query, onSelect }: Props) {
 
             {/* ── Main row ── */}
             <div
-              onClick={() => !outOfStock && onSelect(product)}
-              className={`flex items-center gap-4 px-4 py-3 ${outOfStock ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'}`}
+              onClick={() => onSelect(product)}
+              className="flex items-center gap-4 px-4 py-3 cursor-pointer"
             >
               <div className="pos-product-media w-14 h-14 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden border">
                 {resolveImageSrc(product.image_url)

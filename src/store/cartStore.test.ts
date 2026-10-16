@@ -126,6 +126,21 @@ describe('useCartStore — item manipulation', () => {
     useCartStore.getState().setItemDiscount('p1', -5)
     expect(useCartStore.getState().items[0].discount_pct).toBe(0)
   })
+
+  it('handles decimal quantities for supermarket / weighed items (e.g. 0.75 kg @ 600)', () => {
+    useCartStore.getState().addItem(makeProduct({ id: 'veg-1', selling_price: 600, tax_rate: 0 }), 0.75)
+    const s = useCartStore.getState()
+    expect(s.items[0].quantity).toBe(0.75)
+    expect(s.subtotal).toBe(450)
+    expect(s.total).toBe(450)
+
+    // Updating quantity with decimal
+    useCartStore.getState().updateQty('veg-1', 1.25)
+    const s2 = useCartStore.getState()
+    expect(s2.items[0].quantity).toBe(1.25)
+    expect(s2.subtotal).toBe(750)
+    expect(s2.total).toBe(750)
+  })
 })
 
 describe('useCartStore — meta state', () => {

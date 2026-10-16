@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
   const body = await req.json()
   const { name, email, phone, address, timezone, currency, country,
           adminEmail, adminName, adminPhone, adminPassword,
-          packageId, trialDays, notes,
+          packageId, trialDays, notes, businessType,
           maxBranches, maxUsers, maxPosDevices, maxStorageGb,
           clearDataPassword } = body
 
@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
   const result = await createTenant({
     name, email, phone, address, timezone, currency, country,
     adminEmail, adminName, adminPhone, adminPassword,
-    packageId, trialDays,
+    packageId, trialDays, businessType,
     createdBy: auth.payload.sub, notes,
     maxBranches, maxUsers, maxPosDevices, maxStorageGb,
     clearDataPassword,

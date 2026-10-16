@@ -51,12 +51,17 @@ export default function POSPage() {
   const [categories, setCategories]     = useState<{ id: string; name: string }[]>([])
   const [cartFocusedIdx, setCartFocusedIdx] = useState(-1)
   const [discountRules, setDiscountRules] = useState<Record<string, unknown>[]>([])
+  const [appSettings, setAppSettings]     = useState<Record<string, unknown>>({})
   const searchRef = useRef<HTMLInputElement>(null)
+  const allowNegativeStock = Boolean(appSettings.allow_negative_stock || appSettings.business_type === 'supermarket')
 
   useEffect(() => {
     loadInvoiceNumber(cart.billType)
     loadCategories()
     loadDiscountRules()
+    window.api.settings.get().then((res: any) => {
+      if (res.success && res.data) setAppSettings(res.data as Record<string, unknown>)
+    }).catch(() => {})
     searchRef.current?.focus()
   }, [])
 
@@ -310,52 +315,94 @@ export default function POSPage() {
     { key: 'p', ctrl: true, handler: openPayment },
   ])
 
-  const handleProductSelect = useCallback((product: Product) => {
-    if (!product.stock || product.stock <= 0) {
-      if (cart.billType !== 'QUOTATION') {
-        toast.error('Out of stock')
-        return
-      }
-    }
-    cart.addItem(product, 1, resolveAutoDiscountPct(product))
-    // Auto-focus the newly added item (it will be last)
-    setCartFocusedIdx(cart.items.length) // items hasn't updated yet, so this = new last index
-    toast.success(`${product.name} added`, { duration: 900, position: 'bottom-right' })
-  }, [cart, resolveAutoDiscountPct])
-
-  const handleScannerSubmit = async () => {
-    const code = searchQuery.trim()
-    if (!code) return
-    try {
-      const res = await window.api.products.searchSku(code)
-      if (res.success && res.data) {
-        const product = res.data as Product
-        if ((!product.stock || product.stock <= 0) && cart.billType !== 'QUOTATION') {
-          setSearchQuery(product.sku || code)
-          toast.error('Out of stock in this branch. Check other branches below.')
-          return
-        }
-        handleProductSelect(product)
-        setSearchQuery('')
-        searchRef.current?.focus()
-        return
-      }
-      // Gift coupon scanned at the POS — show issued-to / balance / expiry
-      if (/^CPN-/i.test(code)) {
-        const cres = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> } }
-        if (cres.success && cres.data?.coupon) {
-          setCouponPeek({ ...cres.data.coupon, __valid: cres.data.valid, __reason: cres.data.reason || null })
-          setSearchQuery('')
-          return
-        }
-        toast.error('Coupon not found')
-        return
-      }
-      toast.error('Barcode not found')
-    } catch (err) {
-      toast.error((err as Error).message || 'Failed to look up barcode')
-    }
-  }
+  const handleProductSelect = useCallback((product: Product, customQty?: number) => {
+    const isOutOfStock = !product.stock || product.stock <= 0
+    if (isOutOfStock && cart.billType !== 'QUOTATION' && !allowNegativeStock) {
+      toast.error('Out of stock')
+      return
+    }
+    const qty = customQty && customQty > 0 ? customQty : 1
+    cart.addItem(product, qty, resolveAutoDiscountPct(product))
+    // Auto-focus the newly added item (it will be last)
+    setCartFocusedIdx(cart.items.length) // items hasn't updated yet, so this = new last index
+    if (isOutOfStock && allowNegativeStock) {
+      toast.success(`${product.name} added (${qty} qty)`, { duration: 900, position: 'bottom-right' })
+    } else {
+      toast.success(`${product.name} added`, { duration: 900, position: 'bottom-right' })
+    }
+  }, [cart, resolveAutoDiscountPct, allowNegativeStock])
+
+  const handleScannerSubmit = async () => {
+    const code = searchQuery.trim()
+    if (!code) return
+    try {
+      // 1. Direct SKU / Barcode search
+      const res = await window.api.products.searchSku(code)
+      if (res.success && res.data) {
+        const product = res.data as Product
+        const isOutOfStock = !product.stock || product.stock <= 0
+        if (isOutOfStock && cart.billType !== 'QUOTATION' && !allowNegativeStock) {
+          setSearchQuery('')
+          searchRef.current?.focus()
+          toast.error('Out of stock in this branch. Check other branches below.')
+          return
+        }
+        handleProductSelect(product)
+        setSearchQuery('')
+        searchRef.current?.focus()
+        return
+      }
+
+      // 2. Weighing Scale Barcode (EAN-13 format: 20/21/22/23/24 + 5-digit code + 5-digit weight/price + checksum)
+      const scaleEnabled = appSettings.weighing_scale_barcode !== false
+      if (scaleEnabled && /^(20|21|22|23|24|02)\d{11}$/.test(code)) {
+        const itemCode = code.slice(2, 7) // 5 digit code
+        const weightValue = parseInt(code.slice(7, 12), 10)
+        const scaleQty = weightValue > 0 ? weightValue / 1000 : 1 // grams to kg
+
+        let scaleProductRes = await window.api.products.searchSku(itemCode)
+        if (!scaleProductRes.success || !scaleProductRes.data) {
+          scaleProductRes = await window.api.products.searchSku(code.slice(0, 7))
+        }
+        if (!scaleProductRes.success || !scaleProductRes.data) {
+          scaleProductRes = await window.api.products.searchSku(itemCode.replace(/^0+/, ''))
+        }
+
+        if (scaleProductRes.success && scaleProductRes.data) {
+          const product = scaleProductRes.data as Product
+          handleProductSelect(product, scaleQty)
+          setSearchQuery('')
+          searchRef.current?.focus()
+          return
+        }
+      }
+
+      // 3. Gift coupon scanned at the POS
+      if (/^CPN-/i.test(code)) {
+        const cres = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> } }
+        if (cres.success && cres.data?.coupon) {
+          setCouponPeek({ ...cres.data.coupon, __valid: cres.data.valid, __reason: cres.data.reason || null })
+          setSearchQuery('')
+          searchRef.current?.focus()
+          return
+        }
+        setSearchQuery('')
+        searchRef.current?.focus()
+        toast.error('Coupon not found')
+        return
+      }
+
+      // 4. Barcode not found -> Clear buffer immediately to avoid concatenating with subsequent scans!
+      setSearchQuery('')
+      searchRef.current?.focus()
+      toast.error(`Barcode not found: ${code}`)
+    } catch (err) {
+      setSearchQuery('')
+      searchRef.current?.focus()
+      toast.error((err as Error).message || 'Failed to look up barcode')
+    }
+  }
+
 
   const handleCustomerSelect = (customer: Customer) => {
     cart.setCustomer(customer)

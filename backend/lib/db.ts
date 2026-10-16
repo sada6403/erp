@@ -148,6 +148,7 @@ async function autoMigrate() {
     `ALTER TABLE companies ADD COLUMN branding_json  TEXT         NULL`,
     `ALTER TABLE companies ADD COLUMN company_key    VARCHAR(36)  NULL UNIQUE`,
     `ALTER TABLE companies ADD COLUMN initial_admin_password VARCHAR(255) NULL`,
+    `ALTER TABLE companies ADD COLUMN business_type VARCHAR(50) NOT NULL DEFAULT 'retail'`,
     `UPDATE companies SET company_key = UUID() WHERE company_key IS NULL OR company_key = ''`,
 
     // subscription grace period on packages

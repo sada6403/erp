@@ -18,7 +18,9 @@ describe('LoginPage company contact details', () => {
   let settingsUpdated: (() => void) | undefined
 
   beforeEach(() => {
-    localStorage.clear()
+    if (typeof localStorage !== 'undefined' && typeof localStorage.clear === 'function') {
+      localStorage.clear()
+    }
     branding = {
       company_name: 'Main Company',
       company_phone: '+94 11 234 5678',

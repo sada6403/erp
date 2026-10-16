@@ -165,11 +165,12 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   </button>
                   <NumberInput
                     value={item.quantity}
-                    onChange={e => cart.updateQty(item.product.id, parseInt(e.target.value) || 0)}
+                    onChange={e => cart.updateQty(item.product.id, parseFloat(e.target.value) || 0)}
                     onClick={e => e.stopPropagation()}
-                    className="w-10 text-center bg-transparent text-sm font-bold border-0 outline-none"
+                    className="w-14 text-center bg-transparent text-sm font-bold border-0 outline-none"
                     style={{ color: 'var(--text-1)' }}
-                    min="1"
+                    min="0.001"
+                    step="any"
                     tabIndex={-1}
                   />
                   <button

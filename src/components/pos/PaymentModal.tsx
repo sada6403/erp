@@ -418,6 +418,17 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       const payload = buildPayload(data.invoice_number || invoiceNumber)
       setReceiptPayload(payload)
       setDone(true)
+
+      // Auto-print thermal bill in supermarket mode or if auto_print_thermal is configured
+      const settData = settings?.data as Record<string, unknown> | undefined
+      const shouldAutoPrint = isRetail && Boolean(settData?.auto_print_thermal || settData?.business_type === 'supermarket')
+      if (shouldAutoPrint) {
+        window.api.printer.printInvoice({ ...payload, invoice_design: 'thermal' })
+          .then((pRes: any) => {
+            if (pRes?.success) toast.success('Thermal bill printed', { position: 'bottom-right' })
+          })
+          .catch(() => {})
+      }
     } catch (err: unknown) {
       toast.error((err as Error).message)
     } finally {

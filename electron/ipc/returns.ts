@@ -121,8 +121,8 @@ export function registerReturnHandlers() {
     const resolvedItems: Array<{ product_id: string; invoice_item_id: string | null; quantity: number; unit_price: number }> = []
     for (const item of data.items) {
       const qty = Number(item.quantity)
-      if (!Number.isFinite(qty) || qty <= 0 || !Number.isInteger(qty)) {
-        return { success: false, error: 'Every returned item must have a whole-number quantity greater than zero' }
+      if (!Number.isFinite(qty) || qty <= 0) {
+        return { success: false, error: 'Every returned item must have a quantity greater than zero' }
       }
       let unitPrice = Number(item.unit_price) || 0
       if (item.invoice_item_id) {
