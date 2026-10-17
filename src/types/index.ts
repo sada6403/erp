@@ -320,6 +320,7 @@ export interface AuthUser {
   branch_id?: string | null
   sub_branch_id?: string | null
   permissions?: Record<string, boolean>
+  business_type?: string
   enabledModules?: string[]
   enabledFeatures?: string[]
   limits?: Record<string, number>

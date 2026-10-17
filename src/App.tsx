@@ -100,6 +100,9 @@ function RequireSmartBuyAccess({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuthStore()
   if (isLoading) return <LoadingScreen />
   if (!user) return <Navigate to="/login" replace />
+  if (user.business_type === 'supermarket') {
+    return <Navigate to="/admin" replace />
+  }
   const permissions = (user.role?.permissions ||
     (user as unknown as Record<string, unknown>).permissions) as Record<string, unknown> || {}
   // Requires an EXPLICIT Smart Buy grant ('all' or 'chits'), never

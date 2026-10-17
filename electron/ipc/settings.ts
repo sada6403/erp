@@ -337,6 +337,12 @@ export async function refreshBrandingFromCloud(): Promise<{ success: boolean; br
       }
     }
 
+    if (next.business_type === 'supermarket') {
+      if (next.allow_negative_stock !== true) { next.allow_negative_stock = true; changed = true }
+      if (next.weighing_scale_barcode !== true) { next.weighing_scale_barcode = true; changed = true }
+      if (next.auto_print_thermal !== true) { next.auto_print_thermal = true; changed = true }
+    }
+
     if (changed) {
       store.set('app_settings', next)
       store.set('company_branding_synced', JSON.stringify(branding))
@@ -382,6 +388,11 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
 
       const current = store.get('app_settings') as Record<string, unknown> || {}
       const next = normalizeForStorage(payload as Record<string, unknown>, current)
+      if (next.business_type === 'supermarket' && current.business_type !== 'supermarket') {
+        next.allow_negative_stock = true
+        next.weighing_scale_barcode = true
+        next.auto_print_thermal = true
+      }
       store.set('app_settings', next)
       auditSettingsUpdate(Object.keys(payload as Record<string, unknown>))
 

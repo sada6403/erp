@@ -547,8 +547,15 @@ function GeneralSettings({ form, f, setForm }: { form: Record<string, any>; f: (
             <option value="retail">General Retail / Showroom</option>
             <option value="supermarket">Supermarket / Food City / Grocery</option>
             <option value="furniture">Furniture & Electronics Store</option>
+            <option value="chit_fund">Chit Fund & Investments</option>
           </select>
         </Field>
+
+        {form.business_type === 'supermarket' && (
+          <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/30 p-2.5 text-xs text-emerald-300 mb-3 mt-1">
+            🛒 <b>Supermarket Mode Active:</b> Hides Chit Funds/SmartBuy & Installments across menus and sales. Pre-configures barcode weighing scale reader (20xxxx/21xxxx), negative stock deduction, and instant 80mm thermal receipt auto-printing.
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-4 mt-3">
           <label className="flex items-start gap-2.5 cursor-pointer p-3 rounded-xl border border-slate-700/50 hover:bg-slate-800/30">

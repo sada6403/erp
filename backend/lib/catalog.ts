@@ -27,6 +27,7 @@ export const MODULE_DEFINITIONS: ModuleDefinition[] = [
   { key: 'stock_transfers', name: 'Inter-Branch Stock Transfers', sort: 11 },
   { key: 'api_access',      name: 'API Access',                   sort: 12 },
   { key: 'white_label',     name: 'White Label',                  sort: 13 },
+  { key: 'smartbuy',        name: 'SmartBuy & Chit Funds',        sort: 14 },
 ]
 
 // Tables frozen when a company is admin-locked (companies.admin_locked) —
@@ -61,6 +62,14 @@ export const TABLE_MODULE_MAP: Record<string, string> = {
   branch_transfer_mismatches:  'stock_transfers',
   branch_transfer_logs:        'stock_transfers',
   branch_transfer_prints:      'stock_transfers',
+
+  chits:                       'smartbuy',
+  chit_schemes:                'smartbuy',
+  chit_customers:              'smartbuy',
+  smartbuy_agents:             'smartbuy',
+  smartbuy_transfers:          'smartbuy',
+  smartbuy_awards:             'smartbuy',
+  smartbuy_draws:              'smartbuy',
 }
 
 export const FEATURE_DEFINITIONS: FeatureDefinition[] = [

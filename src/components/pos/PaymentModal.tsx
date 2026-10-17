@@ -79,6 +79,15 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const receivedRef = useRef<HTMLInputElement>(null)
   const navigate    = useNavigate()
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null)
+  const [appSettings, setAppSettings] = useState<Record<string, unknown>>({})
+
+  useEffect(() => {
+    window.api.settings.get().then((r: { success: boolean; data?: unknown }) => {
+      if (r.success && r.data) setAppSettings(r.data as Record<string, unknown>)
+    }).catch(() => undefined)
+  }, [])
+
+  const isSupermarket = appSettings.business_type === 'supermarket'
 
   useEffect(() => {
     receivedRef.current?.focus()
@@ -471,7 +480,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     { key: '1', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('cash');          receivedRef.current?.select() } } },
     { key: '2', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('card');          receivedRef.current?.select() } } },
     { key: '3', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('bank_transfer'); receivedRef.current?.select() } } },
-    { key: '4', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('installment');   receivedRef.current?.select() } } },
+    { key: '4', ctrl: true, handler: () => { if (!done && isRetail && !isSupermarket) { setMethod('installment');   receivedRef.current?.select() } } },
     // Confirm (fires only when NOT in an input — handled directly on input below)
     { key: 'Enter', handler: () => { if (done) onSuccess(); else handleConfirm() } },
     // Success screen print shortcuts
@@ -771,7 +780,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                       ⚠ This coupon was issued to {String(couponInfo.customer_name)} — different from the bill customer.
                     </div>
                   )}
-                  {Boolean(couponInfo.is_smartbuy) && (
+                  {!isSupermarket && Boolean(couponInfo.is_smartbuy) && (
                     <div className="rounded-lg border px-2.5 py-2 space-y-1" style={{ borderColor: '#d97706', background: 'color-mix(in srgb, #d97706 10%, transparent)' }}>
                       <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: '#b45309' }}>
                         <Sparkles size={13} /> SMARTBUY / CHIT FUND VOUCHER
@@ -810,12 +819,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
             </div>
           )}
 
-          {/* SmartBuy Wallet payment — tied to the selected customer, no
-              code to enter. Requires: 1. customer selected, 2. system
-              checks their balance (fetched above), 3. cashier opts in,
-              4. balance applied, 5. remainder payable by the method chosen
-              above. */}
-          {isRetail && method !== 'installment' && (
+          {/* SmartBuy Wallet payment */}
+          {!isSupermarket && isRetail && method !== 'installment' && (
             <div className="rounded-xl border p-3" style={{ borderColor: 'var(--border)', background: 'color-mix(in srgb, #14b8a6 6%, transparent)' }}>
               <div className="flex items-center gap-2 mb-2">
                 <Wallet size={15} className="text-teal-400" />
@@ -901,7 +906,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               <div>
                 <label className="label">Payment Method <span className="text-[10px] font-normal ml-1" style={{ color: 'var(--text-3)' }}>(Ctrl+1 to 5)</span></label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                  {PAYMENT_METHODS.map(m => (
+                  {PAYMENT_METHODS.filter(m => !isSupermarket || m.value !== 'installment').map(m => (
                     <button key={m.value} onClick={() => { setMethod(m.value); receivedRef.current?.select() }}
                       className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl text-xs font-medium transition-all border-2 min-h-[68px] relative
                         ${method === m.value

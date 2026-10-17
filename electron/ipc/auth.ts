@@ -150,6 +150,7 @@ function buildAuthUserPayload(user: Record<string, unknown>, company?: { id: str
     deviceId: meta.deviceId,
     scope,
     company: company ? { id: company.id, name: company.name, slug: company.slug } : undefined,
+    business_type: String(((store.get('app_settings') as Record<string, unknown>) || {}).business_type || 'retail'),
   }
 }
 

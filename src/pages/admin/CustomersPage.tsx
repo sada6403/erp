@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useAuthStore } from '@/store/authStore'
 import NumberInput from '@/components/shared/NumberInput'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -10,6 +11,8 @@ import { validateCustomer } from '@/lib/validateCustomer'
 import { useDeleteAction } from '@/hooks/useDeleteAction'
 
 export default function CustomersPage() {
+  const { user } = useAuthStore()
+  const isSupermarket = user?.business_type === 'supermarket'
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch]       = useState('')
   const [showForm, setShowForm]   = useState(false)
@@ -130,7 +133,9 @@ export default function CustomersPage() {
                   <div className="flex gap-1">
                     <button onClick={() => setViewing(c)} className="btn-ghost btn-sm p-1.5"><Eye size={13} /></button>
                     <button onClick={() => { setEditing(c); setShowForm(true) }} className="btn-ghost btn-sm p-1.5"><Edit2 size={13} /></button>
-                    <button onClick={() => setEnrolling(c)} className="btn-ghost btn-sm p-1.5" title="Add to Smart Buy Scheme"><Coins size={13} /></button>
+                    {!isSupermarket && (
+                      <button onClick={() => setEnrolling(c)} className="btn-ghost btn-sm p-1.5" title="Add to Smart Buy Scheme"><Coins size={13} /></button>
+                    )}
                     <button onClick={() => del.requestDelete(c)} className="btn-ghost btn-sm p-1.5 hover:text-red-500" title="Delete"><Trash2 size={13} /></button>
                   </div>
                 </td>
@@ -286,6 +291,8 @@ function CustomerForm({ customer, onClose, onSave }: { customer: Customer | null
 }
 
 function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: () => void }) {
+  const { user } = useAuthStore()
+  const isSupermarket = user?.business_type === 'supermarket'
   const [invoices, setInvoices] = useState<Record<string,unknown>[]>([])
   const [installments, setInstallments] = useState<Record<string,unknown>[]>([])
   const [chitMemberships, setChitMemberships] = useState<Record<string,unknown>[]>([])
@@ -295,15 +302,15 @@ function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: (
       if (r.success) setInvoices(r.data as Record<string,unknown>[])
       else toast.error(r.error || 'Failed to load invoice history')
     }).catch(() => toast.error('Failed to load invoice history'))
-    window.api.customers.installments(customer.id).then((r: any) => {
-      if (r.success) setInstallments(r.data as Record<string,unknown>[])
-      else toast.error(r.error || 'Failed to load installments')
-    }).catch(() => toast.error('Failed to load installments'))
-    window.api.customers.chitMemberships(customer.id).then((r: any) => {
-      if (r.success) setChitMemberships(r.data as Record<string,unknown>[])
-      else toast.error(r.error || 'Failed to load chit memberships')
-    }).catch(() => toast.error('Failed to load chit memberships'))
-  }, [customer.id])
+    if (!isSupermarket) {
+      window.api.customers.installments(customer.id).then((r: any) => {
+        if (r.success) setInstallments(r.data as Record<string,unknown>[])
+      }).catch(() => undefined)
+      window.api.customers.chitMemberships(customer.id).then((r: any) => {
+        if (r.success) setChitMemberships(r.data as Record<string,unknown>[])
+      }).catch(() => undefined)
+    }
+  }, [customer.id, isSupermarket])
 
   return (
     <Modal title={`${customer.name} — History`} onClose={onClose} size="lg">
@@ -326,7 +333,7 @@ function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: (
           </div>
         </div>
 
-        {installments.length > 0 && (
+        {!isSupermarket && installments.length > 0 && (
           <div>
             <h3 className="text-sm font-semibold mb-2">Installments</h3>
             <div className="space-y-2">
@@ -340,7 +347,7 @@ function CustomerHistory({ customer, onClose }: { customer: Customer; onClose: (
           </div>
         )}
 
-        {chitMemberships.length > 0 && (
+        {!isSupermarket && chitMemberships.length > 0 && (
           <div>
             <h3 className="text-sm font-semibold mb-2">Smart Buy Memberships</h3>
             <div className="space-y-2">

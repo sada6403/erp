@@ -1130,6 +1130,12 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
                 <option value="furniture">Furniture & Electronics</option>
                 <option value="chit_fund">Chit Fund & Investments</option>
               </select>
+              {form.businessType === 'supermarket' && (
+                <p className="text-[11px] text-emerald-400 mt-1">🛒 Supermarket Mode: Clean food city setup. Disables Chit Funds & Installments, enables Scale Barcodes & Negative Stock.</p>
+              )}
+              {form.businessType === 'chit_fund' && (
+                <p className="text-[11px] text-purple-400 mt-1">💰 Chit Fund Mode: Enables SmartBuy schemes, member collections & agents.</p>
+              )}
             </div>
             <div><label className="label">Package</label>
               <select className="input" value={form.packageId} onChange={e => set('packageId', e.target.value)}>
@@ -1371,6 +1377,7 @@ function ApiKeyModal({ company, onClose, onRegenerated }: {
 const MODULE_GROUPS: Record<string, string[]> = {
   'Core':       ['pos', 'inventory', 'customers'],
   'Finance':    ['installments', 'expenses', 'purchase_orders'],
+  'Schemes':    ['smartbuy'],
   'Operations': ['deliveries', 'stock_transfers', 'multi_branch'],
   'Reporting':  ['reports_basic', 'reports_full'],
   'Advanced':   ['api_access', 'white_label'],

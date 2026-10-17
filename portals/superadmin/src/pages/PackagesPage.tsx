@@ -36,6 +36,7 @@ const MODULE_CATALOG: { key: string; name: string }[] = [
   { key: 'stock_transfers', name: 'Inter-Branch Stock Transfers' },
   { key: 'api_access',      name: 'API Access' },
   { key: 'white_label',     name: 'White Label' },
+  { key: 'smartbuy',        name: 'SmartBuy & Chit Funds' },
 ]
 
 function moduleEnabled(pkg: Pkg, key: string) {

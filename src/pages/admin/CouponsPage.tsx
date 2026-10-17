@@ -52,7 +52,8 @@ export default function CouponsPage() {
   const [detail, setDetail]         = useState<Coupon | null>(null)
   const [loading, setLoading]       = useState(false)
 
-  const isSmartBuyView = voucherType === 'smartbuy' || voucherType === ''
+  const isSupermarket = user?.business_type === 'supermarket'
+  const isSmartBuyView = !isSupermarket && (voucherType === 'smartbuy' || voucherType === '')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -156,7 +157,7 @@ export default function CouponsPage() {
           <select value={voucherType} onChange={e => { setVoucherType(e.target.value); setLifecycle('') }} className="input w-40">
             <option value="">All Voucher Types</option>
             <option value="normal">Normal</option>
-            <option value="smartbuy">SmartBuy / Chit Fund</option>
+            {!isSupermarket && <option value="smartbuy">SmartBuy / Chit Fund</option>}
           </select>
           {isSmartBuyView && (
             <>

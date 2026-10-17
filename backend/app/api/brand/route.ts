@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
 
     const { rows } = await pool.query(
       `SELECT c.id as company_id, c.name, c.email, c.phone, c.address,
-              c.brand_color, c.brand_logo_url,
+              c.brand_color, c.brand_logo_url, c.business_type,
               c.status as company_status, c.suspension_reason,
               c.max_users, c.max_branches, c.max_pos_devices,
               s.ends_at as sub_ends_at, s.status as sub_status,
@@ -58,6 +58,7 @@ export async function GET(req: NextRequest) {
       company_email:   c.email   ?? null,
       company_phone:   c.phone   ?? null,
       company_address: c.address ?? null,
+      business_type:   (c.business_type as string) || 'retail',
       brand_color:     c.brand_color    ?? null,
       brand_logo_url:  c.brand_logo_url ?? null,
       sub_status:     subStatus,

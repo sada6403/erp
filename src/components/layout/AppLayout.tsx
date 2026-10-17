@@ -99,7 +99,7 @@ const NAV_GROUPS: NavGroup[] = [
     // never explicitly granted Smart Buy access. A company that wants those
     // roles to keep Smart Buy access must now grant 'chits' explicitly via
     // Roles & Permissions.
-    label: 'Smart Buy', icon: Coins, perm: ['chits'], module: 'customers',
+    label: 'Smart Buy', icon: Coins, perm: ['chits'], module: 'smartbuy',
     items: [
       { to: '/admin/smart-buy', label: 'Dashboard', perm: ['chits'] },
       { to: '/admin/smart-buy-award', label: 'Award Winners', perm: ['chits'] },
@@ -244,7 +244,7 @@ function saveSidebarScroll(top: number) {
 }
 
 const SidebarGroup = memo(function SidebarGroup({
-  group, permissions, isAdmin, collapsed, enabledModules, kind, pendingRoutes
+  group, permissions, isAdmin, collapsed, enabledModules, kind, pendingRoutes, businessType
 }: {
   group: NavGroup
   permissions: Record<string, unknown>
@@ -253,11 +253,28 @@ const SidebarGroup = memo(function SidebarGroup({
   enabledModules: string[] | null
   kind: SessionRoleKind
   pendingRoutes?: string[]
+  businessType?: string
 }) {
+  const isSupermarket = businessType === 'supermarket'
+  const isChitFund = businessType === 'chit_fund'
+
+  // Industry exclusions: Supermarkets never have Smart Buy / Chit schemes
+  if (isSupermarket && group.label === 'Smart Buy') return null
+  // Non-chit fund businesses only show Smart Buy if specifically enabled in modules
+  if (group.label === 'Smart Buy' && !isChitFund && enabledModules && !enabledModules.includes('smartbuy')) return null
+
   const location = useLocation()
   const Icon = group.icon
   const label = group.label
-  const visibleItems = group.items.filter(item => canSeeItem(item, permissions, isAdmin))
+  const visibleItems = group.items.filter(item => {
+    if (!canSeeItem(item, permissions, isAdmin)) return false
+    if (isSupermarket) {
+      // Supermarket / Food City doesn't sell groceries on hire-purchase installments or write quotations
+      if (item.to === '/admin/installments') return false
+      if (item.to === '/admin/quotations') return false
+    }
+    return true
+  })
   const groupActive = visibleItems.some(item =>
     location.pathname === item.to || location.pathname.startsWith(`${item.to}/`)
   )
@@ -837,6 +854,7 @@ export default function AppLayout() {
                 collapsed={!sidebarOpen}
                 enabledModules={enabledModules}
                 kind={profile.kind}
+                businessType={String(branding.business_type || user?.business_type || 'retail')}
                 pendingRoutes={hasPendingStockRequests ? ['/admin/stock-requests'] : undefined}
               />
             ))}

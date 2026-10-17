@@ -61,6 +61,7 @@ export function openWhatsAppCompose(phone: string, text: string) {
 
 export default function BranchesPage() {
   const { user } = useAuthStore()
+  const isSupermarket = user?.business_type === 'supermarket'
   const perms = getPerms(user)
   const isAdmin = Boolean(perms.all)
 
@@ -203,9 +204,11 @@ export default function BranchesPage() {
               <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                 Manager: {String(b.manager_name || 'Unassigned')}
               </p>
-              <p className="text-xs" style={{ color: 'var(--text-3)' }}>
-                SmartBuy Manager: {String(b.smartbuy_manager_name || 'Unassigned')}
-              </p>
+              {!isSupermarket && (
+                <p className="text-xs" style={{ color: 'var(--text-3)' }}>
+                  SmartBuy Manager: {String(b.smartbuy_manager_name || 'Unassigned')}
+                </p>
+              )}
               <p className="text-xs" style={{ color: 'var(--text-3)' }}>{b.address as string || 'No address'}</p>
               {isAdmin && (
                 <div className="mt-2.5 pt-2 border-t border-slate-700/50 flex flex-wrap items-center gap-2">
@@ -808,6 +811,8 @@ function BranchForm({
   onClose: () => void
   onSave: () => void
 }) {
+  const { user } = useAuthStore()
+  const isSupermarket = user?.business_type === 'supermarket'
   const isMain = String(branch?.id || '') === 'b1111111-1111-4111-8111-111111111111'
 
   const hasExistingPin = Boolean(branch?.has_branch_pin)
@@ -907,7 +912,7 @@ function BranchForm({
           </p>
         </div>
 
-        {branch && (
+        {!isSupermarket && branch && (
           <div>
             <label className="block text-xs font-medium text-slate-400 mb-1">Assigned SmartBuy Manager</label>
             <select value={form.smartbuy_manager_id} onChange={f('smartbuy_manager_id')} className="input">

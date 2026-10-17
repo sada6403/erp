@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useAuthStore } from '@/store/authStore'
 import NumberInput from '@/components/shared/NumberInput'
 import CreatableSearchSelect from '@/components/shared/CreatableSearchSelect'
 import Modal from '@/components/shared/Modal'
@@ -360,6 +361,8 @@ function StaffDetailsModal({ agent, onClose, onChanged, onViewFullReport, onEdit
   onViewFullReport: () => void
   onEdit: () => void
 }) {
+  const { user } = useAuthStore()
+  const isSupermarket = user?.business_type === 'supermarket'
   const [posStats, setPosStats] = useState<Row | null>(null)
   const [smartBuyStats, setSmartBuyStats] = useState<Row | null>(null)
   const [linkedUser, setLinkedUser] = useState<Row | null>(null)
@@ -443,7 +446,7 @@ function StaffDetailsModal({ agent, onClose, onChanged, onViewFullReport, onEdit
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <StatCard label="POS Commission (This Month)" value={`Rs.${money(stats.commission_total)}`} icon={Receipt} color="blue" />
               <StatCard label="POS Sales (This Month)" value={`Rs.${money(stats.sales_total)}`} icon={DollarSign} color="green" />
-              {smartBuyStats && (
+              {!isSupermarket && smartBuyStats && (
                 <>
                   <StatCard label="Smart Buy Commission Earned" value={`Rs.${money(smartBuyStats.commission_earned)}`} icon={Target} color="purple" />
                   <StatCard label="Smart Buy Commission Pending" value={`Rs.${money(smartBuyStats.commission_pending)}`} icon={Target} color="yellow" />

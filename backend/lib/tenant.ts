@@ -619,6 +619,38 @@ export async function createTenant(params: {
     ]
   )
 
+  // 1b. Module configuration based on business type
+  const bType = params.businessType ?? 'retail'
+  if (bType === 'supermarket') {
+    // Supermarket / Food City: Disable SmartBuy & Installments
+    const mods = [
+      { key: 'smartbuy', enabled: 0 },
+      { key: 'installments', enabled: 0 },
+      { key: 'pos', enabled: 1 },
+      { key: 'inventory', enabled: 1 },
+      { key: 'customers', enabled: 1 },
+      { key: 'reports_basic', enabled: 1 },
+      { key: 'reports_full', enabled: 1 },
+      { key: 'expenses', enabled: 1 },
+      { key: 'stock_transfers', enabled: 1 },
+      { key: 'purchase_orders', enabled: 1 },
+    ]
+    for (const m of mods) {
+      await pool.query(
+        `INSERT INTO company_modules (id, company_id, module_key, is_enabled, enabled_by, enabled_at)
+         VALUES (UUID(), ?, ?, ?, ?, NOW())`,
+        [companyId, m.key, m.enabled, params.createdBy ?? 'system']
+      )
+    }
+  } else if (bType === 'retail') {
+    // General Retail: Disable SmartBuy by default
+    await pool.query(
+      `INSERT INTO company_modules (id, company_id, module_key, is_enabled, enabled_by, enabled_at)
+       VALUES (UUID(), ?, 'smartbuy', 0, ?, NOW())`,
+      [companyId, params.createdBy ?? 'system']
+    )
+  }
+
   // 2. Subscription row
   if (params.packageId) {
     await pool.query(
