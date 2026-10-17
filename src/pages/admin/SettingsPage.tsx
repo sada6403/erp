@@ -522,33 +522,22 @@ function GeneralSettings({ form, f, setForm }: { form: Record<string, any>; f: (
         </Field>
       </Section>
 
-      <Section title="Business Type & Supermarket / Food City Settings">
+      <Section title="Industry & Supermarket Settings">
         <p className="text-xs -mt-1 mb-2" style={{ color: 'var(--text-3)' }}>
-          Configures workflow rules for Supermarkets/Food Cities, Retail Stores, or Showrooms.
+          Workflow rules configured for this company. Industry type is managed centrally by your platform administrator.
         </p>
         <Field label="Business Type">
-          <select
-            value={form.business_type || 'retail'}
-            onChange={e => {
-              const btype = e.target.value
-              setForm((p: Record<string, any>) => ({
-                ...p,
-                business_type: btype,
-                ...(btype === 'supermarket' ? {
-                  allow_negative_stock: true,
-                  auto_print_thermal: true,
-                  weighing_scale_barcode: true,
-                  invoice_active_design: 'thermal',
-                } : {})
-              }))
-            }}
-            className="input max-w-sm"
-          >
-            <option value="retail">General Retail / Showroom</option>
-            <option value="supermarket">Supermarket / Food City / Grocery</option>
-            <option value="furniture">Furniture & Electronics Store</option>
-            <option value="chit_fund">Chit Fund & Investments</option>
-          </select>
+          <div className="flex items-center gap-2 py-1">
+            <span className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-500/10 text-blue-400 border border-blue-500/30">
+              {form.business_type === 'supermarket' ? '🛒 Supermarket / Food City / Grocery' :
+               form.business_type === 'furniture' ? '🛋️ Furniture & Electronics Store' :
+               form.business_type === 'chit_fund' ? '💰 Chit Fund & Investments' :
+               '🏬 General Retail / Showroom'}
+            </span>
+            <span className="text-[11px]" style={{ color: 'var(--text-3)' }}>
+              (Centrally configured in SuperAdmin)
+            </span>
+          </div>
         </Field>
 
         {form.business_type === 'supermarket' && (

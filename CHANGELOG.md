@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.8.2 — 2026-10-17 — Lock Business Type selection to SuperAdmin only
+
+- Removed editable `Business Type` dropdown selector from Desktop POS System Settings.
+- Replaced with read-only badge indicator showing centrally assigned industry mode (Supermarket, Retail, Furniture, Chit Fund).
+- Prevents local POS operators from altering company industry assignment; industry types are exclusively managed in SuperAdmin portal.
+
 ## 2.8.1 — 2026-10-17 — Supermarket clean mode & SmartBuy industry isolation
 
 - **Supermarket / Food City Isolation**:
