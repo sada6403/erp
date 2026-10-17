@@ -42,8 +42,9 @@ npm ci
 echo "[deploy] building backend"
 npm run build
 
-echo "[deploy] restarting backend"
-pm2 restart pos-backend --update-env || pm2 start "npm start" --name pos-backend --cwd "$BACKEND_DIR"
+echo "[deploy] restarting backend on port 4001"
+pm2 delete pos-backend >/dev/null 2>&1 || true
+PORT=4001 pm2 start "npm start" --name pos-backend --cwd "$BACKEND_DIR"
 
 if [ -d "$SUPERADMIN_DIR" ]; then
   echo "[deploy] installing superadmin dependencies"
