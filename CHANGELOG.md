@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.8.1 — 2026-10-17 — Supermarket clean mode & SmartBuy industry isolation
+
+- **Supermarket / Food City Isolation**:
+  - Hides SmartBuy, Chit Funds, Installments, and Quotations cleanly across Desktop POS and Admin UI when `business_type` is set to `supermarket`.
+  - Removes SmartBuy scheme buttons from Customers page, voucher filtering from Coupons, and Manager assignments from Branches for supermarkets.
+  - POS payment modal suppresses Installment payment tab and SmartBuy wallet options in supermarket mode.
+- **SmartBuy Continuity for Natural Plantation & Retail**:
+  - Ensures SmartBuy and Chit Fund features remain 100% active and accessible for Natural Plantation and non-supermarket businesses.
+  - Added backward-compatible module resolution so existing companies retain full SmartBuy access.
+
 ## 2.7.28 — 2026-10-12 — WhatsApp credentials share and branch management updates
 
 - Added "Share via WhatsApp" click-to-chat action to branch cards with pre-filled activation key and manager credentials.
