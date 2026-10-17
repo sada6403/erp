@@ -642,13 +642,6 @@ export async function createTenant(params: {
         [companyId, m.key, m.enabled, params.createdBy ?? 'system']
       )
     }
-  } else if (bType === 'retail') {
-    // General Retail: Disable SmartBuy by default
-    await pool.query(
-      `INSERT INTO company_modules (id, company_id, module_key, is_enabled, enabled_by, enabled_at)
-       VALUES (UUID(), ?, 'smartbuy', 0, ?, NOW())`,
-      [companyId, params.createdBy ?? 'system']
-    )
   }
 
   // 2. Subscription row

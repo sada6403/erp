@@ -256,12 +256,9 @@ const SidebarGroup = memo(function SidebarGroup({
   businessType?: string
 }) {
   const isSupermarket = businessType === 'supermarket'
-  const isChitFund = businessType === 'chit_fund'
 
   // Industry exclusions: Supermarkets never have Smart Buy / Chit schemes
   if (isSupermarket && group.label === 'Smart Buy') return null
-  // Non-chit fund businesses only show Smart Buy if specifically enabled in modules
-  if (group.label === 'Smart Buy' && !isChitFund && enabledModules && !enabledModules.includes('smartbuy')) return null
 
   const location = useLocation()
   const Icon = group.icon
@@ -295,7 +292,14 @@ const SidebarGroup = memo(function SidebarGroup({
   if (!isAdmin && group.perm && !hasAnyPerm(group.perm, permissions) && !visibleItems.length) return null
   if (!visibleItems.length) return null
   // Module gating: enabledModules null = offline/unknown = show all
-  if (group.module && enabledModules && !enabledModules.includes(group.module)) return null
+  if (group.module && enabledModules) {
+    if (group.label === 'Smart Buy') {
+      // Allow Smart Buy if explicitly enabled OR if legacy customer module is enabled (backward compatibility)
+      if (!enabledModules.includes('smartbuy') && !enabledModules.includes('customers')) return null
+    } else if (!enabledModules.includes(group.module)) {
+      return null
+    }
+  }
 
   const toggleOpen = () => {
     const next = !open
