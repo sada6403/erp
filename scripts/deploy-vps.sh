@@ -63,4 +63,17 @@ fi
 
 pm2 save
 
+echo "[deploy] checking listening ports and nginx configs"
+grep -rn "proxy_pass" /etc/nginx/ 2>/dev/null || true
+ss -tulpn 2>/dev/null | grep -E "node|next|3000|4001|4174" || true
+
+echo "[deploy] checking pos-backend status & logs"
+sleep 4
+pm2 status pos-backend || true
+pm2 logs pos-backend --lines 40 --nostream || true
+
+echo "[deploy] local health check"
+curl -is http://127.0.0.1:3000/api/health || true
+curl -is http://127.0.0.1:4001/api/health || true
+
 echo "[deploy] done"
