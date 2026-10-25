@@ -869,6 +869,15 @@ function runMigrations(): void {
   if (!hasColumn('chit_schemes', 'add_winner_paid_amount')) {
     db.exec(`ALTER TABLE chit_schemes ADD COLUMN add_winner_paid_amount INTEGER NOT NULL DEFAULT 0`)
   }
+  if (!hasColumn('chit_scheme_templates', 'frequency')) {
+    db.exec(`ALTER TABLE chit_scheme_templates ADD COLUMN frequency TEXT NOT NULL DEFAULT 'weekly'`)
+  }
+  if (!hasColumn('chit_scheme_templates', 'max_customers')) {
+    db.exec(`ALTER TABLE chit_scheme_templates ADD COLUMN max_customers INTEGER`)
+  }
+  if (!hasColumn('chit_scheme_templates', 'add_winner_paid_amount')) {
+    db.exec(`ALTER TABLE chit_scheme_templates ADD COLUMN add_winner_paid_amount INTEGER NOT NULL DEFAULT 1`)
+  }
   if (!hasColumn('chit_members', 'agent_id')) {
     db.exec(`ALTER TABLE chit_members ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
   }
@@ -1405,6 +1414,9 @@ function runMigrations(): void {
       duration_months               INTEGER NOT NULL,
       minimum_members                INTEGER NOT NULL,
       product_value                  REAL NOT NULL,
+      frequency                      TEXT NOT NULL DEFAULT 'weekly',
+      max_customers                  INTEGER,
+      add_winner_paid_amount         INTEGER NOT NULL DEFAULT 1,
       status                         TEXT NOT NULL DEFAULT 'active',
       created_by                     TEXT REFERENCES users(id),
       created_at                     TEXT NOT NULL DEFAULT (datetime('now')),

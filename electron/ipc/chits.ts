@@ -752,22 +752,26 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // capacity fields from it — never from client-supplied values — so
   // neither a Smart Buy Manager nor a tampered API call can inject a
   // hand-typed contribution amount, duration, or member count.
-  const TEMPLATE_FIELDS = ['scheme_name', 'monthly_contribution_amount', 'duration_months', 'minimum_members', 'product_value'] as const
+  const TEMPLATE_FIELDS = ['scheme_name', 'monthly_contribution_amount', 'duration_months', 'minimum_members', 'product_value', 'frequency', 'max_customers', 'add_winner_paid_amount'] as const
 
   function validateTemplatePayload(payload: Record<string, unknown>): { error: string } | {
-    scheme_name: string; monthly_contribution_amount: number; duration_months: number; minimum_members: number; product_value: number
+    scheme_name: string; monthly_contribution_amount: number; duration_months: number; minimum_members: number; product_value: number;
+    frequency: string; max_customers: number; add_winner_paid_amount: number
   } {
     const scheme_name = String(payload.scheme_name || '').trim()
     const monthly_contribution_amount = money(Number(payload.monthly_contribution_amount) || 0)
     const duration_months = Number(payload.duration_months) || 0
     const minimum_members = Number(payload.minimum_members) || 0
     const product_value = money(Number(payload.product_value) || 0)
+    const frequency = payload.frequency === 'monthly' ? 'monthly' : 'weekly'
+    const max_customers = Number(payload.max_customers || payload.minimum_members || 100)
+    const add_winner_paid_amount = payload.add_winner_paid_amount === false || payload.add_winner_paid_amount === 0 ? 0 : 1
     if (!scheme_name) return { error: 'Scheme name is required' }
-    if (monthly_contribution_amount <= 0) return { error: 'Monthly contribution amount must be greater than 0' }
-    if (duration_months <= 0) return { error: 'Duration (months) must be greater than 0' }
+    if (monthly_contribution_amount <= 0) return { error: `${frequency === 'weekly' ? 'Weekly payment' : 'Monthly contribution'} amount must be greater than 0` }
+    if (duration_months <= 0) return { error: `Duration (${frequency === 'weekly' ? 'weeks' : 'months'}) must be greater than 0` }
     if (minimum_members <= 0) return { error: 'Minimum members must be greater than 0' }
     if (product_value <= 0) return { error: 'Product value must be greater than 0' }
-    return { scheme_name, monthly_contribution_amount, duration_months, minimum_members, product_value }
+    return { scheme_name, monthly_contribution_amount, duration_months, minimum_members, product_value, frequency, max_customers, add_winner_paid_amount }
   }
 
   // View: any Smart Buy access (Super Admin or Smart Buy Manager) may list
@@ -798,8 +802,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const row = { id, ...validated, status: 'active', created_by: caller.id || null }
     db.prepare(`
       INSERT INTO chit_scheme_templates
-        (id, scheme_name, monthly_contribution_amount, duration_months, minimum_members, product_value, status, created_by)
-      VALUES (@id,@scheme_name,@monthly_contribution_amount,@duration_months,@minimum_members,@product_value,@status,@created_by)
+        (id, scheme_name, monthly_contribution_amount, duration_months, minimum_members, product_value, frequency, max_customers, add_winner_paid_amount, status, created_by)
+      VALUES (@id,@scheme_name,@monthly_contribution_amount,@duration_months,@minimum_members,@product_value,@frequency,@max_customers,@add_winner_paid_amount,@status,@created_by)
     `).run(row)
     await enqueuSync('chit_scheme_templates', id, 'INSERT', row)
     logAudit(db, {
@@ -873,8 +877,9 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     let minMembers: number
     let memberCount: number
 
+    let tmpl: Record<string, unknown> | undefined
     if (templateId) {
-      const tmpl = db.prepare('SELECT * FROM chit_scheme_templates WHERE id=?').get(templateId) as Record<string, unknown> | undefined
+      tmpl = db.prepare('SELECT * FROM chit_scheme_templates WHERE id=?').get(templateId) as Record<string, unknown> | undefined
       if (!tmpl) return { success: false, error: 'Scheme Master template not found' }
       if (tmpl.status !== 'active' && !isGlobalChitAccess(perms)) {
         return { success: false, error: 'Cannot instantiate a deactivated Scheme Master template' }
@@ -931,9 +936,13 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
     const id = crypto.randomUUID()
     const schemeNumber = nextChitNumber(db, branchId)
-    const frequency = payload.frequency === 'weekly' ? 'weekly' : 'monthly'
-    const maxCustomers = Number(payload.max_customers ?? payload.member_count ?? memberCount) || memberCount
-    const addWinnerPaidAmount = payload.add_winner_paid_amount ? 1 : 0
+    const frequency = payload.frequency
+      ? (payload.frequency === 'weekly' ? 'weekly' : 'monthly')
+      : (tmpl?.frequency ? (tmpl.frequency === 'monthly' ? 'monthly' : 'weekly') : (isSupermarketCompany() ? 'weekly' : 'monthly'))
+    const maxCustomers = Number(payload.max_customers ?? payload.member_count ?? tmpl?.max_customers ?? memberCount) || memberCount
+    const addWinnerPaidAmount = payload.add_winner_paid_amount !== undefined
+      ? (payload.add_winner_paid_amount ? 1 : 0)
+      : (tmpl?.add_winner_paid_amount !== undefined ? (tmpl.add_winner_paid_amount ? 1 : 0) : (isSupermarketCompany() ? 1 : 0))
     const row = {
       id, scheme_number: schemeNumber, name, branch_id: branchId, template_id: templateId,
       product_id: payload.product_id || null, agent_id: payload.agent_id || null,

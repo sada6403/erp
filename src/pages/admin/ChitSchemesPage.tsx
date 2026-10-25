@@ -400,14 +400,18 @@ function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, isSupermark
       setForm(p => ({ ...p, template_id: '' }))
       return
     }
+    const freq = String(template.frequency || (isSupermarket ? 'weekly' : 'monthly'))
     setForm(p => ({
       ...p,
       template_id: templateId,
       name: String(template.scheme_name || ''),
+      frequency: freq,
       contribution_amount: Number(template.monthly_contribution_amount || 0),
       cycle_count: Number(template.duration_months || 0),
       chit_value: Number(template.product_value || 0),
-      member_count: Math.max(Number(p.member_count || 0), Number(template.minimum_members || 0)),
+      max_customers: Number(template.max_customers || template.minimum_members || p.max_customers || 100),
+      member_count: Number(template.max_customers || template.minimum_members || p.member_count || 100),
+      add_winner_paid_amount: template.add_winner_paid_amount !== undefined ? Number(template.add_winner_paid_amount) : p.add_winner_paid_amount,
     }))
   }
 
@@ -448,7 +452,7 @@ function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, isSupermark
             <option value="">{isSuperAdmin ? '— Custom scheme (no template) —' : '— Select Scheme Master template —'}</option>
             {templates.map(template => (
               <option key={String(template.id)} value={String(template.id)}>
-                {String(template.scheme_name)} — Rs.{money(template.monthly_contribution_amount)} × {Number(template.duration_months || 0)} months
+                {String(template.scheme_name)} — Rs.{money(template.monthly_contribution_amount)} × {Number(template.duration_months || 0)} {template.frequency === 'weekly' ? 'weeks' : 'months'} ({template.frequency === 'weekly' ? 'Weekly' : 'Monthly'})
               </option>
             ))}
           </select>
@@ -462,16 +466,42 @@ function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, isSupermark
           )}
         </div>
 
-        <div><label className="block text-xs font-medium text-slate-400 mb-1">Scheme Name *</label><input value={form.name} onChange={f('name')} disabled={Boolean(form.template_id)} className="input disabled:opacity-60" placeholder="e.g. Rs.5000 Scheme" /></div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Payment Frequency *</label>
+            <select
+              value={form.frequency}
+              onChange={e => setForm(p => ({ ...p, frequency: e.target.value }))}
+              disabled={Boolean(form.template_id)}
+              className="input disabled:opacity-60"
+            >
+              <option value="weekly">Weekly (Weekly Payments)</option>
+              <option value="monthly">Monthly (Monthly Payments)</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-400 mb-1">Winner Calculation Method</label>
+            <select
+              value={form.add_winner_paid_amount}
+              onChange={e => setForm(p => ({ ...p, add_winner_paid_amount: Number(e.target.value) }))}
+              className="input"
+            >
+              <option value={1}>Scheme Value + Winner Paid Amount (Recommended)</option>
+              <option value={0}>Scheme Value Only</option>
+            </select>
+          </div>
+        </div>
+
+        <div><label className="block text-xs font-medium text-slate-400 mb-1">Scheme Name *</label><input value={form.name} onChange={f('name')} disabled={Boolean(form.template_id)} className="input disabled:opacity-60" placeholder={form.frequency === 'weekly' ? "e.g. Weekly 500 Scheme" : "e.g. Rs.5000 Scheme"} /></div>
 
         <div className="grid grid-cols-3 gap-3">
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Contribution Amount (Rs.) *</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1">{form.frequency === 'weekly' ? 'Weekly Payment (Rs.) *' : 'Monthly Contribution (Rs.) *'}</label>
             <NumberInput value={form.contribution_amount} onChange={f('contribution_amount')} disabled={Boolean(form.template_id)} className="input disabled:opacity-60" min={0} />
             <p className="text-[11px] text-slate-500 mt-1">Paid per member, per cycle</p>
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-400 mb-1">Duration (months) *</label>
+            <label className="block text-xs font-medium text-slate-400 mb-1">{form.frequency === 'weekly' ? 'Duration (weeks) *' : 'Duration (months) *'}</label>
             <NumberInput value={form.cycle_count} onChange={f('cycle_count')} disabled={Boolean(form.template_id)} className="input disabled:opacity-60" min={1} />
           </div>
           <div>
@@ -482,7 +512,7 @@ function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, isSupermark
         </div>
 
         <div>
-          <label className="block text-xs font-medium text-slate-400 mb-1">Maximum Members *</label>
+          <label className="block text-xs font-medium text-slate-400 mb-1">{isSupermarket ? 'Maximum Customers (Capacity / Slots) *' : 'Maximum Members *'}</label>
           <NumberInput value={form.member_count} onChange={f('member_count')} className="input" min={1} />
           <p className="text-xs text-slate-500 mt-1">This scheme activates once enrollment reaches this number. If it exceeds the duration ({Number(form.cycle_count) || 0} cycles), all remaining members receive their product together at the final cycle.</p>
         </div>
