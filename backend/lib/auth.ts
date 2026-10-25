@@ -1385,6 +1385,11 @@ async function runTenantCompatibility(dbSchema: string) {
     `ALTER TABLE chit_schemes ADD COLUMN projected_early_winners INT NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_schemes ADD COLUMN avg_product_cost DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE chit_schemes ADD COLUMN other_expenses DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_schemes ADD COLUMN frequency VARCHAR(50) NOT NULL DEFAULT 'monthly'`,
+    `ALTER TABLE chit_schemes ADD COLUMN max_customers INT NULL`,
+    `ALTER TABLE chit_schemes ADD COLUMN add_winner_paid_amount TINYINT(1) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_draws ADD COLUMN winner_paid_amount DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE chit_draws ADD COLUMN product_purchase_value DECIMAL(14,2) NOT NULL DEFAULT 0`,
 
     `ALTER TABLE suppliers ADD COLUMN due_balance DECIMAL(14,2) NOT NULL DEFAULT 0`,
 

@@ -624,7 +624,7 @@ export async function createTenant(params: {
   if (bType === 'supermarket') {
     // Supermarket / Food City: Disable SmartBuy & Installments
     const mods = [
-      { key: 'smartbuy', enabled: 0 },
+      { key: 'smartbuy', enabled: 1 },
       { key: 'installments', enabled: 0 },
       { key: 'pos', enabled: 1 },
       { key: 'inventory', enabled: 1 },

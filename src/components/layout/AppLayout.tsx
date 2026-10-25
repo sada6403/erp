@@ -257,9 +257,6 @@ const SidebarGroup = memo(function SidebarGroup({
 }) {
   const isSupermarket = businessType === 'supermarket'
 
-  // Industry exclusions: Supermarkets never have Smart Buy / Chit schemes
-  if (isSupermarket && group.label === 'Smart Buy') return null
-
   const location = useLocation()
   const Icon = group.icon
   const label = group.label

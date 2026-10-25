@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.8.3 — 2026-10-25 — Supermarket SmartBuy Scheme Enhancements & Winner Settlement
+
+- **Supermarket SmartBuy Scheme Engine**:
+  - Added support for flexible scheme frequencies (Weekly, Monthly).
+  - Enforced strict maximum customer capacity (`max_customers`) with capacity validation and slots remaining indicator in Admin UI.
+  - Added option `add_winner_paid_amount` ("Scheme + Paid" vs "Scheme Only"):
+    - Scheme + Paid: Winner receives Scheme Chit Value + Total Installment Amount paid by the winner.
+    - Scheme Only: Winner receives original Scheme Chit Value.
+    - Final cycle settlement ensures remaining customers receive original Scheme Amount.
+- **Reporting & Accounting**:
+  - SmartBuy winning draws report now displays `Scheme Amount`, `Paid by Winner`, and `Product Purchase Value`.
+- **Backend & Tenant Compatibility**:
+  - Added automated migration in `runTenantCompatibility` for `frequency`, `max_customers`, `add_winner_paid_amount` on `chit_schemes`, and `winner_paid_amount`, `product_purchase_value` on `chit_draws`.
+  - Updated tenant creation module defaults.
+
 ## 2.8.2 — 2026-10-17 — Lock Business Type selection to SuperAdmin only
 
 - Removed editable `Business Type` dropdown selector from Desktop POS System Settings.

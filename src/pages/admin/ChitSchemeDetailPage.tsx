@@ -25,6 +25,7 @@ export default function ChitSchemeDetailPage() {
   const userPermissions = ((user?.role as Record<string, unknown> | undefined)?.permissions
     || (user as unknown as Record<string, unknown> | undefined)?.permissions) as Record<string, unknown> | undefined
   const isSuperAdmin = Boolean(userPermissions?.all)
+  const isSupermarket = user?.business_type === 'supermarket'
   const [scheme, setScheme] = useState<Row | null>(null)
   const [members, setMembers] = useState<Row[]>([])
   const [draws, setDraws] = useState<Row[]>([])
@@ -137,6 +138,9 @@ export default function ChitSchemeDetailPage() {
   const nextCycle = draws.length + 1
   const isFinalCycle = nextCycle >= Number(scheme.cycle_count)
   const membersEnrolled = members.filter(m => m.status !== 'withdrawn').length
+  const maxCustomers = Number(scheme.max_customers || scheme.member_count || 0)
+  const availableSlots = Math.max(0, maxCustomers - membersEnrolled)
+  const isFull = maxCustomers > 0 && membersEnrolled >= maxCustomers
   const myPermissions = ((user?.role as unknown as Row)?.permissions as Row) || {}
   const isGlobal = Boolean(myPermissions.all)
   const myBranchId = String(user?.branch_id || '')
@@ -216,7 +220,7 @@ export default function ChitSchemeDetailPage() {
               <button onClick={downloadTemplate} className="btn-secondary btn-sm gap-1.5"><FileDown size={14} /> Template</button>
               <button onClick={bulkImport} disabled={importing} className="btn-secondary btn-sm gap-1.5"><Upload size={14} /> {importing ? 'Importing...' : 'Bulk Import'}</button>
               <button onClick={() => setShowRegisterHistorical(true)} className="btn-secondary btn-sm gap-1.5" title="Digitize a physical ledger/invoice record"><FileDown size={14} /> Register from Paper</button>
-              <button onClick={() => setShowAddMember(true)} className="btn-secondary btn-sm gap-1.5"><Plus size={14} /> Add Member</button>
+              <button onClick={() => setShowAddMember(true)} disabled={isFull} className="btn-secondary btn-sm gap-1.5 disabled:opacity-50" title={isFull ? "This scheme has reached its maximum customer limit. Please select or create a new scheme." : undefined}><Plus size={14} /> Add Member</button>
             </>
           )}
           {tab === 'branches' && isHomeBranchOrGlobal && (

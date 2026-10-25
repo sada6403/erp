@@ -57,6 +57,11 @@ function smartBuySettings() {
   }
 }
 
+export function isSupermarketCompany(): boolean {
+  const saved = (store.get('app_settings') as Record<string, unknown> | undefined) || {}
+  return String(saved.business_type || '').toLowerCase() === 'supermarket'
+}
+
 function currentPerms(caller: Record<string, unknown> = authUser()): Record<string, unknown> {
   return ((caller.role as Record<string, unknown>)?.permissions as Record<string, unknown>)
     || (caller.permissions as Record<string, unknown>)
@@ -414,10 +419,33 @@ function activeCandidatesForCycle(db: ReturnType<typeof getDb>, schemeId: string
 }
 
 function eligibleMembersForDraw(db: ReturnType<typeof getDb>, schemeId: string, cycleNo: number): Record<string, unknown>[] {
-  const scheme = db.prepare('SELECT contribution_amount FROM chit_schemes WHERE id=?').get(schemeId) as { contribution_amount: number } | undefined
+  const scheme = db.prepare('SELECT * FROM chit_schemes WHERE id=?').get(schemeId) as Record<string, unknown> | undefined
   const expectedAmount = Number(scheme?.contribution_amount) || 0
   const candidates = activeCandidatesForCycle(db, schemeId, cycleNo)
-  return candidates.filter(m => computeMemberCycleBalance(db, String(m.id), schemeId, cycleNo, expectedAmount).balanceDue <= 0.01)
+  const isSupermarket = isSupermarketCompany()
+  const isFinalCycle = cycleNo >= Number(scheme?.cycle_count)
+
+  return candidates
+    .filter(m => computeMemberCycleBalance(db, String(m.id), schemeId, cycleNo, expectedAmount).balanceDue <= 0.01)
+    .map(m => {
+      const paidRow = db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) as total_paid
+        FROM chit_contributions
+        WHERE member_id = ? AND scheme_id = ? AND status = 'approved'
+      `).get(m.id, schemeId) as { total_paid: number }
+      const totalPaid = money(Number(paidRow?.total_paid) || 0)
+      let projectedEntitlement = money(Number(scheme?.chit_value) || 0)
+      if (!isFinalCycle && isSupermarket && Boolean(scheme?.add_winner_paid_amount)) {
+        projectedEntitlement = money(Number(scheme?.chit_value) + totalPaid)
+      }
+      return {
+        ...m,
+        total_paid_by_winner: totalPaid,
+        winner_paid_amount: totalPaid,
+        product_purchase_value: projectedEntitlement,
+        scheme_amount: money(Number(scheme?.chit_value) || 0),
+      }
+    })
 }
 
 // The core gate this feature adds: a cycle is only "ready for the draw" once
@@ -494,9 +522,15 @@ function currentCycleNo(db: ReturnType<typeof getDb>, schemeId: string): number 
 // scheme that began in March is correctly dated in May, not "day X of
 // whatever month it happens to be checked in." No due-date column is
 // stored anywhere — always computed the same way this is used everywhere.
-function cycleDueDate(startDate: string, cycleNo: number, latePaymentDays: number): string {
+function cycleDueDate(startDate: string, cycleNo: number, latePaymentDays: number, frequency: string = 'monthly'): string {
   const day = latePaymentDays > 0 ? latePaymentDays : 5
   const start = new Date(startDate)
+  if (frequency === 'weekly') {
+    const msPerDay = 24 * 60 * 60 * 1000
+    const weekStartMs = start.getTime() + (cycleNo - 1) * 7 * msPerDay
+    const dueMs = weekStartMs + Math.min(day, 6) * msPerDay
+    return new Date(dueMs).toISOString().slice(0, 10)
+  }
   const due = new Date(start.getFullYear(), start.getMonth() + (cycleNo - 1), Math.min(day, 28))
   return due.toISOString().slice(0, 10)
 }
@@ -506,7 +540,7 @@ function contributionQuote(
   cycleNo: number, paidAt: string
 ) {
   const balance = computeMemberCycleBalance(db, String(member.id), String(member.scheme_id), cycleNo, Number(scheme.contribution_amount) || 0)
-  const dueDate = cycleDueDate(String(scheme.start_date), cycleNo, Number(scheme.late_payment_days) || 0)
+  const dueDate = cycleDueDate(String(scheme.start_date), cycleNo, Number(scheme.late_payment_days) || 0, String(scheme.frequency || 'monthly'))
   const paymentDate = String(paidAt || new Date().toISOString()).slice(0, 10)
   const isLate = paymentDate > dueDate && balance.balanceDue > 0.01
   const charged = db.prepare(`
@@ -641,6 +675,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
     const draws = db.prepare(`
       SELECT d.*,
+        cs.name as scheme_name, cs.chit_value as scheme_amount, cs.frequency,
         -- winner_member_id is only ever set for a single-winner draw
         -- (random/manual_pick) — a final_batch draw settles multiple
         -- members at once and leaves it NULL, so winner_name is built from
@@ -649,8 +684,12 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         (SELECT GROUP_CONCAT(c2.name, ', ') FROM chit_members m2
            JOIN customers c2 ON c2.id = m2.customer_id
            WHERE m2.scheme_id = d.scheme_id AND m2.won_cycle_no = d.cycle_no) as winner_name,
+        (SELECT GROUP_CONCAT(ag.name, ', ') FROM chit_members m2
+           JOIN agents ag ON ag.id = m2.agent_id
+           WHERE m2.scheme_id = d.scheme_id AND m2.won_cycle_no = d.cycle_no) as winner_agent_name,
         u.name as conducted_by_name
       FROM chit_draws d
+      JOIN chit_schemes cs ON cs.id = d.scheme_id
       LEFT JOIN users u ON u.id = d.conducted_by
       WHERE d.scheme_id = ?
       ORDER BY d.cycle_no
@@ -852,19 +891,20 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       }
       memberCount = requestedMemberCount
     } else {
-      if (!isGlobalChitAccess(perms)) {
+      if (!isGlobalChitAccess(perms) && !isSupermarketCompany()) {
         return { success: false, error: 'Scheme Master template is required to create a scheme' }
       }
       name = String(payload.name || '').trim()
       if (!name) return { success: false, error: 'Scheme name is required' }
-      cycleCount = Math.trunc(Number(payload.cycle_count) || 0)
-      if (cycleCount <= 0) return { success: false, error: 'Duration (months) must be greater than 0' }
-      memberCount = Number(payload.member_count) || 0
-      if (memberCount <= 0) return { success: false, error: 'Maximum members must be greater than 0' }
-      minMembers = payload.min_members !== undefined && Number(payload.min_members) > 0 ? Math.min(Number(payload.min_members), memberCount) : memberCount
+      chitValue = money(Number(payload.chit_value) || 0)
       contributionAmount = money(Number(payload.contribution_amount) || 0)
       if (contributionAmount <= 0) return { success: false, error: 'Contribution amount must be greater than 0' }
-      chitValue = money(Number(payload.chit_value) || 0)
+
+      cycleCount = Math.trunc(Number(payload.cycle_count) || (chitValue > 0 && contributionAmount > 0 ? Math.round(chitValue / contributionAmount) : 0))
+      if (cycleCount <= 0) return { success: false, error: 'Duration (months/weeks) must be greater than 0' }
+      memberCount = Number(payload.member_count ?? payload.max_customers) || 0
+      if (memberCount <= 0) return { success: false, error: 'Maximum members must be greater than 0' }
+      minMembers = payload.min_members !== undefined && Number(payload.min_members) > 0 ? Math.min(Number(payload.min_members), memberCount) : (isSupermarketCompany() ? 1 : memberCount)
     }
 
     const branchId = String(resolveScopedBranchId(perms, caller, payload.branch_id) || defaultBranchId())
@@ -891,11 +931,16 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
     const id = crypto.randomUUID()
     const schemeNumber = nextChitNumber(db, branchId)
+    const frequency = payload.frequency === 'weekly' ? 'weekly' : 'monthly'
+    const maxCustomers = Number(payload.max_customers ?? payload.member_count ?? memberCount) || memberCount
+    const addWinnerPaidAmount = payload.add_winner_paid_amount ? 1 : 0
     const row = {
       id, scheme_number: schemeNumber, name, branch_id: branchId, template_id: templateId,
       product_id: payload.product_id || null, agent_id: payload.agent_id || null,
       member_count: memberCount, cycle_count: cycleCount, min_members: minMembers,
-      frequency: payload.frequency || 'monthly',
+      frequency,
+      max_customers: maxCustomers,
+      add_winner_paid_amount: addWinnerPaidAmount,
       contribution_amount: contributionAmount,
       chit_value: chitValue,
       early_redemption_count: earlyRedemptionCount,
@@ -917,13 +962,13 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     db.prepare(`
       INSERT INTO chit_schemes
         (id, scheme_number, name, branch_id, template_id, product_id, agent_id, member_count, cycle_count, min_members,
-         frequency, contribution_amount, chit_value, early_redemption_count, early_redemption_amount,
+         frequency, max_customers, add_winner_paid_amount, contribution_amount, chit_value, early_redemption_count, early_redemption_amount,
          repayment_months, agent_commission_pct, start_date, next_draw_date,
          registration_start_date, registration_end_date, late_payment_days, late_fee_amount,
          projected_early_winners, avg_product_cost, other_expenses,
          status, notes, created_by)
       VALUES (@id,@scheme_number,@name,@branch_id,@template_id,@product_id,@agent_id,@member_count,@cycle_count,@min_members,
-         @frequency,@contribution_amount,@chit_value,@early_redemption_count,@early_redemption_amount,
+         @frequency,@max_customers,@add_winner_paid_amount,@contribution_amount,@chit_value,@early_redemption_count,@early_redemption_amount,
          @repayment_months,@agent_commission_pct,@start_date,@next_draw_date,
          @registration_start_date,@registration_end_date,@late_payment_days,@late_fee_amount,
          @projected_early_winners,@avg_product_cost,@other_expenses,
@@ -1357,8 +1402,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       }
     }
 
+    const maxCapacity = Number(scheme.max_customers || scheme.member_count)
     const enrolled = db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status != 'withdrawn'`).get(schemeId) as { c: number }
-    if (enrolled.c >= Number(scheme.member_count)) return { success: false, error: 'This chit scheme is already full' }
+    if (enrolled.c >= maxCapacity) {
+      return { success: false, error: 'This scheme has reached its maximum customer limit. Please select or create a new scheme.' }
+    }
 
     let customerId = String(payload.customer_id || '')
 
@@ -1398,6 +1446,10 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const nextOrder = (db.prepare('SELECT COALESCE(MAX(join_order),0) as m FROM chit_members WHERE scheme_id=?').get(schemeId) as { m: number }).m + 1
 
     db.transaction(() => {
+      const enrolledInTx = db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status != 'withdrawn'`).get(schemeId) as { c: number }
+      if (enrolledInTx.c >= maxCapacity) {
+        throw new Error('This scheme has reached its maximum customer limit. Please select or create a new scheme.')
+      }
       if (!customerId) {
         customerId = crypto.randomUUID()
         const customerRow = {
@@ -1486,8 +1538,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       }
     }
 
+    const maxCapacity = Number(scheme.max_customers || scheme.member_count)
     const enrolled = db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status != 'withdrawn'`).get(schemeId) as { c: number }
-    if (enrolled.c >= Number(scheme.member_count)) return { success: false, error: 'This chit scheme is already full' }
+    if (enrolled.c >= maxCapacity) {
+      return { success: false, error: 'This scheme has reached its maximum customer limit. Please select or create a new scheme.' }
+    }
 
     let customerId = String(payload.customer_id || '')
     if (!customerId) {
@@ -1522,6 +1577,10 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     let activated = false
 
     db.transaction(() => {
+      const enrolledInTx = db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status != 'withdrawn'`).get(schemeId) as { c: number }
+      if (enrolledInTx.c >= maxCapacity) {
+        throw new Error('This scheme has reached its maximum customer limit. Please select or create a new scheme.')
+      }
       if (!customerId) {
         customerId = crypto.randomUUID()
         const customerRow = {
@@ -1905,7 +1964,9 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     let skipped = 0
     const errors: string[] = []
     let nextOrder = (db.prepare('SELECT COALESCE(MAX(join_order),0) as m FROM chit_members WHERE scheme_id=?').get(schemeId) as { m: number }).m
-    const capacity = Number(scheme.member_count) - (db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status != 'withdrawn'`).get(schemeId) as { c: number }).c
+    const maxCapacity = Number(scheme.max_customers || scheme.member_count)
+    const currentCount = (db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status != 'withdrawn'`).get(schemeId) as { c: number }).c
+    const capacity = Math.max(0, maxCapacity - currentCount)
 
     // Pre-load agents once (not per row) for the optional "Agent Code" column.
     const agentRows = db.prepare('SELECT id, code FROM agents').all() as { id: string; code: string }[]
@@ -1922,7 +1983,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       const agentCode = importCell(row, 'Agent Code', 'Agent')
 
       if (!name && !phone) continue // fully blank row
-      if (imported >= capacity) { errors.push(`Row ${rowNum}: skipped — chit scheme is full`); skipped++; continue }
+      if (imported >= capacity) { errors.push(`Row ${rowNum}: skipped — This scheme has reached its maximum customer limit. Please select or create a new scheme.`); skipped++; continue }
       if (!name) { errors.push(`Row ${rowNum}: customer name is required`); skipped++; continue }
       if (!phone) { errors.push(`Row ${rowNum}: phone is required`); skipped++; continue }
       if (!PHONE_RE.test(phone)) { errors.push(`Row ${rowNum}: invalid phone "${phone}"`); skipped++; continue }
@@ -1973,6 +2034,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           product_received_at: null, contributions_paid: 0, installment_id: null,
           status: 'active', eligibility_note: null, enrolled_branch_id: enrolledBranchId || scheme.branch_id,
         }
+        const currentInDb = (db.prepare(`SELECT COUNT(*) as c FROM chit_members WHERE scheme_id=? AND status != 'withdrawn'`).get(schemeId) as { c: number }).c
+        if (currentInDb >= maxCapacity) {
+          throw new Error('This scheme has reached its maximum customer limit. Please select or create a new scheme.')
+        }
+
         db.prepare(`
           INSERT INTO chit_members
             (id, scheme_id, customer_id, agent_id, join_order, is_early_redemption, redemption_type,
@@ -2131,6 +2197,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const drawId = crypto.randomUUID()
     let settledWinners: Record<string, unknown>[] = []
     let allIssuedVouchers: Array<{ memberId: string; couponId: string; code: string; amount: number }> = []
+    let computedWinnerPaidAmount = 0
+    let computedProductValue = money(Number(scheme.chit_value) || 0)
 
     db.transaction(() => {
       // Re-verified inside the transaction, not just in the pre-transaction
@@ -2178,6 +2246,28 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         throw new Error(`Cannot conduct draw — ${freshlyMissing.length} member(s) missing a valid Agent`)
       }
 
+      const isSupermarket = isSupermarketCompany()
+      let winnerPaidAmount = 0
+      let singleProductValue = money(Number(scheme.chit_value) || 0)
+
+      if (!isFinalCycle && winners.length === 1) {
+        const w = winners[0]
+        const paidRow = db.prepare(`
+          SELECT COALESCE(SUM(amount), 0) as total_paid
+          FROM chit_contributions
+          WHERE member_id = ? AND scheme_id = ? AND status = 'approved'
+        `).get(w.id, schemeId) as { total_paid: number }
+        winnerPaidAmount = money(Number(paidRow?.total_paid) || 0)
+
+        if (isSupermarket && Boolean(scheme.add_winner_paid_amount)) {
+          singleProductValue = money(Number(scheme.chit_value) + winnerPaidAmount)
+        } else {
+          singleProductValue = money(Number(scheme.chit_value) || 0)
+        }
+      }
+      computedWinnerPaidAmount = winnerPaidAmount
+      computedProductValue = isFinalCycle ? money(Number(scheme.chit_value) || 0) : singleProductValue
+
       const drawRow = {
         id: drawId, scheme_id: schemeId, cycle_no: cycleNo,
         // Full date+time (not just the date) — Winner Selection Log needs a
@@ -2185,14 +2275,16 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         // column accepts any string locally and is DATETIME on the cloud side.
         draw_date: new Date().toISOString(),
         winner_member_id: winners.length === 1 ? winners[0].id : null,
+        winner_paid_amount: winnerPaidAmount,
+        product_purchase_value: computedProductValue,
         settled_count: winners.length, eligible_count: eligible.length,
         method, conducted_by: caller.id || null, notes: options.reason || null,
         witness_name: options.witnessName || null, reference_number: options.referenceNumber || null,
       }
       db.prepare(`
         INSERT INTO chit_draws
-          (id, scheme_id, cycle_no, draw_date, winner_member_id, settled_count, eligible_count, method, conducted_by, notes, witness_name, reference_number)
-        VALUES (@id,@scheme_id,@cycle_no,@draw_date,@winner_member_id,@settled_count,@eligible_count,@method,@conducted_by,@notes,@witness_name,@reference_number)
+          (id, scheme_id, cycle_no, draw_date, winner_member_id, winner_paid_amount, product_purchase_value, settled_count, eligible_count, method, conducted_by, notes, witness_name, reference_number)
+        VALUES (@id,@scheme_id,@cycle_no,@draw_date,@winner_member_id,@winner_paid_amount,@product_purchase_value,@settled_count,@eligible_count,@method,@conducted_by,@notes,@witness_name,@reference_number)
       `).run(drawRow)
       enqueue.push({ table: 'chit_draws', id: drawId, row: drawRow, op: 'INSERT' })
 
@@ -2214,7 +2306,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         // fields only drive the soft reminder system (chitClaimReminder
         // service) and are never used to block or revoke a claim.
         const claimDueDate = addDays(new Date().toISOString().slice(0, 10), smartBuySettings().claimReminderDays)
-        const entitlementValue = money(Number(scheme.chit_value) || 0)
+        const entitlementValue = isFinalCycle ? money(Number(scheme.chit_value) || 0) : singleProductValue
 
         const effectiveAgentId = (winner.agent_id as string | null) || (scheme.agent_id as string | null) || null
         const schemeAgentObj = effectiveAgentId ? (db.prepare('SELECT code, name FROM agents WHERE id=?').get(effectiveAgentId) as { code: string; name: string } | undefined) : undefined
@@ -2313,6 +2405,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       success: true,
       data: {
         drawId, isFinalCycle, settledCount: isFinalCycle ? eligible.length : 1, winnerMemberIds: settledWinners.map(w => w.id),
+        winnerPaidAmount: computedWinnerPaidAmount,
+        productPurchaseValue: computedProductValue,
         vouchers: allIssuedVouchers.map(v => ({ memberId: v.memberId, voucherId: v.couponId, voucherCode: v.code, amount: v.amount })),
       },
     }
@@ -2330,13 +2424,18 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     }
     const rows = db.prepare(`
       SELECT d.*,
+        cs.name as scheme_name, cs.chit_value as scheme_amount, cs.frequency,
         -- Same fix as chits:get's embedded draws — winner_member_id alone
         -- misses final_batch's multiple winners.
         (SELECT GROUP_CONCAT(c2.name, ', ') FROM chit_members m2
            JOIN customers c2 ON c2.id = m2.customer_id
            WHERE m2.scheme_id = d.scheme_id AND m2.won_cycle_no = d.cycle_no) as winner_name,
+        (SELECT GROUP_CONCAT(ag.name, ', ') FROM chit_members m2
+           JOIN agents ag ON ag.id = m2.agent_id
+           WHERE m2.scheme_id = d.scheme_id AND m2.won_cycle_no = d.cycle_no) as winner_agent_name,
         u.name as conducted_by_name
       FROM chit_draws d
+      JOIN chit_schemes cs ON cs.id = d.scheme_id
       LEFT JOIN users u ON u.id = d.conducted_by
       WHERE d.scheme_id = ?
       ORDER BY d.cycle_no
@@ -3047,10 +3146,11 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     // final_batch draws produce one accurate row per winner.
     const rows = db.prepare(`
       SELECT d.cycle_no, d.draw_date, d.method, d.settled_count, d.eligible_count, d.notes as reason,
-        d.witness_name, d.reference_number,
-        cs.id as scheme_id, cs.name as scheme_name, cs.scheme_number, cs.branch_id, cs.chit_value, b.name as branch_name,
+        d.witness_name, d.reference_number, d.winner_paid_amount, d.product_purchase_value,
+        cs.id as scheme_id, cs.name as scheme_name, cs.scheme_number, cs.branch_id, cs.chit_value, cs.chit_value as scheme_amount, cs.frequency, b.name as branch_name,
         wm.id as member_id, wm.customer_id, wm.enrolled_branch_id, wm.entitlement_value as prize_value,
         c.name as winner_name, c.phone as winner_phone, c.nic as winner_nic,
+        ag.name as agent_name, ag.code as agent_code,
         wm.redeemed_product_name, wm.redeemed_qty, wm.redeemed_value, wm.redemption_invoice_id,
         ri.invoice_number as redemption_invoice_number, u.name as conducted_by_name,
         wm.claim_status, wm.claim_due_date, wm.claimed_at,
@@ -3063,6 +3163,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       JOIN chit_draws d ON d.scheme_id = wm.scheme_id AND d.cycle_no = wm.won_cycle_no
       LEFT JOIN branches b ON b.id = cs.branch_id
       LEFT JOIN customers c ON c.id = wm.customer_id
+      LEFT JOIN agents ag ON ag.id = wm.agent_id
       LEFT JOIN invoices ri ON ri.id = wm.redemption_invoice_id
       LEFT JOIN users u ON u.id = d.conducted_by
       LEFT JOIN products op ON op.id = cs.product_id
@@ -3088,7 +3189,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
     const members = db.prepare(`
       SELECT m.id, m.scheme_id, c.name as customer_name, c.phone as customer_phone,
-        cs.name as scheme_name, cs.scheme_number, cs.contribution_amount, cs.start_date, cs.late_payment_days,
+        cs.name as scheme_name, cs.scheme_number, cs.contribution_amount, cs.start_date, cs.late_payment_days, cs.frequency,
         b.name as branch_name,
         (SELECT COALESCE(MAX(d.cycle_no),0)+1 FROM chit_draws d WHERE d.scheme_id = cs.id) as current_cycle
       FROM chit_members m
@@ -3104,7 +3205,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
       const cycleNo = Number(m.current_cycle) || 1
       const balance = computeMemberCycleBalance(db, String(m.id), String(m.scheme_id), cycleNo, expected)
       const hasActivity = balance.paidAmount > 0 || balance.creditUsed > 0
-      const dueDate = cycleDueDate(String(m.start_date), cycleNo, Number(m.late_payment_days) || 0)
+      const dueDate = cycleDueDate(String(m.start_date), cycleNo, Number(m.late_payment_days) || 0, String(m.frequency || 'monthly'))
       const isPastDue = balance.balanceDue > 0.01 && today > dueDate
       const monthLabel = new Date(dueDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
       const status = balance.balanceDue <= 0.01 && hasActivity ? 'paid' : isPastDue ? 'overdue' : hasActivity ? 'partial' : 'pending'
@@ -3427,7 +3528,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
     const member = db.prepare(`
       SELECT m.*, cs.branch_id, cs.name as scheme_name, cs.scheme_number, cs.contribution_amount, cs.cycle_count,
-        cs.start_date, cs.late_payment_days,
+        cs.start_date, cs.late_payment_days, cs.frequency,
         c.name as customer_name, c.phone as customer_phone
       FROM chit_members m
       JOIN chit_schemes cs ON cs.id = m.scheme_id
@@ -3450,7 +3551,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     for (let cycleNo = 1; cycleNo <= cycleCount; cycleNo++) {
       const balance = computeMemberCycleBalance(db, memberId, String(member.scheme_id), cycleNo, expectedAmount)
       const hasActivity = balance.paidAmount > 0 || balance.creditUsed > 0
-      const dueDate = cycleDueDate(String(member.start_date), cycleNo, Number(member.late_payment_days) || 0)
+      const dueDate = cycleDueDate(String(member.start_date), cycleNo, Number(member.late_payment_days) || 0, String(member.frequency || 'monthly'))
       const isPastDue = balance.balanceDue > 0.01 && today > dueDate
       const daysOverdue = isPastDue ? Math.max(0, Math.floor((Date.parse(today) - Date.parse(dueDate)) / 86400000)) : 0
       cycles.push({
@@ -3490,7 +3591,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
   // balance — returns null (with the response already sent) if invalid.
   function resolveReminderContext(db: ReturnType<typeof getDb>, perms: Record<string, unknown>, caller: Record<string, unknown>, memberId: string, cycleNo?: number) {
     const member = db.prepare(`
-      SELECT m.*, cs.branch_id, cs.name as scheme_name, cs.scheme_number, cs.contribution_amount, cs.start_date, cs.late_payment_days,
+      SELECT m.*, cs.branch_id, cs.name as scheme_name, cs.scheme_number, cs.contribution_amount, cs.start_date, cs.late_payment_days, cs.frequency,
         c.name as customer_name, c.phone as customer_phone
       FROM chit_members m
       JOIN chit_schemes cs ON cs.id = m.scheme_id
@@ -3505,12 +3606,15 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const expectedAmount = Number(member.contribution_amount) || 0
     const balance = computeMemberCycleBalance(db, memberId, String(member.scheme_id), resolvedCycle, expectedAmount)
     if (balance.balanceDue <= 0.01) return { error: 'This member has already completed payment for this cycle' }
-    const dueDate = cycleDueDate(String(member.start_date), resolvedCycle, Number(member.late_payment_days) || 0)
-    const monthLabel = new Date(dueDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
-    // Deliberately terse — customer name, scheme, month, three numbers, due
+    const isWeekly = String(member.frequency || '') === 'weekly'
+    const dueDate = cycleDueDate(String(member.start_date), resolvedCycle, Number(member.late_payment_days) || 0, String(member.frequency || 'monthly'))
+    const periodLabel = isWeekly
+      ? `Week ${resolvedCycle} (Due ${dueDate})`
+      : new Date(dueDate).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+    // Deliberately terse — customer name, scheme, period, three numbers, due
     // date. No phone/NIC/other customer data leaks into an outbound message.
-    const message = `Dear ${member.customer_name || 'Customer'}, your SmartBuy monthly payment for ${member.scheme_name} (${monthLabel}) is Rs.${money(expectedAmount)}. You have paid Rs.${money(balance.paidAmount + balance.creditUsed)} and the remaining balance is Rs.${balance.balanceDue}. Please complete your payment to keep the scheme cycle on schedule. Thank you.`
-    return { member, resolvedCycle, balance, dueDate, monthLabel, message }
+    const message = `Dear ${member.customer_name || 'Customer'}, your SmartBuy ${isWeekly ? 'weekly' : 'monthly'} payment for ${member.scheme_name} (${periodLabel}) is Rs.${money(expectedAmount)}. You have paid Rs.${money(balance.paidAmount + balance.creditUsed)} and the remaining balance is Rs.${balance.balanceDue}. Please complete your payment to keep the scheme cycle on schedule. Thank you.`
+    return { member, resolvedCycle, balance, dueDate, monthLabel: periodLabel, message }
   }
 
   safeHandle(ipcMain, 'chits:reminders:preview', (_e, memberId: string, cycleNo?: number) => {

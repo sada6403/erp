@@ -18,6 +18,7 @@ export default function ChitSchemesPage() {
   const navigate = useNavigate()
   const { user } = useAuthStore()
   const isSuperAdmin = Boolean(((user?.role as unknown as Row)?.permissions as Row)?.all)
+  const isSupermarket = user?.business_type === 'supermarket'
   const ownBranchId = String(user?.branch?.id || user?.branch_id || '')
   const ownBranchName = String(user?.branch?.name || 'Your branch')
   const [schemes, setSchemes] = useState<Row[]>([])
@@ -115,12 +116,31 @@ export default function ChitSchemesPage() {
     profit: acc.profit + Number(s.profit || 0),
   }), { members: 0, contributions: 0, active: 0, profit: 0 })
 
-  const exportRows = () => filtered.map(s => ({
-    'Scheme #': s.scheme_number, Name: s.name, Branch: s.branch_name, Agent: s.agent_name,
-    Status: s.status, Members: `${s.members_enrolled}/${s.member_count}`, Cycles: `${s.cycles_completed}/${s.cycle_count}`,
-    'Chit Value': `Rs.${money(s.chit_value)}`, Collected: `Rs.${money(s.contributions_collected)}`,
-    'Profit / Loss': `Rs.${money(s.profit)}`,
-  }))
+  const exportRows = () => filtered.map(s => {
+    const maxCust = Number(s.max_customers || s.member_count || 0)
+    const enrolled = Number(s.members_enrolled || 0)
+    const avail = Math.max(0, maxCust - enrolled)
+    if (isSupermarket) {
+      return {
+        'Scheme #': s.scheme_number,
+        Name: s.name,
+        Frequency: s.frequency === 'weekly' ? 'Weekly' : 'Monthly',
+        'Scheme Amount': `Rs.${money(s.chit_value)}`,
+        'Installment': `Rs.${money(s.contribution_amount)}`,
+        'Max Customers': maxCust,
+        'Registered Customers': enrolled,
+        'Available Slots': avail,
+        'Winner Calculation': s.add_winner_paid_amount ? 'Scheme + Paid' : 'Scheme Only',
+        Status: avail === 0 && s.status === 'active' ? 'FULL' : s.status,
+      }
+    }
+    return {
+      'Scheme #': s.scheme_number, Name: s.name, Branch: s.branch_name, Agent: s.agent_name,
+      Status: s.status, Members: `${s.members_enrolled}/${s.member_count}`, Cycles: `${s.cycles_completed}/${s.cycle_count}`,
+      'Chit Value': `Rs.${money(s.chit_value)}`, Collected: `Rs.${money(s.contributions_collected)}`,
+      'Profit / Loss': `Rs.${money(s.profit)}`,
+    }
+  })
   const exportMeta = { 'Report': 'Smart Buy Scheme Summary', Branch: branches.find(b => b.id === branchFilter)?.name as string || 'All Branches', Generated: new Date().toLocaleString() }
   const filename = `smartbuy-schemes-${new Date().toISOString().slice(0, 10)}`
 
@@ -197,7 +217,10 @@ export default function ChitSchemesPage() {
         <table className="w-full">
           <thead className="sticky top-0 bg-surface-900 z-10">
             <tr>
-              {['Scheme #', 'Name', 'Product', 'Agent', 'Members', 'Cycles', 'Contributions', 'Profit / Loss', 'Status', ''].map(h => (
+              {(isSupermarket
+                ? ['Scheme #', 'Name', 'Frequency', 'Scheme Amount', 'Installment', 'Customers (Slots)', 'Cycles', 'Winner Calculation', 'Status', '']
+                : ['Scheme #', 'Name', 'Product', 'Agent', 'Members', 'Cycles', 'Contributions', 'Profit / Loss', 'Status', '']
+              ).map(h => (
                 <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
               ))}
             </tr>
@@ -211,21 +234,53 @@ export default function ChitSchemesPage() {
               <tr key={s.id as string} className="table-row cursor-pointer" onClick={() => navigate(`/admin/chits/${s.id}`)}>
                 <td className="table-cell font-mono text-xs font-semibold">{s.scheme_number as string}</td>
                 <td className="table-cell font-medium">{s.name as string}</td>
-                <td className="table-cell text-slate-400">{(s.product_name as string) || '—'}</td>
-                <td className="table-cell text-slate-400">{(s.agent_name as string) || '—'}</td>
+                {isSupermarket ? (
+                  <>
+                    <td className="table-cell capitalize">{(s.frequency as string) || 'Monthly'}</td>
+                    <td className="table-cell font-semibold text-brand-400">Rs.{money(s.chit_value)}</td>
+                    <td className="table-cell">Rs.{money(s.contribution_amount)}</td>
+                    <td className="table-cell">
+                      <div className="flex items-center gap-1.5">
+                        <span>{Number(s.members_enrolled || 0)} / {Number(s.max_customers || s.member_count || 0)}</span>
+                        {Number(s.members_enrolled || 0) >= Number(s.max_customers || s.member_count || 0) ? (
+                          <span className="badge-red text-[10px]">FULL</span>
+                        ) : (
+                          <span className="text-[11px] text-slate-500">({Math.max(0, Number(s.max_customers || s.member_count || 0) - Number(s.members_enrolled || 0))} slots left)</span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="table-cell">{Number(s.cycles_completed || 0)} / {Number(s.cycle_count || 0)}</td>
+                    <td className="table-cell text-xs">
+                      {s.add_winner_paid_amount ? (
+                        <span className="text-emerald-400 font-medium">Scheme + Paid</span>
+                      ) : (
+                        <span className="text-slate-400 font-medium">Scheme Only</span>
+                      )}
+                    </td>
+                  </>
+                ) : (
+                  <>
+                    <td className="table-cell text-slate-400">{(s.product_name as string) || '—'}</td>
+                    <td className="table-cell text-slate-400">{(s.agent_name as string) || '—'}</td>
+                    <td className="table-cell">
+                      {Number(s.members_enrolled || 0)} / {Number(s.member_count || 0)}
+                      {s.status === 'pending' && (
+                        <div className="text-[11px] text-amber-400 mt-0.5">
+                          Need {Math.max(0, Number(s.min_members || 0) - Number(s.members_enrolled || 0))} more members
+                        </div>
+                      )}
+                    </td>
+                    <td className="table-cell">{Number(s.cycles_completed || 0)} / {Number(s.cycle_count || 0)}</td>
+                    <td className="table-cell text-brand-400 font-semibold">Rs.{money(s.contributions_collected)}</td>
+                    <td className={`table-cell font-semibold ${Number(s.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>Rs.{money(s.profit)}</td>
+                  </>
+                )}
                 <td className="table-cell">
-                  {Number(s.members_enrolled || 0)} / {Number(s.member_count || 0)}
-                  {s.status === 'pending' && (
-                    <div className="text-[11px] text-amber-400 mt-0.5">
-                      Need {Math.max(0, Number(s.min_members || 0) - Number(s.members_enrolled || 0))} more members
-                    </div>
+                  {isSupermarket && Number(s.members_enrolled || 0) >= Number(s.max_customers || s.member_count || 0) && s.status === 'active' ? (
+                    <span className="badge-red font-bold">FULL</span>
+                  ) : (
+                    <span className={s.status === 'active' ? 'badge-green' : s.status === 'pending' ? 'badge-yellow' : s.status === 'completed' ? 'badge-blue' : 'badge-gray'}>{s.status as string}</span>
                   )}
-                </td>
-                <td className="table-cell">{Number(s.cycles_completed || 0)} / {Number(s.cycle_count || 0)}</td>
-                <td className="table-cell text-brand-400 font-semibold">Rs.{money(s.contributions_collected)}</td>
-                <td className={`table-cell font-semibold ${Number(s.profit || 0) >= 0 ? 'text-green-400' : 'text-red-400'}`}>Rs.{money(s.profit)}</td>
-                <td className="table-cell">
-                  <span className={s.status === 'active' ? 'badge-green' : s.status === 'pending' ? 'badge-yellow' : s.status === 'completed' ? 'badge-blue' : 'badge-gray'}>{s.status as string}</span>
                 </td>
                 <td className="table-cell">
                   <div className="flex gap-1">
@@ -265,7 +320,7 @@ export default function ChitSchemesPage() {
       </div>
 
       {showForm && (
-        <ChitSchemeForm branches={branches} agents={agents} templates={templates} isSuperAdmin={isSuperAdmin}
+        <ChitSchemeForm branches={branches} agents={agents} templates={templates} isSuperAdmin={isSuperAdmin} isSupermarket={isSupermarket}
           ownBranchId={ownBranchId} ownBranchName={ownBranchName}
           onClose={() => setShowForm(false)}
           onSave={(id) => { setShowForm(false); load(); navigate(`/admin/chits/${id}`) }} />
@@ -284,14 +339,15 @@ export default function ChitSchemesPage() {
   )
 }
 
-function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, ownBranchId, ownBranchName, onClose, onSave }: {
-  branches: Row[]; agents: Row[]; templates: Row[]; isSuperAdmin: boolean
+function ChitSchemeForm({ branches, agents, templates, isSuperAdmin, isSupermarket, ownBranchId, ownBranchName, onClose, onSave }: {
+  branches: Row[]; agents: Row[]; templates: Row[]; isSuperAdmin: boolean; isSupermarket: boolean
   ownBranchId: string; ownBranchName: string
   onClose: () => void; onSave: (id: string) => void
 }) {
   const [form, setForm] = useState({
     template_id: '', name: '', contribution_amount: 0, cycle_count: 12, chit_value: 0,
-    branch_id: isSuperAdmin ? '' : ownBranchId, agent_id: '', member_count: 0,
+    frequency: 'weekly', max_customers: 100, add_winner_paid_amount: 1,
+    branch_id: isSuperAdmin ? '' : ownBranchId, agent_id: '', member_count: 100,
     early_redemption_count: 0, early_redemption_amount: 0,
     repayment_months: 12, agent_commission_pct: 0,
     start_date: new Date().toISOString().slice(0, 10), notes: '',

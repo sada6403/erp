@@ -860,6 +860,15 @@ function runMigrations(): void {
   if (!hasColumn('chit_schemes', 'other_expenses')) {
     db.exec(`ALTER TABLE chit_schemes ADD COLUMN other_expenses REAL NOT NULL DEFAULT 0`)
   }
+  if (!hasColumn('chit_schemes', 'frequency')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN frequency TEXT NOT NULL DEFAULT 'monthly'`)
+  }
+  if (!hasColumn('chit_schemes', 'max_customers')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN max_customers INTEGER`)
+  }
+  if (!hasColumn('chit_schemes', 'add_winner_paid_amount')) {
+    db.exec(`ALTER TABLE chit_schemes ADD COLUMN add_winner_paid_amount INTEGER NOT NULL DEFAULT 0`)
+  }
   if (!hasColumn('chit_members', 'agent_id')) {
     db.exec(`ALTER TABLE chit_members ADD COLUMN agent_id TEXT REFERENCES agents(id)`)
   }
@@ -943,6 +952,12 @@ function runMigrations(): void {
   if (!hasColumn('chit_draws', 'witness_name')) {
     db.exec(`ALTER TABLE chit_draws ADD COLUMN witness_name TEXT`)
     db.exec(`ALTER TABLE chit_draws ADD COLUMN reference_number TEXT`)
+  }
+  if (!hasColumn('chit_draws', 'winner_paid_amount')) {
+    db.exec(`ALTER TABLE chit_draws ADD COLUMN winner_paid_amount REAL NOT NULL DEFAULT 0`)
+  }
+  if (!hasColumn('chit_draws', 'product_purchase_value')) {
+    db.exec(`ALTER TABLE chit_draws ADD COLUMN product_purchase_value REAL NOT NULL DEFAULT 0`)
   }
 
   // Payment reminder history — distinct from the existing chit_payment_due
