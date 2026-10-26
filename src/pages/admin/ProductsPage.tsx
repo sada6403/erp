@@ -1358,8 +1358,11 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
     setSaving(true)
     try {
       const branchId = stockBranchId || user?.branch?.id || user?.branch_id || DEFAULT_MAIN_BRANCH_ID
+      const baseUom = uoms.find(u => u.is_base && u.uom_name.trim())
+      const baseUnit = baseUom ? baseUom.uom_name.trim() : (product?.unit || 'pcs')
       const payload = {
         ...form,
+        unit:                   baseUnit,
         min_stock_level:        form.alert_qty,
         discount_pct:           discountPct,
         not_for_sale:           form.not_for_sale ? 1 : 0,

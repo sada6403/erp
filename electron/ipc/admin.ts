@@ -2277,9 +2277,18 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
           .run(row)
         newRows.push(row)
       }
+      const baseUom = uoms.find(u => u.is_base && String(u.uom_name || '').trim())
+      if (baseUom) {
+        const baseUnit = String(baseUom.uom_name).trim()
+        db.prepare(`UPDATE products SET unit = ?, updated_at = datetime('now') WHERE id = ?`).run(baseUnit, productId)
+      }
     })()
     for (const oldId of oldIds) await enqueuSync('product_uom', oldId, 'DELETE', { id: oldId })
     for (const row of newRows) await enqueuSync('product_uom', String(row.id), 'INSERT', row)
+    const baseUom = uoms.find(u => u.is_base && String(u.uom_name || '').trim())
+    if (baseUom) {
+      await enqueuSync('products', productId, 'UPDATE', { id: productId, unit: String(baseUom.uom_name).trim() })
+    }
     return { success: true }
   })
 

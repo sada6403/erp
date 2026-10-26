@@ -193,7 +193,13 @@ export function registerProductHandlers(ipcMain: IpcMain) {
            ) s ON s.product_id = p.id`
 
       let sql = `
-        SELECT p.*, c.name as category_name,
+        SELECT p.*,
+               COALESCE(
+                 NULLIF((SELECT pu.uom_name FROM product_uom pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.uom_name != '' LIMIT 1), ''),
+                 NULLIF(p.unit, ''),
+                 'pcs'
+               ) as unit,
+               c.name as category_name,
                MAX(COALESCE(s.quantity, 0) - COALESCE(s.damaged_qty, 0), 0) as stock,
                b.name as branch_name
         FROM products p
@@ -229,7 +235,13 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         : `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
 
       let sql = `
-        SELECT p.*, COALESCE(s.quantity, 0) as stock
+        SELECT p.*,
+               COALESCE(
+                 NULLIF((SELECT pu.uom_name FROM product_uom pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.uom_name != '' LIMIT 1), ''),
+                 NULLIF(p.unit, ''),
+                 'pcs'
+               ) as unit,
+               COALESCE(s.quantity, 0) as stock
         FROM products p
         ${stockJoin}
         WHERE p.is_active = 1
@@ -252,7 +264,13 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         : `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
 
       const sql = `
-        SELECT p.*, COALESCE(s.quantity, 0) as stock
+        SELECT p.*,
+               COALESCE(
+                 NULLIF((SELECT pu.uom_name FROM product_uom pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.uom_name != '' LIMIT 1), ''),
+                 NULLIF(p.unit, ''),
+                 'pcs'
+               ) as unit,
+               COALESCE(s.quantity, 0) as stock
         FROM products p
         ${stockJoin}
         WHERE p.sku = ? OR p.barcode = ?
@@ -264,7 +282,15 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
   safeHandle(ipcMain, 'products:get', (_e, id: string) => {
       const db = getDb()
-      const row = db.prepare('SELECT * FROM products WHERE id = ?').get(id)
+      const row = db.prepare(`
+        SELECT p.*,
+               COALESCE(
+                 NULLIF((SELECT pu.uom_name FROM product_uom pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.uom_name != '' LIMIT 1), ''),
+                 NULLIF(p.unit, ''),
+                 'pcs'
+               ) as unit
+        FROM products p WHERE p.id = ?
+      `).get(id)
       return { success: true, data: row || null }
   })
 

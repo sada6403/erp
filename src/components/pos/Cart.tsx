@@ -183,6 +183,10 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   </button>
                 </div>
 
+                <span className="text-[11px] font-semibold px-1.5 py-0.5 rounded bg-surface-700/60 text-slate-300">
+                  {item.product.unit || 'pcs'}
+                </span>
+
                 <div className="flex-1 flex items-center gap-1" onClick={e => e.stopPropagation()}>
                   <span className="text-xs" style={{ color: 'var(--text-3)' }}>× Rs.</span>
                   {priceEditable ? (
