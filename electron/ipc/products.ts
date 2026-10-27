@@ -1,6 +1,6 @@
 import type { IpcMain } from 'electron'
 import { dialog, app } from 'electron'
-import { getDb } from '../database'
+import { getDb, seedProductAttributes } from '../database'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -177,7 +177,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
     let sql = 'SELECT * FROM product_attributes WHERE is_active = 1'
     const params: unknown[] = []
     if (filters.business_type && filters.business_type !== 'all') {
-      sql += ' AND (business_type = ? OR business_type = "all")'
+      sql += " AND (business_type = ? OR business_type = 'all')"
       params.push(filters.business_type)
     }
     if (filters.category_id) {
@@ -185,7 +185,19 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       params.push(filters.category_id)
     }
     sql += ' ORDER BY sort_order ASC, name ASC'
-    const attributes = db.prepare(sql).all(...params) as Record<string, unknown>[]
+    let attributes = db.prepare(sql).all(...params) as Record<string, unknown>[]
+
+    if (attributes.length === 0) {
+      try {
+        const totalCount = (db.prepare('SELECT COUNT(*) as c FROM product_attributes').get() as { c: number } | undefined)?.c || 0
+        if (totalCount === 0) {
+          seedProductAttributes(db)
+          attributes = db.prepare(sql).all(...params) as Record<string, unknown>[]
+        }
+      } catch (err) {
+        console.warn('[Attributes] Auto-seed check failed:', err)
+      }
+    }
 
     const valuesStmt = db.prepare('SELECT * FROM product_attribute_values WHERE attribute_id = ? ORDER BY sort_order ASC, value ASC')
     const result = attributes.map(attr => ({

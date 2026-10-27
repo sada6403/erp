@@ -1,6 +1,4 @@
-import AttributeManagementModal from '@/components/admin/AttributeManagementModal'
 import ProductVariantBuilder, { type VariantItem } from '@/components/admin/ProductVariantBuilder'
-import { Layers } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -9,7 +7,7 @@ import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
   FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw, Clock, Printer,
-  ShieldCheck, AlertCircle, CheckCircle2
+  ShieldCheck, AlertCircle, CheckCircle2, ChevronDown, Settings2, Barcode
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
@@ -50,7 +48,6 @@ export default function ProductsPage() {
   const [branchFilter, setBranchFilter] = useState(() => canManageAllBranches ? '' : ownBranchId)
   const [branches, setBranches]     = useState<BranchItem[]>([])
   const [showForm, setShowForm]     = useState(false)
-  const [showAttrManager, setShowAttrManager] = useState(false)
   const [editing, setEditing]       = useState<Product | null>(null)
   const [editRequestId, setEditRequestId] = useState<string | undefined>(undefined)
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
@@ -355,9 +352,6 @@ export default function ProductsPage() {
                 <Trash2 size={14} /> Delete Selected ({selectedIds.size})
               </button>
             )}
-            <button onClick={() => setShowAttrManager(true)} className="btn-secondary btn-sm gap-1.5" title="Manage Dynamic Product Attributes">
-              <Layers size={14} /> Attributes
-            </button>
             <button onClick={handleDownloadTemplate} className="btn-secondary btn-sm gap-1.5" title="Download Product Bulk Upload Template">
               <Download size={14} /> Download Template
             </button>
@@ -578,13 +572,6 @@ export default function ProductsPage() {
         )}
       </div>
 
-      {showAttrManager && (
-        <AttributeManagementModal
-          onClose={() => setShowAttrManager(false)}
-          onUpdated={load}
-          initialBusinessType={currentUser?.business_type === 'supermarket' ? 'supermarket' : 'normal'}
-        />
-      )}
 
       {showForm && (
         <ProductForm
@@ -1241,6 +1228,22 @@ function AddProductBtn({ isAdmin, onAdd }: {
   )
 }
 
+// ─── Common Units for Clean & Fast Selection ──────────────────────────────
+const COMMON_UNITS = [
+  { value: 'pcs', label: 'Pieces (எண்ணிக்கை - pcs)' },
+  { value: 'kg', label: 'Kilogram (கிலோ - kg)' },
+  { value: 'g', label: 'Gram (கிராம் - g)' },
+  { value: 'l', label: 'Litre (லீற்றர் - L)' },
+  { value: 'ml', label: 'Millilitre (மில்லி - ml)' },
+  { value: 'packet', label: 'Packet (பாக்கெட்)' },
+  { value: 'box', label: 'Box (பெட்டி)' },
+  { value: 'bottle', label: 'Bottle (போத்தல்)' },
+  { value: 'can', label: 'Can (ரின்)' },
+  { value: 'bundle', label: 'Bundle (கட்டு)' },
+  { value: 'meter', label: 'Meter (மீற்றர் - m)' },
+  { value: 'custom', label: 'Custom (வேறு அலகு...)' },
+]
+
 // ─── Main Product Form ───────────────────────────────────────────────────────
 function ProductForm({ product, categories, suppliers, stockBranchId, stockScopeLabel, editRequestId, onClose, onSave, onCategoryCreated }: {
   product: Product | null
@@ -1285,11 +1288,17 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
     custom_field3:      (product as Record<string,unknown> | null)?.custom_field3 as string || '',
   })
 
-    const [formVariants, setFormVariants] = useState<VariantItem[]>([])
+  const [formVariants, setFormVariants] = useState<VariantItem[]>([])
   const [uoms, setUoms] = useState<UOMRow[]>([{ uom_name: '', conversion_factor: 1, is_base: true, wastage: 0 }])
   const [stockQty, setStockQty]       = useState(Number(product?.stock ?? 0))
   const [originalStockQty, setOriginalStockQty] = useState(Number(product?.stock ?? 0))
   const [stockReason, setStockReason] = useState('')
+
+  const isKnownUnit = (u?: string) => COMMON_UNITS.some(c => c.value === (u || '').toLowerCase())
+  const initialUnit = (product?.unit || 'pcs').toLowerCase()
+  const [selectedUnit, setSelectedUnit] = useState<string>(isKnownUnit(initialUnit) ? initialUnit : 'custom')
+  const [customUnit, setCustomUnit] = useState<string>(isKnownUnit(initialUnit) ? '' : (product?.unit || ''))
+
   // Quick per-product discount % — a shortcut that creates/updates a
   // scope:'product', global-branch rule via the same Discounts module used
   // by Admin > Discounts, instead of a separate storage mechanism.
@@ -1311,7 +1320,17 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
 
   useEffect(() => {
     if (product) {
-      if (product.discount_pct !== undefined) setDiscountPct(product.discount_pct);
+      if (product.discount_pct !== undefined) setDiscountPct(product.discount_pct)
+      if (product.unit) {
+        const u = product.unit.toLowerCase()
+        if (isKnownUnit(u)) {
+          setSelectedUnit(u)
+          setCustomUnit('')
+        } else {
+          setSelectedUnit('custom')
+          setCustomUnit(product.unit)
+        }
+      }
       // Load variants if editing a variable product
       (window as any).api.products.variants.list(product.id, stockBranchId).then((res: any) => {
         if (res.success && Array.isArray(res.data) && res.data.length > 0) {
@@ -1387,17 +1406,21 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
   )
 
   const save = async () => {
-    if (!form.name) { toast.error('Product name is required'); return }
+    if (!form.name.trim()) { toast.error('Product name is required'); return }
     if (stockHasChanged && !stockReason.trim()) { toast.error('Enter a reason for the stock correction'); return }
     setSaving(true)
     try {
       const branchId = stockBranchId || user?.branch?.id || user?.branch_id || DEFAULT_MAIN_BRANCH_ID
-      const baseUom = uoms.find(u => u.is_base && u.uom_name.trim())
-      const baseUnit = baseUom ? baseUom.uom_name.trim() : (product?.unit || 'pcs')
+      const finalUnit = selectedUnit === 'custom' ? (customUnit.trim() || 'pcs') : selectedUnit
+      const activeUoms = uoms.filter(u => u.uom_name.trim())
+      const uomToSave = activeUoms.length > 1
+        ? activeUoms
+        : [{ uom_name: finalUnit, conversion_factor: 1, is_base: true, wastage: 0 }]
       const varStockTotal = form.product_type === 'variable' ? formVariants.filter(v => v.selected).reduce((acc, v) => acc + Number(v.stock || 0), 0) : stockQty
       const payload = {
         ...form,
-        unit:                   baseUnit,
+        name:                   form.name.trim(),
+        unit:                   finalUnit,
         min_stock_level:        form.alert_qty,
         discount_pct:           discountPct,
         not_for_sale:           form.not_for_sale ? 1 : 0,
@@ -1432,7 +1455,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
           : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: form.product_type === 'variable' ? varStockTotal : stockQty, reason: 'Opening stock for new product' }) as Promise<{ success: boolean; error?: string }>
       const [stockRes, uomRes] = await Promise.all([
         stockPromise,
-        window.api.admin.productUom.save(productId, uoms.filter(u => u.uom_name.trim())) as Promise<{ success: boolean; error?: string }>,
+        window.api.admin.productUom.save(productId, uomToSave) as Promise<{ success: boolean; error?: string }>,
       ])
       if (!stockRes.success) {
         toast.error(`${product ? 'Product details were saved, but' : 'Product was created, but'} stock was not updated: ${stockRes.error || 'Unknown error'}`)
@@ -1483,19 +1506,19 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
           <button onClick={onClose} className="btn-secondary">Cancel</button>
           <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Save Product'}</button>
         </>}>
-        <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1">
+        <div className="space-y-5 max-h-[78vh] overflow-y-auto pr-1">
 
-                    {/* ── Product Type Selector (Simple vs Variable) ───────────── */}
+          {/* ── Product Structure Toggle ── */}
           <div className="flex items-center justify-between p-3 rounded-xl border border-slate-700/60 bg-slate-900/60">
             <div>
               <p className="text-xs font-bold text-white uppercase tracking-wider">Product Structure (தயாரிப்பு வகை)</p>
-              <p className="text-xs text-slate-400">Choose whether this item is a simple standalone product or has multiple variants</p>
+              <p className="text-xs text-slate-400">Choose whether this item is a simple single product or has multiple sizes/variants</p>
             </div>
             <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-950 border border-slate-800">
               <button
                 type="button"
                 onClick={() => setForm(p => ({ ...p, product_type: 'single' }))}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
                   form.product_type === 'single'
                     ? 'bg-brand-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
@@ -1506,272 +1529,221 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
               <button
                 type="button"
                 onClick={() => setForm(p => ({ ...p, product_type: 'variable' }))}
-                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${
                   form.product_type === 'variable'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                ⚡ Variable Product
+                ⚡ Variable Product (வகைகள்)
               </button>
             </div>
           </div>
 
-          {/* ── Section 1: Basic Details ─────────────────────────────── */}
-          <div>
-            <h3 className="text-sm font-bold underline mb-3" style={{ color: 'var(--text-1)' }}>Product Basic Details</h3>
-            <div className="grid grid-cols-4 gap-3">
-              <div className="col-span-1">
-                <label className="label">Product name *</label>
-                <input value={form.name} onChange={f('name')} className="input" placeholder="Product name..." />
+          {/* ── Primary Basic Details (Clear, Simple & Direct) ── */}
+          <div className="space-y-3.5">
+            {/* Row 1: Name, Category, Brand */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div className="md:col-span-2">
+                <label className="label">Product Name (பொருளின் பெயர்) <span className="text-red-400">*</span></label>
+                <input
+                  value={form.name}
+                  onChange={f('name')}
+                  className="input font-medium"
+                  placeholder="e.g. Sunsilk Shampoo 180ml, Keeri Samba 5kg, Office Chair..."
+                  autoFocus
+                />
               </div>
               <div>
-                <label className="label">Sort name</label>
-                <input value={form.sort_name} onChange={f('sort_name')} className="input" placeholder="10-100" />
-              </div>
-              <div className="col-span-2">
-                <label className="label">Description</label>
-                <textarea value={form.description} onChange={f('description')} className="input resize-none h-9 py-1.5 text-sm" placeholder="Description" />
-              </div>
-
-              <div>
-                <label className="label">Product SKU (Barcode Number)</label>
-                <input value={form.sku} onChange={f('sku')} className="input font-mono" placeholder="SKU (Barcode Number)" />
-              </div>
-              <div>
-                <label className="label">Product ISBN</label>
-                <input value={form.isbn} onChange={f('isbn')} className="input" placeholder="ISBN" />
-              </div>
-              <div>
-                <label className="label">Category *</label>
+                <label className="label">Category (பிரிவு) <span className="text-red-400">*</span></label>
                 <div className="flex gap-1.5">
                   <select value={form.category_id} onChange={f('category_id')} className="input flex-1">
                     <option value="">Select category</option>
-                    {localCategories.filter(c => c.is_active).map(c => <option key={c.id} value={c.id}>{categoryPath(c.id) || c.name}</option>)}
+                    {localCategories.filter(c => c.is_active).map(c => (
+                      <option key={c.id} value={c.id}>{categoryPath(c.id) || c.name}</option>
+                    ))}
                   </select>
-                  <button onClick={() => setShowAddCategory(true)} className="btn-primary btn-sm w-9 flex items-center justify-center flex-shrink-0" title="Add category">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCategory(true)}
+                    className="btn-primary btn-sm w-9 flex items-center justify-center flex-shrink-0"
+                    title="Add new category"
+                  >
                     <Plus size={14} />
                   </button>
                 </div>
               </div>
-              <div>
-                <label className="label">Brand</label>
-                <input value={form.brand} onChange={f('brand')} className="input" placeholder="Brand name..." />
-              </div>
+            </div>
 
+            {/* Row 2: Barcode/SKU, Unit of Measure, Brand */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <div>
-                <label className="label">Rack No</label>
-                <input value={form.rack_no} onChange={f('rack_no')} className="input" placeholder="A1" />
-              </div>
-              <div>
-                <label className="label">Alert Qty</label>
-                <NumberInput value={form.alert_qty} onChange={f('alert_qty')} className="input" min="0" />
-              </div>
-              <div>
-                <label className="label">Weight</label>
-                <NumberInput value={form.weight} onChange={f('weight')} className="input" min="0" step="0.01" placeholder="weight" />
-              </div>
-              <div>
-                <label className="label">Base Cost</label>
-                <div className="flex">
-                  <span className="flex items-center px-2.5 rounded-l-lg text-sm" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none', color: 'var(--text-3)' }}>Rs.</span>
-                  <NumberInput value={form.cost_price} onChange={f('cost_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
+                <label className="label">Barcode / SKU (பார்கோடு எண்)</label>
+                <div className="relative">
+                  <Barcode size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+                  <input
+                    value={form.sku || form.barcode}
+                    onChange={e => {
+                      const val = e.target.value
+                      setForm(p => ({ ...p, sku: val, barcode: val }))
+                    }}
+                    className="input pl-9 font-mono text-sm"
+                    placeholder="Scan or enter barcode..."
+                  />
                 </div>
               </div>
 
               <div>
-                <label className="label">Base Price</label>
+                <label className="label">Unit of Measure (அளவீட்டு அலகு) <span className="text-red-400">*</span></label>
+                <select
+                  value={selectedUnit}
+                  onChange={e => {
+                    const val = e.target.value
+                    setSelectedUnit(val)
+                    if (val !== 'custom') {
+                      setUoms([{ uom_name: val, conversion_factor: 1, is_base: true, wastage: 0 }])
+                    }
+                  }}
+                  className="input"
+                >
+                  {COMMON_UNITS.map(u => (
+                    <option key={u.value} value={u.value}>{u.label}</option>
+                  ))}
+                </select>
+                {selectedUnit === 'custom' && (
+                  <input
+                    value={customUnit}
+                    onChange={e => {
+                      setCustomUnit(e.target.value)
+                      setUoms([{ uom_name: e.target.value, conversion_factor: 1, is_base: true, wastage: 0 }])
+                    }}
+                    placeholder="Enter custom unit (e.g. roll, pack)..."
+                    className="input mt-1.5 text-xs"
+                  />
+                )}
+              </div>
+
+              <div>
+                <label className="label">Brand (பிராண்ட் / நிறுவனம்)</label>
+                <input value={form.brand} onChange={f('brand')} className="input" placeholder="e.g. Sunlight, Damro, Anchor..." />
+              </div>
+            </div>
+
+            {/* Row 3: Pricing (Cost, Selling Price, Wholesale Price, Discount) */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div>
+                <label className="label">Cost Price (Rs. அடக்க விலை)</label>
                 <div className="flex">
-                  <span className="flex items-center px-2.5 rounded-l-lg text-sm" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none', color: 'var(--text-3)' }}>Rs.</span>
-                  <NumberInput value={form.selling_price} onChange={f('selling_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
+                  <span className="flex items-center px-2.5 rounded-l-lg text-xs" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none', color: 'var(--text-3)' }}>Rs.</span>
+                  <NumberInput value={form.cost_price} onChange={f('cost_price')} className="input rounded-l-none border-l-0 text-sm" min="0" step="0.01" />
                 </div>
               </div>
+
               <div>
-                <label className="label">Wholesale Price</label>
+                <label className="label">Selling Price (Rs. விற்பனை விலை) <span className="text-red-400">*</span></label>
                 <div className="flex">
-                  <span className="flex items-center px-2.5 rounded-l-lg text-sm" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none', color: 'var(--text-3)' }}>Rs.</span>
-                  <NumberInput value={form.wholesale_price} onChange={f('wholesale_price')} className="input rounded-l-none border-l-0" min="0" step="0.01" />
+                  <span className="flex items-center px-2.5 rounded-l-lg text-xs font-semibold text-emerald-400" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none' }}>Rs.</span>
+                  <NumberInput value={form.selling_price} onChange={f('selling_price')} className="input rounded-l-none border-l-0 font-bold text-sm text-emerald-400" min="0" step="0.01" />
                 </div>
               </div>
+
               <div>
-                <label className="label">Tax Rate (%)</label>
-                <NumberInput value={form.tax_rate} onChange={f('tax_rate')} className="input" min="0" max="100" step="0.5" />
-              </div>
-              <div>
-                <label className="label">Discount Percentage (%)</label>
+                <label className="label">Wholesale Price (Rs. மொத்த விலை)</label>
                 <div className="flex">
-                  <NumberInput value={discountPct || ''} onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
-                    className="input rounded-r-none border-r-0" min="0" max="100" step="0.5" placeholder="e.g. 10"
-                    title="Discount percentage applied to this product." />
-                  <span className="flex items-center px-3 rounded-r-lg text-xs font-semibold" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderLeft: 'none', color: 'var(--text-2)' }}>% OFF</span>
+                  <span className="flex items-center px-2.5 rounded-l-lg text-xs" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderRight: 'none', color: 'var(--text-3)' }}>Rs.</span>
+                  <NumberInput value={form.wholesale_price} onChange={f('wholesale_price')} className="input rounded-l-none border-l-0 text-sm" min="0" step="0.01" />
                 </div>
               </div>
+
               <div>
-                <label className="label">Image</label>
+                <label className="label">Discount % (தள்ளுபடி)</label>
+                <div className="flex">
+                  <NumberInput
+                    value={discountPct || ''}
+                    onChange={e => setDiscountPct(parseFloat(e.target.value) || 0)}
+                    className="input rounded-r-none border-r-0 text-sm"
+                    min="0" max="100" step="0.5" placeholder="0"
+                  />
+                  <span className="flex items-center px-2.5 rounded-r-lg text-xs font-semibold text-amber-400" style={{ background: 'var(--bg-page)', border: '1px solid var(--border-2)', borderLeft: 'none' }}>% OFF</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Row 4: Stock, Low Stock Alert & Image */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+              {form.product_type === 'single' ? (
+                <div>
+                  <label className="label">{product ? 'Current Stock Qty' : 'Initial Stock Qty (ஆரம்ப கையிருப்பு)'} — {stockScopeLabel}</label>
+                  {stockIsReadOnly ? (
+                    <div className="rounded-lg border px-3 py-2" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
+                      <span className="text-base font-bold" style={{ color: 'var(--text-1)' }}>{stockQty} {selectedUnit !== 'custom' ? selectedUnit : customUnit}</span>
+                      <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-3)' }}>
+                        {stockIsAggregate ? 'Calculated from all branches' : 'Calculated stock'}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <NumberInput value={stockQty} onChange={e => setStockQty(parseInt(e.target.value)||0)} className="input text-sm font-semibold" min="0" />
+                      {product && stockHasChanged && (
+                        <input
+                          value={stockReason}
+                          onChange={e => setStockReason(e.target.value)}
+                          className="input text-xs"
+                          placeholder="Reason for stock correction *"
+                        />
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <label className="label">Variant Stock Total (வகைகளின் மொத்த இருப்பு)</label>
+                  <div className="rounded-lg border px-3 py-2 bg-indigo-950/20 border-indigo-900/40">
+                    <span className="text-base font-bold text-indigo-300">
+                      {formVariants.filter(v => v.selected).reduce((acc, v) => acc + Number(v.stock || 0), 0)} items
+                    </span>
+                    <p className="text-[11px] mt-0.5 text-slate-400">
+                      Calculated automatically from variants table below
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="label">Low Stock Alert Qty (குறைந்தபட்ச எச்சரிக்கை அளவு)</label>
+                <NumberInput value={form.alert_qty} onChange={f('alert_qty')} className="input text-sm" min="0" placeholder="5" />
+              </div>
+
+              <div>
+                <label className="label">Product Image (படம்)</label>
                 <div className="flex items-center gap-2">
                   <div onClick={uploadImage}
-                    className="w-16 h-16 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 transition-colors flex-shrink-0 overflow-hidden"
+                    className="w-14 h-14 rounded-lg flex flex-col items-center justify-center cursor-pointer hover:border-brand-500 transition-colors flex-shrink-0 overflow-hidden"
                     style={{ background: 'var(--bg-page)', border: '2px dashed var(--border-2)' }}>
                     {form.image_url
                       ? <img src={resolveImageSrc(form.image_url)} className="w-full h-full object-cover" alt=""
-                          onError={e => { console.warn('[ProductsPage] Failed to load product image:', form.image_url); e.currentTarget.style.visibility = 'hidden' }} />
-                      : <><Package size={16} style={{ color: 'var(--text-3)' }} /><span className="text-[9px] mt-0.5" style={{ color: 'var(--text-3)' }}>NO IMAGE</span></>
+                          onError={e => { e.currentTarget.style.visibility = 'hidden' }} />
+                      : <><Package size={14} style={{ color: 'var(--text-3)' }} /><span className="text-[8px] mt-0.5 text-slate-400">NO IMAGE</span></>
                     }
                   </div>
                   <div className="flex flex-col gap-1">
-                    <button onClick={uploadImage} disabled={uploading} className="btn-secondary btn-sm gap-1 text-xs">
+                    <button type="button" onClick={uploadImage} disabled={uploading} className="btn-secondary btn-sm gap-1 text-xs py-1">
                       <Upload size={11} />{uploading ? 'Uploading...' : 'Upload'}
                     </button>
-                    {form.image_url && <button onClick={() => setForm(p => ({...p, image_url: ''}))} className="btn-ghost btn-sm p-1"><X size={11} /></button>}
+                    {form.image_url && (
+                      <button type="button" onClick={() => setForm(p => ({...p, image_url: ''}))} className="text-red-400 hover:text-red-300 text-xs flex items-center gap-1">
+                        <X size={10} /> Remove
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* ── Section 2: UOM ───────────────────────────────────────── */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-bold underline" style={{ color: 'var(--text-1)' }}>Product Units of Measure (UOM)</h3>
-              <button onClick={addUOM} className="btn-primary btn-sm gap-1"><Plus size={12}/> Add UOM</button>
-            </div>
-            <div className="flex items-center gap-2 bg-cyan-900/30 border border-cyan-700/40 rounded-lg px-3 py-2 mb-3">
-              <Info size={13} className="text-cyan-400 flex-shrink-0" />
-              <p className="text-xs text-cyan-300">
-                <strong>UOM Hierarchy:</strong> Please select UOMs from high to low hierarchy (e.g., KG → G, L → ML, M → CM).
-              </p>
-            </div>
-            <div className="rounded-lg overflow-hidden" style={{ border: '1px solid var(--border)' }}>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr style={{ background: 'var(--bg-page)' }}>
-                    <th className="text-left px-3 py-2 font-medium text-xs" style={{ color: 'var(--text-3)' }}>UOM <span className="text-red-500">*</span></th>
-                    <th className="text-left px-3 py-2 font-medium text-xs" style={{ color: 'var(--text-3)' }}>Conversion Factor <span className="text-red-500">*</span></th>
-                    <th className="text-center px-3 py-2 font-medium text-xs" style={{ color: 'var(--text-3)' }}>Is Base</th>
-                    <th className="text-left px-3 py-2 font-medium text-xs" style={{ color: 'var(--text-3)' }}>Wastage</th>
-                    <th className="w-8 px-2"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {uoms.map((row, i) => (
-                    <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
-                      <td className="px-3 py-2">
-                        <div className="flex gap-1">
-                          <input value={row.uom_name} onChange={e => setUOM(i, 'uom_name', e.target.value)}
-                            className="input text-sm py-1.5" placeholder="e.g. KG, PCS, L..." />
-                        </div>
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex gap-1">
-                          <NumberInput value={row.conversion_factor}
-                            onChange={e => setUOM(i, 'conversion_factor', parseFloat(e.target.value)||1)}
-                            className="input text-sm py-1.5 w-24" min="0" step="0.001" />
-                          <button className="btn-ghost btn-sm p-1.5" title="Calculator"><Calculator size={12} /></button>
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 text-center">
-                        <input type="checkbox" checked={row.is_base}
-                          onChange={() => setBaseUOM(i)}
-                          className="w-4 h-4 accent-brand-500 cursor-pointer" />
-                      </td>
-                      <td className="px-3 py-2">
-                        <div className="flex items-center gap-1">
-                          <NumberInput value={row.wastage}
-                            onChange={e => setUOM(i, 'wastage', parseFloat(e.target.value)||0)}
-                            className="input text-sm py-1.5 w-20" min="0" step="0.1" />
-                          <span className="text-xs text-slate-400 whitespace-nowrap">{row.uom_name || 'UOM'}</span>
-                        </div>
-                      </td>
-                      <td className="px-2 py-2">
-                        {row.is_base
-                          ? <Lock size={13} className="text-slate-600" />
-                          : <button onClick={() => removeUOM(i)} className="text-red-400 hover:text-red-300">
-                              <Trash2 size={13} />
-                            </button>
-                        }
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* ── Section 3: Other Details ──────────────────────────────── */}
-          <div>
-            <h3 className="text-sm font-bold text-white underline mb-3">Product Other Details</h3>
-            <div className="flex flex-wrap gap-x-6 gap-y-2 mb-4">
-              {([
-                ['not_for_sale',           'Not for sale'],
-                ['enable_emi',             'Enable EMI'],
-                ['is_manage_stock',        'Manage Stock'],
-                ['sale_as_latest_price',   'Sale as Latest price'],
-                ['fast_product',           'Fast product'],
-              ] as [keyof typeof form, string][]).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={Boolean(form[key])} onChange={check(key)} className="w-4 h-4 accent-brand-500" />
-                  <span className="text-sm text-slate-300">{label}</span>
-                </label>
-              ))}
-            </div>
-            <div className="flex items-end gap-3 mb-4">
-              <div className="flex-1 max-w-xs">
-                <label className="label">Employee Commission</label>
-                <div className="flex">
-                  <NumberInput value={form.employee_commission} onChange={f('employee_commission')}
-                    className="input rounded-r-none border-r-0 w-28" min="0" step="0.01" />
-                  <select value={form.commission_type} onChange={f('commission_type')} className="input rounded-l-none border-l-0 w-24">
-                    <option value="fixed">Rs</option>
-                    <option value="percent">%</option>
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div><label className="label">Custom Field1</label><input value={form.custom_field1} onChange={f('custom_field1')} className="input" placeholder="Custom Field1" /></div>
-              <div><label className="label">Custom Field2</label><input value={form.custom_field2} onChange={f('custom_field2')} className="input" placeholder="Custom Field2" /></div>
-              <div><label className="label">Custom Field3</label><input value={form.custom_field3} onChange={f('custom_field3')} className="input" placeholder="Custom Field3" /></div>
-            </div>
-          </div>
-
-          {/* ── Section 4: Product Types ───────────────────────────────── */}
-          <div>
-            <h3 className="text-sm font-bold text-white underline mb-3">Product Types (Single, Variable or combo)</h3>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="label">Applicable tax</label>
-                <select value={form.tax_rate.toString()} onChange={e => setForm(p => ({...p, tax_rate: parseFloat(e.target.value)||0}))} className="input">
-                  <option value="0">None (0%)</option>
-                  <option value="5">5%</option>
-                  <option value="8">8%</option>
-                  <option value="10">10%</option>
-                  <option value="15">15%</option>
-                  <option value="18">18%</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">Sale By</label>
-                <select value={form.sale_by} onChange={f('sale_by')} className="input">
-                  <option value="normal">Normal</option>
-                  <option value="weight">Weight</option>
-                  <option value="uom">UOM</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">Product Type *</label>
-                <select value={form.product_type} onChange={f('product_type')} className="input">
-                  <option value="single">Single</option>
-                  <option value="variable">Variable</option>
-                  <option value="combo">Combo</option>
-                </select>
-              </div>
-            </div>
-          </div>
-
-          
-          {/* ── Dynamic Product Variants Section ────────────────── */}
+          {/* ── Variable Product Builder (Only if Variable Product is active) ── */}
           {form.product_type === 'variable' && (
-            <div>
+            <div className="pt-1">
               <ProductVariantBuilder
                 productName={form.name}
                 baseSku={form.sku}
@@ -1785,38 +1757,193 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
             </div>
           )}
 
-          {/* ── Stock ─────────────────────────────────────────────────── */}
-          <div>
-            <label className="label">{product ? 'Current Stock Qty' : 'Initial Stock Qty'} — {stockScopeLabel}</label>
-            {stockIsReadOnly ? (
-              <div className="rounded-lg border px-3 py-2 w-fit" style={{ borderColor: 'var(--border)', background: 'var(--bg-soft)' }}>
-                <span className="text-lg font-bold" style={{ color: 'var(--text-1)' }}>{stockQty}</span>
-                <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
-                  {stockIsAggregate
-                    ? 'Calculated from all branches. Select a branch to view its balance.'
-                    : product
-                      ? 'Calculated stock is read-only here. Use Stock Adjustment for a documented correction.'
-                      : 'Sub branches receive stock through an approved stock request or transfer.'}
-                </p>
+          {/* ── Collapsible Advanced Details & Options ── */}
+          <details className="group rounded-xl border border-slate-800 bg-slate-900/40 p-3.5 transition-all">
+            <summary className="flex items-center justify-between cursor-pointer font-semibold text-xs uppercase tracking-wider text-slate-400 hover:text-white select-none">
+              <div className="flex items-center gap-2">
+                <Settings2 size={13} className="text-brand-400" />
+                <span>Advanced Details & Options (மேம்பட்ட கூடுதல் விவரங்கள்)</span>
+                <span className="text-[10px] text-slate-500 normal-case font-normal">(Rack No, Description, Tax, Multi-UOM, Commission)</span>
               </div>
-            ) : (
-              <div className="space-y-2 max-w-md">
-                <NumberInput value={stockQty} onChange={e => setStockQty(parseInt(e.target.value)||0)}
-                  className="input w-40" min="0" />
-                {product && stockHasChanged && (
-                  <input
-                    value={stockReason}
-                    onChange={e => setStockReason(e.target.value)}
-                    className="input"
-                    placeholder="Reason for stock correction *"
-                  />
-                )}
-                <p className="text-xs" style={{ color: 'var(--text-3)' }}>
-                  Company Admin correction for the selected active branch. Every change is recorded in the stock movement log.
-                </p>
+              <ChevronDown size={14} className="group-open:rotate-180 transition-transform text-slate-400" />
+            </summary>
+
+            <div className="mt-4 pt-3 border-t border-slate-800/80 space-y-4">
+              {/* Description */}
+              <div>
+                <label className="label">Product Description (விவரக்குறிப்பு)</label>
+                <textarea
+                  value={form.description}
+                  onChange={f('description')}
+                  className="input resize-none h-16 py-1.5 text-xs"
+                  placeholder="Enter optional product description or notes..."
+                />
               </div>
-            )}
-          </div>
+
+              {/* Rack No, Weight, Tax Rate */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="label">Rack No (ரேக் எண்)</label>
+                  <input value={form.rack_no} onChange={f('rack_no')} className="input text-xs" placeholder="e.g. A1, Shelf-3" />
+                </div>
+                <div>
+                  <label className="label">Weight (எடை)</label>
+                  <NumberInput value={form.weight} onChange={f('weight')} className="input text-xs" min="0" step="0.01" placeholder="0" />
+                </div>
+                <div>
+                  <label className="label">Applicable Tax (வரி %)</label>
+                  <select
+                    value={form.tax_rate.toString()}
+                    onChange={e => setForm(p => ({ ...p, tax_rate: parseFloat(e.target.value) || 0 }))}
+                    className="input text-xs"
+                  >
+                    <option value="0">None (0%)</option>
+                    <option value="5">5%</option>
+                    <option value="8">8%</option>
+                    <option value="10">10%</option>
+                    <option value="15">15%</option>
+                    <option value="18">18%</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Store Flags */}
+              <div>
+                <label className="label mb-2">Store Preferences & Flags</label>
+                <div className="flex flex-wrap gap-x-6 gap-y-2">
+                  {([
+                    ['is_manage_stock',      'Manage Stock (இருப்பு கண்காணிப்பு)'],
+                    ['fast_product',         'Fast Product (விரைவு விற்பனை)'],
+                    ['sale_as_latest_price', 'Sale as Latest Price'],
+                    ['enable_emi',           'Enable EMI (தவணை முறை)'],
+                    ['not_for_sale',         'Not for Sale (விற்பனைக்கு அல்ல)'],
+                  ] as [keyof typeof form, string][]).map(([key, label]) => (
+                    <label key={key} className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={Boolean(form[key])} onChange={check(key)} className="w-4 h-4 accent-brand-500 rounded" />
+                      <span className="text-xs text-slate-300">{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Employee Commission */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div>
+                  <label className="label">Employee Commission</label>
+                  <div className="flex">
+                    <NumberInput
+                      value={form.employee_commission}
+                      onChange={f('employee_commission')}
+                      className="input rounded-r-none border-r-0 text-xs"
+                      min="0"
+                      step="0.01"
+                    />
+                    <select
+                      value={form.commission_type}
+                      onChange={f('commission_type')}
+                      className="input rounded-l-none border-l-0 w-24 text-xs"
+                    >
+                      <option value="fixed">Rs</option>
+                      <option value="percent">%</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {/* Multi-tier UOM Table */}
+              <div className="pt-2 border-t border-slate-800/80">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-300">Multi-UOM Hierarchy & Conversions (கூடுதல் அலகுகள் மாற்றீடு)</h5>
+                    <p className="text-[11px] text-slate-500">Only needed if 1 Box contains multiple Packs or Pieces</p>
+                  </div>
+                  <button type="button" onClick={addUOM} className="btn-secondary btn-sm text-xs gap-1">
+                    <Plus size={11} /> Add Secondary UOM
+                  </button>
+                </div>
+                <div className="rounded-lg overflow-hidden border border-slate-800">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="bg-slate-900">
+                        <th className="text-left px-3 py-2 font-medium text-slate-400">UOM Name</th>
+                        <th className="text-left px-3 py-2 font-medium text-slate-400">Conversion Factor</th>
+                        <th className="text-center px-3 py-2 font-medium text-slate-400">Is Base</th>
+                        <th className="text-left px-3 py-2 font-medium text-slate-400">Wastage</th>
+                        <th className="w-8 px-2"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {uoms.map((row, i) => (
+                        <tr key={i} className="border-t border-slate-800/60">
+                          <td className="px-3 py-2">
+                            <input
+                              value={row.uom_name}
+                              onChange={e => setUOM(i, 'uom_name', e.target.value)}
+                              className="input text-xs py-1"
+                              placeholder="e.g. BOX, CARTON, PACKET..."
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <div className="flex items-center gap-1">
+                              <NumberInput
+                                value={row.conversion_factor}
+                                onChange={e => setUOM(i, 'conversion_factor', parseFloat(e.target.value)||1)}
+                                className="input text-xs py-1 w-24"
+                                min="0"
+                                step="0.001"
+                              />
+                            </div>
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <input
+                              type="checkbox"
+                              checked={row.is_base}
+                              onChange={() => setBaseUOM(i)}
+                              className="w-4 h-4 accent-brand-500 cursor-pointer"
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <NumberInput
+                              value={row.wastage}
+                              onChange={e => setUOM(i, 'wastage', parseFloat(e.target.value)||0)}
+                              className="input text-xs py-1 w-20"
+                              min="0"
+                              step="0.1"
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            {row.is_base ? (
+                              <Lock size={12} className="text-slate-600" />
+                            ) : (
+                              <button type="button" onClick={() => removeUOM(i)} className="text-red-400 hover:text-red-300">
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Custom Fields */}
+              <div className="grid grid-cols-3 gap-3 pt-2 border-t border-slate-800/80">
+                <div>
+                  <label className="label text-[11px]">Custom Field 1</label>
+                  <input value={form.custom_field1} onChange={f('custom_field1')} className="input text-xs" placeholder="Custom Field 1" />
+                </div>
+                <div>
+                  <label className="label text-[11px]">Custom Field 2</label>
+                  <input value={form.custom_field2} onChange={f('custom_field2')} className="input text-xs" placeholder="Custom Field 2" />
+                </div>
+                <div>
+                  <label className="label text-[11px]">Custom Field 3</label>
+                  <input value={form.custom_field3} onChange={f('custom_field3')} className="input text-xs" placeholder="Custom Field 3" />
+                </div>
+              </div>
+            </div>
+          </details>
 
         </div>
       </Modal>

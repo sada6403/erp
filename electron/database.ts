@@ -2573,7 +2573,7 @@ function runMigrations(): void {
   seedProductAttributes(db)
 }
 
-function seedProductAttributes(database: Database.Database): void {
+export function seedProductAttributes(database: Database.Database): void {
   try {
     const count = (database.prepare('SELECT COUNT(*) as c FROM product_attributes').get() as { c: number } | undefined)?.c || 0
     if (count > 0) return

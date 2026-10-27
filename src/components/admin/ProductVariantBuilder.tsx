@@ -312,28 +312,18 @@ export default function ProductVariantBuilder({
 
   return (
     <div className="space-y-4 rounded-xl border border-indigo-900/40 bg-indigo-950/20 p-4">
-      {/* Header & Mode Badge */}
+      {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-indigo-900/40">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5">
           <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
             <Layers size={18} />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <h4 className="text-sm font-bold text-white">Dynamic Product Variant Management</h4>
-              <span className={`inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border ${
-                businessType === 'supermarket'
-                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-              }`}>
-                {businessType === 'supermarket' ? <ShoppingCart size={11} /> : <Armchair size={11} />}
-                {businessType === 'supermarket' ? 'Supermarket Catalog' : 'Normal Company (Furniture/Appliances)'}
-              </span>
-            </div>
+            <h4 className="text-sm font-bold text-white">Product Variants (பொருள் வகைகள் & அளவுகள்)</h4>
             <p className="text-xs text-slate-400">
               {businessType === 'supermarket'
-                ? 'Select supermarket attributes (Size, Volume, Variety, Flavour, Fragrance, Pack Size) to create SKU variants.'
-                : 'Select company attributes (Color, Material, Cushion Type, Fabric, Dimensions, Model) to generate multi-dimensional variants.'}
+                ? 'அளவுகள், சுவைகள் அல்லது வகைகளைத் தேர்ந்தெடுத்து தனித்தனி விலைகளுடன் வகைகளை உருவாக்கவும் (e.g. 100g, 500g, 1kg)'
+                : 'நிறங்கள் அல்லது வகைகளைத் தேர்ந்தெடுத்து மாறுபட்ட பொருட்களை உருவாக்கவும் (e.g. Color, Material, Size)'}
             </p>
           </div>
         </div>
@@ -341,9 +331,9 @@ export default function ProductVariantBuilder({
         <button
           type="button"
           onClick={() => setShowAddAttribute(true)}
-          className="btn-secondary btn-sm text-xs gap-1"
+          className="btn-secondary btn-sm text-xs gap-1.5"
         >
-          <Plus size={12} /> Add Custom Attribute
+          <Plus size={13} /> Add Custom Attribute
         </button>
       </div>
 
@@ -352,7 +342,7 @@ export default function ProductVariantBuilder({
         <div className="rounded-lg border border-indigo-500/40 bg-slate-900/90 p-3 space-y-3">
           <div className="flex items-center justify-between">
             <h5 className="text-xs font-bold text-indigo-300 uppercase tracking-wide">
-              Create New {businessType === 'supermarket' ? 'Supermarket' : 'Company'} Attribute
+              Create New Attribute (புதிய பண்புக்கூறு)
             </h5>
             <button
               type="button"
