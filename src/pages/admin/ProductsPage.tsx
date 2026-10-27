@@ -1,3 +1,6 @@
+import AttributeManagementModal from '@/components/admin/AttributeManagementModal'
+import ProductVariantBuilder, { type VariantItem } from '@/components/admin/ProductVariantBuilder'
+import { Layers } from 'lucide-react'
 import { useState, useEffect, useMemo } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -47,6 +50,7 @@ export default function ProductsPage() {
   const [branchFilter, setBranchFilter] = useState(() => canManageAllBranches ? '' : ownBranchId)
   const [branches, setBranches]     = useState<BranchItem[]>([])
   const [showForm, setShowForm]     = useState(false)
+  const [showAttrManager, setShowAttrManager] = useState(false)
   const [editing, setEditing]       = useState<Product | null>(null)
   const [editRequestId, setEditRequestId] = useState<string | undefined>(undefined)
   const [deleteTarget, setDeleteTarget] = useState<Product | null>(null)
@@ -351,6 +355,9 @@ export default function ProductsPage() {
                 <Trash2 size={14} /> Delete Selected ({selectedIds.size})
               </button>
             )}
+            <button onClick={() => setShowAttrManager(true)} className="btn-secondary btn-sm gap-1.5" title="Manage Dynamic Product Attributes">
+              <Layers size={14} /> Attributes
+            </button>
             <button onClick={handleDownloadTemplate} className="btn-secondary btn-sm gap-1.5" title="Download Product Bulk Upload Template">
               <Download size={14} /> Download Template
             </button>
@@ -570,6 +577,14 @@ export default function ProductsPage() {
           </div>
         )}
       </div>
+
+      {showAttrManager && (
+        <AttributeManagementModal
+          onClose={() => setShowAttrManager(false)}
+          onUpdated={load}
+          initialBusinessType={currentUser?.business_type === 'supermarket' ? 'supermarket' : 'normal'}
+        />
+      )}
 
       {showForm && (
         <ProductForm
@@ -1270,6 +1285,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
     custom_field3:      (product as Record<string,unknown> | null)?.custom_field3 as string || '',
   })
 
+    const [formVariants, setFormVariants] = useState<VariantItem[]>([])
   const [uoms, setUoms] = useState<UOMRow[]>([{ uom_name: '', conversion_factor: 1, is_base: true, wastage: 0 }])
   const [stockQty, setStockQty]       = useState(Number(product?.stock ?? 0))
   const [originalStockQty, setOriginalStockQty] = useState(Number(product?.stock ?? 0))
@@ -1295,7 +1311,25 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
 
   useEffect(() => {
     if (product) {
-      if (product.discount_pct !== undefined) setDiscountPct(product.discount_pct)
+      if (product.discount_pct !== undefined) setDiscountPct(product.discount_pct);
+      // Load variants if editing a variable product
+      (window as any).api.products.variants.list(product.id, stockBranchId).then((res: any) => {
+        if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+          setFormVariants(res.data.map((v: any) => ({
+            id: v.id,
+            selected: true,
+            variant_name: v.variant_name,
+            sku: v.sku,
+            barcode: v.barcode || '',
+            cost_price: Number(v.cost_price || 0),
+            selling_price: Number(v.selling_price || 0),
+            stock: Number(v.stock || 0),
+            attributes: typeof v.attributes === 'object' ? v.attributes : (typeof v.attributes_json === 'string' ? JSON.parse(v.attributes_json || '{}') : (v.attributes_json || {})),
+            image_url: v.image_url,
+          })))
+        }
+      }).catch(() => {})
+
       if (stockBranchId) {
         window.api.stocks.get(product.id, stockBranchId).then((res: { success: boolean; data?: unknown; error?: string }) => {
           if (res.success) {
@@ -1360,6 +1394,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
       const branchId = stockBranchId || user?.branch?.id || user?.branch_id || DEFAULT_MAIN_BRANCH_ID
       const baseUom = uoms.find(u => u.is_base && u.uom_name.trim())
       const baseUnit = baseUom ? baseUom.uom_name.trim() : (product?.unit || 'pcs')
+      const varStockTotal = form.product_type === 'variable' ? formVariants.filter(v => v.selected).reduce((acc, v) => acc + Number(v.stock || 0), 0) : stockQty
       const payload = {
         ...form,
         unit:                   baseUnit,
@@ -1371,6 +1406,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
         fast_product:           form.fast_product ? 1 : 0,
         sale_as_latest_price:   form.sale_as_latest_price ? 1 : 0,
         category_id:            form.category_id || null,
+        variants:               form.product_type === 'variable' ? formVariants.filter(v => v.selected) : [],
       }
       let productId = ''
       if (product) {
@@ -1393,7 +1429,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
                 reason: stockReason.trim(),
               }) as Promise<{ success: boolean; error?: string }>
             : Promise.resolve({ success: true } as { success: boolean; error?: string })
-          : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: stockQty, reason: 'Opening stock for new product' }) as Promise<{ success: boolean; error?: string }>
+          : window.api.stocks.adjust({ product_id: productId, branch_id: String(branchId), quantity: form.product_type === 'variable' ? varStockTotal : stockQty, reason: 'Opening stock for new product' }) as Promise<{ success: boolean; error?: string }>
       const [stockRes, uomRes] = await Promise.all([
         stockPromise,
         window.api.admin.productUom.save(productId, uoms.filter(u => u.uom_name.trim())) as Promise<{ success: boolean; error?: string }>,
@@ -1448,6 +1484,38 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
           <button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving...' : 'Save Product'}</button>
         </>}>
         <div className="space-y-6 max-h-[75vh] overflow-y-auto pr-1">
+
+                    {/* ── Product Type Selector (Simple vs Variable) ───────────── */}
+          <div className="flex items-center justify-between p-3 rounded-xl border border-slate-700/60 bg-slate-900/60">
+            <div>
+              <p className="text-xs font-bold text-white uppercase tracking-wider">Product Structure (தயாரிப்பு வகை)</p>
+              <p className="text-xs text-slate-400">Choose whether this item is a simple standalone product or has multiple variants</p>
+            </div>
+            <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-950 border border-slate-800">
+              <button
+                type="button"
+                onClick={() => setForm(p => ({ ...p, product_type: 'single' }))}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                  form.product_type === 'single'
+                    ? 'bg-brand-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                📦 Simple Product
+              </button>
+              <button
+                type="button"
+                onClick={() => setForm(p => ({ ...p, product_type: 'variable' }))}
+                className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
+                  form.product_type === 'variable'
+                    ? 'bg-indigo-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                ⚡ Variable Product
+              </button>
+            </div>
+          </div>
 
           {/* ── Section 1: Basic Details ─────────────────────────────── */}
           <div>
@@ -1699,6 +1767,23 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
               </div>
             </div>
           </div>
+
+          
+          {/* ── Dynamic Product Variants Section ────────────────── */}
+          {form.product_type === 'variable' && (
+            <div>
+              <ProductVariantBuilder
+                productName={form.name}
+                baseSku={form.sku}
+                baseCostPrice={form.cost_price}
+                baseSellingPrice={form.selling_price}
+                categoryId={form.category_id || undefined}
+                businessType={user?.business_type === 'supermarket' ? 'supermarket' : 'normal'}
+                variants={formVariants}
+                onChange={setFormVariants}
+              />
+            </div>
+          )}
 
           {/* ── Stock ─────────────────────────────────────────────────── */}
           <div>

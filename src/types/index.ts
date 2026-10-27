@@ -67,6 +67,42 @@ export interface Supplier {
   is_active: boolean
 }
 
+export interface ProductAttributeValue {
+  id: string
+  attribute_id: string
+  value: string
+  color_code?: string
+  sort_order: number
+}
+
+export interface ProductAttribute {
+  id: string
+  business_type: 'supermarket' | 'normal' | 'all'
+  category_id?: string
+  name: string
+  slug: string
+  description?: string
+  is_active: boolean
+  is_system: boolean
+  sort_order: number
+  values?: ProductAttributeValue[]
+}
+
+export interface ProductVariant {
+  id: string
+  product_id: string
+  variant_name: string
+  sku: string
+  barcode?: string
+  cost_price: number
+  selling_price: number
+  attributes_json: Record<string, string> | string
+  image_url?: string
+  is_active: boolean
+  sort_order: number
+  stock?: number
+}
+
 export interface Product {
   id: string
   category_id?: string
@@ -83,6 +119,12 @@ export interface Product {
   discount_pct?: number
   min_stock_level: number
   is_active: boolean
+  product_type?: 'single' | 'variable' | 'combo'
+  variants?: ProductVariant[]
+  variant_id?: string
+  variant_name?: string
+  variant_count?: number
+  attributes?: Record<string, string>
   // joined
   category?: Category
   supplier?: Supplier
@@ -135,6 +177,8 @@ export interface InvoiceItem {
   id: string
   invoice_id: string
   product_id: string
+  variant_id?: string
+  variant_title?: string
   quantity: number
   unit_price: number
   discount_pct: number
@@ -294,6 +338,9 @@ export interface CartItem {
   tax_amount: number
   line_total: number
   auto_discount_pct?: number   // admin-applied discount floor — exempt from the cashier's role cap
+  variant_id?: string
+  variant_name?: string
+  attributes?: Record<string, string>
 }
 
 export interface Cart {

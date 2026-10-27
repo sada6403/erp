@@ -150,6 +150,70 @@ CREATE TABLE IF NOT EXISTS stocks (
 CREATE INDEX IF NOT EXISTS idx_stocks_product ON stocks(product_id);
 CREATE INDEX IF NOT EXISTS idx_stocks_branch  ON stocks(branch_id);
 
+-- ─── PRODUCT ATTRIBUTES & VARIANTS ─────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS product_attributes (
+  id             TEXT PRIMARY KEY,
+  business_type  TEXT NOT NULL DEFAULT 'all', -- 'supermarket' | 'normal' | 'all'
+  category_id    TEXT REFERENCES categories(id) ON DELETE SET NULL,
+  name           TEXT NOT NULL,
+  slug           TEXT NOT NULL,
+  description    TEXT,
+  is_active      INTEGER NOT NULL DEFAULT 1,
+  is_system      INTEGER NOT NULL DEFAULT 0,
+  sort_order     INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_prod_attr_biz ON product_attributes(business_type);
+CREATE INDEX IF NOT EXISTS idx_prod_attr_cat ON product_attributes(category_id);
+
+CREATE TABLE IF NOT EXISTS product_attribute_values (
+  id             TEXT PRIMARY KEY,
+  attribute_id   TEXT NOT NULL REFERENCES product_attributes(id) ON DELETE CASCADE,
+  value          TEXT NOT NULL,
+  color_code     TEXT,
+  sort_order     INTEGER NOT NULL DEFAULT 0,
+  created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_prod_attr_val_attr ON product_attribute_values(attribute_id);
+
+CREATE TABLE IF NOT EXISTS product_variants (
+  id              TEXT PRIMARY KEY,
+  product_id      TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  variant_name    TEXT NOT NULL,
+  sku             TEXT NOT NULL,
+  barcode         TEXT,
+  cost_price      REAL NOT NULL DEFAULT 0,
+  selling_price   REAL NOT NULL DEFAULT 0,
+  attributes_json TEXT NOT NULL DEFAULT '{}',
+  image_url       TEXT,
+  is_active       INTEGER NOT NULL DEFAULT 1,
+  sort_order      INTEGER NOT NULL DEFAULT 0,
+  created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at       TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_prod_var_prod ON product_variants(product_id);
+CREATE INDEX IF NOT EXISTS idx_prod_var_sku ON product_variants(sku);
+CREATE INDEX IF NOT EXISTS idx_prod_var_barcode ON product_variants(barcode);
+
+CREATE TABLE IF NOT EXISTS product_variant_stocks (
+  id           TEXT PRIMARY KEY,
+  variant_id   TEXT NOT NULL REFERENCES product_variants(id) ON DELETE CASCADE,
+  product_id   TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+  branch_id    TEXT NOT NULL REFERENCES branches(id),
+  quantity     REAL NOT NULL DEFAULT 0,
+  damaged_qty  REAL NOT NULL DEFAULT 0,
+  updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+  synced_at    TEXT,
+  UNIQUE(variant_id, branch_id)
+);
+CREATE INDEX IF NOT EXISTS idx_prod_var_stocks_var ON product_variant_stocks(variant_id);
+CREATE INDEX IF NOT EXISTS idx_prod_var_stocks_branch ON product_variant_stocks(branch_id);
+
 CREATE TABLE IF NOT EXISTS stock_movements (
   id                   TEXT PRIMARY KEY,
   product_id            TEXT NOT NULL REFERENCES products(id),
@@ -415,6 +479,8 @@ CREATE TABLE IF NOT EXISTS invoice_items (
   id              TEXT PRIMARY KEY,
   invoice_id      TEXT NOT NULL REFERENCES invoices(id) ON DELETE CASCADE,
   product_id      TEXT NOT NULL REFERENCES products(id),
+  variant_id      TEXT REFERENCES product_variants(id),
+  variant_title   TEXT,
   quantity        INTEGER NOT NULL,
   unit_price      REAL NOT NULL,
   discount_pct    REAL NOT NULL DEFAULT 0,

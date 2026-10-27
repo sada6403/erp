@@ -55,8 +55,8 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
     return () => window.removeEventListener('pos:openDiscount', handler)
   }, [])
 
-  const handleItemDiscount = (productId: string, pct: number) => {
-    const item = cart.items.find(i => i.product.id === productId)
+  const handleItemDiscount = (itemKey: string, pct: number) => {
+    const item = cart.items.find(i => (i.variant_id ? i.variant_id === itemKey : i.product.id === itemKey))
     const allowed = item?.auto_discount_pct ?? 0
     if (pct > allowed) {
       toast.error(
@@ -64,10 +64,10 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
           ? `Max ${allowed}% discount allowed for this product.`
           : 'No discount is configured for this product.'
       )
-      cart.setItemDiscount(productId, allowed)
+      cart.setItemDiscount(itemKey, allowed)
       return
     }
-    cart.setItemDiscount(productId, pct)
+    cart.setItemDiscount(itemKey, pct)
   }
 
   const handleGlobalDiscount = (pct: number) => {
@@ -119,10 +119,11 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
         {cart.items.map((item, idx) => {
           const discountExceedsLimit = item.discount_pct > (item.auto_discount_pct ?? 0)
           const isFocused = idx === activeFocusedIdx
+          const itemKey = item.variant_id ? item.variant_id : item.product.id
 
           return (
             <div
-              key={item.product.id}
+              key={itemKey}
               data-cart-idx={idx}
               onClick={() => onFocusIdx?.(idx)}
               className={`pos-cart-item rounded-lg p-3 border transition-all cursor-pointer
@@ -139,11 +140,16 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                     <p className="text-sm font-medium leading-tight truncate" style={{ color: 'var(--text-1)' }}>
                       {item.product.name}
                     </p>
+                    {item.variant_name && (
+                      <span className="inline-flex items-center text-[10px] font-semibold px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-300 border border-brand-500/40 mt-0.5">
+                        {item.variant_name}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs font-mono" style={{ color: 'var(--text-3)' }}>{item.product.sku}</p>
                 </div>
                 <button
-                  onClick={e => { e.stopPropagation(); cart.removeItem(item.product.id); toast.success('Removed') }}
+                  onClick={e => { e.stopPropagation(); cart.removeItem(itemKey); toast.success('Removed') }}
                   className="text-[var(--text-3)] hover:text-red-500 transition-colors flex-shrink-0 p-1"
                   title="Remove (Del when selected)"
                   tabIndex={-1}
@@ -156,7 +162,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
               <div className="flex items-center gap-2 mt-2">
                 <div className="pos-qty-control flex items-center rounded-lg border">
                   <button
-                    onClick={e => { e.stopPropagation(); cart.updateQty(item.product.id, item.quantity - 1) }}
+                    onClick={e => { e.stopPropagation(); cart.updateQty(itemKey, item.quantity - 1) }}
                     className="w-7 h-7 flex items-center justify-center text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors"
                     title="Decrease (- key when selected)"
                     tabIndex={-1}
@@ -165,7 +171,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   </button>
                   <NumberInput
                     value={item.quantity}
-                    onChange={e => cart.updateQty(item.product.id, parseFloat(e.target.value) || 0)}
+                    onChange={e => cart.updateQty(itemKey, parseFloat(e.target.value) || 0)}
                     onClick={e => e.stopPropagation()}
                     className="w-14 text-center bg-transparent text-sm font-bold border-0 outline-none"
                     style={{ color: 'var(--text-1)' }}
@@ -174,7 +180,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                     tabIndex={-1}
                   />
                   <button
-                    onClick={e => { e.stopPropagation(); cart.updateQty(item.product.id, item.quantity + 1) }}
+                    onClick={e => { e.stopPropagation(); cart.updateQty(itemKey, item.quantity + 1) }}
                     className="w-7 h-7 flex items-center justify-center text-[var(--text-3)] hover:text-[var(--text-1)] transition-colors"
                     title="Increase (+ key when selected)"
                     tabIndex={-1}
@@ -192,7 +198,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   {priceEditable ? (
                     <NumberInput
                       value={item.unit_price}
-                      onChange={e => cart.updatePrice(item.product.id, parseFloat(e.target.value) || 0)}
+                      onChange={e => cart.updatePrice(itemKey, parseFloat(e.target.value) || 0)}
                       className="w-20 bg-transparent text-xs border-0 outline-none"
                       style={{ color: 'var(--text-3)' }}
                       title="Edit price"
@@ -218,7 +224,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                 }
                 <NumberInput
                   value={item.discount_pct}
-                  onChange={e => handleItemDiscount(item.product.id, parseFloat(e.target.value) || 0)}
+                  onChange={e => handleItemDiscount(itemKey, parseFloat(e.target.value) || 0)}
                   className={`w-16 bg-transparent text-xs border-0 outline-none ${
                     discountExceedsLimit ? 'text-amber-500' : 'text-[var(--text-3)]'
                   }`}

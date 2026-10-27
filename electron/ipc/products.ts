@@ -171,6 +171,185 @@ export function registerProductHandlers(ipcMain: IpcMain) {
     return { success: true, data: rows }
   })
 
+  // ─── PRODUCT ATTRIBUTES (BUSINESS-TYPE SPECIFIC) ──────────────────────────
+  safeHandle(ipcMain, 'products:attributes:list', (_e, filters: { business_type?: string; category_id?: string } = {}) => {
+    const db = getDb()
+    let sql = 'SELECT * FROM product_attributes WHERE is_active = 1'
+    const params: unknown[] = []
+    if (filters.business_type && filters.business_type !== 'all') {
+      sql += ' AND (business_type = ? OR business_type = "all")'
+      params.push(filters.business_type)
+    }
+    if (filters.category_id) {
+      sql += ' AND (category_id = ? OR category_id IS NULL)'
+      params.push(filters.category_id)
+    }
+    sql += ' ORDER BY sort_order ASC, name ASC'
+    const attributes = db.prepare(sql).all(...params) as Record<string, unknown>[]
+
+    const valuesStmt = db.prepare('SELECT * FROM product_attribute_values WHERE attribute_id = ? ORDER BY sort_order ASC, value ASC')
+    const result = attributes.map(attr => ({
+      ...attr,
+      values: valuesStmt.all(attr.id)
+    }))
+    return { success: true, data: result }
+  })
+
+  safeHandle(ipcMain, 'products:attributes:create', async (_e, payload: {
+    name: string
+    slug?: string
+    business_type?: 'supermarket' | 'normal' | 'all'
+    category_id?: string | null
+    description?: string
+    values?: string[]
+  }) => {
+    const db = getDb()
+    if (!payload.name?.trim()) return { success: false, error: 'Attribute name is required' }
+    const id = crypto.randomUUID()
+    const slug = (payload.slug || payload.name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/(^_|_$)/g, '')
+    const businessType = payload.business_type || 'all'
+    const categoryId = payload.category_id || null
+
+    db.transaction(() => {
+      db.prepare(`
+        INSERT INTO product_attributes (id, business_type, category_id, name, slug, description, is_active, is_system, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, 1, 0, 0)
+      `).run(id, businessType, categoryId, payload.name.trim(), slug, payload.description || '')
+
+      if (Array.isArray(payload.values)) {
+        const valStmt = db.prepare('INSERT INTO product_attribute_values (id, attribute_id, value, sort_order) VALUES (?, ?, ?, ?)')
+        payload.values.forEach((val, idx) => {
+          if (String(val).trim()) {
+            valStmt.run(crypto.randomUUID(), id, String(val).trim(), idx + 1)
+          }
+        })
+      }
+    })()
+
+    await enqueuSync('product_attributes', id, 'INSERT', { id, business_type: businessType, category_id: categoryId, name: payload.name.trim(), slug })
+    return { success: true, data: { id, name: payload.name, slug } }
+  })
+
+  safeHandle(ipcMain, 'products:attributes:update', async (_e, id: string, payload: {
+    name?: string
+    slug?: string
+    business_type?: string
+    category_id?: string | null
+    description?: string
+    is_active?: boolean
+    values?: Array<{ id?: string; value: string; color_code?: string }>
+  }) => {
+    const db = getDb()
+    const attr = db.prepare('SELECT * FROM product_attributes WHERE id = ?').get(id) as Record<string, unknown> | undefined
+    if (!attr) return { success: false, error: 'Attribute not found' }
+
+    db.transaction(() => {
+      const name = payload.name !== undefined ? payload.name.trim() : attr.name
+      const slug = payload.slug !== undefined ? payload.slug : attr.slug
+      const businessType = payload.business_type !== undefined ? payload.business_type : attr.business_type
+      const categoryId = payload.category_id !== undefined ? payload.category_id : attr.category_id
+      const isActive = payload.is_active !== undefined ? (payload.is_active ? 1 : 0) : attr.is_active
+
+      db.prepare(`
+        UPDATE product_attributes
+        SET name = ?, slug = ?, business_type = ?, category_id = ?, is_active = ?, updated_at = datetime('now')
+        WHERE id = ?
+      `).run(name, slug, businessType, categoryId, isActive, id)
+
+      if (Array.isArray(payload.values)) {
+        db.prepare('DELETE FROM product_attribute_values WHERE attribute_id = ?').run(id)
+        const insertVal = db.prepare('INSERT INTO product_attribute_values (id, attribute_id, value, color_code, sort_order) VALUES (?, ?, ?, ?, ?)')
+        payload.values.forEach((v, idx) => {
+          const valText = typeof v === 'string' ? v : v.value
+          const colorCode = typeof v === 'object' ? v.color_code : null
+          if (String(valText).trim()) {
+            insertVal.run(crypto.randomUUID(), id, String(valText).trim(), colorCode || null, idx + 1)
+          }
+        })
+      }
+    })()
+
+    await enqueuSync('product_attributes', id, 'UPDATE', { id, ...payload })
+    return { success: true }
+  })
+
+  safeHandle(ipcMain, 'products:attributes:delete', async (_e, id: string) => {
+    const db = getDb()
+    db.prepare("UPDATE product_attributes SET is_active = 0, updated_at = datetime('now') WHERE id = ?").run(id)
+    await enqueuSync('product_attributes', id, 'UPDATE', { id, is_active: 0 })
+    return { success: true }
+  })
+
+  // ─── PRODUCT VARIANTS ──────────────────────────────────────────────────────
+  safeHandle(ipcMain, 'products:variants:list', (_e, productId: string, branchId?: string) => {
+    const db = getDb()
+    const authUser = getAuthUser()
+    const targetBranch = branchId || (authUser?.branch_id as string) || null
+
+    const stockJoin = targetBranch
+      ? 'LEFT JOIN product_variant_stocks pvs ON pvs.variant_id = pv.id AND pvs.branch_id = ?'
+      : `LEFT JOIN (
+           SELECT variant_id, SUM(quantity) as quantity
+           FROM product_variant_stocks GROUP BY variant_id
+         ) pvs ON pvs.variant_id = pv.id`
+
+    const sql = `
+      SELECT pv.*,
+             COALESCE(pvs.quantity, 0) as stock
+      FROM product_variants pv
+      ${stockJoin}
+      WHERE pv.product_id = ? AND pv.is_active = 1
+      ORDER BY pv.sort_order ASC, pv.variant_name ASC
+    `
+    const params = targetBranch ? [targetBranch, productId] : [productId]
+    const rows = db.prepare(sql).all(...params) as Record<string, unknown>[]
+
+    const parsed = rows.map(r => ({
+      ...r,
+      attributes: typeof r.attributes_json === 'string' ? JSON.parse(String(r.attributes_json || '{}')) : (r.attributes_json || {})
+    }))
+    return { success: true, data: parsed }
+  })
+
+  safeHandle(ipcMain, 'products:variants:getByBarcode', (_e, barcode: string, branchId?: string) => {
+    const db = getDb()
+    const authUser = getAuthUser()
+    const targetBranch = branchId || (authUser?.branch_id as string) || null
+
+    const stockJoin = targetBranch
+      ? 'LEFT JOIN product_variant_stocks pvs ON pvs.variant_id = pv.id AND pvs.branch_id = ?'
+      : `LEFT JOIN (
+           SELECT variant_id, SUM(quantity) as quantity
+           FROM product_variant_stocks GROUP BY variant_id
+         ) pvs ON pvs.variant_id = pv.id`
+
+    const sql = `
+      SELECT pv.*,
+             p.name as parent_product_name,
+             p.tax_rate,
+             p.category_id,
+             p.product_type,
+             COALESCE(pvs.quantity, 0) as stock
+      FROM product_variants pv
+      JOIN products p ON p.id = pv.product_id
+      ${stockJoin}
+      WHERE (pv.barcode = ? OR pv.sku = ?) AND pv.is_active = 1
+      LIMIT 1
+    `
+    const params = targetBranch ? [targetBranch, barcode, barcode] : [barcode, barcode]
+    const row = db.prepare(sql).get(...params) as Record<string, unknown> | undefined
+    if (!row) return { success: true, data: null }
+
+    return {
+      success: true,
+      data: {
+        ...row,
+        attributes: typeof row.attributes_json === 'string' ? JSON.parse(String(row.attributes_json || '{}')) : row.attributes_json
+      }
+    }
+  })
+
+
   safeHandle(ipcMain, 'products:list', (_e, filters: { category_id?: string; is_active?: boolean; branch_id?: string } = {}) => {
       const db = getDb()
       const authUser = getAuthUser()
@@ -201,7 +380,8 @@ export function registerProductHandlers(ipcMain: IpcMain) {
                ) as unit,
                c.name as category_name,
                MAX(COALESCE(s.quantity, 0) - COALESCE(s.damaged_qty, 0), 0) as stock,
-               b.name as branch_name
+               b.name as branch_name,
+               (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1) as variant_count
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
         LEFT JOIN branches b ON b.id = p.branch_id
@@ -263,6 +443,54 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         ? `LEFT JOIN (SELECT product_id, SUM(quantity) AS quantity FROM stocks GROUP BY product_id) s ON s.product_id = p.id`
         : `LEFT JOIN stocks s ON s.product_id = p.id AND s.branch_id = ?`
 
+      // 1. Check if SKU or Barcode matches a product variant
+      const variantStockJoin = (superAdmin || !branchId)
+        ? `LEFT JOIN (SELECT variant_id, SUM(quantity) AS quantity FROM product_variant_stocks GROUP BY variant_id) pvs ON pvs.variant_id = pv.id`
+        : `LEFT JOIN product_variant_stocks pvs ON pvs.variant_id = pv.id AND pvs.branch_id = ?`
+
+      const varSql = `
+        SELECT p.*,
+               pv.id as variant_id,
+               pv.variant_name,
+               pv.sku as variant_sku,
+               pv.barcode as variant_barcode,
+               pv.selling_price as variant_price,
+               pv.attributes_json,
+               COALESCE(pvs.quantity, 0) as variant_stock,
+               COALESCE(
+                 NULLIF((SELECT pu.uom_name FROM product_uom pu WHERE pu.product_id = p.id AND pu.is_base = 1 AND pu.uom_name != '' LIMIT 1), ''),
+                 NULLIF(p.unit, ''),
+                 'pcs'
+               ) as unit,
+               COALESCE(s.quantity, 0) as stock
+        FROM product_variants pv
+        JOIN products p ON p.id = pv.product_id
+        ${stockJoin}
+        ${variantStockJoin}
+        WHERE pv.is_active = 1 AND p.is_active = 1
+          AND (pv.sku = ? OR pv.barcode = ?)
+        LIMIT 1
+      `
+      const varParams = (!superAdmin && branchId) ? [branchId, branchId, sku, sku] : [sku, sku]
+      const variantMatch = db.prepare(varSql).get(...varParams) as Record<string, unknown> | undefined
+
+      if (variantMatch) {
+        return {
+          success: true,
+          data: {
+            ...variantMatch,
+            selling_price: (variantMatch.variant_price !== undefined && variantMatch.variant_price !== null && Number(variantMatch.variant_price) > 0)
+              ? variantMatch.variant_price
+              : variantMatch.selling_price,
+            stock: variantMatch.variant_stock !== undefined ? variantMatch.variant_stock : variantMatch.stock,
+            variant_id: variantMatch.variant_id,
+            variant_name: variantMatch.variant_name,
+            attributes: typeof variantMatch.attributes_json === 'string' ? JSON.parse(String(variantMatch.attributes_json || '{}')) : variantMatch.attributes_json
+          }
+        }
+      }
+
+      // 2. Standard product match
       const sql = `
         SELECT p.*,
                COALESCE(
@@ -290,8 +518,27 @@ export function registerProductHandlers(ipcMain: IpcMain) {
                  'pcs'
                ) as unit
         FROM products p WHERE p.id = ?
-      `).get(id)
-      return { success: true, data: row || null }
+      `).get(id) as Record<string, unknown> | undefined
+      if (!row) return { success: true, data: null }
+
+      const variants = db.prepare(`
+        SELECT pv.*,
+               COALESCE(pvs.quantity, 0) as stock
+        FROM product_variants pv
+        LEFT JOIN (
+          SELECT variant_id, SUM(quantity) as quantity
+          FROM product_variant_stocks GROUP BY variant_id
+        ) pvs ON pvs.variant_id = pv.id
+        WHERE pv.product_id = ? AND pv.is_active = 1
+        ORDER BY pv.sort_order ASC, pv.created_at ASC
+      `).all(id) as Record<string, unknown>[]
+
+      const parsedVariants = variants.map(v => ({
+        ...v,
+        attributes: typeof v.attributes_json === 'string' ? JSON.parse(String(v.attributes_json || '{}')) : (v.attributes_json || {})
+      }))
+
+      return { success: true, data: { ...row, variants: parsedVariants } }
   })
 
   // Branch Managers must submit a "new product" edit request (target_record_id
@@ -303,7 +550,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const id = crypto.randomUUID()
       const authUser = getAuthUser()
       const isAdmin = isSuperAdmin(authUser)
-      const { edit_request_id, ...rest } = (payload || {}) as Record<string, unknown> & { edit_request_id?: string }
+      const { edit_request_id, variants, ...rest } = (payload || {}) as Record<string, unknown> & { edit_request_id?: string; variants?: any[] }
 
       if (!isAdmin && !edit_request_id) {
         return { success: false, error: 'No approved edit request found — please request approval first' }
@@ -311,12 +558,11 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       // Super admin creates global products (branch_id = NULL); branch users tag to their branch
       const branch_id = isAdmin ? null : (authUser?.branch_id as string || null)
-      const category = rest?.category_id
-        ? db.prepare('SELECT name FROM categories WHERE id=?').get(rest.category_id) as { name?: string } | undefined
-        : undefined
+      const targetBranch = branch_id || (authUser?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111'
       const rawSku = String((rest as Record<string, unknown>)?.sku || '').trim()
       const rawBarcode = String((rest as Record<string, unknown>)?.barcode || '').trim()
       const sku = rawSku || (rawBarcode ? rawBarcode : `NO-SKU-${id.slice(0, 8).toUpperCase()}`)
+      const productType = (rest.product_type as string) || (Array.isArray(variants) && variants.length > 0 ? 'variable' : 'simple')
 
       db.transaction(() => {
         if (!isAdmin) {
@@ -345,17 +591,55 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           tax_rate: Number(rest.tax_rate) || 0,
           discount_pct: Number(rest.discount_pct) || 0,
           min_stock_level: Number(rest.min_stock_level) || 0,
+          product_type: productType,
           ...rest,
         }
         db.prepare(`
           INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
-            image_url, unit, cost_price, selling_price, tax_rate, discount_pct, min_stock_level)
+            image_url, unit, cost_price, selling_price, tax_rate, discount_pct, min_stock_level, product_type)
           VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
-            @image_url, @unit, @cost_price, @selling_price, @tax_rate, @discount_pct, @min_stock_level)
+            @image_url, @unit, @cost_price, @selling_price, @tax_rate, @discount_pct, @min_stock_level, @product_type)
         `).run(productRow)
+
+        // Save variants if variable product
+        if (Array.isArray(variants) && variants.length > 0) {
+          const insertVar = db.prepare(`
+            INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, cost_price, selling_price, attributes_json, image_url, is_active, sort_order)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+          `)
+          const insertVarStock = db.prepare(`
+            INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at)
+            VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
+          `)
+
+          let totalVarStock = 0
+          variants.forEach((v, idx) => {
+            const varId = v.id || crypto.randomUUID()
+            const varSku = String(v.sku || '').trim() || `${sku}-${idx + 1}`
+            const varBarcode = String(v.barcode || '').trim() || null
+            const varCost = Number(v.cost_price) || Number(rest.cost_price) || 0
+            const varPrice = Number(v.selling_price) || Number(rest.selling_price) || 0
+            const attrJson = JSON.stringify(v.attributes || {})
+            const varImg = v.image_url || null
+            const varStock = Number(v.initial_stock || v.stock || 0)
+            totalVarStock += varStock
+
+            insertVar.run(varId, id, String(v.variant_name || `Variant ${idx + 1}`), varSku, varBarcode, varCost, varPrice, attrJson, varImg, idx + 1)
+            if (varStock > 0) {
+              insertVarStock.run(crypto.randomUUID(), varId, id, targetBranch, varStock)
+            }
+          })
+
+          if (totalVarStock > 0) {
+            db.prepare(`
+              INSERT INTO stocks (id, product_id, branch_id, quantity, damaged_qty, updated_at)
+              VALUES (?, ?, ?, ?, 0, datetime('now'))
+            `).run(crypto.randomUUID(), id, targetBranch, totalVarStock)
+          }
+        }
       })()
 
-      await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku })
+      await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku, product_type: productType })
       if (!isAdmin && edit_request_id) {
         await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
       }
@@ -368,7 +652,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
   // there's no check-then-use race. Admins update directly, as before.
   safeHandle(ipcMain, 'products:update', async (_e, id: string, payload) => {
       const db = getDb()
-      const { edit_request_id, ...rest } = payload as Record<string, unknown> & { edit_request_id?: string }
+      const { edit_request_id, variants, ...rest } = (payload || {}) as Record<string, unknown> & { edit_request_id?: string; variants?: any[] }
       const nextPayload = { ...rest }
       if (!String(nextPayload.sku || '').trim()) {
         const rawBarcode = String(nextPayload.barcode || '').trim()
@@ -381,6 +665,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         return { success: false, error: 'No approved edit request found — please request approval first' }
       }
 
+      const targetBranch = (caller?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111'
       const fields = Object.keys(nextPayload).map(k => `${k} = @${k}`).join(', ')
       db.transaction(() => {
         if (!isAdmin) {
@@ -393,8 +678,78 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
             .run(request.id)
         }
-        db.prepare(`UPDATE products SET ${fields}, updated_at = datetime('now') WHERE id = @id`)
-          .run({ ...nextPayload, id })
+        if (fields) {
+          db.prepare(`UPDATE products SET ${fields}, updated_at = datetime('now') WHERE id = @id`)
+            .run({ ...nextPayload, id })
+        }
+
+        // Handle variants updates if supplied
+        if (Array.isArray(variants)) {
+          const incomingIds = new Set(variants.map(v => v.id).filter(Boolean))
+          if (incomingIds.size > 0) {
+            const placeholders = Array.from(incomingIds).map(() => '?').join(',')
+            db.prepare(`UPDATE product_variants SET is_active = 0, updated_at = datetime('now') WHERE product_id = ? AND id NOT IN (${placeholders})`)
+              .run(id, ...Array.from(incomingIds))
+          } else {
+            db.prepare(`UPDATE product_variants SET is_active = 0, updated_at = datetime('now') WHERE product_id = ?`)
+              .run(id)
+          }
+
+          const upsertVar = db.prepare(`
+            INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, cost_price, selling_price, attributes_json, image_url, is_active, sort_order, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))
+            ON CONFLICT(id) DO UPDATE SET
+              variant_name = excluded.variant_name,
+              sku = excluded.sku,
+              barcode = excluded.barcode,
+              cost_price = excluded.cost_price,
+              selling_price = excluded.selling_price,
+              attributes_json = excluded.attributes_json,
+              image_url = excluded.image_url,
+              is_active = 1,
+              sort_order = excluded.sort_order,
+              updated_at = datetime('now')
+          `)
+
+          const upsertVarStock = db.prepare(`
+            INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at)
+            VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
+            ON CONFLICT(variant_id, branch_id) DO UPDATE SET
+              quantity = excluded.quantity,
+              updated_at = datetime('now')
+          `)
+
+          let totalVarStock = 0
+          variants.forEach((v, idx) => {
+            const varId = v.id || crypto.randomUUID()
+            const varSku = String(v.sku || '').trim() || `${nextPayload.sku || 'SKU'}-${idx + 1}`
+            const varBarcode = String(v.barcode || '').trim() || null
+            const varCost = Number(v.cost_price) || Number(nextPayload.cost_price) || 0
+            const varPrice = Number(v.selling_price) || Number(nextPayload.selling_price) || 0
+            const attrJson = JSON.stringify(v.attributes || {})
+            const varImg = v.image_url || null
+            const varStock = Number(v.stock !== undefined ? v.stock : (v.initial_stock || 0))
+            totalVarStock += varStock
+
+            upsertVar.run(varId, id, String(v.variant_name || `Variant ${idx + 1}`), varSku, varBarcode, varCost, varPrice, attrJson, varImg, idx + 1)
+            if (v.stock !== undefined || v.initial_stock !== undefined) {
+              upsertVarStock.run(crypto.randomUUID(), varId, id, targetBranch, varStock)
+            }
+          })
+
+          if (variants.length > 0) {
+            const sumRow = db.prepare('SELECT SUM(quantity) as total FROM product_variant_stocks WHERE product_id = ? AND branch_id = ?')
+              .get(id, targetBranch) as { total: number } | undefined
+            const aggQty = sumRow?.total !== undefined ? sumRow.total : totalVarStock
+            db.prepare(`
+              INSERT INTO stocks (id, product_id, branch_id, quantity, damaged_qty, updated_at)
+              VALUES (?, ?, ?, ?, 0, datetime('now'))
+              ON CONFLICT(product_id, branch_id) DO UPDATE SET
+                quantity = excluded.quantity,
+                updated_at = datetime('now')
+            `).run(crypto.randomUUID(), id, targetBranch, aggQty)
+          }
+        }
       })()
 
       await enqueuSync('products', id, 'UPDATE', { id, ...nextPayload })

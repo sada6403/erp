@@ -12,11 +12,11 @@ interface CartState {
   validUntil: string   // for QUOTATION — expiry date
   dueDate: string      // for CREDIT — payment due date
 
-  addItem: (product: Product, quantity?: number, autoDiscountPct?: number) => void
-  removeItem: (productId: string) => void
-  updateQty: (productId: string, qty: number) => void
-  setItemDiscount: (productId: string, pct: number) => void
-  updatePrice: (productId: string, price: number) => void
+  addItem: (product: Product, quantity?: number, autoDiscountPct?: number, variant?: { id: string; name?: string; variant_name?: string; selling_price?: number; price?: number; attributes?: Record<string, string> }) => void
+  removeItem: (key: string) => void
+  updateQty: (key: string, qty: number) => void
+  setItemDiscount: (key: string, pct: number) => void
+  updatePrice: (key: string, price: number) => void
   setCustomer: (customer: Customer | null) => void
   setGlobalDiscount: (pct: number) => void
   setNotes: (notes: string) => void
@@ -86,22 +86,31 @@ export const useCartStore = create<CartState>((set, get) => ({
   taxAmount:      0,
   total:          0,
 
-  addItem: (product, quantity = 1, autoDiscountPct) => {
+  addItem: (product, quantity = 1, autoDiscountPct, variant) => {
     const { items, globalDiscount } = get()
-    const existing = items.find(i => i.product.id === product.id)
+    const variantId = variant?.id || product.variant_id
+    const variantName = variant?.variant_name || variant?.name || product.variant_name
+    const unitPrice = (variant?.selling_price !== undefined ? variant.selling_price : variant?.price) ?? product.selling_price
+    const attributes = variant?.attributes || product.attributes
+
+    const existing = items.find(i => variantId ? i.variant_id === variantId : (!i.variant_id && i.product.id === product.id))
     let newItems: CartItem[]
 
     if (existing) {
       newItems = items.map(i =>
-        i.product.id === product.id
+        (variantId ? i.variant_id === variantId : (!i.variant_id && i.product.id === product.id))
           ? calcLine({ ...i, quantity: i.quantity + quantity })
           : i
       )
     } else {
       const floor = Math.max(0, Math.min(100, autoDiscountPct || 0))
       const newItem = calcLine({
-        product, quantity,
-        unit_price:      product.selling_price,
+        product,
+        variant_id:      variantId,
+        variant_name:    variantName,
+        attributes,
+        quantity,
+        unit_price:      unitPrice,
         discount_pct:    0,
         discount_amount: 0,
         tax_amount:      0,
@@ -113,34 +122,34 @@ export const useCartStore = create<CartState>((set, get) => ({
     set({ items: newItems, ...computeTotals(newItems, globalDiscount) })
   },
 
-  removeItem: (productId) => {
+  removeItem: (key) => {
     const { items, globalDiscount } = get()
-    const newItems = items.filter(i => i.product.id !== productId)
+    const newItems = items.filter(i => (i.variant_id ? i.variant_id !== key : i.product.id !== key))
     set({ items: newItems, ...computeTotals(newItems, globalDiscount) })
   },
 
-  updateQty: (productId, qty) => {
+  updateQty: (key, qty) => {
     const { items, globalDiscount } = get()
     const newItems = qty <= 0
-      ? items.filter(i => i.product.id !== productId)
-      : items.map(i => i.product.id === productId ? calcLine({ ...i, quantity: qty }) : i)
+      ? items.filter(i => (i.variant_id ? i.variant_id !== key : i.product.id !== key))
+      : items.map(i => (i.variant_id ? i.variant_id === key : i.product.id === key) ? calcLine({ ...i, quantity: qty }) : i)
     set({ items: newItems, ...computeTotals(newItems, globalDiscount) })
   },
 
-  setItemDiscount: (productId, pct) => {
+  setItemDiscount: (key, pct) => {
     const { items, globalDiscount } = get()
     const clamped = Math.max(0, Math.min(100, pct))
     const newItems = items.map(i =>
-      i.product.id === productId ? calcLine({ ...i, discount_pct: clamped }) : i
+      (i.variant_id ? i.variant_id === key : i.product.id === key) ? calcLine({ ...i, discount_pct: clamped }) : i
     )
     set({ items: newItems, ...computeTotals(newItems, globalDiscount) })
   },
 
-  updatePrice: (productId, price) => {
+  updatePrice: (key, price) => {
     const { items, globalDiscount } = get()
     const clamped = Math.max(0, price)
     const newItems = items.map(i =>
-      i.product.id === productId ? calcLine({ ...i, unit_price: clamped }) : i
+      (i.variant_id ? i.variant_id === key : i.product.id === key) ? calcLine({ ...i, unit_price: clamped }) : i
     )
     set({ items: newItems, ...computeTotals(newItems, globalDiscount) })
   },

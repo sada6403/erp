@@ -211,8 +211,16 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           priceByProduct.set(productId, product)
         }
         const real = priceByProduct.get(productId)!
+        let expectedSellingPrice = real.selling_price
+        if (item.variant_id) {
+          const vRow = db.prepare('SELECT selling_price FROM product_variants WHERE id=? AND product_id=?')
+            .get(String(item.variant_id), productId) as { selling_price: number } | undefined
+          if (vRow && Number(vRow.selling_price) > 0) {
+            expectedSellingPrice = Number(vRow.selling_price)
+          }
+        }
         const submittedPrice = Number(item.unit_price || 0)
-        if (!priceOverrideAllowed && Math.abs(submittedPrice - Number(real.selling_price || 0)) > 0.01) {
+        if (!priceOverrideAllowed && Math.abs(submittedPrice - Number(expectedSellingPrice || 0)) > 0.01) {
           return { success: false, error: 'A product price changed since this was added to the cart — please refresh and try again' }
         }
         if (priceOverrideAllowed && (!Number.isFinite(submittedPrice) || submittedPrice < 0)) {
@@ -236,7 +244,13 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         let minAllowedPct = Infinity // most restrictive product cap in this bill — used for the whole-bill discount check below
         for (const item of (payload.items || [])) {
           const real = priceByProduct.get(String(item.product_id))!
-          const unitPrice = money(priceOverrideAllowed ? Number(item.unit_price ?? real.selling_price) : real.selling_price)
+          let expectedPrice = real.selling_price
+          if (item.variant_id) {
+            const vRow = db.prepare('SELECT selling_price FROM product_variants WHERE id=?')
+              .get(String(item.variant_id)) as { selling_price: number } | undefined
+            if (vRow && Number(vRow.selling_price) > 0) expectedPrice = Number(vRow.selling_price)
+          }
+          const unitPrice = money(priceOverrideAllowed ? Number(item.unit_price ?? expectedPrice) : expectedPrice)
           const qty = Number(item.quantity)
           const pct = Number(item.discount_pct || 0)
           clientItemDiscountTotal += Number(item.discount_amount || 0)
@@ -392,7 +406,13 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         // every absolute rupee figure is derived from it server-side.
         for (const item of (payload.items || [])) {
           const real = priceByProduct.get(String(item.product_id))!
-          const unitPrice = money(priceOverrideAllowed ? Number(item.unit_price ?? real.selling_price) : real.selling_price)
+          let expectedPrice = real.selling_price
+          if (item.variant_id) {
+            const vRow = db.prepare('SELECT selling_price FROM product_variants WHERE id=?')
+              .get(String(item.variant_id)) as { selling_price: number } | undefined
+            if (vRow && Number(vRow.selling_price) > 0) expectedPrice = Number(vRow.selling_price)
+          }
+          const unitPrice = money(priceOverrideAllowed ? Number(item.unit_price ?? expectedPrice) : expectedPrice)
           const qty = Number(item.quantity)
           const discountPct = Math.max(0, Math.min(100, Number(item.discount_pct) || 0))
           const discountAmount = money(unitPrice * qty * discountPct / 100)
@@ -404,6 +424,8 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
             id:              crypto.randomUUID(),
             invoice_id:      id,
             product_id:      item.product_id,
+            variant_id:      item.variant_id || null,
+            variant_title:   item.variant_title || null,
             quantity:        qty,
             unit_price:      unitPrice,
             discount_pct:    discountPct,
@@ -413,9 +435,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
             line_total:      lineTotal,
           }
           db.prepare(`
-            INSERT INTO invoice_items (id, invoice_id, product_id, quantity, unit_price,
+            INSERT INTO invoice_items (id, invoice_id, product_id, variant_id, variant_title, quantity, unit_price,
               discount_pct, discount_amount, tax_rate, tax_amount, line_total)
-            VALUES (@id, @invoice_id, @product_id, @quantity, @unit_price,
+            VALUES (@id, @invoice_id, @product_id, @variant_id, @variant_title, @quantity, @unit_price,
               @discount_pct, @discount_amount, @tax_rate, @tax_amount, @line_total)
           `).run(itemRow)
           itemRecords.push(itemRow)
@@ -443,6 +465,19 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
                 throw new Error(`Insufficient branch stock for product ${item.product_id}`)
               }
             }
+            // Variant stock deduction
+            if (item.variant_id) {
+              const vStock = db.prepare('SELECT id, quantity FROM product_variant_stocks WHERE variant_id = ? AND branch_id = ?')
+                .get(item.variant_id, branchId) as { id: string; quantity: number } | undefined
+              if (vStock) {
+                db.prepare('UPDATE product_variant_stocks SET quantity = quantity - ?, updated_at = datetime("now") WHERE variant_id = ? AND branch_id = ?')
+                  .run(item.quantity, item.variant_id, branchId)
+              } else {
+                db.prepare('INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at) VALUES (?, ?, ?, ?, ?, 0, datetime("now"))')
+                  .run(crypto.randomUUID(), item.variant_id, item.product_id, branchId, -item.quantity)
+              }
+            }
+
             movementRecords.push(insertStockMovement(db, {
               product_id: item.product_id,
               from_branch_id: branchId,
@@ -452,6 +487,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
               reference_order_id: id,
               notes: `${billType} bill ${invoiceNumber}`,
               created_by: (user?.id as string) || null,
+              variant_id: item.variant_id || null,
             }))
 
             // Commission for this line — matched against this product's own
@@ -855,8 +891,9 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       }
 
       const items = db.prepare(`
-        SELECT ii.*, p.name as product_name, p.sku
+        SELECT ii.*, p.name as product_name, p.sku, pv.variant_name
         FROM invoice_items ii
+        LEFT JOIN product_variants pv ON pv.id = ii.variant_id
         LEFT JOIN products p ON p.id = ii.product_id
         WHERE ii.invoice_id = ?
       `).all(id)

@@ -175,4 +175,53 @@ describe('useCartStore — meta state', () => {
     expect(s.billType).toBe('RETAIL')
     expect(s.total).toBe(0)
   })
+
+  it('supports distinct variants for the same base product', () => {
+    const baseProduct = makeProduct({ id: 'prod-sunsilk', name: 'Sunsilk Shampoo', selling_price: 300, tax_rate: 0 })
+
+    // Add variant 1: 100ml Black Shine @ Rs. 200
+    useCartStore.getState().addItem(baseProduct, 2, undefined, {
+      id: 'var-100-black',
+      variant_name: '100ml – Black Shine',
+      selling_price: 200,
+      attributes: { Size: '100ml', Variety: 'Black Shine' },
+    })
+
+    // Add variant 2: 200ml Aloe Vera @ Rs. 350
+    useCartStore.getState().addItem(baseProduct, 1, undefined, {
+      id: 'var-200-aloe',
+      variant_name: '200ml – Aloe Vera',
+      selling_price: 350,
+      attributes: { Size: '200ml', Variety: 'Aloe Vera' },
+    })
+
+    const state = useCartStore.getState()
+    expect(state.items.length).toBe(2)
+    expect(state.items[0].variant_id).toBe('var-100-black')
+    expect(state.items[0].quantity).toBe(2)
+    expect(state.items[0].unit_price).toBe(200)
+    expect(state.items[0].line_total).toBe(400)
+
+    expect(state.items[1].variant_id).toBe('var-200-aloe')
+    expect(state.items[1].quantity).toBe(1)
+    expect(state.items[1].unit_price).toBe(350)
+    expect(state.items[1].line_total).toBe(350)
+
+    // Subtotal: 2*200 + 1*350 = 750
+    expect(state.subtotal).toBe(750)
+    expect(state.total).toBe(750)
+
+    // Updating qty on variant 1
+    useCartStore.getState().updateQty('var-100-black', 3)
+    expect(useCartStore.getState().items[0].quantity).toBe(3)
+    expect(useCartStore.getState().items[1].quantity).toBe(1)
+    expect(useCartStore.getState().total).toBe(950) // 3*200 + 350 = 950
+
+    // Removing variant 2
+    useCartStore.getState().removeItem('var-200-aloe')
+    expect(useCartStore.getState().items.length).toBe(1)
+    expect(useCartStore.getState().items[0].variant_id).toBe('var-100-black')
+    expect(useCartStore.getState().total).toBe(600) // 3*200 = 600
+  })
 })
+

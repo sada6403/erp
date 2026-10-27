@@ -782,6 +782,68 @@ async function runTenantCompatibility(dbSchema: string) {
        INDEX idx_batches_expiry (expiry_date)
      )`,
 
+    // ── Product Attributes & Variants ─────────────────────────────────────
+    `CREATE TABLE IF NOT EXISTS product_attributes (
+       id             CHAR(36)     NOT NULL PRIMARY KEY,
+       business_type  VARCHAR(32)  NOT NULL DEFAULT 'all',
+       category_id    CHAR(36)     NULL,
+       name           VARCHAR(128) NOT NULL,
+       slug           VARCHAR(128) NOT NULL,
+       description    TEXT         NULL,
+       is_active      BOOLEAN      NOT NULL DEFAULT 1,
+       is_system      BOOLEAN      NOT NULL DEFAULT 0,
+       sort_order     INT          NOT NULL DEFAULT 0,
+       created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at      DATETIME     NULL,
+       INDEX idx_prod_attr_biz (business_type)
+     )`,
+    `CREATE TABLE IF NOT EXISTS product_attribute_values (
+       id             CHAR(36)     NOT NULL PRIMARY KEY,
+       attribute_id   CHAR(36)     NOT NULL,
+       value          VARCHAR(128) NOT NULL,
+       color_code     VARCHAR(32)  NULL,
+       sort_order     INT          NOT NULL DEFAULT 0,
+       created_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at     DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at      DATETIME     NULL,
+       INDEX idx_prod_attr_val_attr (attribute_id)
+     )`,
+    `CREATE TABLE IF NOT EXISTS product_variants (
+       id              CHAR(36)      NOT NULL PRIMARY KEY,
+       product_id      CHAR(36)      NOT NULL,
+       variant_name    VARCHAR(255)  NOT NULL,
+       sku             VARCHAR(100)  NOT NULL,
+       barcode         VARCHAR(100)  NULL,
+       cost_price      DECIMAL(12,2) NOT NULL DEFAULT 0,
+       selling_price   DECIMAL(12,2) NOT NULL DEFAULT 0,
+       attributes_json JSON          NULL,
+       image_url       TEXT          NULL,
+       is_active       BOOLEAN       NOT NULL DEFAULT 1,
+       sort_order      INT           NOT NULL DEFAULT 0,
+       created_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       updated_at      DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at       DATETIME      NULL,
+       INDEX idx_prod_var_prod (product_id),
+       INDEX idx_prod_var_sku (sku),
+       INDEX idx_prod_var_barcode (barcode)
+     )`,
+    `CREATE TABLE IF NOT EXISTS product_variant_stocks (
+       id           CHAR(36)      NOT NULL PRIMARY KEY,
+       variant_id   CHAR(36)      NOT NULL,
+       product_id   CHAR(36)      NOT NULL,
+       branch_id    CHAR(36)      NOT NULL,
+       quantity     DECIMAL(12,2) NOT NULL DEFAULT 0,
+       damaged_qty  DECIMAL(12,2) NOT NULL DEFAULT 0,
+       updated_at   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+       synced_at    DATETIME      NULL,
+       UNIQUE KEY uq_var_branch (variant_id, branch_id),
+       INDEX idx_prod_var_stocks_branch (branch_id)
+     )`,
+    `ALTER TABLE invoice_items ADD COLUMN variant_id CHAR(36) NULL`,
+    `ALTER TABLE invoice_items ADD COLUMN variant_title VARCHAR(255) NULL`,
+    `ALTER TABLE stock_movements ADD COLUMN variant_id CHAR(36) NULL`,
+
     // ── Chit Fund — schemes, members, draws, contributions ────────────────
     `CREATE TABLE IF NOT EXISTS chit_schemes (
        id                      CHAR(36)      NOT NULL PRIMARY KEY,

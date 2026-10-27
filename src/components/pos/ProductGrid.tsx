@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import type { Product } from '@/types'
-import { Package, AlertCircle, MapPin, ArrowRightLeft, Check } from 'lucide-react'
+import { Package, AlertCircle, MapPin, ArrowRightLeft, Check, X, Layers } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
 import { resolveImageSrc } from '@/lib/imageUrl'
@@ -15,6 +15,129 @@ interface BranchStock {
   branch_id: string
   branch_name: string
   available_quantity: number
+}
+
+
+// ─── Variant Selection Modal ──────────────────────────────────────────────────
+function VariantSelectModal({
+  product,
+  onSelect,
+  onClose,
+}: {
+  product: Product
+  onSelect: (variantProduct: Product) => void
+  onClose: () => void
+}) {
+  const [variants, setVariants] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    (window as any).api.products.variants.list(product.id)
+      .then((res: any) => {
+        if (res.success && Array.isArray(res.data)) {
+          setVariants(res.data)
+        }
+      })
+      .finally(() => setLoading(false))
+  }, [product.id])
+
+  return (
+    <div className="fixed inset-0 z-[999] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(4px)' }}>
+      <div className="w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[85vh]"
+        style={{ background: 'var(--bg-card)', border: '1px solid var(--border)' }}
+        onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="px-5 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--border)' }}>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-brand-400 bg-brand-500/10 px-2 py-0.5 rounded-full border border-brand-500/20">
+              Select Variant
+            </span>
+            <h3 className="text-base font-bold leading-snug mt-1" style={{ color: 'var(--text-1)' }}>{product.name}</h3>
+            <p className="text-xs" style={{ color: 'var(--text-3)' }}>Choose the product option to add to cart</p>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Variants List */}
+        <div className="p-4 overflow-y-auto space-y-2 flex-1">
+          {loading ? (
+            <div className="space-y-2">
+              <div className="h-16 rounded-xl pos-skeleton" />
+              <div className="h-16 rounded-xl pos-skeleton" />
+              <div className="h-16 rounded-xl pos-skeleton" />
+            </div>
+          ) : variants.length === 0 ? (
+            <div className="text-center py-8 text-slate-400">
+              <p className="text-sm">No active variants found for this product.</p>
+              <button
+                onClick={() => { onSelect(product); onClose() }}
+                className="mt-3 btn-primary btn-sm"
+              >
+                Add Base Product
+              </button>
+            </div>
+          ) : (
+            variants.map(v => {
+              const outOfStock = Number(v.stock ?? 0) <= 0
+              return (
+                <div
+                  key={v.id}
+                  onClick={() => {
+                    onSelect({
+                      ...product,
+                      selling_price: v.selling_price || product.selling_price,
+                      variant_id: v.id,
+                      variant_name: v.variant_name,
+                      sku: v.sku || product.sku,
+                      barcode: v.barcode || product.barcode,
+                      stock: v.stock,
+                    })
+                    onClose()
+                  }}
+                  className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between gap-3 group
+                    ${outOfStock ? 'opacity-60 bg-slate-900/40 border-slate-800 hover:border-slate-700' : 'bg-slate-900/70 border-slate-700/60 hover:border-brand-500 hover:bg-brand-950/20'}`}
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-sm font-semibold group-hover:text-brand-300" style={{ color: 'var(--text-1)' }}>
+                        {v.variant_name}
+                      </p>
+                      {outOfStock ? (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30">
+                          Out of stock
+                        </span>
+                      ) : (
+                        <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          {v.stock ?? 0} {product.unit || 'pcs'}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 font-mono">
+                      <span>SKU: {v.sku}</span>
+                      {v.barcode && <span>• Barcode: {v.barcode}</span>}
+                    </div>
+                  </div>
+
+                  <div className="text-right flex-shrink-0">
+                    <p className="text-base font-bold text-brand-400">
+                      Rs.{(v.selling_price || product.selling_price).toLocaleString()}
+                    </p>
+                    <span className="text-[11px] font-medium text-slate-400 group-hover:text-brand-300">
+                      + Add
+                    </span>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  )
 }
 
 // ─── Cross-Branch Availability Modal ─────────────────────────────────────────
@@ -202,6 +325,7 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
   const [loading, setLoading]           = useState(true)
   const [focused, setFocused]           = useState(0)
   const [checkProduct, setCheckProduct] = useState<Product | null>(null)
+  const [variantProduct, setVariantProduct] = useState<Product | null>(null)
   const [packUomMap, setPackUomMap]     = useState<Map<string, PackUom>>(new Map())
   const gridRef = useRef<HTMLDivElement>(null)
 
@@ -271,11 +395,25 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
             pack={packUomMap.get(product.id) || null}
             isFocused={focused === idx}
             onFocus={() => setFocused(idx)}
-            onSelect={() => onSelect(product)}
+            onSelect={() => {
+              if (product.product_type === 'variable' || (product.variant_count && product.variant_count > 0)) {
+                setVariantProduct(product)
+              } else {
+                onSelect(product)
+              }
+            }}
             onCheckBranches={() => setCheckProduct(product)}
           />
         ))}
       </div>
+
+      {variantProduct && (
+        <VariantSelectModal
+          product={variantProduct}
+          onSelect={onSelect}
+          onClose={() => setVariantProduct(null)}
+        />
+      )}
 
       {checkProduct && (
         <CrossBranchModal
@@ -320,7 +458,14 @@ function ProductCard({ product, pack, isFocused, onFocus, onSelect, onCheckBranc
 
       {/* Info */}
       <p className="text-sm font-semibold leading-tight line-clamp-2 mb-1 min-h-10" style={{ color: 'var(--text-1)' }}>{product.name}</p>
-      <p className="text-xs font-mono" style={{ color: 'var(--text-3)' }}>{product.sku}</p>
+      <div className="flex items-center justify-between gap-1">
+        <p className="text-xs font-mono" style={{ color: 'var(--text-3)' }}>{product.sku}</p>
+        {(product.product_type === 'variable' || (product.variant_count && product.variant_count > 0)) && (
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            ⚡ Variants
+          </span>
+        )}
+      </div>
 
       <div className="flex items-center justify-between mt-2">
         <span className="text-sm font-bold text-brand-400">

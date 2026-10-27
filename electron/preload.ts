@@ -42,6 +42,16 @@ const api = {
     normalizeCatalog:     ()        => ipcRenderer.invoke('products:normalizeCatalog'),
     catalogAudit:         ()        => ipcRenderer.invoke('products:catalogAudit'),
     permanentDelete:      (id: string, reason: string) => ipcRenderer.invoke('products:permanentDelete', id, reason),
+    attributes: {
+      list:   (filters?: unknown) => ipcRenderer.invoke('products:attributes:list', filters),
+      create: (payload: unknown)  => ipcRenderer.invoke('products:attributes:create', payload),
+      update: (id: string, payload: unknown) => ipcRenderer.invoke('products:attributes:update', id, payload),
+      delete: (id: string)        => ipcRenderer.invoke('products:attributes:delete', id),
+    },
+    variants: {
+      list:         (productId: string, branchId?: string) => ipcRenderer.invoke('products:variants:list', productId, branchId),
+      getByBarcode: (barcode: string, branchId?: string)   => ipcRenderer.invoke('products:variants:getByBarcode', barcode, branchId),
+    },
   },
 
   // Invoices

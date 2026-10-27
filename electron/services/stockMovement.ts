@@ -5,6 +5,7 @@ export type StockMovementType = 'SALE' | 'TRANSFER' | 'ADJUSTMENT' | 'RECEIVE'
 
 export type StockMovementInput = {
   product_id: string
+  variant_id?: string | null
   from_branch_id?: string | null
   to_branch_id?: string | null
   quantity: number
@@ -24,6 +25,7 @@ export function insertStockMovement(
   const record = {
     id: crypto.randomUUID(),
     product_id: input.product_id,
+    variant_id: input.variant_id || null,
     from_branch_id: input.from_branch_id || null,
     to_branch_id: input.to_branch_id || null,
     quantity: Math.max(0, Math.trunc(Number(input.quantity) || 0)),
@@ -42,11 +44,11 @@ export function insertStockMovement(
 
   db.prepare(`
     INSERT INTO stock_movements (
-      id, product_id, from_branch_id, to_branch_id, quantity, movement_type,
+      id, product_id, variant_id, from_branch_id, to_branch_id, quantity, movement_type,
       reference_order_id, reference_transfer_id, reference_branch_transfer_id, notes, created_by, status
     )
     VALUES (
-      @id, @product_id, @from_branch_id, @to_branch_id, @quantity, @movement_type,
+      @id, @product_id, @variant_id, @from_branch_id, @to_branch_id, @quantity, @movement_type,
       @reference_order_id, @reference_transfer_id, @reference_branch_transfer_id, @notes, @created_by, @status
     )
   `).run(record)

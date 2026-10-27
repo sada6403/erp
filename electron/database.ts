@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import fs from 'fs'
 import { app } from 'electron'
+import crypto from 'crypto'
 import { enqueuSync } from './services/syncQueue'
 import { createCompanyStore, getActiveWorkspaceDir } from './services/companyWorkspace'
 
@@ -163,6 +164,10 @@ function runMigrations(): void {
     ['suppliers', 'state',         "TEXT"],
     ['suppliers', 'country',       "TEXT"],
     ['suppliers', 'zip_code',      "TEXT"],
+    // Product variant tracking
+    ['invoice_items',   'variant_id',     "TEXT"],
+    ['invoice_items',   'variant_title',  "TEXT"],
+    ['stock_movements', 'variant_id',     "TEXT"],
   ]
 
   for (const [table, column, definition] of migrations) {
@@ -613,6 +618,70 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_expenses_branch   ON expenses(branch_id);
     CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id);
     CREATE INDEX IF NOT EXISTS idx_expenses_date     ON expenses(created_at);
+
+    -- ─── PRODUCT ATTRIBUTES & VARIANTS ENGINE ────────────────────────────────
+    CREATE TABLE IF NOT EXISTS product_attributes (
+      id             TEXT PRIMARY KEY,
+      business_type  TEXT NOT NULL DEFAULT 'all', -- 'supermarket' | 'normal' | 'all'
+      category_id    TEXT REFERENCES categories(id) ON DELETE SET NULL,
+      name           TEXT NOT NULL,
+      slug           TEXT NOT NULL,
+      description    TEXT,
+      is_active      INTEGER NOT NULL DEFAULT 1,
+      is_system      INTEGER NOT NULL DEFAULT 0,
+      sort_order     INTEGER NOT NULL DEFAULT 0,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_prod_attr_biz ON product_attributes(business_type);
+    CREATE INDEX IF NOT EXISTS idx_prod_attr_cat ON product_attributes(category_id);
+
+    CREATE TABLE IF NOT EXISTS product_attribute_values (
+      id             TEXT PRIMARY KEY,
+      attribute_id   TEXT NOT NULL REFERENCES product_attributes(id) ON DELETE CASCADE,
+      value          TEXT NOT NULL,
+      color_code     TEXT,
+      sort_order     INTEGER NOT NULL DEFAULT 0,
+      created_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at      TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_prod_attr_val_attr ON product_attribute_values(attribute_id);
+
+    CREATE TABLE IF NOT EXISTS product_variants (
+      id              TEXT PRIMARY KEY,
+      product_id      TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      variant_name    TEXT NOT NULL,
+      sku             TEXT NOT NULL,
+      barcode         TEXT,
+      cost_price      REAL NOT NULL DEFAULT 0,
+      selling_price   REAL NOT NULL DEFAULT 0,
+      attributes_json TEXT NOT NULL DEFAULT '{}',
+      image_url       TEXT,
+      is_active       INTEGER NOT NULL DEFAULT 1,
+      sort_order      INTEGER NOT NULL DEFAULT 0,
+      created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at      TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at       TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_prod_var_prod ON product_variants(product_id);
+    CREATE INDEX IF NOT EXISTS idx_prod_var_sku ON product_variants(sku);
+    CREATE INDEX IF NOT EXISTS idx_prod_var_barcode ON product_variants(barcode);
+
+    CREATE TABLE IF NOT EXISTS product_variant_stocks (
+      id           TEXT PRIMARY KEY,
+      variant_id   TEXT NOT NULL REFERENCES product_variants(id) ON DELETE CASCADE,
+      product_id   TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+      branch_id    TEXT NOT NULL REFERENCES branches(id),
+      quantity     REAL NOT NULL DEFAULT 0,
+      damaged_qty  REAL NOT NULL DEFAULT 0,
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at    TEXT,
+      UNIQUE(variant_id, branch_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_prod_var_stocks_var ON product_variant_stocks(variant_id);
+    CREATE INDEX IF NOT EXISTS idx_prod_var_stocks_branch ON product_variant_stocks(branch_id);
   `)
 
   // Referral / sales agents — matched against invoices.agent_code (free text,
@@ -2500,6 +2569,64 @@ function runMigrations(): void {
       synced_at  TEXT
     );
   `)
+
+  seedProductAttributes(db)
+}
+
+function seedProductAttributes(database: Database.Database): void {
+  try {
+    const count = (database.prepare('SELECT COUNT(*) as c FROM product_attributes').get() as { c: number } | undefined)?.c || 0
+    if (count > 0) return
+
+    const defaultAttrs: Array<{
+      name: string
+      slug: string
+      business_type: 'supermarket' | 'normal'
+      sort_order: number
+      values: string[]
+    }> = [
+      // Supermarket default attributes
+      { name: 'Size', slug: 'size', business_type: 'supermarket', sort_order: 1, values: ['100g', '200g', '250g', '400g', '500g', '1kg', '2kg', '5kg', '10kg'] },
+      { name: 'Volume', slug: 'volume', business_type: 'supermarket', sort_order: 2, values: ['100ml', '200ml', '250ml', '500ml', '750ml', '1L', '1.5L', '2L'] },
+      { name: 'Variety', slug: 'variety', business_type: 'supermarket', sort_order: 3, values: ['Regular', 'Black Shine', 'Aloe Vera', 'Coconut', 'Herbal', 'Egg & Honey'] },
+      { name: 'Flavour', slug: 'flavour', business_type: 'supermarket', sort_order: 4, values: ['Original', 'Vanilla', 'Chocolate', 'Strawberry', 'Mango', 'Orange', 'Lemon'] },
+      { name: 'Fragrance', slug: 'fragrance', business_type: 'supermarket', sort_order: 5, values: ['Rose', 'Jasmine', 'Lavender', 'Lemon & Mint', 'Sandalwood', 'Neem'] },
+      { name: 'Pack Size', slug: 'pack_size', business_type: 'supermarket', sort_order: 6, values: ['Single', 'Pack of 2', 'Pack of 3', 'Pack of 4', 'Family Pack', 'Box of 10'] },
+
+      // Normal Company (Furniture, Electronics, Appliances, etc.) default attributes
+      { name: 'Color', slug: 'color', business_type: 'normal', sort_order: 1, values: ['Black', 'Brown', 'White', 'Grey', 'Navy Blue', 'Dark Walnut', 'Natural Wood', 'Red'] },
+      { name: 'Material', slug: 'material', business_type: 'normal', sort_order: 2, values: ['Teak Wood', 'Mahogany Wood', 'Engineered Wood', 'Metal Frame', 'Stainless Steel', 'Plastic / Polymer', 'Glass'] },
+      { name: 'Cushion Type', slug: 'cushion_type', business_type: 'normal', sort_order: 3, values: ['With Cushion', 'Without Cushion', 'High-Density Foam', 'Memory Foam', 'Leatherette Cushion'] },
+      { name: 'Fabric Type', slug: 'fabric_type', business_type: 'normal', sort_order: 4, values: ['Genuine Leather', 'Synthetic Leather (PU)', 'Velvet', 'Breathable Mesh', 'Cotton Blend', 'Linen'] },
+      { name: 'Seating Capacity', slug: 'seating_capacity', business_type: 'normal', sort_order: 5, values: ['1 Seater', '2 Seater', '3 Seater', '4 Seater', '6 Seater', 'L-Shape (5 Seater)'] },
+      { name: 'Capacity', slug: 'capacity', business_type: 'normal', sort_order: 6, values: ['180 Litres', '220 Litres', '260 Litres', '350 Litres', '450 Litres', '1.0 Ton', '1.5 Ton', '2.0 Ton'] },
+      { name: 'Door Type', slug: 'door_type', business_type: 'normal', sort_order: 7, values: ['Single Door', 'Double Door', 'Side by Side', 'French Door', 'Sliding Door'] },
+      { name: 'Model / Variant', slug: 'model', business_type: 'normal', sort_order: 8, values: ['Standard', 'Deluxe', 'Pro Executive', 'Ergonomic'] },
+    ]
+
+    const insertAttr = database.prepare(`
+      INSERT INTO product_attributes (id, business_type, name, slug, is_active, is_system, sort_order)
+      VALUES (?, ?, ?, ?, 1, 1, ?)
+    `)
+    const insertVal = database.prepare(`
+      INSERT INTO product_attribute_values (id, attribute_id, value, sort_order)
+      VALUES (?, ?, ?, ?)
+    `)
+
+    database.transaction(() => {
+      for (const attr of defaultAttrs) {
+        const attrId = crypto.randomUUID()
+        insertAttr.run(attrId, attr.business_type, attr.name, attr.slug, attr.sort_order)
+        let sort = 1
+        for (const val of attr.values) {
+          insertVal.run(crypto.randomUUID(), attrId, val, sort++)
+        }
+      }
+    })()
+    console.log('[DB] Seeded business-specific default product attributes')
+  } catch (err) {
+    console.warn('[DB] Failed to seed default product attributes:', err)
+  }
 }
 
 function seedDefaultData() {
