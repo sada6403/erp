@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import type { ProductAttribute } from '@/types'
 import NumberInput from '@/components/shared/NumberInput'
-import { Plus, Trash2, Zap, CheckSquare, Square, Layers, Sparkles, AlertCircle, Tag, ShoppingCart, Armchair } from 'lucide-react'
+import { Plus, Trash2, Zap, CheckSquare, Square, Layers, Sparkles, AlertCircle, Tag, ShoppingCart, Armchair, Barcode } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { generateEanBarcode, playScannerBeep } from '@/lib/barcodeUtils'
 
 export interface VariantItem {
   id?: string
@@ -226,6 +227,7 @@ export default function ProductVariantBuilder({
           ...matchExisting,
           attributes: attrs,
           variant_name: matchExisting.variant_name || `${namePrefix} – ${attrSuffix}`,
+          barcode: matchExisting.barcode || generateEanBarcode(),
         }
       }
 
@@ -233,7 +235,7 @@ export default function ProductVariantBuilder({
         selected: true,
         variant_name: `${namePrefix} – ${attrSuffix}`,
         sku: baseSku ? `${baseSku}-${skuSuffix}` : `VAR-${idx + 1}-${skuSuffix}`,
-        barcode: '',
+        barcode: generateEanBarcode(),
         cost_price: baseCostPrice || 0,
         selling_price: baseSellingPrice || 0,
         stock: 0,
@@ -308,6 +310,18 @@ export default function ProductVariantBuilder({
     const remaining = variants.filter(v => !v.selected)
     onChange(remaining)
     toast.success('Removed selected variants')
+  }
+
+  // Auto-generate standard EAN barcodes for all variants
+  const autoGenerateAllVariantBarcodes = () => {
+    if (variants.length === 0) return
+    const updated = variants.map(v => ({
+      ...v,
+      barcode: generateEanBarcode()
+    }))
+    onChange(updated)
+    playScannerBeep()
+    toast.success(`Generated unique EAN barcodes for ${updated.length} variants!`)
   }
 
   return (
@@ -581,6 +595,16 @@ export default function ProductVariantBuilder({
                 </button>
               </div>
 
+              <button
+                type="button"
+                onClick={autoGenerateAllVariantBarcodes}
+                className="btn-secondary btn-sm text-xs gap-1 h-7 text-amber-300 hover:text-amber-200 border-amber-500/30"
+                title="Auto-generate authentic 13-digit EAN barcodes for all variants"
+              >
+                <Barcode size={13} className="text-amber-400" />
+                Auto Barcodes
+              </button>
+
               {variants.some(v => v.selected) && (
                 <button
                   type="button"
@@ -647,13 +671,38 @@ export default function ProductVariantBuilder({
                       />
                     </td>
                     <td className="px-2 py-2">
-                      <input
-                        type="text"
-                        value={v.barcode}
-                        onChange={e => updateVariant(idx, 'barcode', e.target.value)}
-                        className="input text-xs py-1 h-7 font-mono w-28"
-                        placeholder="Barcode"
-                      />
+                      <div className="flex items-center gap-1">
+                        <input
+                          type="text"
+                          value={v.barcode}
+                          onChange={e => updateVariant(idx, 'barcode', e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault()
+                              const raw = (e.currentTarget.value || '').trim()
+                              if (raw) {
+                                playScannerBeep()
+                                toast.success(`Barcode scanned: ${raw}`)
+                              }
+                            }
+                          }}
+                          className="input text-xs py-1 h-7 font-mono w-28"
+                          placeholder="Scan or type"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const code = generateEanBarcode()
+                            updateVariant(idx, 'barcode', code)
+                            playScannerBeep()
+                            toast.success(`Generated: ${code}`)
+                          }}
+                          className="w-6 h-7 rounded border border-slate-700 bg-slate-800 hover:bg-slate-700 text-amber-300 flex items-center justify-center flex-shrink-0 text-xs"
+                          title="Generate unique EAN barcode for this variant"
+                        >
+                          ⚡
+                        </button>
+                      </div>
                     </td>
                     <td className="px-2 py-2 text-right">
                       <NumberInput

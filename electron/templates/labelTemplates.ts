@@ -18,16 +18,17 @@ function esc(s: string | undefined | null): string {
 
 export function buildLabelHtml(payload: LabelPayload, settings: Record<string, unknown>): string {
   const code = payload.barcode || payload.sku || ''
-  const svg = code ? buildBarcodeSvg(code, 32) : ''
+  const svg = code ? buildBarcodeSvg(code, 46) : ''
   const currency = payload.currency_symbol || String(settings.currency_symbol || 'Rs.')
   const price = payload.price != null ? `${currency}${Number(payload.price).toFixed(2)}` : ''
 
   return `<html><head><style>
     * { margin:0; padding:0; box-sizing:border-box; font-family: Arial, sans-serif; }
-    body { width: 100%; height: 100%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 2mm; text-align:center; }
+    body { width: 100%; height: 100%; display:flex; flex-direction:column; align-items:center; justify-content:center; padding: 2mm; text-align:center; background:#fff; }
     .name { font-size: 11px; font-weight:bold; line-height:1.1; max-width: 100%; overflow:hidden; }
-    .barcode { width: 90%; margin: 1mm 0; }
-    .code { font-size: 9px; letter-spacing: 1px; }
+    .barcode { width: 95%; margin: 1mm 0; display:flex; justify-content:center; }
+    .barcode svg { max-width: 100%; height: auto; }
+    .code { font-size: 10px; font-weight:bold; letter-spacing: 2px; font-family: monospace; }
     .price { font-size: 14px; font-weight:bold; margin-top: 1mm; }
   </style></head>
   <body>

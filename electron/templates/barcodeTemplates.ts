@@ -16,20 +16,23 @@ const CODE39: Record<string, string> = {
   '/':'010100010','+':'010001010','%':'000101010','*':'010010100',
 }
 
-export function buildBarcodeSvg(raw: string, height = 44): string {
-  const text = String(raw || '').toUpperCase().replace(/[^0-9A-Z\-. $/+%]/g, '-')
+export function buildBarcodeSvg(raw: string, height = 48): string {
+  const text = String(raw || '').trim().toUpperCase().replace(/[^0-9A-Z\-. $/+%]/g, '-')
+  if (!text) return ''
   const data = `*${text}*`
-  const NARROW = 2, WIDE = 5, GAP = NARROW
-  let x = 0
+  const NARROW = 2, WIDE = 5, GAP = 2
+  const QUIET_ZONE = 24
+  let x = QUIET_ZONE
   const rects: string[] = []
   for (const ch of data) {
     const pat = CODE39[ch] || CODE39['-']
     for (let i = 0; i < 9; i++) {
       const w = pat[i] === '1' ? WIDE : NARROW
-      if (i % 2 === 0) rects.push(`<rect x="${x}" y="0" width="${w}" height="${height}"/>`) // even = bar
+      if (i % 2 === 0) rects.push(`<rect x="${x}" y="0" width="${w}" height="${height}" fill="#000000"/>`)
       x += w
     }
     x += GAP
   }
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${x} ${height}" preserveAspectRatio="none" fill="#000">${rects.join('')}</svg>`
+  const totalWidth = x + QUIET_ZONE
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${totalWidth} ${height}" preserveAspectRatio="xMidYMid meet" style="background:#ffffff;display:block;margin:0 auto;max-width:100%"><rect width="${totalWidth}" height="${height}" fill="#ffffff"/>${rects.join('')}</svg>`
 }

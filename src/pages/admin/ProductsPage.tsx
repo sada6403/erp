@@ -1,5 +1,5 @@
 import ProductVariantBuilder, { type VariantItem } from '@/components/admin/ProductVariantBuilder'
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import NumberInput from '@/components/shared/NumberInput'
@@ -7,13 +7,14 @@ import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
   FileSpreadsheet, Trash2, Lock, Calculator, Info, AlertTriangle, RefreshCw, Clock, Printer,
-  ShieldCheck, AlertCircle, CheckCircle2, ChevronDown, Settings2, Barcode
+  ShieldCheck, AlertCircle, CheckCircle2, ChevronDown, Settings2, Barcode, Sparkles
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '@/store/authStore'
 import { useProductsStore } from '@/store/productsStore'
 import { resolveImageSrc } from '@/lib/imageUrl'
 import { canManageAllBranchStock, canManuallyEditBranchStock, DEFAULT_MAIN_BRANCH_ID, isCompanyAdmin as hasCompanyAdminAccess } from '@/lib/branchAccess'
+import { generateEanBarcode, renderBarcodeSvg, playScannerBeep } from '@/lib/barcodeUtils'
 
 type UOMRow = { id?: string; uom_name: string; conversion_factor: number; is_base: boolean; wastage: number }
 type CatalogAudit = {
@@ -1299,6 +1300,61 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
   const [selectedUnit, setSelectedUnit] = useState<string>(isKnownUnit(initialUnit) ? initialUnit : 'custom')
   const [customUnit, setCustomUnit] = useState<string>(isKnownUnit(initialUnit) ? '' : (product?.unit || ''))
 
+  const barcodeInputRef = useRef<HTMLInputElement>(null)
+  const [isScanning, setIsScanning] = useState(false)
+  const [scanSuccess, setScanSuccess] = useState(false)
+
+  const handleAutoGenerateBarcode = () => {
+    const newBarcode = generateEanBarcode()
+    setForm(p => ({
+      ...p,
+      barcode: newBarcode,
+      sku: (!p.sku || p.sku === p.barcode) ? newBarcode : p.sku
+    }))
+    playScannerBeep()
+    setScanSuccess(true)
+    setTimeout(() => setScanSuccess(false), 2500)
+    toast.success(`Barcode Generated: ${newBarcode}`)
+  }
+
+  const handleBarcodeKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      const raw = (e.currentTarget.value || '').trim()
+      if (raw) {
+        setForm(p => ({
+          ...p,
+          barcode: raw,
+          sku: (!p.sku || p.sku === p.barcode) ? raw : p.sku
+        }))
+        playScannerBeep()
+        setScanSuccess(true)
+        setTimeout(() => setScanSuccess(false), 2500)
+        toast.success(`Barcode Scanned: ${raw}`)
+      }
+    }
+  }
+
+  const handlePrintTestLabel = async () => {
+    const code = form.barcode || form.sku
+    if (!code) {
+      toast.error('Enter or generate a barcode first')
+      return
+    }
+    try {
+      const res = await window.api.printer.printLabel({
+        product_name: form.name || 'Product',
+        sku: form.sku,
+        barcode: form.barcode,
+        price: form.selling_price,
+      }) as { success: boolean; error?: string }
+      if (res.success) toast.success('Barcode label sent to printer')
+      else toast.error(res.error || 'Failed to print label')
+    } catch (err) {
+      toast.error('Print failed: ' + String(err))
+    }
+  }
+
   // Quick per-product discount % — a shortcut that creates/updates a
   // scope:'product', global-branch rule via the same Discounts module used
   // by Admin > Discounts, instead of a separate storage mechanism.
@@ -1575,24 +1631,123 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
               </div>
             </div>
 
-            {/* Row 2: Barcode/SKU, Unit of Measure, Brand */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="label">Barcode / SKU (பார்கோடு எண்)</label>
-                <div className="relative">
-                  <Barcode size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
-                  <input
-                    value={form.sku || form.barcode}
-                    onChange={e => {
-                      const val = e.target.value
-                      setForm(p => ({ ...p, sku: val, barcode: val }))
+            {/* Row 2: Dedicated Barcode & Scanner Controller */}
+            <div className="p-3.5 rounded-xl border border-slate-700/70 bg-slate-900/60 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Barcode size={16} className="text-brand-400" />
+                    <span className="text-xs font-bold text-white uppercase tracking-wider">
+                      Product Barcode / SKU (பார்கோடு & குறியீடு)
+                    </span>
+                    {scanSuccess && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-400 bg-emerald-950/80 border border-emerald-500/30 px-2 py-0.5 rounded-full animate-bounce">
+                        <CheckCircle2 size={12} /> Barcode Scanned! (பதிவானது)
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Manual entry, auto-generate standard EAN-13, or scan with physical barcode gun.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleAutoGenerateBarcode}
+                    className="btn-secondary btn-sm text-xs gap-1 py-1 px-2.5 text-amber-300 hover:text-amber-200 border-amber-500/30 hover:border-amber-400/60 bg-amber-950/20"
+                    title="Generate unique GS1 standard 13-digit EAN barcode"
+                  >
+                    <Sparkles size={13} className="text-amber-400" />
+                    Auto Generate (உருவாக்கு)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsScanning(true)
+                      barcodeInputRef.current?.focus()
+                      barcodeInputRef.current?.select()
+                      toast('Ready! Point scanner gun and pull trigger.', { icon: '📡' })
                     }}
-                    className="input pl-9 font-mono text-sm"
-                    placeholder="Scan or enter barcode..."
-                  />
+                    className={`btn-sm text-xs gap-1 py-1 px-2.5 rounded-lg border transition-all ${
+                      isScanning
+                        ? 'bg-emerald-600 text-white border-emerald-400 ring-2 ring-emerald-500/40'
+                        : 'btn-secondary text-slate-300'
+                    }`}
+                    title="Focus scanner gun input"
+                  >
+                    <span className={`w-2 h-2 rounded-full ${isScanning ? 'bg-white animate-ping' : 'bg-emerald-400'}`} />
+                    Scan Gun Mode (ஸ்கேனர்)
+                  </button>
                 </div>
               </div>
 
+              {/* Barcode Input & Scanner Handler */}
+              <div className="relative">
+                <Barcode size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  ref={barcodeInputRef}
+                  value={form.barcode || form.sku}
+                  onChange={e => {
+                    const val = e.target.value
+                    setForm(p => ({ ...p, barcode: val, sku: (!p.sku || p.sku === p.barcode) ? val : p.sku }))
+                  }}
+                  onKeyDown={handleBarcodeKeyDown}
+                  onFocus={() => setIsScanning(true)}
+                  onBlur={() => setIsScanning(false)}
+                  className={`input pl-9 font-mono text-sm tracking-wider ${
+                    isScanning ? 'border-brand-500 ring-2 ring-brand-500/20' : ''
+                  }`}
+                  placeholder="Type barcode or scan with barcode reader gun..."
+                />
+                {(form.barcode || form.sku) && (
+                  <button
+                    type="button"
+                    onClick={() => setForm(p => ({ ...p, barcode: '', sku: p.sku === p.barcode ? '' : p.sku }))}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-1"
+                    title="Clear barcode"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
+              </div>
+
+              {/* Scannable Barcode SVG Preview (100% readable by physical scanner guns) */}
+              {(form.barcode || form.sku) && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3 bg-slate-950/80 rounded-lg border border-slate-800">
+                  <div className="bg-white px-4 py-2.5 rounded shadow-inner flex flex-col items-center min-w-[240px]">
+                    <div
+                      dangerouslySetInnerHTML={{
+                        __html: renderBarcodeSvg(form.barcode || form.sku, 44)
+                      }}
+                      className="w-full flex justify-center"
+                    />
+                    <span className="text-[12px] font-mono font-bold text-black tracking-widest mt-1 select-all">
+                      {form.barcode || form.sku}
+                    </span>
+                  </div>
+
+                  <div className="flex-1 text-xs text-slate-400 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-emerald-400 font-semibold text-xs">
+                      <ShieldCheck size={14} /> 100% Scannable Barcode (High Contrast & Quiet Zones)
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      This barcode can be scanned directly from screen or printed to label stickers with any 1D laser or 2D barcode scanner gun.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handlePrintTestLabel}
+                      className="inline-flex items-center gap-1 text-xs text-brand-300 hover:text-brand-200 underline mt-1 font-medium"
+                    >
+                      <Printer size={13} /> Print Barcode Label
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Row 2b: Unit of Measure & Brand */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
                 <label className="label">Unit of Measure (அளவீட்டு அலகு) <span className="text-red-400">*</span></label>
                 <select
