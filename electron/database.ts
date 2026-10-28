@@ -682,6 +682,7 @@ function runMigrations(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_prod_var_stocks_var ON product_variant_stocks(variant_id);
     CREATE INDEX IF NOT EXISTS idx_prod_var_stocks_branch ON product_variant_stocks(branch_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_prod_var_stocks_var_branch ON product_variant_stocks(variant_id, branch_id);
   `)
 
   // Referral / sales agents — matched against invoices.agent_code (free text,

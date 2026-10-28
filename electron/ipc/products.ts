@@ -643,10 +643,15 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           })
 
           if (totalVarStock > 0) {
-            db.prepare(`
-              INSERT INTO stocks (id, product_id, branch_id, quantity, damaged_qty, updated_at)
-              VALUES (?, ?, ?, ?, 0, datetime('now'))
-            `).run(crypto.randomUUID(), id, targetBranch, totalVarStock)
+            const existingStock = db.prepare('SELECT id FROM stocks WHERE product_id = ? AND branch_id = ? LIMIT 1').get(id, targetBranch) as { id: string } | undefined
+            if (existingStock) {
+              db.prepare(`UPDATE stocks SET quantity = ?, updated_at = datetime('now') WHERE id = ?`).run(totalVarStock, existingStock.id)
+            } else {
+              db.prepare(`
+                INSERT INTO stocks (id, product_id, branch_id, quantity, damaged_qty, updated_at)
+                VALUES (?, ?, ?, ?, 0, datetime('now'))
+              `).run(crypto.randomUUID(), id, targetBranch, totalVarStock)
+            }
           }
         }
       })()
@@ -678,7 +683,16 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       }
 
       const targetBranch = (caller?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111'
-      const fields = Object.keys(nextPayload).map(k => `${k} = @${k}`).join(', ')
+      const validCols = new Set(
+        (db.prepare("PRAGMA table_info(products)").all() as { name: string }[]).map(c => c.name)
+      )
+      const filteredPayload: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(nextPayload)) {
+        if (validCols.has(k) && k !== 'id') {
+          filteredPayload[k] = v
+        }
+      }
+      const fields = Object.keys(filteredPayload).map(k => `${k} = @${k}`).join(', ')
       db.transaction(() => {
         if (!isAdmin) {
           const request = db.prepare(`
@@ -692,7 +706,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
         if (fields) {
           db.prepare(`UPDATE products SET ${fields}, updated_at = datetime('now') WHERE id = @id`)
-            .run({ ...nextPayload, id })
+            .run({ ...filteredPayload, id })
         }
 
         // Handle variants updates if supplied
@@ -707,32 +721,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
               .run(id)
           }
 
-          const upsertVar = db.prepare(`
-            INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, cost_price, selling_price, attributes_json, image_url, is_active, sort_order, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))
-            ON CONFLICT(id) DO UPDATE SET
-              variant_name = excluded.variant_name,
-              sku = excluded.sku,
-              barcode = excluded.barcode,
-              cost_price = excluded.cost_price,
-              selling_price = excluded.selling_price,
-              attributes_json = excluded.attributes_json,
-              image_url = excluded.image_url,
-              is_active = 1,
-              sort_order = excluded.sort_order,
-              updated_at = datetime('now')
-          `)
-
-          const upsertVarStock = db.prepare(`
-            INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at)
-            VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
-            ON CONFLICT(variant_id, branch_id) DO UPDATE SET
-              quantity = excluded.quantity,
-              updated_at = datetime('now')
-          `)
-
           let totalVarStock = 0
-          variants.forEach((v, idx) => {
+          for (let idx = 0; idx < variants.length; idx++) {
+            const v = variants[idx]
             const varId = v.id || crypto.randomUUID()
             const varSku = String(v.sku || '').trim() || `${nextPayload.sku || 'SKU'}-${idx + 1}`
             const varBarcode = String(v.barcode || '').trim() || null
@@ -743,23 +734,60 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             const varStock = Number(v.stock !== undefined ? v.stock : (v.initial_stock || 0))
             totalVarStock += varStock
 
-            upsertVar.run(varId, id, String(v.variant_name || `Variant ${idx + 1}`), varSku, varBarcode, varCost, varPrice, attrJson, varImg, idx + 1)
-            if (v.stock !== undefined || v.initial_stock !== undefined) {
-              upsertVarStock.run(crypto.randomUUID(), varId, id, targetBranch, varStock)
+            const existingVar = db.prepare('SELECT id FROM product_variants WHERE id = ?').get(varId) as { id: string } | undefined
+            if (existingVar) {
+              db.prepare(`
+                UPDATE product_variants SET
+                  variant_name = ?,
+                  sku = ?,
+                  barcode = ?,
+                  cost_price = ?,
+                  selling_price = ?,
+                  attributes_json = ?,
+                  image_url = ?,
+                  is_active = 1,
+                  sort_order = ?,
+                  updated_at = datetime('now')
+                WHERE id = ?
+              `).run(String(v.variant_name || `Variant ${idx + 1}`), varSku, varBarcode, varCost, varPrice, attrJson, varImg, idx + 1, varId)
+            } else {
+              db.prepare(`
+                INSERT INTO product_variants (id, product_id, variant_name, sku, barcode, cost_price, selling_price, attributes_json, image_url, is_active, sort_order, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, datetime('now'))
+              `).run(varId, id, String(v.variant_name || `Variant ${idx + 1}`), varSku, varBarcode, varCost, varPrice, attrJson, varImg, idx + 1)
             }
-          })
+
+            if (v.stock !== undefined || v.initial_stock !== undefined) {
+              const existingVarStock = db.prepare('SELECT id FROM product_variant_stocks WHERE variant_id = ? AND branch_id = ? LIMIT 1')
+                .get(varId, targetBranch) as { id: string } | undefined
+              if (existingVarStock) {
+                db.prepare(`UPDATE product_variant_stocks SET quantity = ?, updated_at = datetime('now') WHERE id = ?`)
+                  .run(varStock, existingVarStock.id)
+              } else {
+                db.prepare(`
+                  INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at)
+                  VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
+                `).run(crypto.randomUUID(), varId, id, targetBranch, varStock)
+              }
+            }
+          }
 
           if (variants.length > 0) {
             const sumRow = db.prepare('SELECT SUM(quantity) as total FROM product_variant_stocks WHERE product_id = ? AND branch_id = ?')
               .get(id, targetBranch) as { total: number } | undefined
-            const aggQty = sumRow?.total !== undefined ? sumRow.total : totalVarStock
-            db.prepare(`
-              INSERT INTO stocks (id, product_id, branch_id, quantity, damaged_qty, updated_at)
-              VALUES (?, ?, ?, ?, 0, datetime('now'))
-              ON CONFLICT(product_id, branch_id) DO UPDATE SET
-                quantity = excluded.quantity,
-                updated_at = datetime('now')
-            `).run(crypto.randomUUID(), id, targetBranch, aggQty)
+            const aggQty = sumRow?.total !== undefined && sumRow.total !== null ? sumRow.total : totalVarStock
+
+            const existingStock = db.prepare('SELECT id FROM stocks WHERE product_id = ? AND branch_id = ? LIMIT 1')
+              .get(id, targetBranch) as { id: string } | undefined
+            if (existingStock) {
+              db.prepare(`UPDATE stocks SET quantity = ?, updated_at = datetime('now') WHERE id = ?`)
+                .run(aggQty, existingStock.id)
+            } else {
+              db.prepare(`
+                INSERT INTO stocks (id, product_id, branch_id, quantity, damaged_qty, updated_at)
+                VALUES (?, ?, ?, ?, 0, datetime('now'))
+              `).run(crypto.randomUUID(), id, targetBranch, aggQty)
+            }
           }
         }
       })()
