@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    # Mobile app and planning docs don't change the desktop installer or the
+    # VPS backend, so they must never trigger a production deploy.
+    paths-ignore:
+      - 'mobile/**'
+      - 'docs/**'
+      - '.agent/**'
+      - 'AGENTS.md'
   workflow_dispatch:
 
 concurrency:
