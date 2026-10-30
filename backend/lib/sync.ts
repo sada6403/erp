@@ -18,6 +18,7 @@ export const ALLOWED_TABLES = new Set([
   'returns', 'return_items', 'cash_sessions',
   'loyalty_config', 'loyalty_transactions',
   'product_uom', 'product_batches',
+  'product_attributes', 'product_attribute_values', 'product_variants', 'product_variant_stocks',
   // Chit Fund
   'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions',
   // Smart Buy centralized Scheme Master — company-wide template catalog,

@@ -10,6 +10,7 @@ import { decryptSecret, pushBrandingToCloud } from '../ipc/settings'
 import { CLOUD_BRANDING_KEYS, hasCloudBrandingDifferences } from './companyBranding'
 import { reconcileLocalDefaultRoles } from './roleReconcile'
 import { ensureLocalBranchIdentity, reconcileIncomingBranch } from './branchReconcile'
+import { reconcileIncomingProduct } from './productReconcile'
 import { isDeviceLocked, reportDeviceRevoked } from './licenseService'
 
 const store = createCompanyStore()
@@ -1260,6 +1261,9 @@ export class SyncService {
   ): void {
     if (table === 'branches') {
       reconcileIncomingBranch(db, String(row.id || ''), row.code)
+    }
+    if (table === 'products') {
+      reconcileIncomingProduct(db, String(row.id || ''), row.sku)
     }
     const validColumns = this.getColumns(db, table)
     const localRow: Record<string, unknown> = {}
