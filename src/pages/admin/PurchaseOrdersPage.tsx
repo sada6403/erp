@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Plus, RefreshCw, Eye, Send, PackageCheck, XCircle, MessageSquare, Mail, Phone } from 'lucide-react'
+import {
+  Plus, RefreshCw, Eye, Send, PackageCheck, XCircle, MessageSquare, Mail, Phone,
+  Upload, Download, CheckCircle, FileSpreadsheet
+} from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
@@ -28,6 +31,58 @@ export default function PurchaseOrdersPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [viewPO, setViewPO]   = useState<(PO & { items?: POItem[] }) | null>(null)
   const [showReceive, setShowReceive] = useState(false)
+
+  // PO Excel Import & Template state
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{
+    importedPOs?: number
+    totalItems?: number
+    totalProcurementAmount?: number
+    warnings?: string[]
+  } | null>(null)
+  const [importSupplierId, setImportSupplierId] = useState('')
+  const [markReceived, setMarkReceived] = useState(true)
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([])
+
+  useEffect(() => {
+    window.api?.admin?.suppliers?.list?.().then((r: { success: boolean; data?: unknown[] }) => {
+      if (r?.success && Array.isArray(r.data)) {
+        setSuppliers(r.data.map((s: any) => ({ id: String(s.id), name: String(s.name) })))
+      }
+    }).catch(() => {})
+  }, [])
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const res = await window.api.purchases.downloadTemplate()
+      if (res?.success) toast.success('Purchase Order template downloaded successfully!')
+      else if (!res?.cancelled) toast.error(res?.error || 'Failed to download template')
+    } catch (err) {
+      toast.error('Failed to download template: ' + String(err))
+    }
+  }
+
+  const handleImportPOs = async () => {
+    setImporting(true)
+    try {
+      const res = await window.api.purchases.importExcel({
+        defaultSupplierId: importSupplierId || undefined,
+        markAsReceived: markReceived,
+      })
+      if (!res?.success) {
+        if (!res?.cancelled) toast.error(res?.error || 'Import failed')
+        return
+      }
+      setImportResult(res)
+      toast.success(`Successfully imported ${res.importedPOs} Purchase Orders (${res.totalItems} items)!`)
+      load()
+    } catch (err) {
+      toast.error('Import failed: ' + String(err))
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const load = async () => {
     setLoading(true)
@@ -98,6 +153,12 @@ export default function PurchaseOrdersPage() {
           <div className="flex gap-2">
             <button className="btn-ghost btn-sm gap-1.5" onClick={load} disabled={loading}>
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
+            </button>
+            <button className="btn-secondary btn-sm gap-1.5" onClick={handleDownloadTemplate}>
+              <Download size={14} /> PO Template
+            </button>
+            <button className="btn-secondary btn-sm gap-1.5" onClick={() => setShowImportModal(true)}>
+              <Upload size={14} /> Import PO (Excel)
             </button>
             <button className="btn-primary btn-sm gap-1.5" onClick={() => setShowCreate(true)}>
               <Plus size={14} /> New PO
@@ -188,6 +249,126 @@ export default function PurchaseOrdersPage() {
           </tbody>
         </table>
       </div>
+
+      {/* Excel Import Modal */}
+      {showImportModal && (
+        <Modal
+          title="Import Purchase Orders & Procurement (கொள்முதல் இறக்குமதி)"
+          onClose={() => { if (!importing) setShowImportModal(false) }}
+          footer={
+            <div className="flex justify-between items-center w-full">
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                className="btn-ghost btn-sm gap-1.5 text-sky-400 hover:text-sky-300"
+              >
+                <Download size={14} /> Download PO Template
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowImportModal(false)}
+                  disabled={importing}
+                  className="btn-secondary btn-sm"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleImportPOs}
+                  disabled={importing}
+                  className="btn-primary btn-sm gap-1.5"
+                >
+                  <Upload size={14} className={importing ? 'animate-spin' : ''} />
+                  {importing ? 'Importing...' : 'Select Excel File & Import'}
+                </button>
+              </div>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            {/* Supermarket direct compatibility notice */}
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 flex items-start gap-3">
+              <FileSpreadsheet size={20} className="text-emerald-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                <p className="text-xs font-semibold text-emerald-300">
+                  Direct Supermarket Tracker & PO Import (சூப்பர் மார்க்கெட் நேரடி இறக்குமதி)
+                </p>
+                <p className="text-[12px] text-slate-300 mt-1">
+                  You can upload <strong>Grocery Store Inventory Tracker.xlsx</strong> (all daily procurement sheets are automatically extracted) or <strong>FOOD CITY.xlsx</strong> or any standard PO template!
+                </p>
+                <p className="text-[11px] text-emerald-200/80 mt-1 italic">
+                  அனைத்து தினசரி கொள்முதல் தாள்களும் (13.10.2026, 14, 15.10.2026 போன்றவை) தானாகவே தேதியிடப்பட்ட தனித்தனி கொள்முதல் பட்டியல்களாக (PO) மாற்றப்பட்டு இருப்பு புதுப்பிக்கப்படும்.
+                </p>
+              </div>
+            </div>
+
+            {/* Options */}
+            <div className="bg-surface-800/80 border border-slate-700/60 rounded-xl p-3.5 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-slate-300 mb-1">
+                  Default Supplier (இயல்புநிலை சப்ளையர் - விருப்பத்தேர்வு)
+                </label>
+                <select
+                  value={importSupplierId}
+                  onChange={e => setImportSupplierId(e.target.value)}
+                  className="input w-full text-xs"
+                >
+                  <option value="">Auto-resolve from Excel / Create as needed</option>
+                  {suppliers.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Excel கோப்பில் சப்ளையர் பெயர் இருந்தால் அதுவே பயன்படுத்தப்படும்; இல்லையெனில் இங்கு தேர்வுசெய்யப்பட்ட சப்ளையர் ஒதுக்கப்படும்.
+                </p>
+              </div>
+
+              <div className="pt-2 border-t border-slate-700/60">
+                <label className="flex items-start gap-2.5 cursor-pointer text-slate-300 hover:text-white select-none">
+                  <input
+                    type="checkbox"
+                    checked={markReceived}
+                    onChange={e => setMarkReceived(e.target.checked)}
+                    className="mt-0.5 rounded text-brand-500 focus:ring-brand-400 bg-surface-900 border-slate-700"
+                  />
+                  <div>
+                    <span className="text-xs font-medium text-white block">
+                      Mark as RECEIVED and update inventory stocks immediately
+                    </span>
+                    <span className="text-[11px] text-slate-400 block mt-0.5">
+                      பொருட்கள் பெறப்பட்டதாகக் குறித்து, கிளை இருப்பில் உடனடியாகச் சேர்க்கப்படும் (Stock movement & inventory update).
+                    </span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Results card if any */}
+            {importResult && (
+              <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3.5 space-y-2">
+                <div className="flex items-center gap-2 text-sky-300 font-semibold text-xs">
+                  <CheckCircle size={16} /> Import Summary (இறக்குமதி சுருக்கம்)
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                  <div className="bg-surface-900/60 rounded-lg p-2 border border-slate-800">
+                    <div className="text-lg font-bold text-white">{importResult.importedPOs ?? 0}</div>
+                    <div className="text-[10px] text-slate-400 uppercase tracking-wide">Purchase Orders</div>
+                  </div>
+                  <div className="bg-surface-900/60 rounded-lg p-2 border border-slate-800">
+                    <div className="text-lg font-bold text-emerald-400">{importResult.totalItems ?? 0}</div>
+                    <div className="text-[10px] text-slate-400 uppercase tracking-wide">Total Items</div>
+                  </div>
+                  <div className="bg-surface-900/60 rounded-lg p-2 border border-slate-800">
+                    <div className="text-sm font-bold text-sky-300 mt-1">Rs.{(importResult.totalProcurementAmount ?? 0).toLocaleString()}</div>
+                    <div className="text-[10px] text-slate-400 uppercase tracking-wide">Total Value</div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
 
       {showCreate && (
         <CreatePOModal

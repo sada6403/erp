@@ -1049,8 +1049,91 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const XLSX = require('xlsx')
       const db = getDb()
       const workbook = XLSX.readFile(filePaths[0])
-      const sheet = workbook.Sheets[workbook.SheetNames[0]]
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, unknown>[]
+
+      // Smart Sheet & Header Selection (Supports Food City, Grocery Store Inventory Tracker, WooCommerce, Standard ERP)
+      let selectedSheetName = workbook.SheetNames[0]
+      let headerRowIndex = 0
+      let bestScore = -1
+      let rawSheetRows: unknown[][] = []
+
+      for (const sheetName of workbook.SheetNames) {
+        const s = workbook.Sheets[sheetName]
+        if (!s) continue
+        const raw = XLSX.utils.sheet_to_json(s, { header: 1, defval: '' }) as unknown[][]
+        if (!raw || raw.length === 0) continue
+
+        let foundHeaderIdx = -1
+        let nameColIdx = -1
+
+        for (let r = 0; r < Math.min(15, raw.length); r++) {
+          const rowStrings = (raw[r] || []).map(c => String(c).trim().toLowerCase())
+          let nIdx = rowStrings.findIndex(c =>
+            (c.includes('name') || c.includes('பெயர்')) &&
+            !c.includes('code') && !c.includes('குறியீடு') && !c.includes('category')
+          )
+          if (nIdx < 0) {
+            nIdx = rowStrings.findIndex(c =>
+              c.includes('item name') || c.includes('product name') || c.includes('பொருளின் பெயர்') ||
+              c === 'product' || c === 'name' || c === 'item'
+            )
+          }
+          if (nIdx >= 0) {
+            foundHeaderIdx = r
+            nameColIdx = nIdx
+            break
+          }
+        }
+
+        if (foundHeaderIdx >= 0 && nameColIdx >= 0) {
+          const headers = (raw[foundHeaderIdx] || []).map(c => String(c).trim().toLowerCase())
+          let validRowCount = 0
+          for (let r = foundHeaderIdx + 1; r < raw.length; r++) {
+            const row = raw[r] || []
+            const val = String(row[nameColIdx] || '').trim()
+            if (val && !/^(total|balance|average|subtotal)$/i.test(val)) {
+              validRowCount++
+            }
+          }
+
+          let score = validRowCount
+          if (headers.some(h => h.includes('selling price') || h.includes('new price') || h.includes('cost price') || h.includes('balance stock') || h.includes('விற்பனை விலை'))) {
+            score += 200
+          }
+          if (sheetName.toLowerCase().includes('stock and sales') || sheetName.toLowerCase().includes('inventory') || sheetName.toLowerCase().includes('catalog')) {
+            score += 100
+          }
+          if (/^\.?\d{1,2}[.-]\d{1,2}[.-]\d{2,4}$/.test(sheetName) || /^\.?\d{1,2}$/.test(sheetName)) {
+            score -= 50
+          }
+
+          if (score > bestScore) {
+            bestScore = score
+            selectedSheetName = sheetName
+            headerRowIndex = foundHeaderIdx
+            rawSheetRows = raw
+          }
+        }
+      }
+
+      let rows: Record<string, unknown>[] = []
+      if (rawSheetRows.length > headerRowIndex) {
+        const headers = (rawSheetRows[headerRowIndex] || []).map(c => String(c ?? '').trim())
+        for (let r = headerRowIndex + 1; r < rawSheetRows.length; r++) {
+          const rowData = rawSheetRows[r] || []
+          if (!rowData || rowData.every(c => c === '' || c === null || c === undefined)) continue
+          const rowObj: Record<string, unknown> = {}
+          for (let c = 0; c < headers.length; c++) {
+            const h = headers[c] || `__EMPTY_${c}`
+            rowObj[h] = rowData[c] ?? ''
+          }
+          rows.push(rowObj)
+        }
+      }
+
+      const sheet = workbook.Sheets[selectedSheetName]
+      if (rows.length === 0) {
+        rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, unknown>[]
+      }
 
       if (rows.length === 0) return { success: false, error: 'No data found in file' }
 
@@ -1319,13 +1402,19 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         return { success: true, data: { imported, created, updated, skipped, errors, warnings, mode: 'code_name_list' } }
       }
 
-      // Flexible column mapping (case-insensitive, trim)
-      const norm = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+      // Flexible column mapping (case-insensitive, trim, punctuation-agnostic)
+      const norm = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/.]+/g, '')
       const colMap = (row: Record<string, unknown>, ...aliases: string[]): string => {
         const keys = Object.keys(row)
         for (const alias of aliases) {
-          const found = keys.find(k => norm(k) === norm(alias))
-          if (found) return String(row[found] ?? '').trim()
+          const aNorm = norm(alias)
+          const found = keys.find(k => {
+            const kNorm = norm(k)
+            return kNorm === aNorm || (aNorm.length >= 4 && (kNorm.startsWith(aNorm) || kNorm.includes(aNorm)))
+          })
+          if (found && row[found] !== undefined && row[found] !== null && String(row[found]).trim() !== '') {
+            return String(row[found]).trim()
+          }
         }
         return ''
       }
@@ -1385,7 +1474,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
             if (isMatch) {
               const valStr = String(row[key] ?? '').trim()
-              if (valStr !== '') {
+              if (valStr !== '' && !/^no$/i.test(valStr)) {
                 const parsed = parseInt(valStr, 10)
                 if (!isNaN(parsed) && parsed >= 0) {
                   result.set(branch.id, { qty: parsed, branchName: branch.name })
@@ -1398,9 +1487,17 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         // Fallback: If no branch-specific columns matched in this row, check for generic Stock column and optional Branch column
         if (result.size === 0) {
           const branchVal = colMap(row, 'branch', 'branchname', 'branch name', 'branchcode', 'branch code', 'location')
-          const stockVal = colMap(row, 'stock', 'quantity', 'qty', 'opening stock', 'openingstock')
+          const stockVal = colMap(
+            row,
+            'balance stock', 'balancestock', 'balance', 'balalnce',
+            'opening stock', 'openingstock',
+            'stock', 'quantity', 'qty',
+            'quantity of stock', 'quantityofstock',
+            'current stock', 'currentstock',
+            'quantity of sales', 'quantityofsales'
+          )
 
-          if (stockVal !== '') {
+          if (stockVal !== '' && !/^no$/i.test(stockVal)) {
             const parsed = parseInt(stockVal, 10)
             if (!isNaN(parsed) && parsed >= 0) {
               let targetBranch: { id: string; name: string; code?: string } | undefined
@@ -1428,14 +1525,14 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i]
         try {
-          const name         = colMap(row, 'name', 'productname', 'product name', 'item name', 'itemname')
-          const rawSku       = colMap(row, 'sku', 'code', 'itemcode', 'item code', 'product code').trim()
+          const name         = colMap(row, 'name', 'productname', 'product name', 'item name', 'itemname', 'பொருளின் பெயர்', 'பொருள்')
+          const rawSku       = colMap(row, 'sku', 'code', 'itemcode', 'item code', 'product code', 'product no', 'productno', 'பொருள் குறியீடு').trim()
           const rawBarcode   = colMap(row, 'barcode', 'ean', 'upc', 'gtin', 'isbn').trim()
-          const categoryName = colMap(row, 'category', 'categoryname', 'category name')
+          const categoryName = colMap(row, 'category', 'categoryname', 'category name', 'வகை', 'பிரிவு')
           const supplierName = colMap(row, 'supplier', 'suppliername', 'supplier name', 'vendor')
-          const unit         = colMap(row, 'unit', 'uom', 'measure') || 'pcs'
-          const costPrice    = parseFloat(colMap(row, 'cost', 'costprice', 'cost price', 'purchase price') || '0') || 0
-          const sellingPrice = parseFloat(colMap(row, 'price', 'sellingprice', 'selling price', 'sale price', 'mrp') || '0') || 0
+          const rawUnit      = colMap(row, 'unit', 'uom', 'measure', 'அலகு')
+          const costPrice    = parseFloat(colMap(row, 'cost', 'costprice', 'cost price', 'purchase price', 'வாங்கிய விலை', 'unit cost') || '0') || 0
+          const sellingPrice = parseFloat(colMap(row, 'new price', 'newprice', 'price', 'sellingprice', 'selling price', 'sale price', 'mrp', 'விற்பனை விலை') || '0') || 0
           const taxRate      = parseFloat(colMap(row, 'tax', 'taxrate', 'tax rate', 'vat') || '0') || 0
           const minStock     = parseInt(colMap(row, 'minstock', 'min stock', 'reorder', 'reorder level') || '5') || 5
           const description  = colMap(row, 'description', 'desc', 'notes')
@@ -1443,15 +1540,19 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
           if (!name) { skipped++; continue }
 
-          const hasSku = rawSku !== ''
-          const hasBarcode = rawBarcode !== ''
+          let unit = 'pcs'
+          if (rawUnit) {
+            const uLower = rawUnit.toLowerCase()
+            if (uLower.includes('kg') || uLower.includes('kilo')) unit = 'kg'
+            else if (uLower.includes('ltr') || uLower.includes('liter') || uLower.includes('litre')) unit = 'ltr'
+            else if (uLower.includes('pkt') || uLower.includes('packet')) unit = 'pkt'
+            else if (uLower.includes('box')) unit = 'box'
+            else if (uLower.includes('g') || uLower.includes('gm')) unit = 'g'
+            else if (uLower !== '1' && !/^\d+$/.test(uLower)) unit = rawUnit
+          }
 
-          if (!hasSku) {
-            warnings.push(`Row ${i + 2}: "${name}" — SKU வழங்கப்படவில்லை (No SKU provided in CSV)`)
-          }
-          if (!hasBarcode) {
-            warnings.push(`Row ${i + 2}: "${name}" — Barcode வழங்கப்படவில்லை (No Barcode provided in CSV)`)
-          }
+          const hasSku = rawSku !== '' && !/^no$/i.test(rawSku)
+          const hasBarcode = rawBarcode !== '' && !/^no$/i.test(rawBarcode)
 
           let discountPct = 0
           if (discountVal !== '') {
@@ -1470,12 +1571,32 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           }
 
           const normalizedCategory = normalizeCategoryPath(categoryName)
-          const categoryId = normalizedCategory ? (catMap.get(titleCase(normalizedCategory).toLowerCase()) || null) : null
+          let categoryId = normalizedCategory ? (catMap.get(titleCase(normalizedCategory).toLowerCase()) || null) : null
+
+          // Auto-create category in DB if provided in Excel but missing in DB
+          if (normalizedCategory && !categoryId) {
+            const newCatId = crypto.randomUUID()
+            const catTitle = titleCase(normalizedCategory)
+            try {
+              db.prepare('INSERT INTO categories (id, name, sort_order, is_active, created_at, updated_at) VALUES (?, ?, 0, 1, datetime("now"), datetime("now"))')
+                .run(newCatId, catTitle)
+              catMap.set(catTitle.toLowerCase(), newCatId)
+              categoryId = newCatId
+              await enqueuSync('categories', newCatId, 'INSERT', { id: newCatId, name: catTitle, is_active: 1 })
+            } catch {
+              // Ignore if already created
+            }
+          }
+
           const supplierId  = supplierName ? (supMap.get(supplierName.toLowerCase()) || null) : null
 
           // Determine branch ownership for imported products
           const importUser = store.get('auth_user') as Record<string, unknown> | undefined
           const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
+
+          // Fallback SKU generation if missing
+          const catPrefix = (normalizedCategory || 'PRD').trim().slice(0, 3).toUpperCase().replace(/[^A-Z]/g, '') || 'PRD'
+          const fallbackSku = `${catPrefix}-${String(i + 1).padStart(3, '0')}`
 
           // Lookup existing product by user-supplied SKU, Barcode, or Name — PREVENTS DUPLICATE ENTRY
           const existing = findExistingProduct(db, hasSku ? rawSku : null, hasBarcode ? rawBarcode : null, name)
@@ -1487,13 +1608,12 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
           const productId = existing ? String(existing.id) : crypto.randomUUID()
 
-          // Exactly what the user provided, NO auto-generated category/brand SKUs!
           const finalBarcode = hasBarcode ? rawBarcode : (existing ? (existing.barcode as string | null) : null)
           const finalSku = hasSku
             ? rawSku
             : (existing
                 ? (existing.sku as string)
-                : (hasBarcode ? rawBarcode : `NO-SKU-${productId.slice(0, 8).toUpperCase()}`))
+                : (hasBarcode ? rawBarcode : fallbackSku))
 
           if (existing) {
             let finalName: string

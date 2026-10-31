@@ -428,7 +428,9 @@ const api = {
     create:         (payload: unknown)                              => ipcRenderer.invoke('purchases:create', payload),
     update:         (id: string, payload: unknown)                  => ipcRenderer.invoke('purchases:update', id, payload),
     updateStatus:   (id: string, status: string, payload?: unknown) => ipcRenderer.invoke('purchases:updateStatus', id, status, payload),
-    notifySupplier: (id: string, options?: unknown)                 => ipcRenderer.invoke('purchases:notifySupplier', id, options),
+    notifySupplier:   (id: string, options?: unknown)                 => ipcRenderer.invoke('purchases:notifySupplier', id, options),
+    importExcel:      (options?: unknown)                             => ipcRenderer.invoke('purchases:importExcel', options),
+    downloadTemplate: ()                                              => ipcRenderer.invoke('purchases:downloadTemplate'),
   },
 
   // Returns / Refunds

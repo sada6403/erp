@@ -10,6 +10,7 @@ import { safeHandleModule } from './ipcHandler'
 import { sendEmail } from '../services/emailService'
 import { sendWhatsApp } from '../services/whatsappService'
 import { canManageProcurement, resolveMainBranchId } from '../services/branchAccess'
+import { importPOsFromExcel, downloadPOTemplate } from '../services/purchaseImportExport'
 
 const store = createCompanyStore()
 
@@ -622,5 +623,15 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       sendEmail: options.sendEmail !== false,
     })
     return { success: true, data: notification }
+  })
+
+  // Bulk Import Purchase Orders from Excel (supports Grocery Store Tracker & Food City & Standard POs)
+  safeHandleModule(ipcMain, 'purchases:importExcel', 'purchase_orders', async (_e, options?: { branchId?: string; defaultSupplierId?: string; markAsReceived?: boolean }) => {
+    return await importPOsFromExcel(options)
+  })
+
+  // Download Purchase Order Import Template
+  safeHandleModule(ipcMain, 'purchases:downloadTemplate', 'purchase_orders', async () => {
+    return await downloadPOTemplate()
   })
 }
