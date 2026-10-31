@@ -69,6 +69,9 @@ const api = {
     pendingApproval:    ()                                        => ipcRenderer.invoke('invoices:pendingApproval'),
     creditSummary:      (customerId: string)                      => ipcRenderer.invoke('invoices:creditSummary', customerId),
     applyEdit:          (id: string, payload: unknown)            => ipcRenderer.invoke('invoices:applyEdit', id, payload),
+    downloadTemplate:   ()                                        => ipcRenderer.invoke('invoices:downloadTemplate'),
+    importExcel:        (options?: unknown)                       => ipcRenderer.invoke('invoices:importExcel', options),
+    exportExcel:        (filters?: unknown)                       => ipcRenderer.invoke('invoices:exportExcel', filters),
   },
 
   // POS cart "Hold" — pauses a cart-in-progress, separate from invoices

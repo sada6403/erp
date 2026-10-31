@@ -18,6 +18,7 @@ import { sendSms } from '../services/smsService'
 import { sendWhatsApp } from '../services/whatsappService'
 import { notificationAllowed } from '../services/chitNotifications'
 import { isDeviceLocked } from '../services/licenseService'
+import { downloadPastSalesTemplate, importSalesFromExcel, exportBillsToExcel } from '../services/salesImportExport'
 
 const store = createCompanyStore()
 
@@ -1175,5 +1176,20 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           available_credit: Math.max(0, (customer?.credit_limit || 0) - ledger.balance),
         }
       }
+  })
+
+  // Download past sales import template (.xlsx)
+  safeHandle(ipcMain, 'invoices:downloadTemplate', async () => {
+    return downloadPastSalesTemplate()
+  })
+
+  // Import past sales from Excel (.xlsx, .xls, .csv)
+  safeHandle(ipcMain, 'invoices:importExcel', async (_e, options) => {
+    return importSalesFromExcel(options)
+  })
+
+  // Export bills / sales output to Excel (.xlsx)
+  safeHandle(ipcMain, 'invoices:exportExcel', async (_e, filters) => {
+    return exportBillsToExcel(filters)
   })
 }

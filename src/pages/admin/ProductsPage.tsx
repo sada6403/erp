@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import NumberInput from '@/components/shared/NumberInput'
+import SearchableSelect from '@/components/shared/SearchableSelect'
 import type { Product, Category, Supplier } from '@/types'
 import {
   Plus, Search, Edit2, Package, ToggleLeft, ToggleRight, Upload, X, Download,
@@ -1023,11 +1024,18 @@ function QuickCategoryModal({ allCategories, onClose, onCreated }: {
               onChange={e => setForm(f => ({...f, name: e.target.value}))} autoFocus />
           </div>
           <div>
-            <label className="label">Parent Category</label>
-            <select className="input" value={form.parent_id} onChange={e => setForm(f => ({...f, parent_id: e.target.value}))}>
-              <option value="">Select Category</option>
-              {allCategories.filter(c => c.is_active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <label className="label">Parent Category (முதன்மைப் பிரிவு)</label>
+            <SearchableSelect
+              options={allCategories.filter(c => c.is_active).map(c => ({
+                value: c.id,
+                label: c.name,
+              }))}
+              value={form.parent_id}
+              onChange={val => setForm(f => ({ ...f, parent_id: val }))}
+              placeholder="None (Root Category)"
+              searchPlaceholder="Search parent category..."
+              allowClear
+            />
           </div>
           <div>
             <label className="label">Short Code</label>
@@ -1612,20 +1620,32 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
               </div>
               <div>
                 <label className="label">Category (பிரிவு) <span className="text-red-400">*</span></label>
-                <div className="flex gap-1.5">
-                  <select value={form.category_id} onChange={f('category_id')} className="input flex-1">
-                    <option value="">Select category</option>
-                    {localCategories.filter(c => c.is_active).map(c => (
-                      <option key={c.id} value={c.id}>{categoryPath(c.id) || c.name}</option>
-                    ))}
-                  </select>
+                <div className="flex gap-1.5 items-center">
+                  <div className="flex-1 min-w-0">
+                    <SearchableSelect
+                      options={localCategories
+                        .filter(c => c.is_active)
+                        .map(c => ({
+                          value: c.id,
+                          label: c.name,
+                          sublabel: categoryPath(c.id) !== c.name ? categoryPath(c.id) : undefined,
+                        }))}
+                      value={form.category_id}
+                      onChange={val => setForm(p => ({ ...p, category_id: val }))}
+                      placeholder="Select category (பிரிவு)"
+                      searchPlaceholder="Search category... (வகையைத் தேடுக...)"
+                      allowClear
+                      onAddNew={() => setShowAddCategory(true)}
+                      addNewLabel="Create Category"
+                    />
+                  </div>
                   <button
                     type="button"
                     onClick={() => setShowAddCategory(true)}
-                    className="btn-primary btn-sm w-9 flex items-center justify-center flex-shrink-0"
+                    className="btn-primary btn-sm w-9 h-[38px] flex items-center justify-center flex-shrink-0 rounded-lg shadow-sm"
                     title="Add new category"
                   >
-                    <Plus size={14} />
+                    <Plus size={15} />
                   </button>
                 </div>
               </div>
