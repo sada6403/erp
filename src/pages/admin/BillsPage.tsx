@@ -20,6 +20,7 @@ interface ImportResult {
   importedItems?: number
   totalSalesAmount?: number
   skippedCount?: number
+  autoCreatedProductsCount?: number
   warnings?: string[]
   error?: string
 }
@@ -54,6 +55,8 @@ export default function BillsPage() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importDeductStock, setImportDeductStock] = useState(false)
+  const [importAutoCreateProducts, setImportAutoCreateProducts] = useState(true)
+  const [importOverwriteExisting, setImportOverwriteExisting] = useState(false)
   const [importBranchId, setImportBranchId] = useState('')
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
 
@@ -156,6 +159,8 @@ export default function BillsPage() {
       const res = await window.api.invoices.importExcel({
         deductStock: importDeductStock,
         branchId: (isAdmin && importBranchId) || undefined,
+        autoCreateProducts: importAutoCreateProducts,
+        overwriteExisting: importOverwriteExisting,
       })
       if (res.success) {
         setImportResult(res)
@@ -433,7 +438,7 @@ export default function BillsPage() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   <div className="p-3 rounded-lg bg-surface-800 border border-surface-700">
                     <p className="text-xs text-slate-400">Bills Imported</p>
                     <p className="text-xl font-bold text-slate-100 mt-1">{importResult.importedBills?.toLocaleString()}</p>
@@ -445,6 +450,10 @@ export default function BillsPage() {
                   <div className="p-3 rounded-lg bg-surface-800 border border-surface-700">
                     <p className="text-xs text-slate-400">Total Revenue</p>
                     <p className="text-xl font-bold text-emerald-400 mt-1">Rs. {Number(importResult.totalSalesAmount || 0).toLocaleString()}</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-surface-800 border border-surface-700">
+                    <p className="text-xs text-slate-400">New Products Added</p>
+                    <p className="text-xl font-bold text-indigo-400 mt-1">{importResult.autoCreatedProductsCount ?? 0}</p>
                   </div>
                   <div className="p-3 rounded-lg bg-surface-800 border border-surface-700">
                     <p className="text-xs text-slate-400">Skipped / Duplicates</p>
@@ -511,6 +520,40 @@ export default function BillsPage() {
                   <label className="flex items-start gap-3 cursor-pointer select-none">
                     <input
                       type="checkbox"
+                      checked={importAutoCreateProducts}
+                      onChange={e => setImportAutoCreateProducts(e.target.checked)}
+                      className="mt-1 rounded bg-surface-700 border-surface-600 text-blue-500 focus:ring-0"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-slate-200">Automatically create missing products in catalog?</span>
+                      <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                        <strong className="text-emerald-400">Default: On (Recommended).</strong> If product columns (e.g. &ldquo;BISCUTE 30 RS&rdquo;, &ldquo;CHEES&rdquo;, &ldquo;LEMON&rdquo;) are not found in your active products catalog, the system will automatically register them with prices extracted from the headers so no sales items are skipped.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="p-3 rounded-xl bg-surface-800/80 border border-surface-700">
+                  <label className="flex items-start gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={importOverwriteExisting}
+                      onChange={e => setImportOverwriteExisting(e.target.checked)}
+                      className="mt-1 rounded bg-surface-700 border-surface-600 text-amber-500 focus:ring-0"
+                    />
+                    <div>
+                      <span className="text-sm font-medium text-slate-200">Overwrite previously imported bills with matching numbers?</span>
+                      <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                        <strong className="text-slate-300">Default: Off.</strong> Turn this ON if you previously imported this file with missing product columns and want to re-import it cleanly to overwrite those incomplete bills.
+                      </p>
+                    </div>
+                  </label>
+                </div>
+
+                <div className="p-3 rounded-xl bg-surface-800/80 border border-surface-700">
+                  <label className="flex items-start gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
                       checked={importDeductStock}
                       onChange={e => setImportDeductStock(e.target.checked)}
                       className="mt-1 rounded bg-surface-700 border-surface-600 text-blue-500 focus:ring-0"
@@ -527,7 +570,7 @@ export default function BillsPage() {
                 <div className="p-3 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-start gap-2.5">
                   <HelpCircle size={16} className="text-blue-400 flex-shrink-0 mt-0.5" />
                   <p className="text-xs text-blue-300 leading-relaxed">
-                    Existing bills with matching Bill Numbers will be safely skipped to avoid duplicate entries. Customers not yet in the system will be automatically registered.
+                    Existing bills with matching Bill Numbers will be safely skipped (unless overwrite is enabled). Customers and products not yet in the system will be automatically registered.
                   </p>
                 </div>
               </>

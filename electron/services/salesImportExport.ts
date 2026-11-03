@@ -10,8 +10,6 @@ import { insertStockMovement } from './stockMovement'
 import { syncStockRow, syncCustomerRow } from './stockSync'
 import { createCompanyStore } from './companyWorkspace'
 
-const store = createCompanyStore()
-
 interface ProductRecord {
   id: string
   name: string
@@ -44,6 +42,8 @@ interface ParsedBill {
 export interface ImportSalesOptions {
   deductStock?: boolean
   branchId?: string
+  autoCreateProducts?: boolean
+  overwriteExisting?: boolean
 }
 
 export interface ExportBillsFilters {
@@ -57,6 +57,61 @@ export interface ExportBillsFilters {
 
 function money(v: number): number {
   return Math.round((Number(v) || 0) * 100) / 100
+}
+
+/**
+ * Extracts clean product name and price from header column like "BISCUTE 30 RS", "BISCUT 250", etc.
+ */
+export function extractHeaderInfo(header: string): { cleanName: string; extractedPrice?: number } {
+  const trimmed = header.trim()
+  if (!trimmed) return { cleanName: '' }
+
+  // 1) Pattern: "BISCUTE 30 RS", "BISCUTE 30RS", "BISCUTE 30/-", "BISCUTE RS 30"
+  const rsMatch = trimmed.match(/^(.*?)\s+(?:rs\.?|lkr\.?|inr\.?)?\s*(\d+(?:\.\d+)?)\s*(?:rs|r|\/\-)$/i)
+  if (rsMatch && rsMatch[1] && rsMatch[2]) {
+    const num = parseFloat(rsMatch[2])
+    if (num > 0 && num < 1000000) {
+      return { cleanName: rsMatch[1].trim(), extractedPrice: num }
+    }
+  }
+
+  // 2) Pattern: "RS. 30 BISCUTE" or "RS 30 BISCUTE"
+  const prefixRsMatch = trimmed.match(/^(?:rs\.?|lkr\.?|inr\.?)\s*(\d+(?:\.\d+)?)\s+(.+)$/i)
+  if (prefixRsMatch && prefixRsMatch[1] && prefixRsMatch[2]) {
+    const num = parseFloat(prefixRsMatch[1])
+    if (num > 0 && num < 1000000) {
+      return { cleanName: prefixRsMatch[2].trim(), extractedPrice: num }
+    }
+  }
+
+  // 3) Pattern: "BISCUT 250" - trailing number if name has letters and not followed by units
+  const trailingNumMatch = trimmed.match(/^([a-zA-Z\s]+?)\s+(\d+(?:\.\d+)?)$/i)
+  if (trailingNumMatch && trailingNumMatch[1] && trailingNumMatch[2]) {
+    const num = parseFloat(trailingNumMatch[2])
+    if (num > 0 && num < 1000000) {
+      return { cleanName: trailingNumMatch[1].trim(), extractedPrice: num }
+    }
+  }
+
+  return { cleanName: trimmed }
+}
+
+export function editDistance(a: string, b: string): number {
+  if (a === b) return 0
+  const la = a.length, lb = b.length
+  if (la === 0) return lb
+  if (lb === 0) return la
+  if (Math.abs(la - lb) > 3) return 999
+  let prev = Array.from({ length: lb + 1 }, (_, i) => i)
+  for (let i = 1; i <= la; i++) {
+    const curr = [i]
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1
+      curr[j] = Math.min(curr[j - 1] + 1, prev[j] + 1, prev[j - 1] + cost)
+    }
+    prev = curr
+  }
+  return prev[lb]
 }
 
 function parseQuantity(raw: unknown): number {
@@ -88,7 +143,11 @@ function parseExcelDate(val: unknown): string {
 }
 
 function getAuthUser(): Record<string, unknown> | undefined {
-  return store.get('auth_user') as Record<string, unknown> | undefined
+  try {
+    return createCompanyStore().get('auth_user') as Record<string, unknown> | undefined
+  } catch {
+    return undefined
+  }
 }
 
 function defaultBranchId(): string {
@@ -243,6 +302,7 @@ export async function importSalesFromExcel(
   importedItems?: number
   totalSalesAmount?: number
   skippedCount?: number
+  autoCreatedProductsCount?: number
   warnings?: string[]
 }> {
   try {
@@ -317,6 +377,9 @@ export async function importSalesFromExcel(
     const user = getAuthUser()
     const branchId = options.branchId || (user?.branch_id as string) || defaultBranchId()
     const deductStock = Boolean(options.deductStock)
+    const autoCreateProducts = options.autoCreateProducts !== false
+    const overwriteExisting = Boolean(options.overwriteExisting)
+    let autoCreatedProductsCount = 0
 
     // Load active products for matching
     const allProducts = db.prepare(`
@@ -351,8 +414,18 @@ export async function importSalesFromExcel(
       const qNorm = q.toLowerCase().replace(/[^a-z0-9]/g, '')
       if (byNormalized.has(qNorm)) return byNormalized.get(qNorm)
 
+      // Try cleaned name (without trailing price/currency)
+      const { cleanName } = extractHeaderInfo(q)
+      if (cleanName && cleanName.toLowerCase() !== q.toLowerCase()) {
+        if (bySku.has(cleanName.toLowerCase())) return bySku.get(cleanName.toLowerCase())
+        if (byName.has(cleanName.toLowerCase())) return byName.get(cleanName.toLowerCase())
+        const cleanNorm = cleanName.toLowerCase().replace(/[^a-z0-9]/g, '')
+        if (cleanNorm && byNormalized.has(cleanNorm)) return byNormalized.get(cleanNorm)
+      }
+
       // Token word matching
-      const tokens = q.toLowerCase().split(/\s+/).filter(t => t.length > 1)
+      const targetQuery = cleanName || q
+      const tokens = targetQuery.toLowerCase().split(/\s+/).filter(t => t.length > 1)
       if (tokens.length > 0) {
         let best: ProductRecord | undefined
         let bestScore = 0
@@ -371,13 +444,97 @@ export async function importSalesFromExcel(
       }
 
       // Substring matching
+      const normToUse = cleanName ? cleanName.toLowerCase().replace(/[^a-z0-9]/g, '') : qNorm
       for (const p of allProducts) {
         const pClean = p.name.toLowerCase().replace(/[^a-z0-9]/g, '')
-        if (pClean.includes(qNorm) || (qNorm.length >= 4 && qNorm.includes(pClean))) {
+        if (pClean.includes(normToUse) || (normToUse.length >= 4 && normToUse.includes(pClean))) {
           return p
         }
       }
+
+      // Fuzzy matching via Edit Distance on normalized strings
+      if (normToUse.length >= 4) {
+        const maxDist = normToUse.length >= 7 ? 2 : 1
+        let bestFuzzy: ProductRecord | undefined
+        let bestDist = maxDist + 1
+        for (const p of allProducts) {
+          const pNorm = p.name.toLowerCase().replace(/[^a-z0-9]/g, '')
+          if (Math.abs(pNorm.length - normToUse.length) <= maxDist) {
+            const dist = editDistance(normToUse, pNorm)
+            if (dist <= maxDist && dist < bestDist) {
+              bestFuzzy = p
+              bestDist = dist
+            }
+          }
+        }
+        if (bestFuzzy) return bestFuzzy
+      }
+
       return undefined
+    }
+
+    // Helper: auto-creates product if not present and autoCreateProducts is enabled
+    const resolveOrCreateProduct = (rawName: string, fallbackPrice?: number): ProductRecord | undefined => {
+      let prod = findProduct(rawName)
+      if (prod) return prod
+
+      const { cleanName, extractedPrice } = extractHeaderInfo(rawName)
+      if (cleanName && cleanName.toLowerCase() !== rawName.toLowerCase()) {
+        prod = findProduct(cleanName)
+        if (prod) return prod
+      }
+
+      if (!autoCreateProducts) return undefined
+
+      // Auto-create missing product so past sales items are not dropped
+      const newId = crypto.randomUUID()
+      const price = extractedPrice !== undefined && extractedPrice > 0
+        ? extractedPrice
+        : (fallbackPrice !== undefined && fallbackPrice > 0 ? fallbackPrice : 0)
+      const cleanSlug = (cleanName || rawName).replace(/[^a-zA-Z0-9]/g, '').slice(0, 8).toUpperCase() || 'PROD'
+      const newSku = `IMP-${cleanSlug}-${crypto.randomUUID().slice(0, 4).toUpperCase()}`
+
+      const newProd: ProductRecord = {
+        id: newId,
+        name: rawName.trim(),
+        sku: newSku,
+        barcode: null,
+        selling_price: money(price),
+        cost_price: price > 0 ? money(price * 0.8) : 0,
+        tax_rate: 0,
+        unit: 'pcs',
+        category_name: 'Imported',
+      }
+
+      try {
+        db.prepare(`
+          INSERT INTO products (id, name, sku, barcode, selling_price, cost_price, tax_rate, unit, is_active, created_at, updated_at)
+          VALUES (@id, @name, @sku, @barcode, @selling_price, @cost_price, @tax_rate, @unit, 1, datetime('now'), datetime('now'))
+        `).run(newProd)
+
+        allProducts.push(newProd)
+        byName.set(newProd.name.trim().toLowerCase(), newProd)
+        bySku.set(newProd.sku.trim().toLowerCase(), newProd)
+        const norm = newProd.name.toLowerCase().replace(/[^a-z0-9]/g, '')
+        if (norm) byNormalized.set(norm, newProd)
+
+        enqueuSync('products', newId, 'INSERT', {
+          id: newId,
+          name: newProd.name,
+          sku: newProd.sku,
+          selling_price: newProd.selling_price,
+          cost_price: newProd.cost_price,
+          tax_rate: 0,
+          unit: 'pcs',
+          is_active: 1,
+        }).catch(() => {})
+
+        autoCreatedProductsCount++
+        return newProd
+      } catch (err) {
+        warnings.push(`Failed to auto-create product "${rawName}": ${(err as Error).message}`)
+        return undefined
+      }
     }
 
     // Load existing customers for auto-matching
@@ -475,16 +632,17 @@ export async function importSalesFromExcel(
       const custColIdx = headers.findIndex(h => /cutomer|customer/i.test(h))
       const dateColIdx = headers.findIndex(h => /date|time/i.test(h))
 
-      const productColumns: Array<{ colIdx: number; headerName: string; product?: ProductRecord }> = []
+      const productColumns: Array<{ colIdx: number; headerName: string; product?: ProductRecord; extractedPrice?: number }> = []
 
       for (let c = 0; c < headers.length; c++) {
         if (c === billColIdx || c === custColIdx || c === dateColIdx) continue
         const hName = headers[c]?.trim()
         if (!hName || /^(name|sl|no|total|amount|balalnce|balance)$/i.test(hName)) continue
 
-        const matchedProd = findProduct(hName)
+        const { extractedPrice } = extractHeaderInfo(hName)
+        const matchedProd = resolveOrCreateProduct(hName, extractedPrice)
         if (matchedProd) {
-          productColumns.push({ colIdx: c, headerName: hName, product: matchedProd })
+          productColumns.push({ colIdx: c, headerName: hName, product: matchedProd, extractedPrice })
         } else {
           warnings.push(`Matrix product column "${hName}" could not be matched to an active product.`)
         }
@@ -508,23 +666,28 @@ export async function importSalesFromExcel(
           const val = row[col.colIdx]
           const qty = parseQuantity(val)
           if (qty > 0 && col.product) {
+            const unitPrice = col.product.selling_price > 0 ? col.product.selling_price : (col.extractedPrice || 0)
             items.push({
               query: col.product.sku,
               quantity: qty,
-              unitPrice: col.product.selling_price,
+              unitPrice,
             })
           }
         }
 
         if (items.length > 0) {
-          billsMap.set(billNo, {
-            invoiceNumber: billNo,
-            date,
-            customerName: custName,
-            customerPhone: '',
-            paymentMethod: 'cash',
-            items,
-          })
+          if (billsMap.has(billNo)) {
+            billsMap.get(billNo)!.items.push(...items)
+          } else {
+            billsMap.set(billNo, {
+              invoiceNumber: billNo,
+              date,
+              customerName: custName,
+              customerPhone: '',
+              paymentMethod: 'cash',
+              items,
+            })
+          }
         }
       }
     }
@@ -578,9 +741,16 @@ export async function importSalesFromExcel(
 
     const executeTransaction = db.transaction(() => {
       for (const [_, bill] of billsMap) {
-        if (checkInvoiceExists.get(bill.invoiceNumber)) {
-          skippedCount++
-          continue
+        const existing = checkInvoiceExists.get(bill.invoiceNumber) as { id: string } | undefined
+        if (existing) {
+          if (!overwriteExisting) {
+            skippedCount++
+            continue
+          }
+          // Overwrite mode: delete old invoice and associated records before re-inserting
+          db.prepare('DELETE FROM invoice_items WHERE invoice_id = ?').run(existing.id)
+          db.prepare('DELETE FROM payments WHERE invoice_id = ?').run(existing.id)
+          db.prepare('DELETE FROM invoices WHERE id = ?').run(existing.id)
         }
 
         const customerId = resolveCustomerId(bill.customerName, bill.customerPhone)
@@ -602,7 +772,7 @@ export async function importSalesFromExcel(
         }> = []
 
         for (const item of bill.items) {
-          const product = findProduct(item.query)
+          const product = resolveOrCreateProduct(item.query, item.unitPrice)
           if (!product) {
             warnings.push(`Item "${item.query}" in bill ${bill.invoiceNumber} not found in catalog, skipped.`)
             continue
@@ -750,6 +920,7 @@ export async function importSalesFromExcel(
         importedItems,
         totalSalesAmount: money(totalSalesAmount),
         skippedCount,
+        autoCreatedProductsCount,
       },
     })
 
@@ -761,6 +932,7 @@ export async function importSalesFromExcel(
       importedItems,
       totalSalesAmount: money(totalSalesAmount),
       skippedCount,
+      autoCreatedProductsCount,
       warnings: warnings.slice(0, 50),
     }
   } catch (err) {
