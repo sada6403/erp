@@ -150,6 +150,23 @@ CREATE TABLE IF NOT EXISTS stocks (
 CREATE INDEX IF NOT EXISTS idx_stocks_product ON stocks(product_id);
 CREATE INDEX IF NOT EXISTS idx_stocks_branch  ON stocks(branch_id);
 
+-- ─── PENDING BRANCH STOCKS (Staged stock from Excel for uncreated branches) ───
+CREATE TABLE IF NOT EXISTS pending_branch_stocks (
+  id                TEXT PRIMARY KEY,
+  branch_name       TEXT NOT NULL,
+  product_id        TEXT NOT NULL REFERENCES products(id),
+  quantity          INTEGER NOT NULL DEFAULT 0,
+  stock_date        TEXT,
+  sale_price        REAL,
+  status            TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'applied' | 'dismissed'
+  notes             TEXT,
+  created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+  applied_at        TEXT,
+  applied_branch_id TEXT REFERENCES branches(id)
+);
+CREATE INDEX IF NOT EXISTS idx_pending_branch_stocks_name ON pending_branch_stocks(branch_name, status);
+CREATE INDEX IF NOT EXISTS idx_pending_branch_stocks_prod ON pending_branch_stocks(product_id);
+
 -- ─── PRODUCT ATTRIBUTES & VARIANTS ─────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS product_attributes (
   id             TEXT PRIMARY KEY,

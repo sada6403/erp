@@ -5,6 +5,7 @@ import { app } from 'electron'
 import crypto from 'crypto'
 import { enqueuSync } from './services/syncQueue'
 import { createCompanyStore, getActiveWorkspaceDir } from './services/companyWorkspace'
+import { initPendingBranchStocksTable } from './services/pendingBranchStocks'
 
 let db: Database.Database
 
@@ -66,6 +67,7 @@ export async function initDatabase(): Promise<void> {
     ON sync_pull_quarantine(table_name, record_id);
   `)
   runMigrations()
+  initPendingBranchStocksTable(db)
 
   console.log('[DB] SQLite initialized at', dbPath)
 }

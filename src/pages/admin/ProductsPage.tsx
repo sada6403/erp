@@ -1,4 +1,5 @@
 import ProductVariantBuilder, { type VariantItem } from '@/components/admin/ProductVariantBuilder'
+import FurnitureImportPreview, { type FurnitureImportFile } from '@/components/admin/FurnitureImportPreview'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -67,6 +68,7 @@ export default function ProductsPage() {
   const [showImportModal, setShowImportModal] = useState(false)
   const [duplicateStrategy, setDuplicateStrategy] = useState<'fill_empty' | 'override' | 'skip'>('fill_empty')
   const [importing, setImporting] = useState(false)
+  const [importPreviewFile, setImportPreviewFile] = useState<FurnitureImportFile | null>(null)
   const [importResult, setImportResult] = useState<{
     imported: number
     created?: number
@@ -74,6 +76,8 @@ export default function ProductsPage() {
     skipped: number
     errors: string[]
     warnings?: string[]
+    missingBranches?: { name: string; itemCount: number; totalQty: number }[]
+    pendingBranchStocksCount?: number
   } | null>(null)
 
   // Post-mutation refresh (create/update/delete/import/normalize) always
@@ -163,12 +167,18 @@ export default function ProductsPage() {
   useEffect(() => { setPage(1) }, [search, catFilter, brandFilter, branchFilter])
   useEffect(() => { if (page > pageCount) setPage(pageCount) }, [page, pageCount])
 
-  const handleImportExcel = async (strategy: 'fill_empty' | 'override' | 'skip' = duplicateStrategy) => {
+  const handleImportExcel = async (strategy: 'fill_empty' | 'override' | 'skip' = duplicateStrategy, reviewId?: string) => {
     setShowImportModal(false)
     setImporting(true)
     try {
-      const res = await window.api.products.importExcel({ duplicateStrategy: strategy })
-      if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Import failed'); return }
+      if (currentUser?.business_type === 'furniture' && !reviewId) {
+        const opened = await window.api.products.importPreview.open()
+        if (!opened.success) { if (opened.error !== 'Cancelled') toast.error(opened.error || 'Could not open import preview'); return false }
+        setImportPreviewFile(opened.data)
+        return true
+      }
+      const res = await window.api.products.importExcel({ duplicateStrategy: strategy, reviewId })
+      if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Import failed'); return false }
       const data = res.data as {
         imported: number
         created?: number
@@ -178,10 +188,12 @@ export default function ProductsPage() {
         errors: string[]
         warnings?: string[]
         mode?: string
+        missingBranches?: { name: string; itemCount: number; totalQty: number }[]
+        pendingBranchStocksCount?: number
       }
       load()
       loadAudit()
-      if ((data.warnings && data.warnings.length > 0) || (data.errors && data.errors.length > 0)) {
+      if ((data.warnings && data.warnings.length > 0) || (data.errors && data.errors.length > 0) || (data.missingBranches && data.missingBranches.length > 0)) {
         setImportResult(data)
       } else {
         const createdCount = data.created ?? (data.imported - (data.updated ?? 0))
@@ -189,8 +201,10 @@ export default function ProductsPage() {
         const detail = ` (${createdCount} new, ${updatedCount} updated${data.skipped ? `, ${data.skipped} skipped` : ''})`
         toast.success(`Import completed: ${data.imported} products processed${detail}`)
       }
+      return true
     } catch (err) {
       toast.error('Import failed: ' + String(err))
+      return false
     } finally {
       setImporting(false)
     }
@@ -613,6 +627,7 @@ export default function ProductsPage() {
       )}
 
       {/* Permanent Delete Confirmation Modal */}
+      {importPreviewFile && <FurnitureImportPreview file={importPreviewFile} initialStrategy={duplicateStrategy} onClose={() => setImportPreviewFile(null)} onConfirm={(reviewId, strategy) => handleImportExcel(strategy, reviewId)} />}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
           <div className="card w-full max-w-md" style={{ border: '1px solid #ef4444' }}>
@@ -728,12 +743,15 @@ export default function ProductsPage() {
                 className="btn-primary btn-sm gap-1.5"
               >
                 <Upload size={14} />
-                Select File & Import
+                {currentUser?.business_type === 'furniture' ? 'Select File & Preview' : 'Select File & Import'}
               </button>
             </div>
           }
         >
           <div className="space-y-4">
+            {currentUser?.business_type === 'furniture' && (
+              <p className="text-sm text-sky-300">Download Template includes product details, prices, supplier, barcode and stock columns for your branches. Your existing Branch, Stock Date, Item Code, Description, Qty, Sale Price sheets are also supported. Unknown branches stay pending until created.</p>
+            )}
             {/* Multi-Branch Stock Import Banner */}
             <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3.5 flex items-start gap-3">
               <Package size={18} className="text-sky-400 flex-shrink-0 mt-0.5" />
@@ -939,7 +957,7 @@ export default function ProductsPage() {
                 <div className="flex items-center gap-2">
                   <AlertTriangle size={16} className="text-amber-400 flex-shrink-0" />
                   <span className="text-xs font-bold text-amber-300">
-                    Warnings: Missing SKU / Barcode ({importResult.warnings.length})
+                    Import warnings ({importResult.warnings.length})
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-300">

@@ -92,6 +92,8 @@ beforeAll(async () => {
 
   const { registerAdminHandlers } = await import('../ipc/admin')
   registerAdminHandlers(fakeIpcMain)
+  const { registerProductHandlers } = await import('../ipc/products')
+  registerProductHandlers(fakeIpcMain)
 })
 
 function seedBranch(id: string, name: string, code: string) {
@@ -326,5 +328,61 @@ describe('Universal Delete — audit-logging gaps closed on Branches and Roles',
 
     const audit = db.prepare(`SELECT * FROM audit_logs WHERE action='ROLE_DELETED' AND record_id=?`).get(roleId)
     expect(audit).toBeTruthy()
+  })
+})
+
+
+describe('pending imported product deletion', () => {
+  const admin = makeSession({ id: 'u-pending-delete-admin', permissions: { all: true } })
+  const branchId = 'b1111111-1111-4111-8111-111111111111'
+  beforeAll(() => { seedUser('u-pending-delete-admin', branchId) })
+
+  function seedPendingProduct(id: string) {
+    db.prepare('INSERT INTO products (id, name, sku) VALUES (?, ?, ?)').run(id, id, id)
+    db.prepare(`INSERT INTO pending_branch_stocks (id, branch_name, product_id, quantity)
+      VALUES (?, 'UNCREATED QA BRANCH', ?, 4)`).run('pending-' + id, id)
+    db.prepare('INSERT INTO stocks (id, product_id, branch_id, quantity) VALUES (?, ?, ?, 2)')
+      .run('stock-' + id, id, branchId)
+  }
+
+  it('removes pending stock only for the confirmed product and queues its deletion', async () => {
+    setSession(admin)
+    seedPendingProduct('qa-pending-delete')
+    seedPendingProduct('qa-pending-keep')
+    const result = await call('products:permanentDelete', 'qa-pending-delete', 'Remove test import')
+    expect(result.success).toBe(true)
+    expect(db.prepare('SELECT id FROM products WHERE id=?').get('qa-pending-delete')).toBeUndefined()
+    expect(db.prepare('SELECT id FROM pending_branch_stocks WHERE product_id=?').get('qa-pending-delete')).toBeUndefined()
+    expect(db.prepare('SELECT quantity FROM pending_branch_stocks WHERE product_id=?').get('qa-pending-keep')).toEqual({ quantity: 4 })
+    expect(db.prepare("SELECT operation FROM sync_queue WHERE table_name='products' AND record_id=?").get('qa-pending-delete')).toEqual({ operation: 'DELETE' })
+  })
+
+  it('preserves pending stock when sales history prevents product deletion', async () => {
+    setSession(admin)
+    seedPendingProduct('qa-pending-sale')
+    db.prepare(`INSERT INTO stock_movements (id, product_id, from_branch_id, quantity, movement_type)
+      VALUES ('qa-pending-sale-movement', 'qa-pending-sale', ?, 1, 'SALE')`).run(branchId)
+    const result = await call('products:permanentDelete', 'qa-pending-sale', 'Remove test import')
+    expect(result.success).toBe(false)
+    expect(result.error).toMatch(/sales\/transfer/)
+    expect(db.prepare('SELECT quantity FROM pending_branch_stocks WHERE product_id=?').get('qa-pending-sale')).toEqual({ quantity: 4 })
+    expect(db.prepare('SELECT quantity FROM stocks WHERE product_id=?').get('qa-pending-sale')).toEqual({ quantity: 2 })
+  })
+
+  it('rolls back pending stock cleanup and the audit if product deletion fails', async () => {
+    setSession(admin)
+    seedPendingProduct('qa-pending-fail')
+    db.exec(`CREATE TRIGGER reject_pending_qa_delete BEFORE DELETE ON products
+      WHEN OLD.id = 'qa-pending-fail'
+      BEGIN SELECT RAISE(ABORT, 'QA deletion failed'); END;`)
+    try {
+      const result = await call('products:permanentDelete', 'qa-pending-fail', 'Remove test import')
+      expect(result.success).toBe(false)
+      expect(result.error).toBe('QA deletion failed')
+      expect(db.prepare('SELECT quantity FROM pending_branch_stocks WHERE product_id=?').get('qa-pending-fail')).toEqual({ quantity: 4 })
+      expect(db.prepare('SELECT quantity FROM stocks WHERE product_id=?').get('qa-pending-fail')).toEqual({ quantity: 2 })
+      expect(db.prepare("SELECT id FROM audit_logs WHERE action='PRODUCT_PERMANENT_DELETE' AND record_id=?").get('qa-pending-fail')).toBeUndefined()
+      expect(db.prepare("SELECT id FROM sync_queue WHERE table_name='products' AND record_id=? AND operation='DELETE'").get('qa-pending-fail')).toBeUndefined()
+    } finally { db.exec('DROP TRIGGER reject_pending_qa_delete') }
   })
 })

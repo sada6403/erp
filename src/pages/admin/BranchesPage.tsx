@@ -65,6 +65,8 @@ export default function BranchesPage() {
   const perms = getPerms(user)
   const isAdmin = Boolean(perms.all)
 
+  const [pendingStocks, setPendingStocks] = useState<{ branch_name: string; item_count: number; total_qty: number }[]>([])
+  const [pendingName, setPendingName] = useState('')
   const [branches, setBranches] = useState<Record<string,unknown>[]>([])
   const [users, setUsers] = useState<Record<string,unknown>[]>([])
   const [showForm,   setShowForm]   = useState(false)
@@ -75,6 +77,10 @@ export default function BranchesPage() {
 
   const load = async () => {
     try {
+      if (isAdmin && user?.business_type === 'furniture') {
+        const pending = await window.api.admin.branches.getPendingStocks()
+        if (pending.success) setPendingStocks(pending.data as typeof pendingStocks)
+      }
       const [branchRes, userRes] = await Promise.all([
         window.api.admin.branches.list(),
         window.api.admin.users.list(),
@@ -138,7 +144,7 @@ export default function BranchesPage() {
         actions={
           <>
           <button
-            onClick={() => { setEditing(null); setShowForm(true) }}
+            onClick={() => { setPendingName(''); setEditing(null); setShowForm(true) }}
             className="btn-primary btn-sm gap-1.5"
           >
             <Plus size={14} /> Add Branch
@@ -148,6 +154,18 @@ export default function BranchesPage() {
       />
 
       <div className="flex-1 overflow-auto p-6">
+        {isAdmin && user?.business_type === 'furniture' && pendingStocks.length > 0 && (
+          <div className="mb-6 rounded-xl border border-amber-500/30 p-4 space-y-3">
+            <h3 className="font-semibold">Pending Furniture Branch Stock</h3>
+            <p className="text-sm text-slate-400">Create the matching branch to apply its imported stock automatically.</p>
+            {pendingStocks.map(row => (
+              <div key={row.branch_name} className="flex items-center justify-between gap-4">
+                <span>{row.branch_name} / {row.item_count} items / {row.total_qty} units</span>
+                <button className="btn-primary btn-sm" onClick={() => { setPendingName(row.branch_name); setEditing(null); setShowForm(true) }}>Create Branch</button>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {branches.map(b => (
             <div
@@ -243,6 +261,7 @@ export default function BranchesPage() {
 
       {showForm && !editing && (
         <CreateBranchWizard
+          initialName={pendingName}
           onClose={() => setShowForm(false)}
           onDone={() => { setShowForm(false); load() }}
         />
@@ -494,7 +513,7 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function CreateBranchWizard({ onClose, onDone, initialName = '' }: { onClose: () => void; onDone: () => void; initialName?: string }) {
   const [step, setStep] = useState(0)
   const [saving, setSaving] = useState(false)
   const [resending, setResending] = useState(false)
@@ -502,7 +521,7 @@ function CreateBranchWizard({ onClose, onDone }: { onClose: () => void; onDone: 
   const [result, setResult] = useState<{ id: string; manager_email: string; email_sent: boolean; email_error: string | null; admin_email?: string | null; activation_sent?: boolean; activation_error?: string | null } | null>(null)
   const [form, setForm] = useState({
     manager_name: '', manager_email: '',
-    name: '', code: '', branch_pin: '', address: '', phone: '', email: '',
+    name: initialName, code: '', branch_pin: '', address: '', phone: '', email: '',
   })
   const f = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm(p => ({ ...p, [k]: e.target.value }))

@@ -16,6 +16,9 @@ import { decryptSecret } from './settings'
 import { buildSku, categoryCodeFromName, normalizeCategoryPath, titleCase } from '../lib/catalog'
 import { safeHandle } from './ipcHandler'
 import { canManageAllBranchStock } from '../services/branchAccess'
+import { recordPendingBranchStock, parseDateFlex } from '../services/pendingBranchStocks'
+import { createFurnitureProductTemplate, readAdditionalProductFields } from '../services/productSpreadsheet'
+import { buildFurnitureImportReview, describeFurnitureSheet, furnitureImportFingerprint, recommendFurnitureHeader, type FieldMapping, type ImportStrategy } from '../services/furnitureImportPreview'
 
 const store = createCompanyStore()
 
@@ -154,6 +157,70 @@ function firstImage(value: string): string | null {
 }
 
 export function registerProductHandlers(ipcMain: IpcMain) {
+  const importSessions = new Map<string, {
+    owner: string; workspace: string; expires: number; fileName: string;
+    sheets: Record<string, unknown[][]>;
+    review?: { id: string; rows: Record<string, unknown>[]; fingerprint: string; strategy: ImportStrategy }
+  }>()
+  const requireFurnitureImport = () => {
+    if (((store.get('app_settings') as Record<string, unknown>) || {}).business_type !== 'furniture') throw new Error('Import preview is available only for furniture companies')
+    const user = getAuthUser()
+    if (!user?.id || !canManageAllBranchStock(getDb(), user)) throw new Error('Main-branch inventory manager or Company Admin access required')
+    if (!getDb().prepare('SELECT id FROM users WHERE id=? AND is_active=1').get(String(user.id))) throw new Error('Please sign in again before importing')
+    return String(user.id)
+  }
+  const getImportSession = (id: string) => {
+    const owner = requireFurnitureImport()
+    const session = importSessions.get(id)
+    if (!session || session.owner !== owner || session.workspace !== getActiveWorkspaceDir() || session.expires < Date.now()) {
+      if (session?.owner === owner) importSessions.delete(id)
+      throw new Error('Import preview expired or the company changed. Select the file again.')
+    }
+    return session
+  }
+  safeHandle(ipcMain, 'products:importPreview:open', async () => {
+    const owner = requireFurnitureImport()
+    const selected = await dialog.showOpenDialog({ title: 'Select Furniture Excel for Preview', filters: [{ name: 'Excel / CSV', extensions: ['xlsx', 'xls', 'csv'] }], properties: ['openFile'] })
+    if (selected.canceled || !selected.filePaths?.[0]) return { success: false, error: 'Cancelled' }
+    const XLSX = require('xlsx')
+    const book = XLSX.readFile(selected.filePaths[0])
+    const sheets = Object.fromEntries(book.SheetNames.map((name: string) => [name, XLSX.utils.sheet_to_json(book.Sheets[name], { header: 1, defval: '', raw: true })])) as Record<string, unknown[][]>
+    const available = Object.entries(sheets).filter(([, grid]) => grid.length).map(([name, grid]) => ({ name, rowCount: grid.length - 1, headerRow: recommendFurnitureHeader(grid) }))
+    if (!available.length) return { success: false, error: 'No data found in file' }
+    const preferred = available.find(sheet => /consolidated.*stock/i.test(sheet.name)) || available.find(sheet => /^(products|furniture stock)$/i.test(sheet.name)) || available.find(sheet => !/summary|instructions|read.?me|coverage|reconciliation/i.test(sheet.name)) || available[0]
+    for (const [id, session] of importSessions) if (session.owner === owner || session.expires < Date.now()) importSessions.delete(id)
+    const sessionId = crypto.randomUUID()
+    importSessions.set(sessionId, { owner, workspace: getActiveWorkspaceDir(), expires: Date.now() + 30 * 60_000, fileName: path.basename(selected.filePaths[0]), sheets })
+    const branches = getDb().prepare('SELECT id, name, code FROM branches WHERE is_active=1 ORDER BY name').all() as { id: string; name: string; code?: string }[]
+    return { success: true, data: { sessionId, fileName: path.basename(selected.filePaths[0]), sheets: available, selectedSheet: preferred.name, headerRow: preferred.headerRow, branches, ...describeFurnitureSheet(sheets[preferred.name], preferred.headerRow, branches) } }
+  })
+  safeHandle(ipcMain, 'products:importPreview:describe', (_e, request: { sessionId: string; sheetName: string; headerRow: number }) => {
+    const session = getImportSession(request.sessionId)
+    const grid = session.sheets[request.sheetName]
+    if (!grid) throw new Error('Sheet not found in selected workbook')
+    session.review = undefined
+    const branches = getDb().prepare('SELECT name, code FROM branches').all() as { name: string; code?: string }[]
+    return { success: true, data: describeFurnitureSheet(grid, request.headerRow, branches) }
+  })
+  safeHandle(ipcMain, 'products:importPreview:review', (_e, request: { sessionId: string; sheetName: string; headerRow: number; mapping: FieldMapping; duplicateStrategy: ImportStrategy; defaultBranchId?: string }) => {
+    const session = getImportSession(request.sessionId)
+    session.review = undefined
+    const grid = session.sheets[request.sheetName]
+    if (!grid) throw new Error('Sheet not found in selected workbook')
+    if (!['fill_empty', 'override', 'skip'].includes(request.duplicateStrategy)) throw new Error('Choose a valid existing-product strategy')
+    const { rows, review } = buildFurnitureImportReview(getDb(), grid, request.headerRow, request.mapping, request.duplicateStrategy, request.defaultBranchId)
+    if (!review.errors.length) {
+      const reviewId = crypto.randomUUID()
+      session.review = { id: reviewId, rows, fingerprint: furnitureImportFingerprint(getDb()), strategy: request.duplicateStrategy }
+      review.reviewId = reviewId
+    }
+    return { success: true, data: review }
+  })
+  safeHandle(ipcMain, 'products:importPreview:cancel', (_e, id: string) => {
+    const session = importSessions.get(id)
+    if (session && session.owner === String(getAuthUser()?.id)) importSessions.delete(id)
+    return { success: true }
+  })
   // One product's own configured pack/box unit (product_uom, is_base=0) per
   // row — a small, cheap dataset (one row per product that has a pack unit
   // configured, most don't). Lets POS/reports show "N box + M pcs" without
@@ -903,18 +970,19 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         return { success: false, error: `Cannot permanently delete — ${ruleCnt} commission rule(s) reference this product. Remove or repoint them first.` }
       }
 
-      // Audit log before deletion
-      logAudit(db, {
-        userId: (caller?.id as string) || null,
-        branchId: ((caller?.branch_id || (caller?.branch as Record<string,unknown>)?.id) as string) || null,
-        action: 'PRODUCT_PERMANENT_DELETE',
-        tableName: 'products',
-        recordId: id,
-        oldValues: { name: product.name, sku: product.sku, barcode: product.barcode, reason },
-      })
-
-      // Remove related disposable records (discounts, batches, uom, stock_movements, stocks) then product, atomically
+      // Pending imports belong to the explicitly deleted product. Keep their
+      // cleanup and the audit in the same transaction as the product removal.
       db.transaction(() => {
+        logAudit(db, {
+          userId: (caller?.id as string) || null,
+          branchId: ((caller?.branch_id || (caller?.branch as Record<string,unknown>)?.id) as string) || null,
+          action: 'PRODUCT_PERMANENT_DELETE',
+          tableName: 'products',
+          recordId: id,
+          oldValues: { name: product.name, sku: product.sku, barcode: product.barcode, reason },
+        })
+
+        db.prepare('DELETE FROM pending_branch_stocks WHERE product_id = ?').run(id)
         try { db.prepare(`DELETE FROM discounts WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
         try { db.prepare(`DELETE FROM product_batches WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
         try { db.prepare(`DELETE FROM product_uom WHERE product_id = ?`).run(id) } catch { /* ignore if not present */ }
@@ -1014,17 +1082,88 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       return { success: true, data: localUrl, local_only: true }
   })
 
+  function resolveUniqueSku(
+    db: ReturnType<typeof getDb>,
+    baseSku: string,
+    name: string,
+    currentProductId: string
+  ): string {
+    const candidate = baseSku.trim()
+    const conflict = db.prepare('SELECT id, name FROM products WHERE sku = ?').get(candidate) as { id: string; name: string } | undefined
+    if (!conflict || conflict.id === currentProductId) {
+      return candidate
+    }
+    const cleanConflictName = String(conflict.name || '').trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/]+/g, '')
+    const cleanName = String(name || '').trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/]+/g, '')
+    if (cleanConflictName === cleanName) {
+      return candidate
+    }
+
+    const paren = name.match(/\(([^)]+)\)/)
+    if (paren && paren[1].trim()) {
+      const variantTag = paren[1].trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+      if (variantTag) {
+        const candidateWithVariant = `${candidate}-${variantTag}`
+        const conflict2 = db.prepare('SELECT id, name FROM products WHERE sku = ?').get(candidateWithVariant) as { id: string; name: string } | undefined
+        if (!conflict2 || conflict2.id === currentProductId) {
+          return candidateWithVariant
+        }
+      }
+    }
+
+    let counter = 2
+    while (true) {
+      const candidateNumbered = `${candidate}-${counter}`
+      const conflictN = db.prepare('SELECT id, name FROM products WHERE sku = ?').get(candidateNumbered) as { id: string; name: string } | undefined
+      if (!conflictN || conflictN.id === currentProductId) {
+        return candidateNumbered
+      }
+      counter++
+    }
+  }
+
   function findExistingProduct(
     db: ReturnType<typeof getDb>,
     sku?: string | null,
     barcode?: string | null,
-    name?: string | null
+    name?: string | null,
+    isSupermarket: boolean = false
   ): Record<string, unknown> | undefined {
+    // If not supermarket, check exact product name first so variant items (e.g. CHAIR (RW)) don't get hijacked by CHAIR (JW)
+    if (!isSupermarket && name && name.trim()) {
+      const byName = db.prepare('SELECT * FROM products WHERE lower(trim(name)) = lower(trim(?)) AND is_active = 1 ORDER BY updated_at DESC LIMIT 1').get(name.trim()) as Record<string, unknown> | undefined
+      if (byName) return byName
+    }
+
     if (sku && sku.trim()) {
       const found = db.prepare('SELECT * FROM products WHERE sku = ? AND is_active = 1 LIMIT 1').get(sku.trim()) as Record<string, unknown> | undefined
-      if (found) return found
+      if (found) {
+        if (!isSupermarket && name && name.trim()) {
+          const cFound = String(found.name || '').trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/]+/g, '')
+          const cName = String(name).trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/]+/g, '')
+          if (cFound !== cName) {
+            // Different furniture item sharing base model code
+          } else {
+            return found
+          }
+        } else {
+          return found
+        }
+      }
       const anyStatus = db.prepare('SELECT * FROM products WHERE sku = ? LIMIT 1').get(sku.trim()) as Record<string, unknown> | undefined
-      if (anyStatus) return anyStatus
+      if (anyStatus) {
+        if (!isSupermarket && name && name.trim()) {
+          const cStatus = String(anyStatus.name || '').trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/]+/g, '')
+          const cName = String(name).trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/]+/g, '')
+          if (cStatus !== cName) {
+            // Different furniture item sharing base model code
+          } else {
+            return anyStatus
+          }
+        } else {
+          return anyStatus
+        }
+      }
     }
     if (barcode && barcode.trim()) {
       const found = db.prepare('SELECT * FROM products WHERE barcode = ? AND is_active = 1 LIMIT 1').get(barcode.trim()) as Record<string, unknown> | undefined
@@ -1037,18 +1176,31 @@ export function registerProductHandlers(ipcMain: IpcMain) {
     return undefined
   }
 
-  safeHandle(ipcMain, 'products:importExcel', async (_event, options?: { duplicateStrategy?: 'override' | 'fill_empty' | 'skip' }) => {
-      const duplicateStrategy = options?.duplicateStrategy || 'fill_empty'
-      const { filePaths } = await dialog.showOpenDialog({
+  safeHandle(ipcMain, 'products:importExcel', async (_event, options?: { duplicateStrategy?: 'override' | 'fill_empty' | 'skip'; reviewId?: string }) => {
+      let reviewedRows: Record<string, unknown>[] | undefined
+      let duplicateStrategy = options?.duplicateStrategy || 'fill_empty'
+      if (options?.reviewId) {
+        const entry = [...importSessions.entries()].find(([, session]) => session.review?.id === options.reviewId)
+        if (!entry) throw new Error('Preview not found or already imported. Review the file again.')
+        const session = getImportSession(entry[0])
+        const review = session.review!
+        if (review.fingerprint !== furnitureImportFingerprint(getDb())) throw new Error('Products or branch stock changed after this preview. Review the file again before importing.')
+        reviewedRows = review.rows
+        duplicateStrategy = review.strategy
+        importSessions.delete(entry[0])
+      }
+      const { filePaths } = reviewedRows ? { filePaths: [] } : await dialog.showOpenDialog({
         title: 'Select Excel File',
         filters: [{ name: 'Excel', extensions: ['xlsx', 'xls', 'csv'] }],
         properties: ['openFile']
       })
-      if (!filePaths || filePaths.length === 0) return { success: false, error: 'Cancelled' }
+      if (!reviewedRows && (!filePaths || filePaths.length === 0)) return { success: false, error: 'Cancelled' }
 
       const XLSX = require('xlsx')
       const db = getDb()
-      const workbook = XLSX.readFile(filePaths[0])
+      const workbook = reviewedRows
+        ? { SheetNames: ['Reviewed Products'], Sheets: { 'Reviewed Products': XLSX.utils.json_to_sheet(reviewedRows) } }
+        : XLSX.readFile(filePaths[0])
 
       // Smart Sheet & Header Selection (Supports Food City, Grocery Store Inventory Tracker, WooCommerce, Standard ERP)
       let selectedSheetName = workbook.SheetNames[0]
@@ -1074,6 +1226,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           if (nIdx < 0) {
             nIdx = rowStrings.findIndex(c =>
               c.includes('item name') || c.includes('product name') || c.includes('பொருளின் பெயர்') ||
+              c === 'description' || c.includes('description') || c === 'desc' ||
               c === 'product' || c === 'name' || c === 'item'
             )
           }
@@ -1096,8 +1249,11 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           }
 
           let score = validRowCount
-          if (headers.some(h => h.includes('selling price') || h.includes('new price') || h.includes('cost price') || h.includes('balance stock') || h.includes('விற்பனை விலை'))) {
+          if (headers.some(h => h.includes('selling price') || h.includes('new price') || h.includes('sale price') || h.includes('saleprice') || h.includes('cost price') || h.includes('balance stock') || h.includes('qty') || h.includes('விற்பனை விலை'))) {
             score += 200
+          }
+          if (headers.some(h => h.includes('branch')) && headers.some(h => h.includes('item code') || h.includes('code') || h.includes('sku'))) {
+            score += 150
           }
           if (sheetName.toLowerCase().includes('stock and sales') || sheetName.toLowerCase().includes('inventory') || sheetName.toLowerCase().includes('catalog')) {
             score += 100
@@ -1135,9 +1291,15 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         rows = XLSX.utils.sheet_to_json(sheet, { defval: '' }) as Record<string, unknown>[]
       }
 
+      // Preview rows are already validated and converted to the canonical POS
+      // field names. Do not pass them through workbook/header auto-detection a
+      // second time: that can reinterpret a custom source sheet and silently
+      // lose Product Name, causing every reviewed row to be skipped.
+      if (reviewedRows) rows = reviewedRows
+
       if (rows.length === 0) return { success: false, error: 'No data found in file' }
 
-      if (isWooCommerceExport(rows)) {
+      if (!reviewedRows && isWooCommerceExport(rows)) {
         const importUser = store.get('auth_user') as Record<string, unknown> | undefined
         const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
         const stockBranchId = importUser?.branch_id as string || 'b1111111-1111-4111-8111-111111111111'
@@ -1350,7 +1512,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
       }
 
-      if (isHeaderlessCodeNameFile(rows)) {
+      if (!reviewedRows && isHeaderlessCodeNameFile(rows)) {
         const importUser = getAuthUser()
         const importBranchId = isSuperAdmin(importUser) ? null : (importUser?.branch_id as string || null)
         const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as unknown[][]
@@ -1406,10 +1568,22 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const norm = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/.]+/g, '')
       const colMap = (row: Record<string, unknown>, ...aliases: string[]): string => {
         const keys = Object.keys(row)
+        // Prefer every exact alias before fuzzy matches: "Stock Date" must
+        // never win over the actual "Qty" column in furniture stock sheets.
+        for (const alias of aliases) {
+          const found = keys.find(k => norm(k) === norm(alias))
+          if (found && row[found] !== undefined && row[found] !== null && String(row[found]).trim() !== '') {
+            return String(row[found]).trim()
+          }
+        }
+        // A reviewed mapping is explicit: never fall back to a similarly named
+        // column (e.g. purchase/wholesale price becoming the selling price).
+        if (reviewedRows) return ''
         for (const alias of aliases) {
           const aNorm = norm(alias)
           const found = keys.find(k => {
             const kNorm = norm(k)
+            if (aNorm === 'stock' && ['stockdate', 'stockvalue', 'stockvaluelkr'].includes(kNorm)) return false
             return kNorm === aNorm || (aNorm.length >= 4 && (kNorm.startsWith(aNorm) || kNorm.includes(aNorm)))
           })
           if (found && row[found] !== undefined && row[found] !== null && String(row[found]).trim() !== '') {
@@ -1429,6 +1603,12 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const allBranches = db.prepare('SELECT id, name, code, is_active FROM branches').all() as { id: string; name: string; code?: string; is_active: number }[]
       const importUser = store.get('auth_user') as Record<string, unknown> | undefined
       const defaultBranchId = (importUser?.branch_id as string) || (allBranches.find(b => b.is_active)?.id) || 'b1111111-1111-4111-8111-111111111111'
+      const appSettings = (store.get('app_settings') as Record<string, unknown>) || {}
+      const isFurniture = appSettings.business_type === 'furniture'
+      const isSupermarket = appSettings.business_type === 'supermarket' || importUser?.business_type === 'supermarket'
+
+      const furnitureSheet = rows.some(row => colMap(row, 'branch') && colMap(row, 'item code') && colMap(row, 'stock date'))
+      if (furnitureSheet && !isFurniture) return { success: false, error: 'This branch stock sheet is available only for furniture companies' }
 
       // Standard product columns to protect from false-positive branch matching
       const standardCols = new Set([
@@ -1436,13 +1616,20 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         'price', 'sellingprice', 'cost', 'costprice', 'barcode', 'supplier', 'suppliername',
         'unit', 'tax', 'taxrate', 'vat', 'discount', 'discountpct', 'discountpercentage',
         'discountpercent', 'minstock', 'minstocklevel', 'reorder', 'reorderlevel',
-        'description', 'desc', 'notes', 'isactive', 'status', 'brand'
+        'description', 'desc', 'notes', 'isactive', 'status', 'brand', 'branch', 'stockdate',
+        'shortname', 'isbn', 'rackno', 'imageurl', 'saleby', 'commissiontype',
+        'customfield1', 'customfield2', 'customfield3', 'wholesaleprice', 'weight',
+        'employeecommission', 'notforsale', 'enableemi', 'managestock', 'fastproduct', 'saleaslatestprice'
       ])
       const normClean = (v: unknown) => String(v ?? '').trim().toLowerCase().replace(/[\s_\-\(\)\[\]:#/]+/g, '')
 
       // Helper to extract stock counts for all branches from row columns
-      const extractRowBranchStocks = (row: Record<string, unknown>): Map<string, { qty: number; branchName: string }> => {
+      const extractRowBranchStocks = (row: Record<string, unknown>): {
+        branchStocks: Map<string, { qty: number; branchName: string }>
+        missingBranchStock?: { branchName: string; qty: number }
+      } => {
         const result = new Map<string, { qty: number; branchName: string }>()
+        let missingBranchStock: { branchName: string; qty: number } | undefined
         const rowKeys = Object.keys(row)
 
         for (const branch of allBranches) {
@@ -1473,7 +1660,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
               (kClean === bClean)
 
             if (isMatch) {
-              const valStr = String(row[key] ?? '').trim()
+              const valStr = String(row[key] ?? '').trim().replace(/,/g, '')
               if (valStr !== '' && !/^no$/i.test(valStr)) {
                 const parsed = parseInt(valStr, 10)
                 if (!isNaN(parsed) && parsed >= 0) {
@@ -1498,44 +1685,56 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           )
 
           if (stockVal !== '' && !/^no$/i.test(stockVal)) {
-            const parsed = parseInt(stockVal, 10)
+            const parsed = parseInt(String(stockVal).replace(/,/g, '').trim(), 10)
             if (!isNaN(parsed) && parsed >= 0) {
               let targetBranch: { id: string; name: string; code?: string } | undefined
               if (branchVal) {
                 const bValNorm = norm(branchVal)
                 targetBranch = allBranches.find(b => norm(b.name) === bValNorm || (b.code && norm(b.code) === bValNorm))
               }
-              if (!targetBranch) {
-                targetBranch = allBranches.find(b => b.id === defaultBranchId) || allBranches[0]
-              }
               if (targetBranch) {
                 result.set(targetBranch.id, { qty: parsed, branchName: targetBranch.name })
+              } else if (branchVal && isFurniture) {
+                // Furniture imports stage stock until the named branch is created.
+                missingBranchStock = { branchName: branchVal.trim(), qty: parsed }
+              } else {
+                targetBranch = allBranches.find(b => b.id === defaultBranchId) || allBranches[0]
+                if (targetBranch) {
+                  result.set(targetBranch.id, { qty: parsed, branchName: targetBranch.name })
+                }
               }
             }
           }
         }
 
-        return result
+        return { branchStocks: result, missingBranchStock }
       }
 
       let imported = 0, created = 0, updated = 0, skipped = 0
       const errors: string[] = []
       const warnings: string[] = []
+      const missingBranchesMap = new Map<string, number>()
+      const missingBranchesQtyMap = new Map<string, number>()
+      let totalPendingStocksCount = 0
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i]
         try {
-          const name         = colMap(row, 'name', 'productname', 'product name', 'item name', 'itemname', 'பொருளின் பெயர்', 'பொருள்')
+          const name         = colMap(row, 'name', 'productname', 'product name', 'item name', 'itemname', 'description', 'desc', 'பொருளின் பெயர்', 'பொருள்')
           const rawSku       = colMap(row, 'sku', 'code', 'itemcode', 'item code', 'product code', 'product no', 'productno', 'பொருள் குறியீடு').trim()
           const rawBarcode   = colMap(row, 'barcode', 'ean', 'upc', 'gtin', 'isbn').trim()
           const categoryName = colMap(row, 'category', 'categoryname', 'category name', 'வகை', 'பிரிவு')
           const supplierName = colMap(row, 'supplier', 'suppliername', 'supplier name', 'vendor')
           const rawUnit      = colMap(row, 'unit', 'uom', 'measure', 'அலகு')
-          const costPrice    = parseFloat(colMap(row, 'cost', 'costprice', 'cost price', 'purchase price', 'வாங்கிய விலை', 'unit cost') || '0') || 0
-          const sellingPrice = parseFloat(colMap(row, 'new price', 'newprice', 'price', 'sellingprice', 'selling price', 'sale price', 'mrp', 'விற்பனை விலை') || '0') || 0
-          const taxRate      = parseFloat(colMap(row, 'tax', 'taxrate', 'tax rate', 'vat') || '0') || 0
-          const minStock     = parseInt(colMap(row, 'minstock', 'min stock', 'reorder', 'reorder level') || '5') || 5
+          const costPrice    = parseFloat(colMap(row, 'cost', 'costprice', 'cost price', 'purchase price', 'வாங்கிய விலை', 'unit cost').replace(/,/g, '') || '0') || 0
+          const sellingPrice = parseFloat(colMap(row, 'new price', 'newprice', 'price', 'sellingprice', 'selling price', 'sale price', 'saleprice', 'mrp', 'விற்பனை விலை').replace(/,/g, '') || '0') || 0
+          const taxRate      = parseFloat(colMap(row, 'tax', 'taxrate', 'tax rate', 'vat').replace(/,/g, '') || '0') || 0
+          const minStockText = colMap(row, 'min stock level', 'minstock', 'min stock', 'reorder', 'reorder level')
+          const minStock = minStockText === '' ? 5 : Number(minStockText.replace(/,/g, ''))
+          if (!Number.isInteger(minStock) || minStock < 0) throw new Error('Min Stock Level must be a non-negative integer')
+          const additionalFields = isFurniture ? readAdditionalProductFields(row) : {}
           const description  = colMap(row, 'description', 'desc', 'notes')
+          const stockDateVal = colMap(row, 'stock date', 'stockdate', 'date', 'stock_date')
           const discountVal  = colMap(row, 'discount', 'discountpct', 'discountpercentage', 'discountpercent', 'discount_pct', 'discount_percentage', 'discount %', 'discount percentage')
 
           if (!name) { skipped++; continue }
@@ -1551,7 +1750,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             else if (uLower !== '1' && !/^\d+$/.test(uLower)) unit = rawUnit
           }
 
-          const hasSku = rawSku !== '' && !/^no$/i.test(rawSku)
+          // Reviewed furniture imports require an explicit SKU. Preserve it exactly,
+          // including legitimate short codes such as "NO".
+          const hasSku = reviewedRows ? rawSku !== '' : rawSku !== '' && !/^no$/i.test(rawSku)
           const hasBarcode = rawBarcode !== '' && !/^no$/i.test(rawBarcode)
 
           let discountPct = 0
@@ -1588,7 +1789,13 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             }
           }
 
-          const supplierId  = supplierName ? (supMap.get(supplierName.toLowerCase()) || null) : null
+          let supplierId = supplierName ? (supMap.get(supplierName.toLowerCase()) || null) : null
+          if (isFurniture && supplierName && !supplierId) {
+            supplierId = crypto.randomUUID()
+            db.prepare('INSERT INTO suppliers (id, name) VALUES (?, ?)').run(supplierId, supplierName)
+            supMap.set(supplierName.toLowerCase(), supplierId)
+            await enqueuSync('suppliers', supplierId, 'INSERT', { id: supplierId, name: supplierName, is_active: 1 })
+          }
 
           // Determine branch ownership for imported products
           const importUser = store.get('auth_user') as Record<string, unknown> | undefined
@@ -1599,7 +1806,9 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           const fallbackSku = `${catPrefix}-${String(i + 1).padStart(3, '0')}`
 
           // Lookup existing product by user-supplied SKU, Barcode, or Name — PREVENTS DUPLICATE ENTRY
-          const existing = findExistingProduct(db, hasSku ? rawSku : null, hasBarcode ? rawBarcode : null, name)
+          const existing = reviewedRows
+            ? db.prepare('SELECT * FROM products WHERE lower(trim(sku)) = lower(trim(?)) LIMIT 1').get(rawSku) as Record<string, unknown> | undefined
+            : findExistingProduct(db, hasSku ? rawSku : null, hasBarcode ? rawBarcode : null, name, isSupermarket)
 
           if (existing && duplicateStrategy === 'skip') {
             skipped++
@@ -1607,10 +1816,13 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           }
 
           const productId = existing ? String(existing.id) : crypto.randomUUID()
+          let appliedDiscount = discountPct
+
+          const importActive = reviewedRows && existing ? Number(additionalFields.is_active ?? existing.is_active ?? 1) : 1
 
           const finalBarcode = hasBarcode ? rawBarcode : (existing ? (existing.barcode as string | null) : null)
           const finalSku = hasSku
-            ? rawSku
+            ? (!isSupermarket ? resolveUniqueSku(db, rawSku, name, productId) : rawSku)
             : (existing
                 ? (existing.sku as string)
                 : (hasBarcode ? rawBarcode : fallbackSku))
@@ -1632,7 +1844,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             if (duplicateStrategy === 'fill_empty') {
               // Fill only fields that were empty in previous upload
               finalName = (existing.name as string) || name
-              updatedSku = hasSku ? ((existing.sku as string) || rawSku) : (existing.sku as string)
+              updatedSku = hasSku ? (!isSupermarket ? resolveUniqueSku(db, rawSku, name, productId) : ((existing.sku as string) || rawSku)) : (existing.sku as string)
               updatedBarcode = (existing.barcode as string | null) || (hasBarcode ? rawBarcode : null)
               finalCategoryId = (existing.category_id as string | null) || categoryId || null
               finalSupplierId = (existing.supplier_id as string | null) || supplierId || null
@@ -1646,29 +1858,33 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             } else {
               // Override with new CSV data
               finalName = name || (existing.name as string)
-              updatedSku = hasSku ? rawSku : (existing.sku as string)
+              updatedSku = hasSku ? (!isSupermarket ? resolveUniqueSku(db, rawSku, name, productId) : rawSku) : (existing.sku as string)
               updatedBarcode = hasBarcode ? rawBarcode : (existing.barcode as string | null)
               finalCategoryId = categoryId || (existing.category_id as string | null)
               finalSupplierId = supplierId || (existing.supplier_id as string | null)
-              finalUnit = unit || (existing.unit as string) || 'pcs'
-              finalCost = costPrice > 0 ? costPrice : (existing.cost_price as number) || 0
-              finalSelling = sellingPrice > 0 ? sellingPrice : (existing.selling_price as number) || 0
-              finalTax = taxRate > 0 ? taxRate : (existing.tax_rate as number) || 0
-              finalDiscount = discountPct > 0 ? discountPct : (existing.discount_pct as number) || 0
-              finalMinStock = minStock !== 5 ? minStock : (existing.min_stock_level as number) || 5
+              finalUnit = reviewedRows && String(row.Unit ?? '').trim() === ''
+                ? ((existing.unit as string) || 'pcs')
+                : (unit || (existing.unit as string) || 'pcs')
+              finalCost = reviewedRows ? (String(row['Cost Price'] ?? '').trim() !== '' ? costPrice : Number(existing.cost_price || 0)) : costPrice > 0 ? costPrice : (existing.cost_price as number) || 0
+              finalSelling = reviewedRows ? (String(row['Selling Price'] ?? '').trim() !== '' ? sellingPrice : Number(existing.selling_price || 0)) : sellingPrice > 0 ? sellingPrice : (existing.selling_price as number) || 0
+              finalTax = reviewedRows ? (String(row['Tax Rate'] ?? '').trim() !== '' ? taxRate : Number(existing.tax_rate || 0)) : taxRate > 0 ? taxRate : (existing.tax_rate as number) || 0
+              finalDiscount = reviewedRows ? (String(row['Discount Percentage'] ?? '').trim() !== '' ? discountPct : Number(existing.discount_pct || 0)) : discountPct > 0 ? discountPct : (existing.discount_pct as number) || 0
+              finalMinStock = reviewedRows ? (minStockText !== '' ? minStock : Number(existing.min_stock_level ?? 5)) : minStock !== 5 ? minStock : (existing.min_stock_level as number) || 5
               finalDesc = description || (existing.description as string | null)
             }
 
+            appliedDiscount = finalDiscount
+
             db.prepare(`UPDATE products SET name=?, sku=?, category_id=?, supplier_id=?, barcode=?, unit=?,
-              cost_price=?, selling_price=?, tax_rate=?, discount_pct=?, min_stock_level=?, description=?, is_active=1, updated_at=datetime('now')
+              cost_price=?, selling_price=?, tax_rate=?, discount_pct=?, min_stock_level=?, description=?, is_active=?, updated_at=datetime('now')
               WHERE id=?`).run(finalName, updatedSku, finalCategoryId, finalSupplierId, updatedBarcode, finalUnit,
-              finalCost, finalSelling, finalTax, finalDiscount, finalMinStock, finalDesc, productId)
+              finalCost, finalSelling, finalTax, finalDiscount, finalMinStock, finalDesc, importActive, productId)
 
             await enqueuSync('products', productId, 'UPDATE', {
               id: productId, name: finalName, sku: updatedSku, barcode: updatedBarcode, category_id: finalCategoryId,
               supplier_id: finalSupplierId, unit: finalUnit, cost_price: finalCost,
               selling_price: finalSelling, tax_rate: finalTax, discount_pct: finalDiscount, min_stock_level: finalMinStock,
-              description: finalDesc, is_active: true
+              description: finalDesc, is_active: Boolean(importActive)
             })
             updated++
           } else {
@@ -1685,19 +1901,36 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             created++
           }
 
-          // Sync product discount rule if discountPct > 0
-          if (discountPct > 0) {
-            const existingDisc = db.prepare("SELECT id FROM discounts WHERE scope = 'product' AND product_id = ? AND branch_id IS NULL").get(productId) as { id: string } | undefined
-            if (existingDisc) {
-              db.prepare("UPDATE discounts SET value = ?, is_active = 1, updated_at = datetime('now') WHERE id = ?").run(discountPct, existingDisc.id)
-            } else {
-              db.prepare("INSERT INTO discounts (id, name, type, value, scope, product_id, is_active) VALUES (?, ?, 'percentage', ?, 'product', ?, 1)")
-                .run(crypto.randomUUID(), `${name} discount`, discountPct, productId)
+          // Persist optional full-template fields as well as the original stock-only format.
+          if (isFurniture) {
+            const values = { ...additionalFields }
+            if (minStockText !== '') values.alert_qty = minStock
+            const fields = Object.keys(values).filter(field => hasColumn(db, 'products', field)
+              && (!existing || duplicateStrategy !== 'fill_empty' || existing[field] === null || existing[field] === undefined || existing[field] === ''))
+            if (fields.length) {
+              db.prepare(`UPDATE products SET ${fields.map(field => `${field} = ?`).join(', ')}, updated_at=datetime('now') WHERE id = ?`)
+                .run(...fields.map(field => values[field]), productId)
+              await enqueuSync('products', productId, existing ? 'UPDATE' : 'INSERT', { id: productId, ...Object.fromEntries(fields.map(field => [field, values[field]])) })
             }
           }
 
+          // Keep the product-scoped discount rule consistent with the value that
+          // was actually persisted (including an explicit reviewed value of 0).
+          if (appliedDiscount > 0) {
+            const existingDisc = db.prepare("SELECT id FROM discounts WHERE scope = 'product' AND product_id = ? AND branch_id IS NULL").get(productId) as { id: string } | undefined
+            if (existingDisc) {
+              db.prepare("UPDATE discounts SET value = ?, is_active = 1, updated_at = datetime('now') WHERE id = ?").run(appliedDiscount, existingDisc.id)
+            } else {
+              db.prepare("INSERT INTO discounts (id, name, type, value, scope, product_id, is_active) VALUES (?, ?, 'percentage', ?, 'product', ?, 1)")
+                .run(crypto.randomUUID(), `${name} discount`, appliedDiscount, productId)
+            }
+          } else if (reviewedRows && existing) {
+            db.prepare("UPDATE discounts SET value = 0, is_active = 0, updated_at = datetime('now') WHERE scope = 'product' AND product_id = ? AND branch_id IS NULL")
+              .run(productId)
+          }
+
           // Set opening stock branch-wise for all branches specified in row
-          const branchStocks = extractRowBranchStocks(row)
+          const { branchStocks, missingBranchStock } = extractRowBranchStocks(row)
 
           if (branchStocks.size > 0) {
             const user = store.get('auth_user') as Record<string, unknown>
@@ -1742,6 +1975,25 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             }
           }
 
+          if (missingBranchStock && missingBranchStock.qty > 0) {
+            const user = store.get('auth_user') as Record<string, unknown>
+            if (!canManageAllBranchStock(db, user)) {
+              throw new Error('Only main-branch inventory managers can import stock quantities')
+            }
+            const bName = missingBranchStock.branchName
+            recordPendingBranchStock(db, {
+              branchName: bName,
+              productId,
+              quantity: missingBranchStock.qty,
+              stockDate: parseDateFlex(stockDateVal),
+              salePrice: sellingPrice > 0 ? sellingPrice : undefined,
+              notes: `Furniture import stock (${description || name})`
+            })
+            missingBranchesMap.set(bName, (missingBranchesMap.get(bName) || 0) + 1)
+            missingBranchesQtyMap.set(bName, (missingBranchesQtyMap.get(bName) || 0) + missingBranchStock.qty)
+            totalPendingStocksCount++
+          }
+
           imported++
         } catch (rowErr) {
           errors.push(`Row ${i + 2}: ${(rowErr as Error).message}`)
@@ -1749,7 +2001,34 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
       }
 
-      return { success: true, data: { imported, created, updated, skipped, errors, warnings, mode: 'standard', duplicateStrategy } }
+      if (missingBranchesMap.size > 0) {
+        for (const [bName, count] of missingBranchesMap.entries()) {
+          const totalQty = missingBranchesQtyMap.get(bName) || 0
+          warnings.push(`Branch "${bName}" does not exist in the system. ${count} item(s) (${totalQty} total quantity) held in PENDING stock. Please create branch "${bName}" in Branch Settings to apply this stock automatically.`)
+        }
+      }
+
+      const missingBranches = Array.from(missingBranchesMap.entries()).map(([name, itemCount]) => ({
+        name,
+        itemCount,
+        totalQty: missingBranchesQtyMap.get(name) || 0
+      }))
+
+      return {
+        success: true,
+        data: {
+          imported,
+          created,
+          updated,
+          skipped,
+          errors,
+          warnings,
+          mode: 'standard',
+          duplicateStrategy,
+          missingBranches,
+          pendingBranchStocksCount: totalPendingStocksCount
+        }
+      }
   })
 
   safeHandle(ipcMain, 'products:normalizeCatalog', async () => {
@@ -1950,6 +2229,16 @@ export function registerProductHandlers(ipcMain: IpcMain) {
   })
 
   safeHandle(ipcMain, 'products:downloadTemplate', async () => {
+      const furniture = ((store.get('app_settings') as Record<string, unknown>) || {}).business_type === 'furniture'
+      if (furniture) {
+        const XLSX = require('xlsx')
+        const result = await dialog.showSaveDialog({ title: 'Download Furniture Product Import Template', defaultPath: 'furniture-product-import-template.xlsx', filters: [{ name: 'Excel', extensions: ['xlsx'] }] })
+        if (result.canceled || !result.filePath) return { success: false, error: 'Cancelled' }
+        const branches = getDb().prepare('SELECT name FROM branches WHERE is_active = 1 ORDER BY name ASC').all() as { name: string }[]
+        const book = createFurnitureProductTemplate(branches)
+        XLSX.writeFile(book, result.filePath)
+        return { success: true, data: { path: result.filePath } }
+      }
       const result = await dialog.showSaveDialog({
         title: 'Download Product Bulk Upload Template',
         defaultPath: 'product-import-template.csv',

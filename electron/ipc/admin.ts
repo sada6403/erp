@@ -15,6 +15,7 @@ import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import { canManageProcurement } from '../services/branchAccess'
 import { ensureLocalBranchIdentity } from '../services/branchReconcile'
 import { sendEmail } from '../services/emailService'
+import { applyPendingBranchStocks, getPendingBranchStocksSummary, dismissPendingBranchStocks } from '../services/pendingBranchStocks'
 
 /**
  * Builds a safe `SET` clause from a caller-supplied payload.
@@ -531,6 +532,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       is_active: payload.is_active === 0 ? 0 : 1,
     }
 
+    const furnitureCompany = ((store.get('app_settings') as Record<string, unknown>) || {}).business_type === 'furniture'
+    let applied = { appliedCount: 0, totalQty: 0 }
     db.transaction(() => {
       db.prepare(`
         INSERT INTO branches (id,name,address,phone,email,code,branch_pin,is_active)
@@ -540,6 +543,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash,is_active,force_password_change)
         VALUES (?,?,?,?,?,?,NULL,1,1)
       `).run(managerId, id, managerRole.id, managerName, managerEmail, passwordHash)
+      if (furnitureCompany) applied = applyPendingBranchStocks(db, id, branchName, caller.id ? String(caller.id) : null)
     })()
 
     await Promise.all([
@@ -574,6 +578,17 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const activationKey = companyKey || licenseKey
     const apiUrl = String(appSettings.cloud_api_url || '')
 
+    if (applied.appliedCount > 0) {
+      logAudit(db, {
+        userId: String(caller.id || '') || null,
+        branchId: id,
+        action: 'PENDING_BRANCH_STOCK_APPLIED',
+        tableName: 'stocks',
+        recordId: id,
+        newValues: { branch_name: branchName, applied_count: applied.appliedCount, total_qty: applied.totalQty },
+      })
+    }
+
     return {
       success: true,
       data: {
@@ -590,6 +605,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         branch_phone: String(payload.phone || '').trim(),
         branch_address: String(payload.address || '').trim(),
         branch_pin: rawPin,
+        appliedPendingStockCount: applied.appliedCount,
+        appliedPendingTotalQty: applied.totalQty,
         email_sent: delivery.success,
         email_error: delivery.error || null,
         admin_email: adminEmail || null,
@@ -900,6 +917,45 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       oldValues: { name: branch.name, code: branch.code },
     })
     return { success: true }
+  })
+
+  // Pending branch stocks (staged during Excel import for uncreated branches)
+  safeHandle(ipcMain, 'admin:branches:pendingStocks:list', async () => {
+    if (((store.get('app_settings') as Record<string, unknown>) || {}).business_type !== 'furniture') return { success: false, error: 'Pending branch stock is available only for furniture companies' }
+    if (!currentPerms(authUser()).all) return { success: false, error: 'Company Admin access required' }
+    const db = getDb()
+    const summary = getPendingBranchStocksSummary(db)
+    return { success: true, data: summary }
+  })
+
+  safeHandle(ipcMain, 'admin:branches:pendingStocks:apply', async (_e, branchName: string, targetBranchId: string) => {
+    const caller = authUser()
+    if (!currentPerms(caller).all) return { success: false, error: 'Company Admin access required to assign branch stocks' }
+    if (((store.get('app_settings') as Record<string, unknown>) || {}).business_type !== 'furniture') return { success: false, error: 'Pending branch stock is available only for furniture companies' }
+    const db = getDb()
+    const targetBranch = db.prepare('SELECT id, name FROM branches WHERE id = ? AND is_active = 1').get(targetBranchId) as { id: string; name: string } | undefined
+    if (!targetBranch) return { success: false, error: 'Target branch not found' }
+    const applied = applyPendingBranchStocks(db, targetBranch.id, branchName, caller.id ? String(caller.id) : null)
+    if (applied.appliedCount > 0) {
+      logAudit(db, {
+        userId: String(caller.id || '') || null,
+        branchId: targetBranch.id,
+        action: 'PENDING_BRANCH_STOCK_APPLIED',
+        tableName: 'stocks',
+        recordId: targetBranch.id,
+        newValues: { branch_name: branchName, target_branch_name: targetBranch.name, applied_count: applied.appliedCount, total_qty: applied.totalQty },
+      })
+    }
+    return { success: true, data: applied }
+  })
+
+  safeHandle(ipcMain, 'admin:branches:pendingStocks:dismiss', async (_e, branchName: string) => {
+    const caller = authUser()
+    if (!currentPerms(caller).all) return { success: false, error: 'Company Admin access required' }
+    if (((store.get('app_settings') as Record<string, unknown>) || {}).business_type !== 'furniture') return { success: false, error: 'Pending branch stock is available only for furniture companies' }
+    const db = getDb()
+    const dismissed = dismissPendingBranchStocks(db, branchName)
+    return { success: true, data: { dismissedCount: dismissed } }
   })
 
   // Users
