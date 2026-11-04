@@ -1,0 +1,217 @@
+- banner:
+  - button "Furniture QA":
+    - img
+    - text: Furniture QA
+    - img
+  - img
+  - text: Main Branch Nov 4, 2026 10:56:16 PM
+  - link "POS Billing":
+    - /url: "#/pos"
+    - img
+    - text: POS Billing
+  - button "Refresh this page":
+    - img
+  - button "Change theme":
+    - img
+  - button "Sync - 5 pending":
+    - img
+    - img
+  - button "Notifications":
+    - img
+  - button "Change my password":
+    - img
+  - text: S
+  - paragraph: System Admin
+  - paragraph: Company Admin
+  - img
+  - text: ONLINE
+  - button "Logout":
+    - img
+- complementary:
+  - paragraph: Menu
+  - navigation:
+    - link "Dashboard":
+      - /url: "#/admin"
+      - img
+      - text: Dashboard
+    - button "Products":
+      - img
+      - text: Products
+      - img
+    - link "List Products":
+      - /url: "#/admin/products"
+    - link "Categories":
+      - /url: "#/admin/categories"
+    - link "Stock Intelligence":
+      - /url: "#/admin/stock-intelligence"
+    - link "Stock Lookup":
+      - /url: "#/admin/stock-lookup"
+    - link "Stock Count":
+      - /url: "#/admin/stock-count"
+    - link "Batch / Expiry":
+      - /url: "#/admin/batches"
+    - link "Purchase Orders":
+      - /url: "#/admin/purchase-orders"
+      - img
+      - text: Purchase Orders
+    - link "Supplier Management":
+      - /url: "#/admin/suppliers"
+      - img
+      - text: Supplier Management
+    - button "Customer Management":
+      - img
+      - text: Customer Management
+      - img
+    - link "Customers":
+      - /url: "#/admin/customers"
+    - link "Installments":
+      - /url: "#/admin/installments"
+    - button "Smart Buy":
+      - img
+      - text: Smart Buy
+      - img
+    - link "Dashboard":
+      - /url: "#/admin/smart-buy"
+    - link "Award Winners":
+      - /url: "#/admin/smart-buy-award"
+    - link "Scheme Master":
+      - /url: "#/admin/scheme-master"
+    - link "Schemes":
+      - /url: "#/admin/chits"
+    - link "Viability Calculator":
+      - /url: "#/admin/smart-buy-calculator"
+    - link "Customers":
+      - /url: "#/admin/chit-customers"
+    - link "Agents":
+      - /url: "#/admin/smart-buy-agents"
+    - link "Payment Reminders":
+      - /url: "#/admin/smart-buy-reminders"
+    - link "Bank Transfers":
+      - /url: "#/admin/smart-buy-transfers"
+    - link "Reports":
+      - /url: "#/admin/smart-buy-reports"
+    - link "Commission Rules":
+      - /url: "#/admin/commission-rules"
+    - link "Admin Configuration":
+      - /url: "#/admin/smart-buy-settings"
+    - button "Stock Transfers":
+      - img
+      - text: Stock Transfers
+      - img
+    - link "Stock Transfers":
+      - /url: "#/admin/stock-transfers"
+    - link "Track Transfer":
+      - /url: "#/admin/track-transfer"
+    - link "Branch Transfers":
+      - /url: "#/admin/branch-transfers"
+    - link "Stock Requests":
+      - /url: "#/admin/stock-requests"
+    - button "Sell":
+      - img
+      - text: Sell
+      - img
+    - link "Bills":
+      - /url: "#/admin/bills"
+    - link "Orders":
+      - /url: "#/admin/orders"
+    - link "Quotations":
+      - /url: "#/admin/quotations"
+    - link "Credit Bills":
+      - /url: "#/admin/credit-bills"
+    - link "Returns & Refunds":
+      - /url: "#/admin/returns"
+    - link "Cash Register":
+      - /url: "#/admin/cash-register"
+    - button "Coupons":
+      - img
+      - text: Coupons
+      - img
+    - link "Coupon Management":
+      - /url: "#/admin/coupons"
+    - link "Coupon Reports":
+      - /url: "#/admin/coupon-reports"
+    - link "Discounts":
+      - /url: "#/admin/discounts"
+      - img
+      - text: Discounts
+    - link "Deliveries":
+      - /url: "#/admin/deliveries"
+      - img
+      - text: Deliveries
+    - link "Expenses":
+      - /url: "#/admin/expenses"
+      - img
+      - text: Expenses
+    - button "Reports":
+      - img
+      - text: Reports
+      - img
+    - link "Analytics":
+      - /url: "#/admin/analytics"
+    - link "Advanced Reports":
+      - /url: "#/admin/reports"
+    - link "Transaction Report":
+      - /url: "#/admin/transactions"
+    - button "Employee Management":
+      - img
+      - text: Employee Management
+      - img
+    - link "User List":
+      - /url: "#/admin/users"
+    - link "Roles & Permissions":
+      - /url: "#/admin/roles"
+    - button "Branches":
+      - img
+      - text: Branches
+      - img
+    - link "Branches":
+      - /url: "#/admin/branches"
+    - link "Branch Inspect":
+      - /url: "#/admin/branch-inspect"
+    - link "Audit Logs":
+      - /url: "#/admin/audit-logs"
+    - link "Edit Requests":
+      - /url: "#/admin/edit-requests"
+    - link "Sync Monitor":
+      - /url: "#/admin/sync"
+    - link "Operations Hub":
+      - /url: "#/admin/operations"
+    - button "System":
+      - img
+      - text: System
+      - img
+    - link "Security & 2FA":
+      - /url: "#/admin/security"
+    - link "Backup":
+      - /url: "#/admin/backup"
+    - link "System Health":
+      - /url: "#/admin/system-health"
+    - link "Settings":
+      - /url: "#/admin/settings"
+      - img
+      - text: Settings
+- main:
+  - heading "Branch Management" [level=1]
+  - paragraph: 1 branches
+  - button "Add Branch":
+    - img
+    - text: Add Branch
+  - heading "Pending Furniture Branch Stock" [level=3]
+  - paragraph: Create the matching branch to apply its imported stock automatically.
+  - text: CHAVAKACHERY ? 3 items ? 35 units
+  - button "Create Branch"
+  - img
+  - img
+  - button "Edit branch":
+    - img
+  - heading "Main Branch" [level=3]
+  - button "MAIN":
+    - text: MAIN
+    - img
+  - paragraph: "Manager: Unassigned"
+  - paragraph: "SmartBuy Manager: Unassigned"
+  - paragraph: No address
+  - button "Share via WhatsApp":
+    - img
+    - text: Share via WhatsApp
+  - paragraph: +94 11 000 0000

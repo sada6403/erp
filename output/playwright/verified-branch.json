@@ -1,0 +1,117 @@
+{
+  "state": {
+    "products": [
+      {
+        "id": "308eeb1c-c4de-4972-b97c-b4f7fec12606",
+        "name": "BED",
+        "sku": "KKBP 018",
+        "selling_price": 36900
+      },
+      {
+        "id": "b662967e-e55b-4262-bc7a-dafb59e94e6d",
+        "name": "CHAIR (JW)",
+        "sku": "PDC 307",
+        "selling_price": 3110
+      },
+      {
+        "id": "769d346b-911e-4f5d-8ee9-c54bccedb4b4",
+        "name": "CHAIR (RW)",
+        "sku": "PDC 307-RW",
+        "selling_price": 3110
+      }
+    ],
+    "pending": [
+      {
+        "branch_name": "CHAVAKACHERY",
+        "product_id": "308eeb1c-c4de-4972-b97c-b4f7fec12606",
+        "quantity": 1,
+        "status": "applied"
+      },
+      {
+        "branch_name": "CHAVAKACHERY",
+        "product_id": "b662967e-e55b-4262-bc7a-dafb59e94e6d",
+        "quantity": 19,
+        "status": "applied"
+      },
+      {
+        "branch_name": "CHAVAKACHERY",
+        "product_id": "769d346b-911e-4f5d-8ee9-c54bccedb4b4",
+        "quantity": 15,
+        "status": "applied"
+      }
+    ],
+    "stock": [
+      {
+        "name": "BED",
+        "branch_name": "Main Branch",
+        "quantity": 2
+      },
+      {
+        "name": "BED",
+        "branch_name": "CHAVAKACHERY",
+        "quantity": 1
+      },
+      {
+        "name": "CHAIR (JW)",
+        "branch_name": "CHAVAKACHERY",
+        "quantity": 19
+      },
+      {
+        "name": "CHAIR (RW)",
+        "branch_name": "CHAVAKACHERY",
+        "quantity": 15
+      }
+    ],
+    "movements": [
+      {
+        "product_id": "308eeb1c-c4de-4972-b97c-b4f7fec12606",
+        "quantity": 2,
+        "to_branch_id": "b1111111-1111-4111-8111-111111111111"
+      },
+      {
+        "product_id": "308eeb1c-c4de-4972-b97c-b4f7fec12606",
+        "quantity": 1,
+        "to_branch_id": "ba0dca1d-203b-4568-96d9-00c995541e8e"
+      },
+      {
+        "product_id": "b662967e-e55b-4262-bc7a-dafb59e94e6d",
+        "quantity": 19,
+        "to_branch_id": "ba0dca1d-203b-4568-96d9-00c995541e8e"
+      },
+      {
+        "product_id": "769d346b-911e-4f5d-8ee9-c54bccedb4b4",
+        "quantity": 15,
+        "to_branch_id": "ba0dca1d-203b-4568-96d9-00c995541e8e"
+      }
+    ],
+    "branches": [
+      {
+        "id": "b1111111-1111-4111-8111-111111111111",
+        "name": "Main Branch"
+      },
+      {
+        "id": "ba0dca1d-203b-4568-96d9-00c995541e8e",
+        "name": "CHAVAKACHERY"
+      }
+    ]
+  },
+  "repeat": {
+    "success": true,
+    "data": {
+      "appliedCount": 0,
+      "totalQty": 0
+    }
+  },
+  "restrictions": [
+    {
+      "type": "retail",
+      "pendingRejected": true,
+      "importRejected": true
+    },
+    {
+      "type": "supermarket",
+      "pendingRejected": true,
+      "importRejected": true
+    }
+  ]
+}

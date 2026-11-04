@@ -1,0 +1,217 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - button "Furniture QA" [ref=e5] [cursor=pointer]
+    - generic [ref=e12]: Main Branch
+    - generic [ref=e18]: Nov 4, 2026 10:50:00 PM
+    - link "POS Billing" [ref=e19] [cursor=pointer]:
+      - /url: "#/pos"
+    - button "Refresh this page" [ref=e23] [cursor=pointer]
+    - button "Change theme" [ref=e29] [cursor=pointer]
+    - button "Sync - 0 pending" [ref=e36] [cursor=pointer]
+    - button "Notifications" [ref=e42] [cursor=pointer]
+    - button "Change my password" [ref=e46] [cursor=pointer]
+    - generic [ref=e50]:
+      - generic [ref=e51]: S
+      - generic [ref=e52]:
+        - paragraph [ref=e53]: System Admin
+        - paragraph [ref=e54]: Company Admin
+    - generic [ref=e57]: ONLINE
+    - button "Logout" [ref=e58] [cursor=pointer]
+  - generic [ref=e62]:
+    - complementary [ref=e63]:
+      - paragraph [ref=e65]: Menu
+      - navigation [ref=e66]:
+        - link "Dashboard" [ref=e67] [cursor=pointer]:
+          - /url: "#/admin"
+        - generic [ref=e74]:
+          - button "Products" [ref=e75] [cursor=pointer]
+          - generic [ref=e85]:
+            - link "List Products" [ref=e87] [cursor=pointer]:
+              - /url: "#/admin/products"
+            - link "Categories" [ref=e89] [cursor=pointer]:
+              - /url: "#/admin/categories"
+            - link "Stock Intelligence" [ref=e91] [cursor=pointer]:
+              - /url: "#/admin/stock-intelligence"
+            - link "Stock Lookup" [ref=e93] [cursor=pointer]:
+              - /url: "#/admin/stock-lookup"
+            - link "Stock Count" [ref=e95] [cursor=pointer]:
+              - /url: "#/admin/stock-count"
+            - link "Batch / Expiry" [ref=e97] [cursor=pointer]:
+              - /url: "#/admin/batches"
+        - link "Purchase Orders" [ref=e99] [cursor=pointer]:
+          - /url: "#/admin/purchase-orders"
+        - link "Supplier Management" [ref=e105] [cursor=pointer]:
+          - /url: "#/admin/suppliers"
+        - generic [ref=e112]:
+          - button "Customer Management" [ref=e113] [cursor=pointer]
+          - generic [ref=e129]:
+            - link "Customers" [ref=e131] [cursor=pointer]:
+              - /url: "#/admin/customers"
+            - link "Installments" [ref=e133] [cursor=pointer]:
+              - /url: "#/admin/installments"
+        - generic [ref=e135]:
+          - button "Smart Buy" [ref=e136] [cursor=pointer]
+          - generic [ref=e145]:
+            - link "Dashboard" [ref=e147] [cursor=pointer]:
+              - /url: "#/admin/smart-buy"
+            - link "Award Winners" [ref=e149] [cursor=pointer]:
+              - /url: "#/admin/smart-buy-award"
+            - link "Scheme Master" [ref=e151] [cursor=pointer]:
+              - /url: "#/admin/scheme-master"
+            - link "Schemes" [ref=e153] [cursor=pointer]:
+              - /url: "#/admin/chits"
+            - link "Viability Calculator" [ref=e155] [cursor=pointer]:
+              - /url: "#/admin/smart-buy-calculator"
+            - link "Customers" [ref=e157] [cursor=pointer]:
+              - /url: "#/admin/chit-customers"
+            - link "Agents" [ref=e159] [cursor=pointer]:
+              - /url: "#/admin/smart-buy-agents"
+            - link "Payment Reminders" [ref=e161] [cursor=pointer]:
+              - /url: "#/admin/smart-buy-reminders"
+            - link "Bank Transfers" [ref=e163] [cursor=pointer]:
+              - /url: "#/admin/smart-buy-transfers"
+            - link "Reports" [ref=e165] [cursor=pointer]:
+              - /url: "#/admin/smart-buy-reports"
+            - link "Commission Rules" [ref=e167] [cursor=pointer]:
+              - /url: "#/admin/commission-rules"
+            - link "Admin Configuration" [ref=e169] [cursor=pointer]:
+              - /url: "#/admin/smart-buy-settings"
+        - generic [ref=e171]:
+          - button "Stock Transfers" [ref=e172] [cursor=pointer]
+          - generic [ref=e179]:
+            - link "Stock Transfers" [ref=e181] [cursor=pointer]:
+              - /url: "#/admin/stock-transfers"
+            - link "Track Transfer" [ref=e183] [cursor=pointer]:
+              - /url: "#/admin/track-transfer"
+            - link "Branch Transfers" [ref=e185] [cursor=pointer]:
+              - /url: "#/admin/branch-transfers"
+            - link "Stock Requests" [ref=e187] [cursor=pointer]:
+              - /url: "#/admin/stock-requests"
+        - generic [ref=e189]:
+          - button "Sell" [ref=e190] [cursor=pointer]
+          - generic [ref=e197]:
+            - link "Bills" [ref=e199] [cursor=pointer]:
+              - /url: "#/admin/bills"
+            - link "Orders" [ref=e201] [cursor=pointer]:
+              - /url: "#/admin/orders"
+            - link "Quotations" [ref=e203] [cursor=pointer]:
+              - /url: "#/admin/quotations"
+            - link "Credit Bills" [ref=e205] [cursor=pointer]:
+              - /url: "#/admin/credit-bills"
+            - link "Returns & Refunds" [ref=e207] [cursor=pointer]:
+              - /url: "#/admin/returns"
+            - link "Cash Register" [ref=e209] [cursor=pointer]:
+              - /url: "#/admin/cash-register"
+        - generic [ref=e211]:
+          - button "Coupons" [ref=e212] [cursor=pointer]
+          - generic [ref=e218]:
+            - link "Coupon Management" [ref=e220] [cursor=pointer]:
+              - /url: "#/admin/coupons"
+            - link "Coupon Reports" [ref=e222] [cursor=pointer]:
+              - /url: "#/admin/coupon-reports"
+        - link "Discounts" [ref=e224] [cursor=pointer]:
+          - /url: "#/admin/discounts"
+        - link "Deliveries" [ref=e230] [cursor=pointer]:
+          - /url: "#/admin/deliveries"
+        - link "Expenses" [ref=e237] [cursor=pointer]:
+          - /url: "#/admin/expenses"
+        - generic [ref=e242]:
+          - button "Reports" [ref=e243] [cursor=pointer]
+          - generic [ref=e249]:
+            - link "Analytics" [ref=e251] [cursor=pointer]:
+              - /url: "#/admin/analytics"
+            - link "Advanced Reports" [ref=e253] [cursor=pointer]:
+              - /url: "#/admin/reports"
+            - link "Transaction Report" [ref=e255] [cursor=pointer]:
+              - /url: "#/admin/transactions"
+        - generic [ref=e257]:
+          - button "Employee Management" [ref=e258] [cursor=pointer]
+          - generic [ref=e274]:
+            - link "User List" [ref=e276] [cursor=pointer]:
+              - /url: "#/admin/users"
+            - link "Roles & Permissions" [ref=e278] [cursor=pointer]:
+              - /url: "#/admin/roles"
+        - generic [ref=e280]:
+          - button "Branches" [ref=e281] [cursor=pointer]
+          - generic [ref=e289]:
+            - link "Branches" [ref=e291] [cursor=pointer]:
+              - /url: "#/admin/branches"
+            - link "Branch Inspect" [ref=e293] [cursor=pointer]:
+              - /url: "#/admin/branch-inspect"
+            - link "Audit Logs" [ref=e295] [cursor=pointer]:
+              - /url: "#/admin/audit-logs"
+            - link "Edit Requests" [ref=e297] [cursor=pointer]:
+              - /url: "#/admin/edit-requests"
+            - link "Sync Monitor" [ref=e299] [cursor=pointer]:
+              - /url: "#/admin/sync"
+            - link "Operations Hub" [ref=e301] [cursor=pointer]:
+              - /url: "#/admin/operations"
+        - generic [ref=e303]:
+          - button "System" [ref=e304] [cursor=pointer]
+          - generic [ref=e310]:
+            - link "Security & 2FA" [ref=e312] [cursor=pointer]:
+              - /url: "#/admin/security"
+            - link "Backup" [ref=e314] [cursor=pointer]:
+              - /url: "#/admin/backup"
+            - link "System Health" [ref=e316] [cursor=pointer]:
+              - /url: "#/admin/system-health"
+        - link "Settings" [ref=e318] [cursor=pointer]:
+          - /url: "#/admin/settings"
+    - main [ref=e323]:
+      - generic [ref=e324]:
+        - generic [ref=e325]:
+          - generic [ref=e326]:
+            - heading "List Products" [level=1] [ref=e327]
+            - paragraph [ref=e328]: 0 of 0 products
+          - generic [ref=e330]:
+            - button "Download Template" [ref=e331] [cursor=pointer]
+            - button "Import CSV / Excel" [ref=e335] [cursor=pointer]
+            - button "Export CSV" [ref=e339] [cursor=pointer]
+            - button "Normalize Catalog" [ref=e343] [cursor=pointer]
+            - button "Add Product" [ref=e349] [cursor=pointer]
+        - generic [ref=e351]:
+          - generic [ref=e352]:
+            - generic [ref=e353]:
+              - paragraph [ref=e354]: Missing SKU
+              - paragraph [ref=e355]: "0"
+            - generic [ref=e356]:
+              - paragraph [ref=e357]: Duplicate SKU Groups
+              - paragraph [ref=e358]: "0"
+            - generic [ref=e359]:
+              - paragraph [ref=e360]: Category Short Codes
+              - paragraph [ref=e361]: 0 / 0
+            - generic [ref=e362]:
+              - paragraph [ref=e363]: Unnormalized Categories
+              - paragraph [ref=e364]: "0"
+          - generic [ref=e365]:
+            - button "Refresh Audit" [ref=e366] [cursor=pointer]
+            - paragraph [ref=e372]: Audit is read-only. Normalize only after reviewing the counts.
+        - generic [ref=e373]:
+          - textbox "Enter Keyword..." [ref=e378]
+          - combobox [ref=e379]:
+            - option "All Branches (Stock)" [selected]
+            - option "Main Branch"
+          - combobox [ref=e380]:
+            - option "Select product type" [selected]
+          - combobox [ref=e381]:
+            - option "Select brand" [selected]
+          - button "Filter" [ref=e382] [cursor=pointer]
+          - button "Reset" [ref=e386] [cursor=pointer]
+        - table [ref=e388]:
+          - rowgroup [ref=e389]:
+            - row [ref=e390]:
+              - columnheader [ref=e391]:
+                - checkbox "Select all visible" [ref=e392] [cursor=pointer]
+              - columnheader "Image" [ref=e393]
+              - columnheader "SKU" [ref=e394]
+              - columnheader "Product" [ref=e395]
+              - columnheader "Location" [ref=e396]
+              - columnheader "Unit Cost(Rs.)" [ref=e397]
+              - columnheader "Unit Price(Rs.)" [ref=e398]
+              - columnheader "Discount (%)" [ref=e399]
+              - columnheader "Wholesale(Rs.)" [ref=e400]
+              - columnheader "Stock (Total)" [ref=e401]
+              - columnheader "Action" [ref=e402]
+          - rowgroup [ref=e403]:
+            - row [ref=e404]:
+              - cell "No products found" [ref=e405]

@@ -1,0 +1,25 @@
+const { chromium } = require('C:/Users/USER/AppData/Local/npm-cache/_npx/31e32ef8478fbf80/node_modules/playwright')
+const assert = require('node:assert/strict')
+const fs = require('fs')
+const path = require('path')
+;(async () => {
+  const browser = await chromium.connectOverCDP('http://127.0.0.1:9337')
+  const page = browser.contexts()[0].pages()[0]
+  await page.goto(page.url().split('#')[0] + '#/admin/products')
+  await page.reload()
+  await page.getByRole('heading', { name: 'List Products', exact: true }).waitFor()
+  console.log(await page.locator('main').ariaSnapshot())
+  await page.getByRole('combobox').first().selectOption({ label: 'CHAVAKACHERY' })
+  await page.getByRole('columnheader', { name: 'Stock (CHAVAKACHERY)', exact: true }).waitFor()
+  for (const [name, quantity] of [['BED', 1], ['CHAIR (JW)', 19], ['CHAIR (RW)', 15]]) {
+    const row = page.getByRole('row').filter({ has: page.getByText(name, { exact: true }) })
+    await row.getByText(`${quantity} ITEMS`, { exact: true }).waitFor()
+    assert.equal(await row.count(), 1)
+  }
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.screenshot({ path: path.join(__dirname, 'branch-stock-verified.png') })
+  fs.writeFileSync(path.join(__dirname, 'stock-screen.yml'), await page.locator('main').ariaSnapshot())
+  console.log('PASS: branch stock UI shows BED=1, CHAIR (JW)=19, CHAIR (RW)=15 at 1280x800')
+  await page.close()
+  await browser.close()
+})().catch(error => { console.error(error); process.exit(1) })

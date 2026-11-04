@@ -1,0 +1,62 @@
+{
+  "products": [
+    {
+      "id": "308eeb1c-c4de-4972-b97c-b4f7fec12606",
+      "name": "BED",
+      "sku": "KKBP 018",
+      "selling_price": 36900
+    },
+    {
+      "id": "b662967e-e55b-4262-bc7a-dafb59e94e6d",
+      "name": "CHAIR (JW)",
+      "sku": "PDC 307",
+      "selling_price": 3110
+    },
+    {
+      "id": "769d346b-911e-4f5d-8ee9-c54bccedb4b4",
+      "name": "CHAIR (RW)",
+      "sku": "PDC 307-RW",
+      "selling_price": 3110
+    }
+  ],
+  "pending": [
+    {
+      "branch_name": "CHAVAKACHERY",
+      "product_id": "308eeb1c-c4de-4972-b97c-b4f7fec12606",
+      "quantity": 1,
+      "status": "pending"
+    },
+    {
+      "branch_name": "CHAVAKACHERY",
+      "product_id": "b662967e-e55b-4262-bc7a-dafb59e94e6d",
+      "quantity": 19,
+      "status": "pending"
+    },
+    {
+      "branch_name": "CHAVAKACHERY",
+      "product_id": "769d346b-911e-4f5d-8ee9-c54bccedb4b4",
+      "quantity": 15,
+      "status": "pending"
+    }
+  ],
+  "stock": [
+    {
+      "name": "BED",
+      "branch_name": "Main Branch",
+      "quantity": 2
+    }
+  ],
+  "movements": [
+    {
+      "product_id": "308eeb1c-c4de-4972-b97c-b4f7fec12606",
+      "quantity": 2,
+      "to_branch_id": "b1111111-1111-4111-8111-111111111111"
+    }
+  ],
+  "branches": [
+    {
+      "id": "b1111111-1111-4111-8111-111111111111",
+      "name": "Main Branch"
+    }
+  ]
+}

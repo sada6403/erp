@@ -1,0 +1,142 @@
+- main:
+  - heading "List Products" [level=1]
+  - paragraph: 3 of 3 products
+  - button "Download Template":
+    - img
+    - text: Download Template
+  - button "Import CSV / Excel":
+    - img
+    - text: Import CSV / Excel
+  - button "Export CSV":
+    - img
+    - text: Export CSV
+  - button "Normalize Catalog":
+    - img
+    - text: Normalize Catalog
+  - button "Add Product":
+    - img
+    - text: Add Product
+  - paragraph: Missing SKU
+  - paragraph: "0"
+  - paragraph: Duplicate SKU Groups
+  - paragraph: "0"
+  - paragraph: Category Short Codes
+  - paragraph: 0 / 0
+  - paragraph: Unnormalized Categories
+  - paragraph: "0"
+  - button "Refresh Audit":
+    - img
+    - text: Refresh Audit
+  - paragraph: Audit is read-only. Normalize only after reviewing the counts.
+  - img
+  - textbox "Enter Keyword..."
+  - combobox:
+    - option "All Branches (Stock)"
+    - option "CHAVAKACHERY" [selected]
+    - option "Main Branch"
+  - combobox:
+    - option "Select product type" [selected]
+  - combobox:
+    - option "Select brand" [selected]
+  - button "Filter":
+    - img
+    - text: Filter
+  - button "Reset"
+  - table:
+    - rowgroup:
+      - row "Select all visible Image SKU Product Location Unit Cost(Rs.) Unit Price(Rs.) Discount (%) Wholesale(Rs.) Stock (CHAVAKACHERY) Action":
+        - columnheader "Select all visible":
+          - checkbox "Select all visible"
+        - columnheader "Image"
+        - columnheader "SKU"
+        - columnheader "Product"
+        - columnheader "Location"
+        - columnheader "Unit Cost(Rs.)"
+        - columnheader "Unit Price(Rs.)"
+        - columnheader "Discount (%)"
+        - columnheader "Wholesale(Rs.)"
+        - columnheader "Stock (CHAVAKACHERY)"
+        - columnheader "Action"
+    - rowgroup:
+      - row "KKBP 018 BED All Branches 0(5) 36,900 0% 0 1 ITEMS CHAVAKACHERY":
+        - cell:
+          - checkbox
+        - cell:
+          - img
+        - cell "KKBP 018"
+        - cell "BED":
+          - img
+          - paragraph: BED
+        - cell "All Branches"
+        - cell "0(5)"
+        - cell "36,900"
+        - cell "0%"
+        - cell "0"
+        - cell "1 ITEMS CHAVAKACHERY":
+          - text: 1 ITEMS
+          - paragraph: CHAVAKACHERY
+        - cell:
+          - button "Edit":
+            - img
+          - button "Deactivate":
+            - img
+          - button "Print Label":
+            - img
+          - button "Permanently delete":
+            - img
+      - row "PDC 307 CHAIR (JW) All Branches 0(5) 3,110 0% 0 19 ITEMS CHAVAKACHERY":
+        - cell:
+          - checkbox
+        - cell:
+          - img
+        - cell "PDC 307"
+        - cell "CHAIR (JW)":
+          - img
+          - paragraph: CHAIR (JW)
+        - cell "All Branches"
+        - cell "0(5)"
+        - cell "3,110"
+        - cell "0%"
+        - cell "0"
+        - cell "19 ITEMS CHAVAKACHERY":
+          - text: 19 ITEMS
+          - paragraph: CHAVAKACHERY
+        - cell:
+          - button "Edit":
+            - img
+          - button "Deactivate":
+            - img
+          - button "Print Label":
+            - img
+          - button "Permanently delete":
+            - img
+      - row "PDC 307-RW CHAIR (RW) All Branches 0(5) 3,110 0% 0 15 ITEMS CHAVAKACHERY":
+        - cell:
+          - checkbox
+        - cell:
+          - img
+        - cell "PDC 307-RW"
+        - cell "CHAIR (RW)":
+          - img
+          - paragraph: CHAIR (RW)
+        - cell "All Branches"
+        - cell "0(5)"
+        - cell "3,110"
+        - cell "0%"
+        - cell "0"
+        - cell "15 ITEMS CHAVAKACHERY":
+          - text: 15 ITEMS
+          - paragraph: CHAVAKACHERY
+        - cell:
+          - button "Edit":
+            - img
+          - button "Deactivate":
+            - img
+          - button "Print Label":
+            - img
+          - button "Permanently delete":
+            - img
+  - paragraph: Showing 1-3 of 3
+  - button "Previous" [disabled]
+  - text: Page 1 of 1
+  - button "Next" [disabled]
