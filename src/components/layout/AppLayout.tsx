@@ -1,5 +1,7 @@
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
+import { useBusinessType } from '@/hooks/useBusinessType'
+import { useProductsStore } from '@/store/productsStore'
 import { useSyncStatus } from '@/hooks/useSyncStatus'
 import {
   LayoutDashboard, Package, Users, Warehouse, BarChart3, GitBranch,
@@ -416,6 +418,8 @@ function SidebarLink({ to, icon: Icon, label, collapsed, end = false }: {
 }
 
 export default function AppLayout() {
+  const { isSupermarket } = useBusinessType()
+  useEffect(() => window.api.on?.('products:updated', () => useProductsStore.getState().invalidate()), [])
   const { user, logout, setEnabledModules: setAuthEnabledModules } = useAuthStore()
   const { status, triggerSync } = useSyncStatus()
   const navigate = useNavigate()
@@ -506,7 +510,7 @@ export default function AppLayout() {
         // runs every 30s forever, and re-setting an identical object here was
         // causing the logo to visibly reload/flicker on a timer.
         setBranding(prev =>
-          prev.company_logo_url === d.company_logo_url && prev.company_name === d.company_name
+          prev.company_logo_url === d.company_logo_url && prev.company_name === d.company_name && prev.business_type === d.business_type
             ? prev
             : d
         )
@@ -844,12 +848,17 @@ export default function AppLayout() {
                 collapsed={!sidebarOpen}
               />
             )}
+            {isSupermarket && (isAdmin || Boolean(permissions.reports)) && <SidebarLink to="/admin/stock-profit" icon={BarChart3} label="Stock & Profit" collapsed={!sidebarOpen} />}
+            {isSupermarket && isAdmin && <SidebarLink to="/admin/investments" icon={Coins} label="Owner Investments" collapsed={!sidebarOpen} />}
             {NAV_GROUPS
               .filter(group => procurementAllowed || !['Purchase Orders', 'Supplier Management'].includes(group.label))
               .map(group => (
               <SidebarGroup
                 key={group.label}
-                group={group}
+                group={isSupermarket ? { ...group,
+                  label: group.label === 'Purchase Orders' ? 'Stock Purchases & Bills' : group.label,
+                  items: group.items.map(item => item.to === '/admin/batches' ? { ...item, label: 'Purchase Batches & Stock' } : item),
+                } : group}
                 permissions={permissions}
                 isAdmin={isAdmin}
                 collapsed={!sidebarOpen}

@@ -1,3 +1,4 @@
+import { usesSupermarketStock } from '../services/supermarketModule'
 import type { IpcMain } from 'electron'
 import type Database from 'better-sqlite3'
 import { getDb } from '../database'
@@ -19,6 +20,7 @@ import { sendWhatsApp } from '../services/whatsappService'
 import { notificationAllowed } from '../services/chitNotifications'
 import { isDeviceLocked } from '../services/licenseService'
 import { downloadPastSalesTemplate, importSalesFromExcel, exportBillsToExcel } from '../services/salesImportExport'
+import { reduceSaleBatchQuantity, quoteBatchPrice, allocateSaleBatches, reverseInvoiceBatchAllocations, type SaleBatchAllocation } from '../services/batchInventory'
 
 const store = createCompanyStore()
 
@@ -178,6 +180,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const movementRecords: Record<string, unknown>[] = []
       const itemRecords: Record<string, unknown>[] = []
       const paymentRecords: Record<string, unknown>[] = []
+      const batchAllocationRecords: SaleBatchAllocation[] = []
       const commissionEnqueue: Array<{ table: string; id: string; row: Record<string, unknown>; op: 'INSERT' }> = []
       let creditLedgerRecord: Record<string, unknown> | null = null
       let couponResult: CouponRedemptionResult | null = null
@@ -213,6 +216,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         }
         const real = priceByProduct.get(productId)!
         let expectedSellingPrice = real.selling_price
+        if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) && !item.variant_id) expectedSellingPrice = quoteBatchPrice(db, productId, branchId, qty, real.selling_price)
         if (item.variant_id) {
           const vRow = db.prepare('SELECT selling_price FROM product_variants WHERE id=? AND product_id=?')
             .get(String(item.variant_id), productId) as { selling_price: number } | undefined
@@ -246,6 +250,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         for (const item of (payload.items || [])) {
           const real = priceByProduct.get(String(item.product_id))!
           let expectedPrice = real.selling_price
+          if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) && !item.variant_id) expectedPrice = quoteBatchPrice(db, String(item.product_id), branchId, Number(item.quantity), real.selling_price)
           if (item.variant_id) {
             const vRow = db.prepare('SELECT selling_price FROM product_variants WHERE id=?')
               .get(String(item.variant_id)) as { selling_price: number } | undefined
@@ -408,6 +413,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         for (const item of (payload.items || [])) {
           const real = priceByProduct.get(String(item.product_id))!
           let expectedPrice = real.selling_price
+          if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) && !item.variant_id) expectedPrice = quoteBatchPrice(db, String(item.product_id), branchId, Number(item.quantity), real.selling_price)
           if (item.variant_id) {
             const vRow = db.prepare('SELECT selling_price FROM product_variants WHERE id=?')
               .get(String(item.variant_id)) as { selling_price: number } | undefined
@@ -446,7 +452,22 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           // QUOTATION: do NOT deduct stock. RETAIL and CREDIT: deduct immediately.
           if (billType !== 'QUOTATION') {
             const settings = (store.get('app_settings') as Record<string, unknown>) || {}
-            const allowNegativeStock = Boolean(settings.allow_negative_stock || settings.business_type === 'supermarket')
+            const isSupermarket = usesSupermarketStock(settings)
+            // Supermarket inventory must never oversell. Allocate the exact
+            // receipt cost layers before touching aggregate stock; any failure
+            // rolls the entire invoice transaction back.
+            if (isSupermarket) {
+              batchAllocationRecords.push(...allocateSaleBatches(db, {
+                invoiceId: id,
+                invoiceItemId: String(itemRow.id),
+                productId: String(item.product_id),
+                branchId,
+                quantity: qty,
+                unitSellingPrice: unitPrice * (1 - discountPct / 100) * (itemsSubtotal - itemsDiscountTotal > 0 ? 1 - globalDiscount / (itemsSubtotal - itemsDiscountTotal) : 1),
+                method: 'FIFO',
+              }))
+            }
+            const allowNegativeStock = !isSupermarket && Boolean(settings.allow_negative_stock)
 
             if (allowNegativeStock) {
               const stockRow = db.prepare('SELECT id, quantity FROM stocks WHERE product_id = ? AND branch_id = ?').get(item.product_id, branchId) as { id: string; quantity: number } | undefined
@@ -623,6 +644,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       for (const itemRow of itemRecords) {
         await enqueuSync('invoice_items', String(itemRow.id), 'INSERT', itemRow)
       }
+      for (const allocation of batchAllocationRecords) {
+        await enqueuSync('sale_batch_allocations', allocation.id, 'INSERT', { ...allocation })
+        const batch = db.prepare('SELECT * FROM product_batches WHERE id=?').get(allocation.batch_id) as Record<string, unknown>
+        await enqueuSync('product_batches', allocation.batch_id, 'UPDATE', batch)
+      }
       for (const item of commissionEnqueue) {
         await enqueuSync(item.table, item.id, item.op, item.row)
       }
@@ -677,14 +703,25 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       }
 
       const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id = ?').all(id) as
-        { product_id: string; quantity: number }[]
+        { id: string; product_id: string; quantity: number; unit_price: number; discount_amount: number }[]
       const movementRecords: Record<string, unknown>[] = []
+      const allocations: SaleBatchAllocation[] = []
 
       const convert = db.transaction(() => {
         const newNumber = getNextBillNumber(invoice.branch_id as string, 'RETAIL')
 
         // Deduct stock for each item
         for (const item of items) {
+          if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>)) {
+            const itemDiscount = items.reduce((sum, row) => sum + Number(row.discount_amount || 0), 0)
+            const globalDiscount = Math.max(0, Number(invoice.discount_amount || 0) - itemDiscount)
+            const netSubtotal = Number(invoice.subtotal || 0) - itemDiscount
+            allocations.push(...allocateSaleBatches(db, {
+              invoiceId: id, invoiceItemId: item.id, productId: item.product_id,
+              branchId: String(invoice.branch_id), quantity: item.quantity,
+              unitSellingPrice: (item.unit_price - item.discount_amount / item.quantity) * (netSubtotal > 0 ? 1-globalDiscount/netSubtotal : 1), method: 'FIFO',
+            }))
+          }
           const changed = db.prepare(`
             UPDATE stocks SET quantity = quantity - ?, updated_at = datetime('now')
             WHERE product_id = ? AND branch_id = ? AND quantity - COALESCE(damaged_qty,0) >= ?
@@ -720,6 +757,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       })
 
       const newNumber = convert()
+      for (const allocation of allocations) {
+        await enqueuSync('sale_batch_allocations', allocation.id, 'INSERT', { ...allocation })
+        const batch = db.prepare('SELECT * FROM product_batches WHERE id=?').get(allocation.batch_id) as Record<string, unknown>
+        await enqueuSync('product_batches', allocation.batch_id, 'UPDATE', batch)
+      }
       await enqueuSync('invoices', id, 'UPDATE', { id, bill_type: 'RETAIL', status: 'completed', invoice_number: newNumber })
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
@@ -930,8 +972,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const movementRecords: Record<string, unknown>[] = []
       let couponReversals: CouponRedemptionResult[] = []
       let walletReversals: WalletReversalResult[] = []
+      let reversedBatchAllocations: SaleBatchAllocation[] = []
 
       const cancel = db.transaction(() => {
+        if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) && db.prepare("SELECT 1 FROM returns WHERE invoice_id=? AND status!='cancelled' LIMIT 1").get(id)) throw new Error('Cancel the existing sale returns before cancelling this invoice')
         // Restore stock for RETAIL and CREDIT bills (not QUOTATION — stock was never deducted)
         if (invoice.bill_type !== 'QUOTATION' && invoice.status !== 'cancelled') {
           const items = db.prepare('SELECT * FROM invoice_items WHERE invoice_id=?').all(id) as
@@ -952,6 +996,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
               created_by: (user?.id as string) || null,
             }))
           }
+          reversedBatchAllocations = reverseInvoiceBatchAllocations(db, id)
         }
 
         // Reverse credit_ledger entry
@@ -993,6 +1038,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
         await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
+      }
+      for (const allocation of reversedBatchAllocations) {
+        const updatedAllocation = db.prepare('SELECT * FROM sale_batch_allocations WHERE id=?').get(allocation.id) as Record<string, unknown>
+        const updatedBatch = db.prepare('SELECT * FROM product_batches WHERE id=?').get(allocation.batch_id) as Record<string, unknown>
+        await enqueuSync('sale_batch_allocations', allocation.id, 'UPDATE', updatedAllocation)
+        await enqueuSync('product_batches', allocation.batch_id, 'UPDATE', updatedBatch)
       }
       if (invoice.bill_type === 'CREDIT' && invoice.customer_id) {
         await syncCustomerRow(db, String(invoice.customer_id))
@@ -1059,6 +1110,13 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
             .run(request.id)
         }
 
+        if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) && invoice.bill_type !== 'QUOTATION') {
+          if (db.prepare("SELECT 1 FROM returns WHERE invoice_id=? AND status!='cancelled' LIMIT 1").get(id)) throw new Error('Cancel the existing sale returns before correcting this invoice')
+          const tracked = db.prepare('SELECT 1 FROM sale_batch_allocations WHERE invoice_item_id=? LIMIT 1').get(item.id)
+          if (deltaQuantity > 0) allocateSaleBatches(db, { invoiceId: id, invoiceItemId: String(item.id), productId: String(item.product_id), branchId: String(invoice.branch_id), quantity: deltaQuantity, unitSellingPrice: newPrice, method: 'FIFO' })
+          if (deltaQuantity < 0 && tracked) reduceSaleBatchQuantity(db, String(item.id), -deltaQuantity)
+        }
+
         db.prepare(`
           UPDATE invoice_items
           SET quantity=?, unit_price=?, discount_amount=?, tax_amount=?, line_total=?, updated_at=datetime('now')
@@ -1115,6 +1173,14 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           }
         }
 
+        if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>)) {
+          const lines = db.prepare('SELECT * FROM invoice_items WHERE invoice_id=?').all(id) as Record<string, number | string>[]
+          const discounts = lines.reduce((sum,row) => sum+Number(row.discount_amount || 0),0)
+          const base = newSubtotal-discounts
+          const factor = base>0 ? 1-Math.max(0,newDiscount-discounts)/base : 1
+          for (const line of lines) db.prepare("UPDATE sale_batch_allocations SET unit_selling_price=?,updated_at=datetime('now') WHERE invoice_item_id=?")
+            .run((Number(line.unit_price)-Number(line.discount_amount)/Number(line.quantity))*factor,line.id)
+        }
         logAudit(db, {
           userId: (user?.id as string) || null, branchId: invoice.branch_id as string,
           action: 'INVOICE_ITEM_CORRECTED', tableName: 'invoices', recordId: id,
@@ -1128,6 +1194,13 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         discount_amount: newDiscountAmount, tax_amount: newTaxAmount, line_total: newLineTotal,
       })
       const updatedInvoice = db.prepare('SELECT * FROM invoices WHERE id=?').get(id)
+      if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>)) {
+        const allocations = db.prepare('SELECT * FROM sale_batch_allocations WHERE invoice_id=?').all(id) as SaleBatchAllocation[]
+        for (const row of allocations) {
+          await enqueuSync('sale_batch_allocations',row.id,'UPDATE',{ ...row })
+          await enqueuSync('product_batches',row.batch_id,'UPDATE',db.prepare('SELECT * FROM product_batches WHERE id=?').get(row.batch_id) as Record<string, unknown>)
+        }
+      }
       await enqueuSync('invoices', id, 'UPDATE', updatedInvoice as Record<string, unknown>)
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)

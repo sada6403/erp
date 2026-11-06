@@ -293,6 +293,12 @@ export function wipeLocalTransactionalData(db: Database.Database): void {
     'loyalty_transactions',
     'coupon_redemptions',
     'coupons',
+    'return_batch_allocations',
+    'sale_batch_allocations',
+    'product_batches',
+    'purchase_attachments',
+    'purchase_items',
+    'capital_transactions',
     'return_items',
     'returns',
     'installment_reminders',
@@ -379,7 +385,7 @@ async function performDeletedCompanyReset() {
 
   const tables = [
     'sync_queue', 'audit_logs', 'loyalty_transactions',
-    'return_items', 'returns', 'installment_payments', 'installment_schedules', 'installments',
+    'return_batch_allocations', 'sale_batch_allocations', 'product_batches', 'purchase_attachments', 'purchase_items', 'capital_transactions', 'return_items', 'returns', 'installment_payments', 'installment_schedules', 'installments',
     'order_items', 'orders', 'invoice_items', 'payments', 'invoices',
     'stock_count_items', 'stock_counts', 'stock_transfer_items', 'stock_transfers',
     'stock_movements', 'batches', 'stocks', 'purchase_order_items', 'purchase_orders',

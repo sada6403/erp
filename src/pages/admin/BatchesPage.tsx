@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import NumberInput from '@/components/shared/NumberInput'
+import { useBusinessType } from '@/hooks/useBusinessType'
 import PageHeader from '@/components/shared/PageHeader'
 import { Package, AlertTriangle, Clock, Search, Plus, ChevronDown, ChevronUp } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -23,6 +24,11 @@ interface Batch {
   expiry_date: string | null
   mfg_date: string | null
   quantity: number
+  original_quantity?: number
+  sold_quantity?: number
+  purchase_date?: string
+  status?: string
+  selling_price?: number | null
   cost_price: number
   days_until_expiry?: number
   created_at: string
@@ -45,6 +51,7 @@ const STATUS_COLOR = {
 }
 
 export default function BatchesPage() {
+  const { isSupermarket: supermarket } = useBusinessType()
   const [batches, setBatches]     = useState<Batch[]>([])
   const [search, setSearch]       = useState('')
   const [filter, setFilter]       = useState<'all' | 'expiring' | 'expired'>('all')
@@ -86,10 +93,10 @@ export default function BatchesPage() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
-        title="Batch & Expiry Tracking"
+        title={supermarket ? "Purchase Batches & Remaining Stock" : "Batch & Expiry Tracking"}
         subtitle={`${batches.length} batches · ${expiringCount} expiring · ${expiredCount} expired`}
         actions={
-          <button onClick={() => setShowAdd(true)} className="btn-primary btn-sm gap-1.5">
+          <button disabled={supermarket} title={supermarket ? 'Use Stock Purchases to receive new batches' : undefined} onClick={() => setShowAdd(true)} className="btn-primary btn-sm gap-1.5">
             <Plus size={14} /> Add Batch
           </button>
         }
@@ -156,11 +163,13 @@ export default function BatchesPage() {
                       <td className="table-cell px-4 py-3">
                         <span className={`font-bold text-sm ${b.quantity <= 0 ? 'text-red-400' : ''}`} style={{ color: b.quantity > 0 ? 'var(--text-1)' : undefined }}>
                           {b.quantity}
+                          {supermarket && b.status && <span className="block text-xs font-normal">{b.quantity <= 0 ? 'Old stock finished' : 'Stock available'} ? Purchased {b.original_quantity} ? Sold {b.sold_quantity}</span>}
                         </span>
                       </td>
                       <td className="table-cell px-4 py-3 text-xs" style={{ color: 'var(--text-3)' }}>{b.branch_name || '—'}</td>
                       <td className="table-cell px-4 py-3 text-xs" style={{ color: 'var(--text-3)' }}>
                         Rs.{Number(b.cost_price).toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                        {supermarket && b.status && <button className="block text-xs underline" onClick={async e => { e.stopPropagation(); const price = window.prompt('Selling price for this batch (leave blank to use common product price)', b.selling_price == null ? '' : String(b.selling_price)); if (price === null) return; const r = await window.api.batches.update(b.id, { selling_price: price.trim() === '' ? null : Number(price) }); if (r.success) load(); else toast.error(r.error || 'Could not save price') }}>Selling: {b.selling_price == null ? 'Common price' : `Rs.${b.selling_price}`}</button>}
                       </td>
                       <td className="table-cell px-4 py-3">
                         {isExp ? <ChevronUp size={13} style={{ color: 'var(--text-3)' }} /> : <ChevronDown size={13} style={{ color: 'var(--text-3)' }} />}
@@ -172,7 +181,7 @@ export default function BatchesPage() {
                           <div className="grid grid-cols-4 gap-4 text-xs" style={{ color: 'var(--text-2)' }}>
                             <div><span style={{ color: 'var(--text-3)' }}>Batch ID</span><br /><span className="font-mono">{b.id.slice(0, 16)}…</span></div>
                             <div><span style={{ color: 'var(--text-3)' }}>Mfg Date</span><br />{b.mfg_date || '—'}</div>
-                            <div><span style={{ color: 'var(--text-3)' }}>Created</span><br />{new Date(b.created_at).toLocaleDateString()}</div>
+                            <div><span style={{ color: 'var(--text-3)' }}>Created</span><br />{b.purchase_date || new Date(b.created_at).toLocaleDateString()}</div>
                             <div className="flex gap-2 items-end">
                               {st === 'expired' && (
                                 <span className="flex items-center gap-1 text-red-400 font-semibold"><AlertTriangle size={11} /> EXPIRED — remove from sale</span>

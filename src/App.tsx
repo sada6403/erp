@@ -19,6 +19,7 @@ import { canManageProcurement } from '@/lib/branchAccess'
 const POSPage = lazy(() => import('@/pages/pos/POSPage'))
 const adminPage = (name: string) => lazy(() => import(`./pages/admin/${name}.tsx`))
 const AdminDashboard = adminPage('AdminDashboard')
+const SupermarketStockPage = lazy(() => import('@/pages/admin/SupermarketStockPage'))
 const ProductsPage = adminPage('ProductsPage')
 const CustomersPage = adminPage('CustomersPage')
 const StockIntelligencePage = adminPage('StockIntelligencePage')
@@ -327,6 +328,8 @@ export default function App() {
         <Route index element={<SessionLanding />} />
         <Route path="/pos" element={<POSPage />} />
         <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/stock-profit" element={<RequirePermission permission="reports"><SupermarketStockPage /></RequirePermission>} />
+        <Route path="/admin/investments" element={<RequireSuperAdmin><SupermarketStockPage view="investments" /></RequireSuperAdmin>} />
         <Route path="/admin/products" element={<ProductsPage />} />
         <Route path="/admin/customers" element={<CustomersPage />} />
         <Route path="/admin/stock-intelligence" element={<RequirePermission permission="inventory"><StockIntelligencePage /></RequirePermission>} />

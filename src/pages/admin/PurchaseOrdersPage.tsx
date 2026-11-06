@@ -3,10 +3,13 @@ import {
   Plus, RefreshCw, Eye, Send, PackageCheck, XCircle, MessageSquare, Mail, Phone,
   Upload, Download, CheckCircle, FileSpreadsheet
 } from 'lucide-react'
+import { useBusinessType } from '@/hooks/useBusinessType'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
 import ProductSearchSelect from '@/components/shared/ProductSearchSelect'
 import CreatableSearchSelect from '@/components/shared/CreatableSearchSelect'
+import { useProductsStore } from '@/store/productsStore'
+import PurchaseBillPicker from '@/components/shared/PurchaseBillPicker'
 import NumberInput from '@/components/shared/NumberInput'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 import toast from 'react-hot-toast'
@@ -25,10 +28,18 @@ function statusBadge(status: string) {
 }
 
 export default function PurchaseOrdersPage() {
+  const { isSupermarket: supermarket } = useBusinessType()
   const [pos, setPOs]         = useState<PO[]>([])
   const [statusFilter, setFilter] = useState('')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
   const [loading, setLoading] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
+  const [entryMode,setEntryMode] = useState<'order'|'direct'>('order')
+  const [historyView,setHistoryView] = useState('all')
+  const [supplierFilter,setSupplierFilter] = useState('')
+  const [search,setSearch] = useState('')
+  const [receipts,setReceipts] = useState<PO[]>([])
   const [viewPO, setViewPO]   = useState<(PO & { items?: POItem[] }) | null>(null)
   const [showReceive, setShowReceive] = useState(false)
 
@@ -87,8 +98,9 @@ export default function PurchaseOrdersPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const res = await window.api.purchases.list(statusFilter ? { status: statusFilter } : {})
-      if (res.success) setPOs(res.data as PO[])
+      const filters = { status: statusFilter || undefined, from: from || undefined, to: to || undefined, supplier_id: supplierFilter || undefined, search: search || undefined, purchase_type: ['order','direct'].includes(historyView) ? historyView : undefined, has_bill: historyView === 'bills' }
+      const res = historyView === 'receipts' ? await window.api.purchases.receiptHistory(filters) : await window.api.purchases.list(filters)
+      if (res.success) { if(historyView === 'receipts') setReceipts(res.data as PO[]); else setPOs(res.data as PO[]) }
       else toast.error(String(res.error || 'Failed to load purchase orders'))
     } catch (err) {
       toast.error('Failed to load purchase orders: ' + String(err))
@@ -96,7 +108,7 @@ export default function PurchaseOrdersPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [statusFilter])
+  useEffect(() => { load() }, [statusFilter, from, to, historyView, supplierFilter, search])
 
   const loadDetail = async (id: string) => {
     try {
@@ -115,11 +127,13 @@ export default function PurchaseOrdersPage() {
         toast.success(`PO ${po.po_number} → ${status}`)
         load()
         if (viewPO?.id === po.id) loadDetail(String(po.id))
+        useProductsStore.getState().invalidate()
+        return true
       } else {
-        toast.error(String(res.error))
+        toast.error(String(res.error)); return false
       }
     } catch (err) {
-      toast.error('Failed to update purchase order: ' + String(err))
+      toast.error('Failed to update purchase order: ' + String(err)); return false
     }
   }
 
@@ -147,8 +161,8 @@ export default function PurchaseOrdersPage() {
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
-        title="Purchase Orders"
-        subtitle={`${pos.length} purchase orders`}
+        title={supermarket ? "Stock Purchases & Bills" : "Purchase Orders"}
+        subtitle={historyView === 'receipts' ? `${receipts.length} stock receipts` : `${pos.length} ${supermarket ? 'purchases' : 'purchase orders'}`}
         actions={
           <div className="flex gap-2">
             <button className="btn-ghost btn-sm gap-1.5" onClick={load} disabled={loading}>
@@ -160,13 +174,20 @@ export default function PurchaseOrdersPage() {
             <button className="btn-secondary btn-sm gap-1.5" onClick={() => setShowImportModal(true)}>
               <Upload size={14} /> Import PO (Excel)
             </button>
-            <button className="btn-primary btn-sm gap-1.5" onClick={() => setShowCreate(true)}>
+            {!supermarket && <button className="btn-primary btn-sm gap-1.5" onClick={() => {setEntryMode('order');setShowCreate(true)}}>
               <Plus size={14} /> New PO
-            </button>
+            </button>}
           </div>
         }
       />
 
+      {supermarket && <div className="px-6 pt-4 pb-3 grid md:grid-cols-2 gap-3 border-b" style={{borderColor:'var(--border)'}}>
+        <button className="btn-secondary justify-start py-3" onClick={()=>{setEntryMode('order');setShowCreate(true)}}><span className="text-left"><strong className="block">1. Order from Supplier</strong><span className="text-xs font-normal">Create order, track progress, then receive stock and upload the supplier bill.</span></span></button>
+        <button className="btn-primary justify-start py-3" onClick={()=>{setEntryMode('direct');setShowCreate(true)}}><span className="text-left"><strong className="block">2. Add Received Stock Directly</strong><span className="text-xs font-normal">Search products from the delivered bill and add stock immediately.</span></span></button>
+      </div>}
+      {supermarket && <div className="flex gap-2 flex-wrap px-6 pt-3">{[['all','All Purchases'],['order','Purchase Orders'],['direct','Direct Stock'],['receipts','Date-wise Stock Received'],['bills','Supplier Bills']].map(([key,label])=><button key={key} className={historyView===key?'btn-primary btn-sm':'btn-secondary btn-sm'} onClick={()=>{setHistoryView(key);setFilter('')}}>{label}</button>)}</div>}
+      <div hidden={!supermarket} className="flex gap-3 px-6 py-3"><label>Purchase date from<input className="input" type="date" value={from} onChange={e => setFrom(e.target.value)} /></label><label>To<input className="input" type="date" value={to} onChange={e => setTo(e.target.value)} /></label></div>
+      {supermarket && <div className="flex gap-3 px-6 pb-3"><input className="input flex-1" aria-label="Search purchase history" placeholder="Search purchase / bill number or supplier" value={search} onChange={e=>setSearch(e.target.value)} /><select aria-label="Filter supplier" className="input max-w-xs" value={supplierFilter} onChange={e=>setSupplierFilter(e.target.value)}><option value="">All suppliers</option>{suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>}
       {/* Status filter tabs */}
       <div className="flex gap-2 px-6 py-3 border-b border-slate-800 overflow-x-auto">
         {['', ...PO_STATUSES].map(s => (
@@ -179,10 +200,10 @@ export default function PurchaseOrdersPage() {
       </div>
 
       <div className="flex-1 overflow-auto">
-        <table className="w-full">
+        {supermarket && historyView === 'receipts' ? <table className="w-full"><thead><tr>{['Stock Date','Product','Received','Remaining','Unit Cost','Supplier','Purchase','Bills'].map(h=><th key={h} className="table-header">{h}</th>)}</tr></thead><tbody>{receipts.map(row=><tr key={String(row.id)} className="table-row"><td className="table-cell">{String(row.purchase_date||'?')}</td><td className="table-cell">{String(row.product_name)}<small className="block">{String(row.sku)}</small></td><td className="table-cell">{Number(row.original_quantity)}</td><td className="table-cell">{Number(row.quantity)}</td><td className="table-cell">Rs.{Number(row.cost_price).toLocaleString()}</td><td className="table-cell">{String(row.supplier_name||'?')}</td><td className="table-cell">{String(row.po_number)}<small className="block">{row.purchase_type==='direct'?'Direct receipt':'Purchase order'}</small></td><td className="table-cell"><button className="btn-secondary btn-sm" onClick={()=>loadDetail(String(row.po_id))}>Bills ({Number(row.bill_count)}) / View</button></td></tr>)}{!receipts.length&&<tr><td colSpan={8} className="text-center py-12">No stock receipts in this date range.</td></tr>}</tbody></table> : <table className="w-full">
           <thead className="sticky top-0 bg-surface-900">
             <tr>
-              {['PO #', 'Supplier', 'Branch', 'Items', 'Total', 'Expected', 'Status', ''].map(h =>
+              {(supermarket ? ['Purchase / Bill','Supplier','Purchase Date','Items','Total','Expected','Status','Actions'] : ['PO #', 'Supplier', 'Branch', 'Items', 'Total', 'Expected', 'Status', '']).map(h =>
                 <th className="table-header px-4 py-3 text-left" key={h}>{h}</th>
               )}
             </tr>
@@ -190,9 +211,9 @@ export default function PurchaseOrdersPage() {
           <tbody>
             {pos.map(po => (
               <tr className="table-row" key={String(po.id)}>
-                <td className="table-cell font-mono text-xs text-brand-400">{String(po.po_number)}</td>
+                <td className="table-cell font-mono text-xs text-brand-400">{String(po.po_number)}{supermarket && <><small className="block">{po.purchase_type==='direct'?'Direct stock':'Purchase order'}</small><small className="block">Bill: {String(po.supplier_invoice_number||'Not entered')} | {Number(po.bill_count||0)} files</small></>}</td>
                 <td className="table-cell font-medium">{String(po.supplier_name || '—')}</td>
-                <td className="table-cell text-slate-400 text-sm">{String(po.branch_name || '—')}</td>
+                <td className="table-cell text-slate-400 text-sm">{supermarket ? String(po.purchase_date || String(po.created_at || '').slice(0,10)) : String(po.branch_name || '')}</td>
                 <td className="table-cell text-center">{String(po.item_count ?? 0)}</td>
                 <td className="table-cell font-semibold">
                   Rs.{Number(po.total_amount || 0).toLocaleString()}
@@ -247,7 +268,7 @@ export default function PurchaseOrdersPage() {
               </tr>
             )}
           </tbody>
-        </table>
+        </table>}
       </div>
 
       {/* Excel Import Modal */}
@@ -372,8 +393,9 @@ export default function PurchaseOrdersPage() {
 
       {showCreate && (
         <CreatePOModal
+          mode={entryMode}
           onClose={() => setShowCreate(false)}
-          onDone={() => { setShowCreate(false); load() }}
+          onDone={() => { useProductsStore.getState().invalidate(); setShowCreate(false); load() }}
         />
       )}
 
@@ -392,12 +414,12 @@ export default function PurchaseOrdersPage() {
         <ReceivePOModal
           po={viewPO}
           onClose={() => { setShowReceive(false); setViewPO(null) }}
-          onDone={(items) => {
+          onDone={async (items, attachmentToken) => {
             const isFullReceive = items.every((i: Record<string, unknown>) =>
               Number(i.received_qty) === Number(i.ordered_qty) - Number(i.already_received))
-            updateStatus(viewPO, isFullReceive ? 'RECEIVED' : 'PARTIAL', { items })
-            setShowReceive(false)
-            setViewPO(null)
+            const ok = await updateStatus(viewPO, isFullReceive ? 'RECEIVED' : 'PARTIAL', { items, attachment_token: attachmentToken })
+            if(ok) { setShowReceive(false); setViewPO(null) }
+            return Boolean(ok)
           }}
         />
       )}
@@ -407,6 +429,26 @@ export default function PurchaseOrdersPage() {
 
 function PODetailModal({ po, onClose, onReceive, onSend, onCancel, onNotify }:
   { po: PO & { items?: POItem[] }; onClose: () => void; onReceive: () => void; onSend: () => void; onCancel: () => void; onNotify: (opts: { openWhatsApp?: boolean; sendEmail?: boolean }) => void }) {
+  const { isSupermarket: supermarket } = useBusinessType()
+  const [detail, setDetail] = useState(po)
+  const [invoice, setInvoice] = useState({ supplier_invoice_number: String(po.supplier_invoice_number || ''), purchase_date: String(po.purchase_date || '').slice(0,10), invoice_date: String(po.invoice_date || '').slice(0,10), paid_amount: Number(po.paid_amount || 0) })
+  const saveInvoice = async () => {
+    const res = await window.api.purchases.updateInvoice(String(po.id), invoice)
+    if (!res.success) return toast.error(res.error || 'Failed to save invoice details')
+    setDetail(d => ({ ...d, ...res.data })); toast.success('Supplier invoice details saved')
+  }
+  const attach = async () => {
+    const res = await window.api.purchases.addAttachments(String(po.id))
+    if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Attachment failed'); return }
+    setDetail(d => ({ ...d, attachments: [...((d.attachments as PO[]) || []), ...(res.data as PO[])] })); toast.success('Invoice attachment saved')
+  }
+  const removeAttachment = async (id: string) => {
+    const reason = window.prompt('Reason for correcting/removing this attachment:')
+    if (!reason) return
+    const res = await window.api.purchases.removeAttachment(id, reason)
+    if (!res.success) return toast.error(res.error || 'Could not remove attachment')
+    setDetail(d => ({ ...d, attachments: ((d.attachments as PO[]) || []).filter(a => String(a.id) !== id) })); toast.success('Attachment correction recorded')
+  }
   return (
     <Modal title={`PO — ${po.po_number}`} onClose={onClose}>
       <div className="space-y-4">
@@ -417,6 +459,28 @@ function PODetailModal({ po, onClose, onReceive, onSend, onCancel, onNotify }:
           <div><p className="text-slate-500">Total</p><p className="font-bold text-brand-400">Rs.{Number(po.total_amount || 0).toLocaleString()}</p></div>
           <div><p className="text-slate-500">Expected</p><p>{po.expected_date ? new Date(String(po.expected_date)).toLocaleDateString() : '—'}</p></div>
           <div><p className="text-slate-500">Notes</p><p className="text-xs">{String(po.notes || '—')}</p></div>
+        </div>
+
+        <div hidden={!supermarket} className="rounded-lg border border-slate-700/60 p-3 space-y-3">
+          <p className="text-sm font-semibold">Supplier Invoice & Payment</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <input className="input" placeholder="Supplier invoice number" value={invoice.supplier_invoice_number} onChange={e => setInvoice(v => ({ ...v, supplier_invoice_number: e.target.value }))}/>
+            <input className="input" type="date" title="Purchase date" value={invoice.purchase_date} onChange={e => setInvoice(v => ({ ...v, purchase_date: e.target.value }))}/>
+            <input className="input" type="date" title="Invoice date" value={invoice.invoice_date} onChange={e => setInvoice(v => ({ ...v, invoice_date: e.target.value }))}/>
+            <NumberInput className="input" min={0} max={Number(detail.total_amount || 0)} step={0.01} value={invoice.paid_amount} onChange={value => setInvoice(v => ({ ...v, paid_amount: Number(value.target.value) }))}/>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <button className="btn-secondary btn-sm" onClick={saveInvoice}>Save Invoice Details</button>
+            <button className="btn-secondary btn-sm gap-1" onClick={attach}><Upload size={12}/>Attach PDF / Image</button>
+            <span className="text-slate-400">Status: {String(detail.payment_status || 'unpaid')} · Outstanding Rs.{Number(detail.outstanding_amount || detail.total_amount || 0).toLocaleString()}</span>
+          </div>
+          <div className="space-y-1">
+            {((detail.attachments as PO[]) || []).map(file => <div key={String(file.id)} className="flex items-center justify-between rounded bg-surface-800 px-2 py-1 text-xs">
+              <button className="text-sky-400 hover:underline" onClick={() => window.api.purchases.openAttachment(String(file.id))}>{String(file.original_name)}</button>
+              <button className="text-red-400" onClick={() => removeAttachment(String(file.id))}>Correct / Remove</button>
+            </div>)}
+            {!((detail.attachments as PO[]) || []).length && <p className="text-xs text-slate-500">No invoice attachments.</p>}
+          </div>
         </div>
 
         <div className="bg-surface-800/60 border border-slate-700/60 rounded-lg p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -475,7 +539,12 @@ function itemPackUom(item: POItem): PackUom | null {
 }
 
 function ReceivePOModal({ po, onClose, onDone }:
-  { po: PO & { items?: POItem[] }; onClose: () => void; onDone: (items: Record<string, unknown>[]) => void }) {
+  { po: PO & { items?: POItem[] }; onClose: () => void; onDone: (items: Record<string, unknown>[], token?: string) => Promise<boolean> }) {
+  const { isSupermarket: supermarket } = useBusinessType()
+  const [attachmentToken,setAttachmentToken] = useState('')
+  const [saving,setSaving] = useState(false)
+  const [purchaseDate, setPurchaseDate] = useState(new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10))
+  const [prices, setPrices] = useState<Record<string, string>>({})
   const [qtys, setQtys] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {}
     for (const item of po.items || []) {
@@ -485,25 +554,33 @@ function ReceivePOModal({ po, onClose, onDone }:
     return init
   })
 
-  const submit = () => {
+  const submit = async () => {
+    if(saving) return
+    if (!purchaseDate) { toast.error('Purchase date is required'); return }
     const items = (po.items || []).map((item: POItem) => ({
       id: item.id,
       received_qty: qtys[String(item.id)] || 0,
+      purchase_date: purchaseDate,
+      selling_price: prices[String(item.id)] ?? item.selling_price ?? '',
       ordered_qty: item.quantity,
       already_received: item.received_qty || 0,
     }))
-    onDone(items)
+    setSaving(true)
+    try { await onDone(items,attachmentToken) } finally { setSaving(false) }
   }
 
   return (
     <Modal title={`Receive Items — ${po.po_number}`} onClose={onClose}>
       <div className="space-y-4">
+        <label hidden={!supermarket} className="label">Purchase date<input type="date" className="input" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} /></label>
+        <p hidden={!supermarket} className="text-xs text-slate-400">Leave selling price blank to use the product's common price. Enter a price to apply it to this purchase batch.</p>
+        {supermarket && <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} />}
         <table className="w-full text-sm">
           <thead><tr className="border-b border-slate-700">
             <th className="text-left py-2 text-slate-400 font-normal">Product</th>
             <th className="text-right py-2 text-slate-400 font-normal">Ordered</th>
             <th className="text-right py-2 text-slate-400 font-normal">Already Received</th>
-            <th className="text-right py-2 text-slate-400 font-normal">Receiving Now</th>
+            <th className="text-right py-2 text-slate-400 font-normal">Receiving Now</th><th hidden={!supermarket} className="text-right py-2 text-slate-400 font-normal">Selling Price</th>
           </tr></thead>
           <tbody>
             {(po.items || []).map((item: POItem) => {
@@ -523,7 +600,7 @@ function ReceivePOModal({ po, onClose, onDone }:
                           min={0}
                           value={split.boxes}
                           onChange={e => {
-                            const boxes = Math.max(0, parseInt(e.target.value) || 0)
+                            const boxes = Math.max(0, parseFloat(e.target.value) || 0)
                             setQtys(q => ({ ...q, [String(item.id)]: Math.min(remaining, toBaseQty(boxes, split.pieces, pack)) }))
                           }}
                           className="input w-14 text-right py-1 text-sm"
@@ -546,12 +623,13 @@ function ReceivePOModal({ po, onClose, onDone }:
                         min={0}
                         max={remaining}
                         value={current}
-                        onChange={e => setQtys(q => ({ ...q, [String(item.id)]: Math.min(remaining, Math.max(0, parseInt(e.target.value) || 0)) }))}
+                        onChange={e => setQtys(q => ({ ...q, [String(item.id)]: Math.min(remaining, Math.max(0, parseFloat(e.target.value) || 0)) }))}
                         className="input w-20 text-right py-1 text-sm"
                         disabled={remaining <= 0}
                       />
                     )}
                   </td>
+                  <td hidden={!supermarket}><input aria-label="Batch selling price" className="input w-24" type="number" min="0" step="0.01" placeholder="Common" value={prices[String(item.id)] ?? (item.selling_price == null ? '' : String(item.selling_price))} onChange={e => setPrices(p => ({ ...p, [String(item.id)]: e.target.value }))} /></td>
                 </tr>
               )
             })}
@@ -559,7 +637,7 @@ function ReceivePOModal({ po, onClose, onDone }:
         </table>
         <div className="flex justify-end gap-3 pt-2">
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary gap-1" onClick={submit}>
+          <button className="btn-primary gap-1" onClick={submit} disabled={saving}>
             <PackageCheck size={14} /> Confirm Receipt
           </button>
         </div>
@@ -568,14 +646,18 @@ function ReceivePOModal({ po, onClose, onDone }:
   )
 }
 
-function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void; onDone: () => void; mode?: 'order'|'direct' }) {
+  const { isSupermarket: supermarket }=useBusinessType()
+  const direct=mode==='direct'
+  const [entryId]=useState(()=>crypto.randomUUID())
+  const [attachmentToken,setAttachmentToken]=useState('')
   const [suppliers, setSuppliers] = useState<Record<string, unknown>[]>([])
   const [products, setProducts]   = useState<Record<string, unknown>[]>([])
-  const [sendWhatsApp, setSendWhatsApp] = useState(true)
-  const [sendEmail, setSendEmail]       = useState(true)
+  const [sendWhatsApp, setSendWhatsApp] = useState(false)
+  const [sendEmail, setSendEmail]       = useState(false)
   const [form, setForm] = useState({
-    supplier_id: '', expected_date: '', notes: '',
-    items: [{ product_id: '', quantity: 1, unit_cost: 0 }]
+    supplier_id: '', expected_date: '', notes: '', purchase_date: new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10), supplier_invoice_number: '',
+    items: [{ product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }]
   })
   const [saving, setSaving] = useState(false)
 
@@ -599,14 +681,14 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
         if (i !== index) return item
         if (key === 'product_id') {
           const prod = products.find(p => p.id === value) as Record<string, unknown> | undefined
-          return { ...item, product_id: String(value), unit_cost: Number(prod?.cost_price || prod?.selling_price || 0) }
+          return { ...item, product_id: String(value), unit_cost: Number(prod?.cost_price || 0) }
         }
         return { ...item, [key]: value }
       })
     }))
   }
 
-  const addItem = () => setForm(f => ({ ...f, items: [...f.items, { product_id: '', quantity: 1, unit_cost: 0 }] }))
+  const addItem = () => setForm(f => ({ ...f, items: [...f.items, { product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }] }))
   const removeItem = (i: number) => setForm(f => ({ ...f, items: f.items.filter((_, n) => n !== i) }))
 
   const totalAmount = form.items.reduce((s, i) => s + i.quantity * i.unit_cost, 0)
@@ -614,16 +696,18 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
   const save = async () => {
     if (!form.supplier_id) { toast.error('Select a supplier'); return }
     if (form.items.some(i => !i.product_id)) { toast.error('All items need a product'); return }
+    if(direct) { const missing=form.items.find(item=>item.selling_price==='' && !(Number(products.find(p=>p.id===item.product_id)?.selling_price)>0)); if(missing) { toast.error('Enter a Selling Price: this product has no common selling price yet.'); return } }
     setSaving(true)
     try {
       const res = await window.api.purchases.create({
         ...form,
-        open_whatsapp: sendWhatsApp,
-        send_email: sendEmail,
+        purchase_type: mode, entry_id: entryId, attachment_token: attachmentToken,
+        open_whatsapp: !direct && sendWhatsApp,
+        send_email: !direct && sendEmail,
       })
       if (res.success) {
         const poNum = (res.data as Record<string, unknown>)?.po_number
-        let msg = `PO ${poNum} created successfully!`
+        let msg = direct ? `Stock received: ${poNum}` : `PO ${poNum} created successfully!`
         if (sendWhatsApp) msg += ' 📱 WhatsApp initiated.'
         if (sendEmail) msg += ' ✉️ Email notification triggered.'
         toast.success(msg)
@@ -639,7 +723,7 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
   }
 
   return (
-    <Modal title="New Purchase Order" onClose={onClose}>
+    <Modal title={direct ? "Add Received Stock Directly" : "New Purchase Order"} onClose={()=>{if(!saving)onClose()}} size="lg">
       <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -660,13 +744,17 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
               }}
             />
           </div>
-          <div>
-            <label className="label">Expected Delivery Date</label>
+          <div hidden={direct}>
+            <label className="label">{direct ? 'Delivery reference (optional)' : 'Expected Delivery Date'}</label>
             <input type="date" className="input" value={form.expected_date}
               onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
           </div>
         </div>
 
+        {supermarket && <div className="grid grid-cols-2 gap-3"><label className="label">{direct?'Stock Received Date':'Purchase Date'}<input aria-label="Purchase date" type="date" className="input" value={form.purchase_date} onChange={e=>setForm(f=>({...f,purchase_date:e.target.value}))} /></label><label className="label">Supplier Bill / Invoice Number<input aria-label="Supplier invoice number" className="input" value={form.supplier_invoice_number} onChange={e=>setForm(f=>({...f,supplier_invoice_number:e.target.value}))} /></label></div>}
+        {supermarket && <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} />}
+        {supermarket && <p className="text-xs" style={{color:'var(--text-3)'}}>Purchase Price = what you pay the supplier. Selling Price = what the customer pays. Leave Selling Price as Common only if this product already has a selling price. Receiving stock updates the product prices; older batch costs stay unchanged.</p>}
+        {direct && <p className="text-sm" style={{color:'var(--text-3)'}}>Search each product on the supplier bill, enter delivered quantity and purchase price, then save to update stock immediately.</p>}
         {selectedSupplier && (
           <div className="bg-surface-800/80 border border-slate-700/70 rounded-lg p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -698,8 +786,8 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
           </div>
 
           {/* Column headers */}
-          <div className="grid gap-2 mb-1 px-1" style={{ gridTemplateColumns: '1fr 72px 110px 80px 20px' }}>
-            {['Product', 'Qty', 'Unit Cost', 'Total', ''].map((h, i) => (
+          <div className="grid gap-2 mb-1 px-1" style={{ gridTemplateColumns: supermarket ? 'minmax(170px,1fr) 65px 90px 95px 80px 20px' : '1fr 72px 110px 80px 20px' }}>
+            {(supermarket ? ['Product','Qty','Purchase Price','Selling Price','Total',''] : ['Product', 'Qty', 'Unit Cost', 'Total', '']).map((h, i) => (
               <p key={h} className={`text-xs font-medium${i === 0 ? ' min-w-0 truncate' : ''}`} style={{ color: 'var(--text-3)' }}>{h}</p>
             ))}
           </div>
@@ -707,17 +795,18 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
           <div className="space-y-1.5">
             {form.items.map((item, idx) => (
               <div key={idx} className="grid gap-2 items-center rounded-lg px-1 py-1.5"
-                style={{ gridTemplateColumns: '1fr 72px 110px 80px 20px', background: 'var(--bg-soft)', minWidth: 0 }}>
+                style={{ gridTemplateColumns: supermarket ? 'minmax(170px,1fr) 65px 90px 95px 80px 20px' : '1fr 72px 110px 80px 20px', background: 'var(--bg-soft)', minWidth: 0 }}>
                 <ProductSearchSelect
                   products={products}
                   value={item.product_id}
                   onChange={id => setItem(idx, 'product_id', id)}
                 />
                 <NumberInput
-                  min={1}
+                  min={0.000001}
+                  step="any"
                   className="input text-sm py-1.5 text-center"
                   value={item.quantity}
-                  onChange={e => setItem(idx, 'quantity', parseInt(e.target.value) || 1)}
+                  onChange={e => setItem(idx, 'quantity', parseFloat(e.target.value) || 1)}
                 />
                 <NumberInput
                   min={0}
@@ -725,6 +814,7 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
                   value={item.unit_cost}
                   onChange={e => setItem(idx, 'unit_cost', parseFloat(e.target.value) || 0)}
                 />
+                {supermarket && <input aria-label={`Selling price ${idx+1}`} type="number" min="0" step="0.01" className="input text-sm" placeholder="Common" value={item.selling_price} onChange={e=>setItem(idx,'selling_price',e.target.value)} />}
                 <p className="text-sm font-semibold text-right pr-1">
                   Rs.{(item.quantity * item.unit_cost).toLocaleString()}
                 </p>
@@ -744,7 +834,7 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
           </div>
         </div>
 
-        <div className="bg-surface-800/80 border border-slate-700/60 rounded-lg p-3 space-y-2">
+        <div hidden={direct} className="bg-surface-800/80 border border-slate-700/60 rounded-lg p-3 space-y-2">
           <p className="text-xs font-semibold text-slate-300">Direct Supplier Notification on Order Creation</p>
           <div className="flex flex-wrap gap-4 text-xs">
             <label className="flex items-center gap-2 cursor-pointer text-slate-300 hover:text-white select-none">
@@ -775,7 +865,7 @@ function CreatePOModal({ onClose, onDone }: { onClose: () => void; onDone: () =>
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-700">
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
           <button className="btn-primary gap-1" onClick={save} disabled={saving}>
-            {saving ? 'Creating & Sending...' : 'Create Purchase Order'}
+            {saving ? 'Saving...' : direct ? 'Save & Receive Stock' : 'Create Purchase Order'}
           </button>
         </div>
       </div>

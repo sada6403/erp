@@ -1,3 +1,4 @@
+import { usesSupermarketStock } from '../services/supermarketModule'
 import { ipcMain, dialog, BrowserWindow, app } from 'electron'
 import fs from 'fs'
 import path from 'path'
@@ -351,12 +352,20 @@ export function registerReportHandlers() {
       })
 
       const cogs = safeGet(db, `
-        SELECT COALESCE(SUM(ii.quantity * COALESCE(p.cost_price, 0)), 0) as cogs
+        WITH allocation_costs AS (
+          SELECT invoice_item_id,
+            SUM((quantity-returned_quantity) * unit_cost) cogs,
+            SUM(CASE WHEN cost_known=0 THEN quantity-returned_quantity ELSE 0 END) unknown_cost_qty
+          FROM sale_batch_allocations GROUP BY invoice_item_id
+        )
+        SELECT COALESCE(SUM(${usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) ? 'ac.cogs' : 'ii.quantity * COALESCE(p.cost_price,0)'}), 0) as cogs,
+          COALESCE(SUM(ac.unknown_cost_qty), 0) as unknown_cost_qty
         FROM invoice_items ii
         JOIN invoices i ON i.id = ii.invoice_id
-        LEFT JOIN products p ON p.id = ii.product_id
+        LEFT JOIN allocation_costs ac ON ac.invoice_item_id = ii.id
+        LEFT JOIN products p ON p.id=ii.product_id
         ${where}
-      `, params, { cogs: 0 })
+      `, params, { cogs: 0, unknown_cost_qty: 0 })
 
       const expenses = tableExists(db, 'expenses')
         ? safeGet(db, `
@@ -387,10 +396,14 @@ export function registerReportHandlers() {
       // the same way as periodSales (daily/weekly/monthly/yearly, per the
       // groupBy filter), so the same date range can be sliced any way.
       const periodCogs = safeAll(db, `
-        WITH invoice_cogs AS (
-          SELECT ii.invoice_id, SUM(ii.quantity * COALESCE(p.cost_price, 0)) as cogs
+        WITH allocation_costs AS (
+          SELECT invoice_item_id, SUM((quantity-returned_quantity) * unit_cost) cogs
+          FROM sale_batch_allocations GROUP BY invoice_item_id
+        ), invoice_cogs AS (
+          SELECT ii.invoice_id, SUM(${usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) ? 'COALESCE(ac.cogs,0)' : 'ii.quantity * COALESCE(p.cost_price,0)'}) as cogs
           FROM invoice_items ii
-          LEFT JOIN products p ON p.id = ii.product_id
+          LEFT JOIN allocation_costs ac ON ac.invoice_item_id = ii.id
+          LEFT JOIN products p ON p.id=ii.product_id
           GROUP BY ii.invoice_id
         )
         SELECT ${groupExpr} as period,
@@ -433,6 +446,11 @@ export function registerReportHandlers() {
       const stockBranchId = (filters.branchId || (!isGlobalReports ? caller?.branch_id as string | undefined : undefined)) || ''
 
       const productSales = safeAll(db, `
+        WITH allocation_costs AS (
+          SELECT invoice_item_id, SUM((quantity-returned_quantity) * unit_cost) cogs,
+            SUM(CASE WHEN cost_known=0 THEN quantity-returned_quantity ELSE 0 END) unknown_cost_qty
+          FROM sale_batch_allocations GROUP BY invoice_item_id
+        )
         SELECT p.name as product_name, p.sku,
           p.cost_price as buy_price,
           p.selling_price as sell_price,
@@ -440,14 +458,16 @@ export function registerReportHandlers() {
           COALESCE(SUM(ii.line_total), 0) as sales_total,
           COALESCE(SUM(ii.discount_amount), 0) as discount_total,
           COALESCE(SUM(ii.tax_amount), 0) as tax_total,
-          COALESCE(SUM(ii.quantity * COALESCE(p.cost_price, 0)), 0) as cost_total,
-          COALESCE(SUM(ii.line_total - (ii.quantity * COALESCE(p.cost_price, 0))), 0) as gross_profit,
+          COALESCE(SUM(${usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) ? 'ac.cogs' : 'ii.quantity * COALESCE(p.cost_price,0)'}), 0) as cost_total,
+          COALESCE(SUM(ac.unknown_cost_qty), 0) as unknown_cost_qty,
+          COALESCE(SUM(ii.line_total - ${usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) ? 'COALESCE(ac.cogs,0)' : 'ii.quantity * COALESCE(p.cost_price,0)'}), 0) as gross_profit,
           COALESCE((SELECT SUM(s.quantity) FROM stocks s WHERE s.product_id = p.id${stockBranchId ? ' AND s.branch_id = ?' : ''}), 0) as current_stock,
           COALESCE(SUM(CASE WHEN ins.id IS NOT NULL THEN ii.quantity ELSE 0 END), 0) as installment_qty,
           COALESCE(SUM(CASE WHEN ins.id IS NOT NULL THEN ii.line_total ELSE 0 END), 0) as installment_sales
         FROM invoice_items ii
         JOIN invoices i ON i.id = ii.invoice_id
         LEFT JOIN products p ON p.id = ii.product_id
+        LEFT JOIN allocation_costs ac ON ac.invoice_item_id = ii.id
         LEFT JOIN installments ins ON ins.invoice_id = i.id
         ${where}
         GROUP BY ii.product_id

@@ -4,6 +4,7 @@ import { getDb } from '../database'
 import { enqueuSync } from '../services/syncQueue'
 import { insertStockMovement } from '../services/stockMovement'
 import { syncStockRow } from '../services/stockSync'
+import { cancelReturnedSaleBatches, restoreReturnedSaleBatches, type ReturnBatchAllocation } from '../services/batchInventory'
 import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
 import { createCompanyStore } from '../services/companyWorkspace'
@@ -146,6 +147,7 @@ export function registerReturnHandlers() {
 
     const itemRecords: Record<string, unknown>[] = []
     const movementRecords: Record<string, unknown>[] = []
+    const batchReturnRecords: ReturnBatchAllocation[] = []
     db.transaction(() => {
       db.prepare(`
         INSERT INTO returns (id, invoice_id, customer_id, reason, total_refund, refund_method, notes, created_by, status)
@@ -162,6 +164,18 @@ export function registerReturnHandlers() {
           id: itemId, return_id: id, product_id: item.product_id,
           invoice_item_id: item.invoice_item_id, quantity: item.quantity, unit_price: item.unit_price,
         })
+
+        if (item.invoice_item_id) {
+          const hasBatchAllocations = Boolean(db.prepare('SELECT 1 FROM sale_batch_allocations WHERE invoice_item_id=? LIMIT 1').get(item.invoice_item_id))
+          if (hasBatchAllocations) {
+            batchReturnRecords.push(...restoreReturnedSaleBatches(db, {
+              returnId: id,
+              returnItemId: itemId,
+              invoiceItemId: item.invoice_item_id,
+              quantity: item.quantity,
+            }))
+          }
+        }
 
         // Restore stock in the branch the sale actually happened in.
         const existing = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
@@ -196,6 +210,13 @@ export function registerReturnHandlers() {
     for (const itemRow of itemRecords) {
       await enqueuSync('return_items', String(itemRow.id), 'INSERT', itemRow)
     }
+    for (const allocation of batchReturnRecords) {
+      await enqueuSync('return_batch_allocations', allocation.id, 'INSERT', { ...allocation })
+      const saleAllocation = db.prepare('SELECT * FROM sale_batch_allocations WHERE id=?').get(allocation.sale_allocation_id) as Record<string, unknown>
+      const batch = db.prepare('SELECT * FROM product_batches WHERE id=?').get(allocation.batch_id) as Record<string, unknown>
+      await enqueuSync('sale_batch_allocations', allocation.sale_allocation_id, 'UPDATE', saleAllocation)
+      await enqueuSync('product_batches', allocation.batch_id, 'UPDATE', batch)
+    }
     for (const movement of movementRecords) {
       await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       await syncStockRow(db, String(movement.product_id), branchId)
@@ -220,7 +241,11 @@ export function registerReturnHandlers() {
     if (!branchId) return { success: false, error: 'Cannot determine the branch for this return' }
     const items = db.prepare('SELECT product_id, quantity FROM return_items WHERE return_id=?').all(id) as Array<{ product_id: string; quantity: number }>
     const movementRecords: Record<string, unknown>[] = []
+    let cancelledBatchReturns: ReturnBatchAllocation[] = []
     db.transaction(() => {
+      if (db.prepare('SELECT 1 FROM return_batch_allocations WHERE return_id=? LIMIT 1').get(id)) {
+        cancelledBatchReturns = cancelReturnedSaleBatches(db, id)
+      }
       for (const item of items) {
         const qty = Number(item.quantity)
         const changed = db.prepare(`
@@ -248,6 +273,12 @@ export function registerReturnHandlers() {
     for (const movement of movementRecords) {
       await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
       await syncStockRow(db, String(movement.product_id), branchId)
+    }
+    for (const allocation of cancelledBatchReturns) {
+      const saleAllocation = db.prepare('SELECT * FROM sale_batch_allocations WHERE id=?').get(allocation.sale_allocation_id) as Record<string, unknown>
+      const batch = db.prepare('SELECT * FROM product_batches WHERE id=?').get(allocation.batch_id) as Record<string, unknown>
+      await enqueuSync('sale_batch_allocations', allocation.sale_allocation_id, 'UPDATE', saleAllocation)
+      await enqueuSync('product_batches', allocation.batch_id, 'UPDATE', batch)
     }
     return { success: true }
   })

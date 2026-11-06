@@ -15,9 +15,10 @@ export const ALLOWED_TABLES = new Set([
   // Phase 2 additions — previously had UI/local schema but were missing one
   // or more of: cloud table, whitelist entry, push enqueue, or pull wiring.
   'agents', 'expense_categories', 'expenses',
+  'capital_transactions',
   'returns', 'return_items', 'cash_sessions',
   'loyalty_config', 'loyalty_transactions',
-  'product_uom', 'product_batches',
+  'product_uom', 'product_batches', 'sale_batch_allocations', 'return_batch_allocations',
   'product_attributes', 'product_attribute_values', 'product_variants', 'product_variant_stocks',
   // Chit Fund
   'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions',
@@ -70,6 +71,8 @@ const RELATED_KEYS: Record<string, Set<string>> = {
   installment_reminders:  new Set(['installment_id']),
   customer_order_items:   new Set(['order_id']),
   return_items:           new Set(['return_id']),
+  sale_batch_allocations: new Set(['invoice_id']),
+  return_batch_allocations: new Set(['return_id']),
   chit_members:           new Set(['scheme_id']),
   chit_draws:             new Set(['scheme_id']),
   chit_contributions:     new Set(['scheme_id']),

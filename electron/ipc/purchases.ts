@@ -1,9 +1,15 @@
-import { shell, type IpcMain } from 'electron'
+import { applyReceiptProductPrices, repairMissingReceiptPrices } from '../services/receiptProductPricing'
+import { createStockPurchase } from '../services/purchaseEntry'
+import { stagePurchaseBills, persistStagedBills, completeStagedBills, discardStagedBills } from '../services/purchaseBills'
+import { usesSupermarketStock } from '../services/supermarketModule'
+import { BrowserWindow, dialog, shell, type IpcMain } from 'electron'
+import fs from 'fs'
+import path from 'path'
 import { getDb } from '../database'
 import crypto from 'crypto'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
-import { createCompanyStore } from '../services/companyWorkspace'
+import { createCompanyStore, getWorkspaceDataPath } from '../services/companyWorkspace'
 import { syncStockRow } from '../services/stockSync'
 import { insertStockMovement } from '../services/stockMovement'
 import { safeHandleModule } from './ipcHandler'
@@ -11,8 +17,18 @@ import { sendEmail } from '../services/emailService'
 import { sendWhatsApp } from '../services/whatsappService'
 import { canManageProcurement, resolveMainBranchId } from '../services/branchAccess'
 import { importPOsFromExcel, downloadPOTemplate } from '../services/purchaseImportExport'
+import { createReceiptBatch } from '../services/batchInventory'
 
 const store = createCompanyStore()
+
+async function publishProductPrices(productIds:string[]) {
+  const db=getDb()
+  for(const id of new Set(productIds)) {
+    const row=db.prepare('SELECT * FROM products WHERE id=?').get(id) as Record<string,unknown>
+    if(row) await enqueuSync('products',id,'UPDATE',row)
+  }
+  for(const win of BrowserWindow.getAllWindows()) win.webContents.send('products:updated',{product_ids:productIds})
+}
 
 function requireMainBranchProcurement(): { user: Record<string, unknown>; mainBranchId: string } {
   const db = getDb()
@@ -289,6 +305,43 @@ Thank you for your partnership!
 }
 
 export function registerPurchaseHandlers(ipcMain: IpcMain) {
+  safeHandleModule(ipcMain,'purchases:chooseBills','purchase_orders',async()=>{
+    const {user}=requireMainBranchProcurement()
+    const selected=await dialog.showOpenDialog({title:'Select supplier bills',properties:['openFile','multiSelections'],filters:[{name:'Supplier bills',extensions:['pdf','png','jpg','jpeg']}]})
+    if(selected.canceled) return {success:false,cancelled:true}
+    return {success:true,data:stagePurchaseBills(selected.filePaths,getWorkspaceDataPath('purchase-invoices'),String(user.id))}
+  })
+  safeHandleModule(ipcMain,'purchases:discardBills','purchase_orders',(_e,token:string)=>{
+    const {user}=requireMainBranchProcurement()
+    discardStagedBills(token,getWorkspaceDataPath('purchase-invoices'),String(user.id))
+    return {success:true}
+  })
+  safeHandleModule(ipcMain,'purchases:receiptHistory','purchase_orders',(_e,filters:Record<string,unknown>={})=>{
+    const {mainBranchId}=requireMainBranchProcurement(); const db=getDb()
+    const where=['b.branch_id=?','b.purchase_item_id IS NOT NULL']; const args:unknown[]=[mainBranchId]
+    if(filters.from){where.push('date(b.purchase_date)>=date(?)');args.push(filters.from)}
+    if(filters.to){where.push('date(b.purchase_date)<=date(?)');args.push(filters.to)}
+    if(filters.supplier_id){where.push('po.supplier_id=?');args.push(filters.supplier_id)}
+    if(filters.has_bill) where.push('EXISTS (SELECT 1 FROM purchase_attachments a WHERE a.purchase_id=po.id AND a.is_active=1)')
+    if(filters.search){where.push('(p.name LIKE ? OR p.sku LIKE ? OR po.po_number LIKE ? OR po.supplier_invoice_number LIKE ?)');args.push(...Array(4).fill(`%${String(filters.search)}%`))}
+    const data=db.prepare(`SELECT b.*,p.name product_name,p.sku,po.po_number,po.purchase_type,po.supplier_invoice_number,s.name supplier_name,
+      (SELECT COUNT(*) FROM purchase_attachments a WHERE a.purchase_id=po.id AND a.is_active=1) bill_count
+      FROM product_batches b JOIN products p ON p.id=b.product_id JOIN purchase_orders po ON po.id=b.po_id
+      LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE ${where.join(' AND ')} ORDER BY b.purchase_date DESC,b.created_at DESC,b.id`).all(...args)
+    return {success:true,data}
+  })
+  safeHandleModule(ipcMain,'purchases:refreshProductPrices','purchase_orders',async(_e,id:string)=>{
+    const {user,mainBranchId}=requireMainBranchProcurement();const db=getDb()
+    if(!usesSupermarketStock(store.get('app_settings') as Record<string,unknown>)) throw new Error('Supermarket module required')
+    if(!db.prepare('SELECT 1 FROM purchase_orders WHERE id=? AND branch_id=?').get(id,mainBranchId)) throw new Error('Purchase not found')
+    const rows=db.transaction(()=>{
+      const changed=repairMissingReceiptPrices(db,id)
+      for(const row of changed) logAudit(db,{userId:String(user.id),branchId:mainBranchId,action:'RECEIPT_PRODUCT_PRICE_REPAIR',tableName:'products',recordId:String(row.id),newValues:row})
+      return changed
+    })()
+    await publishProductPrices(rows.map(row=>String(row.id)))
+    return {success:true,data:{updated:rows.length}}
+  })
   // List POs with optional filters
   safeHandleModule(ipcMain, 'purchases:list', 'purchase_orders', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
@@ -296,17 +349,23 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       let sql = `
         SELECT po.*, s.name as supplier_name, b.name as branch_name,
                u.name as created_by_name,
-               (SELECT COUNT(*) FROM purchase_items pi WHERE pi.po_id = po.id) as item_count
+               (SELECT COUNT(*) FROM purchase_items pi WHERE pi.po_id = po.id) as item_count,
+               (SELECT COUNT(*) FROM purchase_attachments pa WHERE pa.purchase_id=po.id AND pa.is_active=1) as bill_count
         FROM purchase_orders po
         LEFT JOIN suppliers s ON s.id = po.supplier_id
         LEFT JOIN branches b  ON b.id  = po.branch_id
         LEFT JOIN users u     ON u.id  = po.created_by
         WHERE po.branch_id=?`
       const params: unknown[] = [mainBranchId]
+      if (filters.purchase_type) { sql += ' AND po.purchase_type=?'; params.push(filters.purchase_type) }
+      if (filters.has_bill) sql += ' AND EXISTS (SELECT 1 FROM purchase_attachments a WHERE a.purchase_id=po.id AND a.is_active=1)'
+      if (filters.search) { sql += ' AND (po.po_number LIKE ? OR po.supplier_invoice_number LIKE ? OR s.name LIKE ?)'; params.push(...Array(3).fill(`%${String(filters.search)}%`)) }
       if (filters.status)    { sql += ' AND po.status=?';    params.push(filters.status) }
       if (filters.branch_id) { sql += ' AND po.branch_id=?'; params.push(filters.branch_id) }
       if (filters.supplier_id) { sql += ' AND po.supplier_id=?'; params.push(filters.supplier_id) }
-      sql += ' ORDER BY po.created_at DESC LIMIT 200'
+      if (filters.from) { sql += ' AND date(COALESCE(po.purchase_date,po.created_at))>=date(?)'; params.push(filters.from) }
+      if (filters.to) { sql += ' AND date(COALESCE(po.purchase_date,po.created_at))<=date(?)'; params.push(filters.to) }
+      sql += ' ORDER BY COALESCE(po.purchase_date,po.created_at) DESC'
       return { success: true, data: db.prepare(sql).all(...params) }
   })
 
@@ -335,13 +394,48 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
           ORDER BY sort_order LIMIT 1
         )
         WHERE pi.po_id=?`).all(id)
-      return { success: true, data: { ...po as object, items } }
+      const attachments = db.prepare(`SELECT id,original_name,mime_type,file_size,uploaded_at,uploaded_by
+        FROM purchase_attachments WHERE purchase_id=? AND is_active=1 ORDER BY uploaded_at DESC`).all(id)
+      return { success: true, data: { ...po as object, items, attachments } }
   })
 
   // Create PO (starts as DRAFT)
   safeHandleModule(ipcMain, 'purchases:create', 'purchase_orders', async (_e, payload) => {
     const db = getDb()
       const { user, mainBranchId } = requireMainBranchProcurement()
+      const supermarket=usesSupermarketStock(store.get('app_settings') as Record<string,unknown>)
+      if (payload.purchase_type === 'direct' && !supermarket) throw new Error('Direct stock purchase requires the supermarket module')
+      if (supermarket) {
+        const purchaseId=String(payload.entry_id || crypto.randomUUID())
+        const billsToken=payload.attachment_token ? String(payload.attachment_token) : undefined
+        const purchase=db.transaction(()=>{
+          const row=createStockPurchase(db,{
+            id:purchaseId,poNumber:getNextPONumber(mainBranchId),branchId:mainBranchId,userId:String(user.id),
+            supplierId:String(payload.supplier_id||''),purchaseType:payload.purchase_type==='direct'?'direct':'order',
+            purchaseDate:String(payload.purchase_date||new Date().toISOString().slice(0,10)),invoiceNumber:payload.supplier_invoice_number,
+            expectedDate:payload.expected_date,notes:payload.notes,
+            items:(payload.items||[]).map((item:Record<string,unknown>)=>({product_id:String(item.product_id||''),quantity:Number(item.quantity),unit_cost:Number(item.unit_cost),selling_price:item.selling_price==null||item.selling_price===''?null:Number(item.selling_price)})),
+          },id=>persistStagedBills(db,id,billsToken,String(user.id)))
+          logAudit(db,{userId:String(user.id),branchId:mainBranchId,action:row.status==='RECEIVED'?'DIRECT_STOCK_RECEIVED':'PO_CREATE',tableName:'purchase_orders',recordId:purchaseId,newValues:row})
+          return row
+        })()
+        completeStagedBills(billsToken)
+        await enqueuSync('purchase_orders',purchaseId,'INSERT',purchase)
+        const items=db.prepare('SELECT * FROM purchase_items WHERE po_id=?').all(purchaseId) as Record<string,unknown>[]
+        for(const item of items) {
+          await enqueuSync('purchase_items',String(item.id),'INSERT',item)
+          if(purchase.status==='RECEIVED') await syncStockRow(db,String(item.product_id),mainBranchId)
+        }
+        if(purchase.status==='RECEIVED') await publishProductPrices(items.map(item=>String(item.product_id)))
+        for(const batch of db.prepare('SELECT * FROM product_batches WHERE po_id=?').all(purchaseId) as Record<string,unknown>[]) await enqueuSync('product_batches',String(batch.id),'INSERT',batch)
+        for(const movement of db.prepare('SELECT * FROM stock_movements WHERE reference_order_id=?').all(purchaseId) as Record<string,unknown>[]) await enqueuSync('stock_movements',String(movement.id),'INSERT',movement)
+        let notification=null
+        if(purchase.purchase_type==='order' && (payload.open_whatsapp===true || payload.send_email===true)) {
+          try { notification=await sendSupplierOrderNotification(purchaseId,{openWhatsApp:payload.open_whatsapp===true,sendEmail:payload.send_email===true}) }
+          catch (error) { console.warn('[PO Notification Warning]',error) }
+        }
+        return {success:true,data:{id:purchaseId,po_number:purchase.po_number,notification}}
+      }
       if (!payload.supplier_id)       throw new Error('Supplier is required')
       if (!payload.items?.length)     throw new Error('At least one item is required')
 
@@ -443,6 +537,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       const receivedItemIds: string[] = []
       const receivedProductIds: string[] = []
       const movementRecords: Record<string, unknown>[] = []
+      const batchRecords: Record<string, unknown>[] = []
       if ((status === 'RECEIVED' || status === 'PARTIAL') && payload.items) {
         db.transaction(() => {
           let allFullyReceived = true
@@ -491,18 +586,43 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
                 notes: `Supplier receipt ${po.po_number || id} / item ${poItem.id}`,
                 created_by: (user?.id as string) || null,
               }))
+              // Every supermarket supplier receipt is an immutable cost layer.
+              // Partial receipts intentionally create separate batches because
+              // they may arrive on different dates or with different expiry lots.
+              const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+              const product = db.prepare('SELECT track_batches, selling_price FROM products WHERE id=?')
+                .get(productId) as { track_batches?: number; selling_price?: number } | undefined
+              if (usesSupermarketStock(settings)) {
+                applyReceiptProductPrices(db,productId,Number(poItem.unit_cost),item.selling_price !== undefined ? (item.selling_price === '' || item.selling_price == null ? null : Number(item.selling_price)) : poItem.selling_price == null ? null : Number(poItem.selling_price))
+                if (item.purchase_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(item.purchase_date))) throw new Error('Invalid purchase date')
+                if (!po.purchase_date && !patch.purchase_date) patch.purchase_date = String(item.purchase_date || now).slice(0,10)
+                batchRecords.push(createReceiptBatch(db, {
+                  productId,
+                  branchId,
+                  purchaseId: id,
+                  purchaseItemId: String(poItem.id),
+                  quantity: newReceived,
+                  unitCost: Number(poItem.unit_cost || 0),
+                  sellingPrice: item.selling_price !== undefined ? (item.selling_price === '' || item.selling_price == null ? null : Number(item.selling_price)) : poItem.selling_price == null ? null : Number(poItem.selling_price),
+                  batchNumber: String(item.batch_number || poItem.batch_number || '').trim() || null,
+                  expiryDate: String(item.expiry_date || poItem.expiry_date || '').trim() || null,
+                  purchaseDate: String(item.purchase_date || po.purchase_date || now).slice(0, 10),
+                  createdBy: (user?.id as string) || null,
+                }))
+              }
               receivedProductIds.push(productId)
             }
 
             if (totalReceived < Number(poItem.quantity)) allFullyReceived = false
           }
 
+          persistStagedBills(db,id,payload.attachment_token ? String(payload.attachment_token) : undefined,String(user.id))
           // Auto-promote PARTIAL to RECEIVED if everything is now received
           if (status === 'PARTIAL' && allFullyReceived) patch.status = 'RECEIVED'
           if (status === 'RECEIVED') patch.received_at = now
 
-          db.prepare(`UPDATE purchase_orders SET status=?, updated_at=datetime('now') WHERE id=?`)
-            .run(patch.status, id)
+          db.prepare(`UPDATE purchase_orders SET status=?, purchase_date=COALESCE(purchase_date,?), received_at=COALESCE(?,received_at), updated_at=datetime('now') WHERE id=?`)
+            .run(patch.status, patch.purchase_date || null, patch.status === 'RECEIVED' ? now : null, id)
 
           logAudit(db, {
             userId: user?.id as string, branchId: po.branch_id as string,
@@ -510,15 +630,20 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             newValues: { from: po.status, to: patch.status },
           })
         })()
+        completeStagedBills(payload.attachment_token ? String(payload.attachment_token) : undefined)
         for (const itemId of receivedItemIds) {
           const row = db.prepare('SELECT * FROM purchase_items WHERE id=?').get(itemId)
           await enqueuSync('purchase_items', itemId, 'UPDATE', row as Record<string, unknown>)
         }
+        if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>) && receivedProductIds.length) await publishProductPrices(receivedProductIds)
         for (const productId of receivedProductIds) {
           await syncStockRow(db, productId, String(po.branch_id))
         }
         for (const movement of movementRecords) {
           await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
+        }
+        for (const batch of batchRecords) {
+          await enqueuSync('product_batches', String(batch.id), 'INSERT', batch)
         }
       } else {
         if (status === 'SENT')      patch.sent_at      = now
@@ -633,5 +758,87 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   // Download Purchase Order Import Template
   safeHandleModule(ipcMain, 'purchases:downloadTemplate', 'purchase_orders', async () => {
     return await downloadPOTemplate()
+  })
+
+  safeHandleModule(ipcMain, 'purchases:updateInvoice', 'purchase_orders', async (_e, id: string, payload: Record<string, unknown>) => {
+    const db = getDb()
+    const { user, mainBranchId } = requireMainBranchProcurement()
+    const po = db.prepare('SELECT * FROM purchase_orders WHERE id=? AND branch_id=?').get(id, mainBranchId) as Record<string, unknown> | undefined
+    if (!po) throw new Error('Purchase order not found')
+    const invoiceNumber = String(payload.supplier_invoice_number || '').trim() || null
+    const paid = Math.round(Math.max(0, Number(payload.paid_amount || 0)) * 100) / 100
+    const total = Number(po.total_amount || po.total || 0)
+    if (paid > total) throw new Error('Paid amount cannot exceed the purchase total')
+    const outstanding = Math.round(Math.max(0, total - paid) * 100) / 100
+    const status = outstanding <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
+    const oldOutstanding = Number(po.outstanding_amount || 0)
+    try {
+      db.transaction(() => {
+        db.prepare(`UPDATE purchase_orders SET supplier_invoice_number=?, purchase_date=?, invoice_date=?,
+          payment_status=?, paid_amount=?, outstanding_amount=?, updated_at=datetime('now') WHERE id=?`)
+          .run(invoiceNumber, payload.purchase_date || null, payload.invoice_date || null, status, paid, outstanding, id)
+        db.prepare('UPDATE suppliers SET due_balance=MAX(0,due_balance+?), updated_at=datetime(\'now\') WHERE id=?')
+          .run(outstanding - oldOutstanding, po.supplier_id)
+        logAudit(db, { userId: user.id as string, branchId: mainBranchId, action: 'PURCHASE_INVOICE_UPDATE', tableName: 'purchase_orders', recordId: id, oldValues: po, newValues: { invoiceNumber, paid, outstanding, status } })
+      })()
+    } catch (error) {
+      if (/UNIQUE constraint/i.test(String(error))) throw new Error('This supplier invoice number is already registered')
+      throw error
+    }
+    const updated = db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown>
+    await enqueuSync('purchase_orders', id, 'UPDATE', updated)
+    await enqueuSync('suppliers', String(po.supplier_id), 'UPDATE', db.prepare('SELECT * FROM suppliers WHERE id=?').get(po.supplier_id) as Record<string, unknown>)
+    return { success: true, data: updated }
+  })
+
+  safeHandleModule(ipcMain, 'purchases:addAttachments', 'purchase_orders', async (_e, id: string) => {
+    const db = getDb()
+    const { user, mainBranchId } = requireMainBranchProcurement()
+    if (!db.prepare('SELECT 1 FROM purchase_orders WHERE id=? AND branch_id=?').get(id, mainBranchId)) throw new Error('Purchase order not found')
+    const selected = await dialog.showOpenDialog({ title: 'Attach supplier invoice', properties: ['openFile', 'multiSelections'], filters: [{ name: 'Invoice documents', extensions: ['pdf','jpg','jpeg','png'] }] })
+    if (selected.canceled) return { success: false, error: 'Cancelled' }
+    const dir = getWorkspaceDataPath('purchase-invoices')
+    fs.mkdirSync(dir, { recursive: true })
+    const allowed: Record<string,string> = { '.pdf':'application/pdf','.jpg':'image/jpeg','.jpeg':'image/jpeg','.png':'image/png' }
+    const rows: Record<string, unknown>[] = []
+    db.transaction(() => {
+      for (const source of selected.filePaths) {
+        const ext = path.extname(source).toLowerCase()
+        if (!allowed[ext]) throw new Error(`Unsupported invoice file: ${path.basename(source)}`)
+        const stat = fs.statSync(source)
+        if (stat.size > 15 * 1024 * 1024) throw new Error(`${path.basename(source)} exceeds the 15 MB limit`)
+        const stored = `${crypto.randomUUID()}${ext}`
+        fs.copyFileSync(source, path.join(dir, stored))
+        const row = { id: crypto.randomUUID(), purchase_id: id, original_name: path.basename(source), stored_name: stored, relative_path: `purchase-invoices/${stored}`, mime_type: allowed[ext], file_size: stat.size, uploaded_by: user.id || null }
+        db.prepare(`INSERT INTO purchase_attachments (id,purchase_id,original_name,stored_name,relative_path,mime_type,file_size,uploaded_by)
+          VALUES (@id,@purchase_id,@original_name,@stored_name,@relative_path,@mime_type,@file_size,@uploaded_by)`).run(row)
+        rows.push(row)
+      }
+      logAudit(db, { userId: user.id as string, branchId: mainBranchId, action: 'PURCHASE_ATTACHMENTS_ADD', tableName: 'purchase_orders', recordId: id, newValues: { files: rows.map(row => row.original_name) } })
+    })()
+    return { success: true, data: rows }
+  })
+
+  safeHandleModule(ipcMain, 'purchases:openAttachment', 'purchase_orders', async (_e, attachmentId: string) => {
+    requireMainBranchProcurement()
+    const row = getDb().prepare('SELECT relative_path FROM purchase_attachments WHERE id=? AND is_active=1').get(attachmentId) as { relative_path: string } | undefined
+    if (!row) throw new Error('Attachment not found')
+    const file = getWorkspaceDataPath(...row.relative_path.split('/'))
+    if (!fs.existsSync(file)) throw new Error('Attachment file is missing on this device')
+    const error = await shell.openPath(file)
+    if (error) throw new Error(error)
+    return { success: true }
+  })
+
+  safeHandleModule(ipcMain, 'purchases:removeAttachment', 'purchase_orders', async (_e, attachmentId: string, reason: string) => {
+    const db = getDb(); const { user, mainBranchId } = requireMainBranchProcurement()
+    if (!String(reason || '').trim()) throw new Error('A correction reason is required')
+    const row = db.prepare(`SELECT pa.*,po.branch_id FROM purchase_attachments pa JOIN purchase_orders po ON po.id=pa.purchase_id WHERE pa.id=? AND pa.is_active=1`).get(attachmentId) as Record<string, unknown> | undefined
+    if (!row || row.branch_id !== mainBranchId) throw new Error('Attachment not found')
+    db.transaction(() => {
+      db.prepare(`UPDATE purchase_attachments SET is_active=0,deleted_by=?,deleted_at=datetime('now'),delete_reason=?,updated_at=datetime('now') WHERE id=?`).run(user.id || null, reason.trim(), attachmentId)
+      logAudit(db, { userId: user.id as string, branchId: mainBranchId, action: 'PURCHASE_ATTACHMENT_CORRECTED', tableName: 'purchase_attachments', recordId: attachmentId, oldValues: row, newValues: { reason: reason.trim() } })
+    })()
+    return { success: true }
   })
 }

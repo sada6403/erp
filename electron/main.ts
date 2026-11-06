@@ -18,6 +18,7 @@ import { registerAnalyticsHandlers } from './ipc/analytics'
 import { registerAdminHandlers } from './ipc/admin'
 import { registerOrderHandlers } from './ipc/orders'
 import { registerPurchaseHandlers } from './ipc/purchases'
+import { registerInvestmentHandlers } from './ipc/investments'
 import { registerReturnHandlers } from './ipc/returns'
 import { registerCashRegisterHandlers } from './ipc/cashRegister'
 import { registerActivationHandlers } from './ipc/activation'
@@ -192,6 +193,7 @@ async function bootstrap() {
   registerAdminHandlers(ipcMain)
   registerOrderHandlers(ipcMain)
   registerPurchaseHandlers(ipcMain)
+  registerInvestmentHandlers(ipcMain)
   registerReturnHandlers()
   registerCashRegisterHandlers()
   registerActivationHandlers()

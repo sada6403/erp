@@ -225,3 +225,12 @@ describe('useCartStore — meta state', () => {
   })
 })
 
+
+it('uses FIFO batch selling prices when quantity crosses a purchase layer', () => {
+  useCartStore.getState().clear()
+  const product = { ...makeProduct({ id: 'batch-rice', selling_price: 400, tax_rate: 0 }), selling_layers: [{ quantity: 5, selling_price: 250 }, { quantity: 10, selling_price: 300 }] }
+  useCartStore.getState().addItem(product, 5)
+  expect(useCartStore.getState().total).toBe(1250)
+  useCartStore.getState().updateQty('batch-rice', 10)
+  expect(useCartStore.getState().total).toBe(2750)
+})

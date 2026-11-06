@@ -9,6 +9,8 @@ const LOCKOUT_MINUTES = 15
 // Business/transactional data only. Company structure and configuration
 // (users, roles, branches, warehouses, plans, templates and rules) survive.
 export const CLEARABLE_TENANT_TABLES = [
+  'sale_batch_allocations',
+  'return_batch_allocations',
   'coupon_redemptions',
   'return_items',
   'installment_payments',
@@ -54,6 +56,7 @@ export const CLEARABLE_TENANT_TABLES = [
   'edit_requests',
   'held_carts',
   'expenses',
+  'capital_transactions',
   'supplier_payments',
   'smartbuy_wallet',
   'chit_schemes',

@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.9.3 - 2026-11-06 - Supermarket stock purchases and product pricing
+
+- Added two stock-entry options on the existing purchase page: supplier purchase orders with receiving, and direct entry of delivered stock using product search.
+- Added supplier PDF/image bills during entry and receiving, date-wise received-stock history, and supplier/date/bill-reference filters.
+- Connected receipts, POS sales, returns, cancellations and invoice corrections to FIFO batch cost tracking. Historical batch costs remain unchanged.
+- Added separate Stock & Profit and Owner Investments pages while preserving the original Dashboard. Fixed duplicate active sidebar selection.
+- Receipt prices now update current product purchase/selling prices and refresh Products/POS. Products without a common selling price require one when receiving stock.
+- Added separate owner investment records, supermarket-only activation, additive local/cloud schema updates and sync support.
+
+Deployment order: backend compatibility migrations first, followed by desktop installer and updater metadata. Existing stock/sales without recorded batch costs remain explicitly marked as historical cost unknown. Purchase bill files are stored in the company workspace on the receiving device.
+
 ## 2.8.3 — 2026-10-25 — Supermarket SmartBuy Scheme Enhancements & Winner Settlement
 
 - **Supermarket SmartBuy Scheme Engine**:

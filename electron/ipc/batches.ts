@@ -1,3 +1,4 @@
+import { usesSupermarketStock } from '../services/supermarketModule'
 import { ipcMain } from 'electron'
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
@@ -27,6 +28,7 @@ interface BatchRow {
   expiry_date: string | null
   mfg_date: string | null
   quantity: number
+  selling_price: number | null
   cost_price: number
   po_id: string | null
   notes: string | null
@@ -38,8 +40,11 @@ export function registerBatchHandlers() {
   ipcMain.handle('batches:list', (_e, filters: { product_id?: string; branch_id?: string; expiring_days?: number }) => {
     try {
       const db = getDb()
-      const wheres: string[] = ['b.quantity > 0']
+      const supermarket = usesSupermarketStock(store.get('app_settings') as Record<string, unknown>)
+      const wheres: string[] = supermarket ? ['1=1'] : ['b.quantity > 0']
       const params: unknown[] = []
+      const caller = authUser()
+      if (!currentPerms(caller).all) { wheres.push('b.branch_id=?'); params.push(caller.branch_id || '') }
       if (filters.product_id) { wheres.push('b.product_id = ?'); params.push(filters.product_id) }
       if (filters.branch_id)  { wheres.push('b.branch_id = ?');  params.push(filters.branch_id) }
       if (filters.expiring_days) {
@@ -71,6 +76,7 @@ export function registerBatchHandlers() {
     const caller = authUser()
     const perms = currentPerms(caller)
     if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory access required' }
+    if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>)) throw new Error('Use stock purchases and POS sales for supermarket batch quantities')
     const db = getDb()
     const id = randomUUID()
     const isAdmin = Boolean(perms.all)
@@ -102,7 +108,9 @@ export function registerBatchHandlers() {
     if (!perms.all && caller.branch_id && existing.branch_id && existing.branch_id !== caller.branch_id) {
       return { success: false, error: 'Cannot edit a batch from another branch' }
     }
-    const allowed = ['batch_number','serial_number','expiry_date','mfg_date','quantity','cost_price','notes'] as const
+    if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) && (payload.quantity !== undefined || payload.cost_price !== undefined)) throw new Error('Use purchase receipts to change supermarket inventory; purchase costs are immutable')
+    if (payload.selling_price != null && (!Number.isFinite(Number(payload.selling_price)) || Number(payload.selling_price)<0)) throw new Error('Invalid selling price')
+    const allowed = ['selling_price','batch_number','serial_number','expiry_date','mfg_date','quantity','cost_price','notes'] as const
     const sets = allowed.filter(k => payload[k] !== undefined).map(k => `${k} = ?`)
     const vals = allowed.filter(k => payload[k] !== undefined).map(k => payload[k])
     if (!sets.length) return { success: false, error: 'Nothing to update' }
@@ -117,6 +125,7 @@ export function registerBatchHandlers() {
     const caller = authUser()
     const perms = currentPerms(caller)
     if (!perms.all && !perms.inventory && !perms.pos) return { success: false, error: 'Inventory access required' }
+    if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>)) throw new Error('Use stock purchases and POS sales for supermarket batch quantities')
     const db = getDb()
     const row = db.prepare(`SELECT quantity, branch_id FROM product_batches WHERE id = ?`).get(payload.batch_id) as { quantity: number; branch_id: string | null } | undefined
     if (!row) return { success: false, error: 'Batch not found' }

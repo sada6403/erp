@@ -28,7 +28,7 @@ export function insertStockMovement(
     variant_id: input.variant_id || null,
     from_branch_id: input.from_branch_id || null,
     to_branch_id: input.to_branch_id || null,
-    quantity: Math.max(0, Math.trunc(Number(input.quantity) || 0)),
+    quantity: Math.max(0, Math.round((Number(input.quantity) || 0) * 1_000_000) / 1_000_000),
     movement_type: input.movement_type,
     reference_order_id: input.reference_order_id || null,
     reference_transfer_id: input.reference_transfer_id || null,

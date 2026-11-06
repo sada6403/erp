@@ -43,6 +43,7 @@ const DEFAULTS = {
   company_tin: '',
   invoice_note: 'Goods once sold will not be taken back or exchanged.',
   // Business Type & Industry configuration
+  supermarket_stock_enabled: false,
   business_type: 'retail', // 'retail' | 'supermarket' | 'furniture'
   allow_negative_stock: false,
   auto_print_thermal: false,
@@ -387,6 +388,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
       }
 
       const current = store.get('app_settings') as Record<string, unknown> || {}
+      if ('supermarket_stock_enabled' in payload && Boolean(payload.supermarket_stock_enabled) !== Boolean(current.supermarket_stock_enabled) && !callerPerms.all) throw new Error('Company Admin access required to configure supermarket stock')
       const next = normalizeForStorage(payload as Record<string, unknown>, current)
       if (next.business_type === 'supermarket' && current.business_type !== 'supermarket') {
         next.allow_negative_stock = true

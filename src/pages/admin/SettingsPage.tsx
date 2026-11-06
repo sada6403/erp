@@ -57,6 +57,7 @@ export default function SettingsPage() {
     invoice_note: 'Goods once sold will not be taken back or exchanged.',
     branch_name: '',
     business_type: 'retail',
+    supermarket_stock_enabled: false,
     allow_negative_stock: false,
     auto_print_thermal: false,
     weighing_scale_barcode: true,
@@ -523,6 +524,14 @@ function GeneralSettings({ form, f, setForm }: { form: Record<string, any>; f: (
       </Section>
 
       <Section title="Industry & Supermarket Settings">
+        <Field label="Supermarket Stock & Profit">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={Boolean(form.supermarket_stock_enabled)} onChange={e => setForm((previous: Record<string, unknown>) => ({ ...previous, supermarket_stock_enabled: e.target.checked }))} />
+            Enable stock purchases, FIFO batches, profit dashboard and owner investments for this company
+          </label>
+          <p className="text-xs mt-2" style={{ color: 'var(--text-3)' }}>Save settings to apply. Other company modules keep their existing workflows.</p>
+        </Field>
+
         <p className="text-xs -mt-1 mb-2" style={{ color: 'var(--text-3)' }}>
           Workflow rules configured for this company. Industry type is managed centrally by your platform administrator.
         </p>

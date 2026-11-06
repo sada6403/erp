@@ -325,6 +325,7 @@ const api = {
 
   // Analytics
   analytics: {
+    supermarketOverview: () => ipcRenderer.invoke('analytics:supermarketOverview'),
     salesSummary:      (filters: unknown) => ipcRenderer.invoke('analytics:salesSummary', filters),
     topProducts:       (filters: unknown) => ipcRenderer.invoke('analytics:topProducts', filters),
     branchPerformance: (filters: unknown) => ipcRenderer.invoke('analytics:branchPerformance', filters),
@@ -432,6 +433,10 @@ const api = {
 
   // Purchase Orders
   purchases: {
+    refreshProductPrices: (id: string) => ipcRenderer.invoke('purchases:refreshProductPrices',id),
+    chooseBills: () => ipcRenderer.invoke('purchases:chooseBills'),
+    discardBills: (token: string) => ipcRenderer.invoke('purchases:discardBills',token),
+    receiptHistory: (filters?: unknown) => ipcRenderer.invoke('purchases:receiptHistory',filters),
     list:           (filters?: unknown)                             => ipcRenderer.invoke('purchases:list', filters),
     get:            (id: string)                                    => ipcRenderer.invoke('purchases:get', id),
     create:         (payload: unknown)                              => ipcRenderer.invoke('purchases:create', payload),
@@ -440,6 +445,14 @@ const api = {
     notifySupplier:   (id: string, options?: unknown)                 => ipcRenderer.invoke('purchases:notifySupplier', id, options),
     importExcel:      (options?: unknown)                             => ipcRenderer.invoke('purchases:importExcel', options),
     downloadTemplate: ()                                              => ipcRenderer.invoke('purchases:downloadTemplate'),
+    updateInvoice:    (id: string, payload: unknown)                  => ipcRenderer.invoke('purchases:updateInvoice', id, payload),
+    addAttachments:   (id: string)                                    => ipcRenderer.invoke('purchases:addAttachments', id),
+    openAttachment:   (id: string)                                    => ipcRenderer.invoke('purchases:openAttachment', id),
+    removeAttachment: (id: string, reason: string)                    => ipcRenderer.invoke('purchases:removeAttachment', id, reason),
+  },
+  investments: {
+    list:   (filters?: unknown) => ipcRenderer.invoke('investments:list', filters),
+    create: (payload: unknown)  => ipcRenderer.invoke('investments:create', payload),
   },
 
   // Returns / Refunds

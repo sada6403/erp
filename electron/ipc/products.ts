@@ -1,3 +1,4 @@
+import { usesSupermarketStock } from '../services/supermarketModule'
 import type { IpcMain } from 'electron'
 import { dialog, app } from 'electron'
 import { getDb, seedProductAttributes } from '../database'
@@ -20,7 +21,15 @@ import { recordPendingBranchStock, parseDateFlex } from '../services/pendingBran
 import { createFurnitureProductTemplate, readAdditionalProductFields } from '../services/productSpreadsheet'
 import { buildFurnitureImportReview, describeFurnitureSheet, furnitureImportFingerprint, recommendFurnitureHeader, type FieldMapping, type ImportStrategy } from '../services/furnitureImportPreview'
 
+import { getSellingLayers } from '../services/batchInventory'
+
 const store = createCompanyStore()
+function withSellingLayers(row: unknown, branchId?: string): unknown {
+  if (!row || !usesSupermarketStock(store.get('app_settings') as Record<string, unknown>)) return row
+  const product = row as Record<string, unknown>
+  const branch = branchId || String(getAuthUser()?.branch_id || '')
+  return { ...product, selling_layers: getSellingLayers(getDb(), String(product.id), branch) }
+}
 
 function getAuthUser(): Record<string, unknown> | undefined {
   return store.get('auth_user') as Record<string, unknown> | undefined
@@ -479,7 +488,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       if (filters.category_id) { sql += ' AND p.category_id = ?'; params.push(filters.category_id) }
       if (filters.is_active !== undefined) { sql += ' AND p.is_active = ?'; params.push(filters.is_active ? 1 : 0) }
       sql += ' ORDER BY p.name'
-      return { success: true, data: db.prepare(sql).all(...params) }
+      return { success: true, data: db.prepare(sql).all(...params).map(row => withSellingLayers(row)) }
   })
 
   safeHandle(ipcMain, 'products:search', (_e, query: string) => {
@@ -509,7 +518,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const params: unknown[] = (!superAdmin && branchId) ? [branchId, q, q, q] : [q, q, q]
 
       sql += ' ORDER BY p.name LIMIT 50'
-      return { success: true, data: db.prepare(sql).all(...params) }
+      return { success: true, data: db.prepare(sql).all(...params).map(row => withSellingLayers(row)) }
   })
 
   safeHandle(ipcMain, 'products:searchSku', (_e, sku: string) => {
@@ -584,7 +593,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         LIMIT 1
       `
       const params: unknown[] = (!superAdmin && branchId) ? [branchId, sku, sku] : [sku, sku]
-      return { success: true, data: db.prepare(sql).get(...params) || null }
+      return { success: true, data: withSellingLayers(db.prepare(sql).get(...params) || null) }
   })
 
   safeHandle(ipcMain, 'products:get', (_e, id: string) => {

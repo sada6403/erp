@@ -42,6 +42,17 @@ interface CartState {
 }
 
 function calcLine(item: CartItem): CartItem {
+  const layers = (item.product as Product & { selling_layers?: { quantity: number; selling_price: number | null }[] }).selling_layers
+  if (layers && !item.variant_id && !(item as CartItem & { manual_price?: boolean }).manual_price) {
+    let remaining = item.quantity, total = 0
+    for (const layer of layers) {
+      const take = Math.min(remaining, layer.quantity)
+      total += take * (layer.selling_price ?? item.product.selling_price)
+      remaining -= take
+      if (remaining <= 0) break
+    }
+    item = { ...item, unit_price: Math.round((total + remaining * item.product.selling_price) / item.quantity * 100) / 100 }
+  }
   const gross    = item.quantity * item.unit_price
   const disc     = gross * (item.discount_pct / 100)
   const taxable  = gross - disc
@@ -149,7 +160,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     const { items, globalDiscount } = get()
     const clamped = Math.max(0, price)
     const newItems = items.map(i =>
-      (i.variant_id ? i.variant_id === key : i.product.id === key) ? calcLine({ ...i, unit_price: clamped }) : i
+      (i.variant_id ? i.variant_id === key : i.product.id === key) ? calcLine({ ...i, unit_price: clamped, manual_price: true } as CartItem) : i
     )
     set({ items: newItems, ...computeTotals(newItems, globalDiscount) })
   },

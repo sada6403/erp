@@ -356,7 +356,8 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
   useEffect(() => {
     const onChange = () => load(true)
     window.addEventListener('pos:stock-changed', onChange)
-    return () => window.removeEventListener('pos:stock-changed', onChange)
+    const off=window.api.on?.('products:updated',onChange)
+    return () => { window.removeEventListener('pos:stock-changed', onChange); off?.() }
   }, [load])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {

@@ -567,6 +567,14 @@ function runMigrations(): void {
     ['purchase_orders', 'cancelled_at', "TEXT"],
     ['purchase_items',  'quantity',     "REAL NOT NULL DEFAULT 0"],
     ['purchase_items',  'notes',        "TEXT"],
+    ['purchase_orders', 'purchase_type', "TEXT NOT NULL DEFAULT 'order'"],
+    ['purchase_items', 'selling_price', "REAL"],
+    ['purchase_orders', 'supplier_invoice_number', "TEXT"],
+    ['purchase_orders', 'purchase_date', "TEXT"],
+    ['purchase_orders', 'invoice_date', "TEXT"],
+    ['purchase_orders', 'payment_status', "TEXT NOT NULL DEFAULT 'unpaid'"],
+    ['purchase_orders', 'paid_amount', "REAL NOT NULL DEFAULT 0"],
+    ['purchase_orders', 'outstanding_amount', "REAL NOT NULL DEFAULT 0"],
   ]
   for (const [table, column, definition] of poMigrations) {
     if (!hasColumn(table, column)) {
@@ -574,6 +582,31 @@ function runMigrations(): void {
       console.log(`[DB] Migration: added ${table}.${column}`)
     }
   }
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_purchase_supplier_invoice
+      ON purchase_orders(supplier_id, supplier_invoice_number)
+      WHERE supplier_invoice_number IS NOT NULL AND trim(supplier_invoice_number) <> '';
+    CREATE INDEX IF NOT EXISTS idx_purchase_orders_purchase_date ON purchase_orders(purchase_date);
+    CREATE INDEX IF NOT EXISTS idx_purchase_orders_invoice_date ON purchase_orders(invoice_date);
+    CREATE TABLE IF NOT EXISTS purchase_attachments (
+      id TEXT PRIMARY KEY,
+      purchase_id TEXT NOT NULL REFERENCES purchase_orders(id),
+      original_name TEXT NOT NULL,
+      stored_name TEXT NOT NULL UNIQUE,
+      relative_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      file_size INTEGER NOT NULL,
+      uploaded_by TEXT REFERENCES users(id),
+      uploaded_at TEXT NOT NULL DEFAULT (datetime('now')),
+      is_active INTEGER NOT NULL DEFAULT 1,
+      deleted_by TEXT REFERENCES users(id),
+      deleted_at TEXT,
+      delete_reason TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_purchase_attachments_purchase ON purchase_attachments(purchase_id, is_active);
+  `)
 
   // New tables for enhanced product/expense features
   db.exec(`
@@ -620,6 +653,26 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_expenses_branch   ON expenses(branch_id);
     CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id);
     CREATE INDEX IF NOT EXISTS idx_expenses_date     ON expenses(created_at);
+
+    CREATE TABLE IF NOT EXISTS capital_transactions (
+      id TEXT PRIMARY KEY,
+      branch_id TEXT REFERENCES branches(id),
+      transaction_type TEXT NOT NULL CHECK (transaction_type IN ('investment','withdrawal')),
+      transaction_date TEXT NOT NULL,
+      amount REAL NOT NULL CHECK (amount > 0),
+      owner_name TEXT NOT NULL,
+      payment_method TEXT NOT NULL,
+      account_name TEXT,
+      reference_number TEXT,
+      description TEXT,
+      supporting_document TEXT,
+      created_by TEXT REFERENCES users(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_capital_transactions_date ON capital_transactions(transaction_date);
+    CREATE INDEX IF NOT EXISTS idx_capital_transactions_type ON capital_transactions(transaction_type);
 
     -- ─── PRODUCT ATTRIBUTES & VARIANTS ENGINE ────────────────────────────────
     CREATE TABLE IF NOT EXISTS product_attributes (
@@ -2031,6 +2084,41 @@ function runMigrations(): void {
     CREATE INDEX IF NOT EXISTS idx_batches_branch    ON product_batches(branch_id);
     CREATE INDEX IF NOT EXISTS idx_batches_expiry    ON product_batches(expiry_date);
     CREATE INDEX IF NOT EXISTS idx_batches_batch_no  ON product_batches(batch_number);
+
+    CREATE TABLE IF NOT EXISTS sale_batch_allocations (
+      id                 TEXT PRIMARY KEY,
+      invoice_id         TEXT NOT NULL REFERENCES invoices(id),
+      invoice_item_id    TEXT NOT NULL REFERENCES invoice_items(id),
+      product_id         TEXT NOT NULL REFERENCES products(id),
+      batch_id           TEXT NOT NULL REFERENCES product_batches(id),
+      branch_id          TEXT NOT NULL REFERENCES branches(id),
+      quantity           REAL NOT NULL CHECK (quantity > 0),
+      returned_quantity  REAL NOT NULL DEFAULT 0 CHECK (returned_quantity >= 0),
+      unit_cost          REAL NOT NULL DEFAULT 0 CHECK (unit_cost >= 0),
+      unit_selling_price REAL NOT NULL DEFAULT 0 CHECK (unit_selling_price >= 0),
+      cost_known         INTEGER NOT NULL DEFAULT 1,
+      created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at          TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sale_batch_alloc_invoice ON sale_batch_allocations(invoice_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_batch_alloc_item ON sale_batch_allocations(invoice_item_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_batch_alloc_batch ON sale_batch_allocations(batch_id);
+    CREATE INDEX IF NOT EXISTS idx_sale_batch_alloc_product_branch ON sale_batch_allocations(product_id, branch_id);
+
+    CREATE TABLE IF NOT EXISTS return_batch_allocations (
+      id                 TEXT PRIMARY KEY,
+      return_id          TEXT NOT NULL REFERENCES returns(id),
+      return_item_id     TEXT NOT NULL REFERENCES return_items(id),
+      sale_allocation_id TEXT NOT NULL REFERENCES sale_batch_allocations(id),
+      batch_id           TEXT NOT NULL REFERENCES product_batches(id),
+      quantity           REAL NOT NULL CHECK (quantity > 0),
+      created_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at         TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at          TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_return_batch_alloc_return ON return_batch_allocations(return_id);
+    CREATE INDEX IF NOT EXISTS idx_return_batch_alloc_item ON return_batch_allocations(return_item_id);
   `)
   if (!hasColumn('products', 'track_batches')) {
     db.exec(`ALTER TABLE products ADD COLUMN track_batches INTEGER NOT NULL DEFAULT 0`)
@@ -2047,6 +2135,31 @@ function runMigrations(): void {
   if (!hasColumn('purchase_items', 'expiry_date')) {
     db.exec(`ALTER TABLE purchase_items ADD COLUMN expiry_date TEXT`)
   }
+  const batchLedgerColumns: [string, string][] = [
+    ['purchase_item_id', 'TEXT REFERENCES purchase_items(id)'],
+    ['purchase_date', 'TEXT'],
+    ['original_quantity', 'REAL NOT NULL DEFAULT 0'],
+    ['sold_quantity', 'REAL NOT NULL DEFAULT 0'],
+    ['returned_quantity', 'REAL NOT NULL DEFAULT 0'],
+    ['damaged_quantity', 'REAL NOT NULL DEFAULT 0'],
+    ['selling_price', 'REAL'],
+    ['status', "TEXT NOT NULL DEFAULT 'available'"],
+    ['historical_cost_known', 'INTEGER NOT NULL DEFAULT 1'],
+    ['synced_at', 'TEXT'],
+  ]
+  for (const [column, definition] of batchLedgerColumns) {
+    if (!hasColumn('product_batches', column)) db.exec(`ALTER TABLE product_batches ADD COLUMN ${column} ${definition}`)
+  }
+  db.exec(`
+    UPDATE product_batches
+    SET original_quantity = CASE WHEN original_quantity <= 0 THEN quantity ELSE original_quantity END,
+        status = CASE
+          WHEN quantity <= 0 THEN 'sold_out'
+          WHEN sold_quantity > 0 THEN 'partially_sold'
+          ELSE 'available'
+        END
+    WHERE original_quantity <= 0 OR status IS NULL OR status = ''
+  `)
 
   // ── 2FA columns ────────────────────────────────────────────────────────────
   if (!hasColumn('users', 'two_factor_enabled')) {

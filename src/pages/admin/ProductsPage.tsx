@@ -92,6 +92,8 @@ export default function ProductsPage() {
     if (res.success && res.data) useProductsStore.setState({ products: res.data })
   }
 
+  useEffect(() => window.api.on?.('products:updated', () => { void load() }), [branchFilter, catFilter])
+
   const loadAudit = async () => {
     setAuditLoading(true)
     try {

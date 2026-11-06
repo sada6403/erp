@@ -18,6 +18,7 @@ interface ProductsState {
   suppliers: Supplier[]
   loaded: boolean
   loading: boolean
+  invalidate: () => void
   load: (force?: boolean) => Promise<void>
 }
 
@@ -28,6 +29,7 @@ export const useProductsStore = create<ProductsState>((set, get) => ({
   loaded: false,
   loading: false,
 
+  invalidate: () => set({ loaded: false }),
   load: async (force = false) => {
     if (get().loaded && !force) return
     if (get().loading) return
