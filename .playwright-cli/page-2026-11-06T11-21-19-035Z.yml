@@ -1,0 +1,210 @@
+- generic [ref=f2e3]:
+  - banner [ref=f2e4]:
+    - button "Supermarket UI verification" [ref=f2e5] [cursor=pointer]
+    - generic [ref=f2e12]: Main Branch
+    - generic [ref=f2e18]: Nov 6, 2026 04:51:18 PM
+    - link "POS Billing" [ref=f2e19] [cursor=pointer]:
+      - /url: /pos
+    - button "Refresh this page" [ref=f2e23] [cursor=pointer]
+    - button "Change theme" [ref=f2e29] [cursor=pointer]
+    - button "Sync - 0 pending" [ref=f2e32] [cursor=pointer]
+    - button "Notifications" [ref=f2e38] [cursor=pointer]
+    - button "Change my password" [ref=f2e42] [cursor=pointer]
+    - generic [ref=f2e46]:
+      - generic [ref=f2e47]: U
+      - generic [ref=f2e48]:
+        - paragraph [ref=f2e49]: UI Test Owner
+        - paragraph [ref=f2e50]: System User
+    - generic [ref=f2e53]: ONLINE
+    - button "Logout" [ref=f2e54] [cursor=pointer]
+  - generic [ref=f2e58]:
+    - complementary [ref=f2e59]:
+      - paragraph [ref=f2e61]: Menu
+      - navigation [ref=f2e62]:
+        - link "Stock & Profit" [ref=f2e63] [cursor=pointer]:
+          - /url: /admin
+        - link "Owner Investments" [ref=f2e70] [cursor=pointer]:
+          - /url: /admin#owner-investments
+        - generic [ref=f2e77]:
+          - button "Products" [ref=f2e78] [cursor=pointer]
+          - generic [ref=f2e86]:
+            - link "List Products" [ref=f2e88] [cursor=pointer]:
+              - /url: /admin/products
+            - link "Categories" [ref=f2e90] [cursor=pointer]:
+              - /url: /admin/categories
+            - link "Stock Intelligence" [ref=f2e92] [cursor=pointer]:
+              - /url: /admin/stock-intelligence
+            - link "Stock Lookup" [ref=f2e94] [cursor=pointer]:
+              - /url: /admin/stock-lookup
+            - link "Stock Count" [ref=f2e96] [cursor=pointer]:
+              - /url: /admin/stock-count
+            - link "Purchase Batches & Stock" [ref=f2e98] [cursor=pointer]:
+              - /url: /admin/batches
+        - link "Stock Purchases & Bills" [ref=f2e100] [cursor=pointer]:
+          - /url: /admin/purchase-orders
+        - link "Supplier Management" [ref=f2e106] [cursor=pointer]:
+          - /url: /admin/suppliers
+        - link "Customer Management" [ref=f2e113] [cursor=pointer]:
+          - /url: /admin/customers
+        - generic [ref=f2e127]:
+          - button "Smart Buy" [ref=f2e128] [cursor=pointer]
+          - generic [ref=f2e137]:
+            - link "Dashboard" [ref=f2e139] [cursor=pointer]:
+              - /url: /admin/smart-buy
+            - link "Award Winners" [ref=f2e141] [cursor=pointer]:
+              - /url: /admin/smart-buy-award
+            - link "Scheme Master" [ref=f2e143] [cursor=pointer]:
+              - /url: /admin/scheme-master
+            - link "Schemes" [ref=f2e145] [cursor=pointer]:
+              - /url: /admin/chits
+            - link "Viability Calculator" [ref=f2e147] [cursor=pointer]:
+              - /url: /admin/smart-buy-calculator
+            - link "Customers" [ref=f2e149] [cursor=pointer]:
+              - /url: /admin/chit-customers
+            - link "Agents" [ref=f2e151] [cursor=pointer]:
+              - /url: /admin/smart-buy-agents
+            - link "Payment Reminders" [ref=f2e153] [cursor=pointer]:
+              - /url: /admin/smart-buy-reminders
+            - link "Bank Transfers" [ref=f2e155] [cursor=pointer]:
+              - /url: /admin/smart-buy-transfers
+            - link "Reports" [ref=f2e157] [cursor=pointer]:
+              - /url: /admin/smart-buy-reports
+            - link "Commission Rules" [ref=f2e159] [cursor=pointer]:
+              - /url: /admin/commission-rules
+            - link "Admin Configuration" [ref=f2e161] [cursor=pointer]:
+              - /url: /admin/smart-buy-settings
+        - generic [ref=f2e163]:
+          - button "Stock Transfers" [ref=f2e164] [cursor=pointer]
+          - generic [ref=f2e171]:
+            - link "Stock Transfers" [ref=f2e173] [cursor=pointer]:
+              - /url: /admin/stock-transfers
+            - link "Track Transfer" [ref=f2e175] [cursor=pointer]:
+              - /url: /admin/track-transfer
+            - link "Branch Transfers" [ref=f2e177] [cursor=pointer]:
+              - /url: /admin/branch-transfers
+            - link "Stock Requests" [ref=f2e179] [cursor=pointer]:
+              - /url: /admin/stock-requests
+        - generic [ref=f2e181]:
+          - button "Sell" [ref=f2e182] [cursor=pointer]
+          - generic [ref=f2e189]:
+            - link "Bills" [ref=f2e191] [cursor=pointer]:
+              - /url: /admin/bills
+            - link "Orders" [ref=f2e193] [cursor=pointer]:
+              - /url: /admin/orders
+            - link "Credit Bills" [ref=f2e195] [cursor=pointer]:
+              - /url: /admin/credit-bills
+            - link "Returns & Refunds" [ref=f2e197] [cursor=pointer]:
+              - /url: /admin/returns
+            - link "Cash Register" [ref=f2e199] [cursor=pointer]:
+              - /url: /admin/cash-register
+        - generic [ref=f2e201]:
+          - button "Coupons" [ref=f2e202] [cursor=pointer]
+          - generic [ref=f2e208]:
+            - link "Coupon Management" [ref=f2e210] [cursor=pointer]:
+              - /url: /admin/coupons
+            - link "Coupon Reports" [ref=f2e212] [cursor=pointer]:
+              - /url: /admin/coupon-reports
+        - link "Discounts" [ref=f2e214] [cursor=pointer]:
+          - /url: /admin/discounts
+        - link "Deliveries" [ref=f2e220] [cursor=pointer]:
+          - /url: /admin/deliveries
+        - link "Expenses" [ref=f2e227] [cursor=pointer]:
+          - /url: /admin/expenses
+        - generic [ref=f2e232]:
+          - button "Reports" [ref=f2e233] [cursor=pointer]
+          - generic [ref=f2e239]:
+            - link "Analytics" [ref=f2e241] [cursor=pointer]:
+              - /url: /admin/analytics
+            - link "Advanced Reports" [ref=f2e243] [cursor=pointer]:
+              - /url: /admin/reports
+            - link "Transaction Report" [ref=f2e245] [cursor=pointer]:
+              - /url: /admin/transactions
+        - generic [ref=f2e247]:
+          - button "Employee Management" [ref=f2e248] [cursor=pointer]
+          - generic [ref=f2e264]:
+            - link "User List" [ref=f2e266] [cursor=pointer]:
+              - /url: /admin/users
+            - link "Roles & Permissions" [ref=f2e268] [cursor=pointer]:
+              - /url: /admin/roles
+        - generic [ref=f2e270]:
+          - button "Branches" [ref=f2e271] [cursor=pointer]
+          - generic [ref=f2e279]:
+            - link "Branches" [ref=f2e281] [cursor=pointer]:
+              - /url: /admin/branches
+            - link "Branch Inspect" [ref=f2e283] [cursor=pointer]:
+              - /url: /admin/branch-inspect
+            - link "Audit Logs" [ref=f2e285] [cursor=pointer]:
+              - /url: /admin/audit-logs
+            - link "Edit Requests" [ref=f2e287] [cursor=pointer]:
+              - /url: /admin/edit-requests
+            - link "Sync Monitor" [ref=f2e289] [cursor=pointer]:
+              - /url: /admin/sync
+            - link "Operations Hub" [ref=f2e291] [cursor=pointer]:
+              - /url: /admin/operations
+        - generic [ref=f2e293]:
+          - button "System" [ref=f2e294] [cursor=pointer]
+          - generic [ref=f2e300]:
+            - link "Security & 2FA" [ref=f2e302] [cursor=pointer]:
+              - /url: /admin/security
+            - link "Backup" [ref=f2e304] [cursor=pointer]:
+              - /url: /admin/backup
+            - link "System Health" [ref=f2e306] [cursor=pointer]:
+              - /url: /admin/system-health
+        - link "Settings" [ref=f2e308] [cursor=pointer]:
+          - /url: /admin/settings
+    - main [ref=f2e313]:
+      - generic [ref=f2e314]:
+        - generic [ref=f2e315]:
+          - generic [ref=f2e316]:
+            - heading "Supermarket" [level=1] [ref=f2e317]
+            - paragraph [ref=f2e318]: Stock, profit and owner investment
+          - button "Refresh" [ref=f2e320] [cursor=pointer]
+        - generic [ref=f2e321]:
+          - generic [ref=f2e322]:
+            - generic [ref=f2e323]:
+              - paragraph [ref=f2e324]: Total Available Stock Value (Purchase Cost)
+              - paragraph [ref=f2e325]: "?"
+            - generic [ref=f2e326]:
+              - paragraph [ref=f2e327]: Total Expected Sales Value
+              - paragraph [ref=f2e328]: "?"
+            - generic [ref=f2e329]:
+              - paragraph [ref=f2e330]: Expected Profit from Remaining Stock
+              - paragraph [ref=f2e331]: "?"
+            - generic [ref=f2e332]:
+              - paragraph [ref=f2e333]: Actual Profit Earned from Sales
+              - paragraph [ref=f2e334]: "?"
+            - generic [ref=f2e335]:
+              - paragraph [ref=f2e336]: Total Owner Investment
+              - paragraph [ref=f2e337]: "?"
+          - generic [ref=f2e338]:
+            - link "Stock Purchases & Bills" [ref=f2e339] [cursor=pointer]:
+              - /url: /admin/purchase-orders
+            - link "Purchase Batches" [ref=f2e340] [cursor=pointer]:
+              - /url: /admin/batches
+          - generic [ref=f2e341]:
+            - heading "Owner investments" [level=2] [ref=f2e342]
+            - generic [ref=f2e343]:
+              - generic [ref=f2e344]:
+                - text: Amount
+                - spinbutton "Investment amount" [ref=f2e345]
+              - generic [ref=f2e346]:
+                - text: Date
+                - textbox "Investment date" [ref=f2e347]: 2026-11-06
+              - button "Record investment" [disabled] [ref=f2e348]
+            - paragraph [ref=f2e349]: Investments are recorded separately from sales and profit.
+            - generic [ref=f2e350]:
+              - generic [ref=f2e351]:
+                - text: From
+                - textbox "From" [ref=f2e352]
+              - generic [ref=f2e353]:
+                - text: To
+                - textbox "To" [ref=f2e354]
+            - table [ref=f2e355]:
+              - rowgroup [ref=f2e356]:
+                - row [ref=f2e357]:
+                  - columnheader "Date" [ref=f2e358]
+                  - columnheader "Owner" [ref=f2e359]
+                  - columnheader "Type" [ref=f2e360]
+                  - columnheader "Amount" [ref=f2e361]
+              - rowgroup
+            - paragraph [ref=f2e362]: No investments in this date range.

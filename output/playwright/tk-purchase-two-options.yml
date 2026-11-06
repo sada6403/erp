@@ -1,0 +1,51 @@
+- main:
+  - heading "Stock Purchases & Bills" [level=1]
+  - paragraph: 0 purchases
+  - button "Refresh":
+    - img
+    - text: Refresh
+  - button "PO Template":
+    - img
+    - text: PO Template
+  - button "Import PO (Excel)":
+    - img
+    - text: Import PO (Excel)
+  - button "1. Order from Supplier Create order, track progress, then receive stock and upload the supplier bill.":
+    - strong: 1. Order from Supplier
+    - text: Create order, track progress, then receive stock and upload the supplier bill.
+  - button "2. Add Received Stock Directly Search products from the delivered bill and add stock immediately.":
+    - strong: 2. Add Received Stock Directly
+    - text: Search products from the delivered bill and add stock immediately.
+  - button "All Purchases"
+  - button "Purchase Orders"
+  - button "Direct Stock"
+  - button "Date-wise Stock Received"
+  - button "Supplier Bills"
+  - text: Purchase date from
+  - textbox "Purchase date from"
+  - text: To
+  - textbox "To"
+  - textbox "Search purchase history":
+    - /placeholder: Search purchase / bill number or supplier
+  - combobox "Filter supplier":
+    - option "All suppliers" [selected]
+  - button "All"
+  - button "DRAFT"
+  - button "SENT"
+  - button "PARTIAL"
+  - button "RECEIVED"
+  - button "CANCELLED"
+  - table:
+    - rowgroup:
+      - row "Purchase / Bill Supplier Purchase Date Items Total Expected Status Actions":
+        - columnheader "Purchase / Bill"
+        - columnheader "Supplier"
+        - columnheader "Purchase Date"
+        - columnheader "Items"
+        - columnheader "Total"
+        - columnheader "Expected"
+        - columnheader "Status"
+        - columnheader "Actions"
+    - rowgroup:
+      - row "No purchase orders found":
+        - cell "No purchase orders found"

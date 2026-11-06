@@ -1,0 +1,31 @@
+const { chromium } = require('C:/Users/USER/AppData/Local/npm-cache/_npx/31e32ef8478fbf80/node_modules/playwright')
+const assert=require('node:assert/strict')
+const fs=require('node:fs')
+;(async()=>{
+ const browser=await chromium.connectOverCDP('http://127.0.0.1:9337')
+ const page=browser.contexts()[0].pages().find(p=>p.url().includes('5173'))
+ const result=await page.evaluate(async()=>{
+  const before=await window.api.settings.get()
+  if(before.data?.company_name!=='TK Fresh Choice') throw new Error('Unexpected active company')
+  const changed=await window.api.settings.update({supermarket_stock_enabled:true})
+  if(!changed.success) throw new Error(changed.error)
+  const after=await window.api.settings.get()
+  return {success:changed.success,company:after.data.company_name,business_type:after.data.business_type,enabled:after.data.supermarket_stock_enabled}
+ })
+ console.log(result)
+ assert.equal(result.business_type,'retail')
+ assert.equal(result.enabled,true)
+ await page.getByRole('heading',{name:'Supermarket',exact:true}).waitFor()
+ await page.getByRole('heading',{name:'Owner investments',exact:true}).waitFor()
+ await page.getByText('Total Available Stock Value (Purchase Cost)',{exact:true}).waitFor()
+ const state=await page.evaluate(async()=>{
+  const r=await window.api.analytics.supermarketOverview()
+  return {success:r.success,error:r.error,data:r.data}
+ })
+ assert.equal(state.success,true, state.error)
+ console.log('Actual company totals:',state.data)
+ await page.screenshot({path:'output/playwright/tk-fresh-choice-supermarket-live.png',fullPage:false})
+ fs.writeFileSync('output/playwright/tk-fresh-choice-supermarket-live.yml',await page.locator('body').ariaSnapshot())
+ console.log('PASS: real TK Fresh Choice dashboard, investments, and five totals visible')
+ await browser.close()
+})().catch(e=>{console.error(e.message);process.exit(1)})

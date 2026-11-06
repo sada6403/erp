@@ -1,0 +1,193 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - button "Supermarket UI verification" [ref=e5] [cursor=pointer]
+    - generic [ref=e12]: Main Branch
+    - generic [ref=e18]: Nov 6, 2026 04:50:20 PM
+    - link "POS Billing" [ref=e19] [cursor=pointer]:
+      - /url: /pos
+    - button "Refresh this page" [ref=e23] [cursor=pointer]
+    - button "Change theme" [ref=e29] [cursor=pointer]
+    - button "Sync - 0 pending" [ref=e32] [cursor=pointer]
+    - button "Notifications" [ref=e38] [cursor=pointer]
+    - button "Change my password" [ref=e42] [cursor=pointer]
+    - generic [ref=e46]:
+      - generic [ref=e47]: U
+      - generic [ref=e48]:
+        - paragraph [ref=e49]: UI Test Owner
+        - paragraph [ref=e50]: System User
+    - generic [ref=e53]: ONLINE
+    - button "Logout" [ref=e54] [cursor=pointer]
+  - generic [ref=e58]:
+    - complementary [ref=e59]:
+      - paragraph [ref=e61]: Menu
+      - navigation [ref=e62]:
+        - link "Stock & Profit" [ref=e63] [cursor=pointer]:
+          - /url: /admin
+        - link "Owner Investments" [ref=e70] [cursor=pointer]:
+          - /url: /admin#owner-investments
+        - generic [ref=e77]:
+          - button "Products" [ref=e78] [cursor=pointer]
+          - generic [ref=e86]:
+            - link "List Products" [ref=e88] [cursor=pointer]:
+              - /url: /admin/products
+            - link "Categories" [ref=e90] [cursor=pointer]:
+              - /url: /admin/categories
+            - link "Stock Intelligence" [ref=e92] [cursor=pointer]:
+              - /url: /admin/stock-intelligence
+            - link "Stock Lookup" [ref=e94] [cursor=pointer]:
+              - /url: /admin/stock-lookup
+            - link "Stock Count" [ref=e96] [cursor=pointer]:
+              - /url: /admin/stock-count
+            - link "Purchase Batches & Stock" [ref=e98] [cursor=pointer]:
+              - /url: /admin/batches
+        - link "Stock Purchases & Bills" [active] [ref=e100] [cursor=pointer]:
+          - /url: /admin/purchase-orders
+        - link "Supplier Management" [ref=e106] [cursor=pointer]:
+          - /url: /admin/suppliers
+        - link "Customer Management" [ref=e113] [cursor=pointer]:
+          - /url: /admin/customers
+        - generic [ref=e127]:
+          - button "Smart Buy" [ref=e128] [cursor=pointer]
+          - generic [ref=e137]:
+            - link "Dashboard" [ref=e139] [cursor=pointer]:
+              - /url: /admin/smart-buy
+            - link "Award Winners" [ref=e141] [cursor=pointer]:
+              - /url: /admin/smart-buy-award
+            - link "Scheme Master" [ref=e143] [cursor=pointer]:
+              - /url: /admin/scheme-master
+            - link "Schemes" [ref=e145] [cursor=pointer]:
+              - /url: /admin/chits
+            - link "Viability Calculator" [ref=e147] [cursor=pointer]:
+              - /url: /admin/smart-buy-calculator
+            - link "Customers" [ref=e149] [cursor=pointer]:
+              - /url: /admin/chit-customers
+            - link "Agents" [ref=e151] [cursor=pointer]:
+              - /url: /admin/smart-buy-agents
+            - link "Payment Reminders" [ref=e153] [cursor=pointer]:
+              - /url: /admin/smart-buy-reminders
+            - link "Bank Transfers" [ref=e155] [cursor=pointer]:
+              - /url: /admin/smart-buy-transfers
+            - link "Reports" [ref=e157] [cursor=pointer]:
+              - /url: /admin/smart-buy-reports
+            - link "Commission Rules" [ref=e159] [cursor=pointer]:
+              - /url: /admin/commission-rules
+            - link "Admin Configuration" [ref=e161] [cursor=pointer]:
+              - /url: /admin/smart-buy-settings
+        - generic [ref=e163]:
+          - button "Stock Transfers" [ref=e164] [cursor=pointer]
+          - generic [ref=e171]:
+            - link "Stock Transfers" [ref=e173] [cursor=pointer]:
+              - /url: /admin/stock-transfers
+            - link "Track Transfer" [ref=e175] [cursor=pointer]:
+              - /url: /admin/track-transfer
+            - link "Branch Transfers" [ref=e177] [cursor=pointer]:
+              - /url: /admin/branch-transfers
+            - link "Stock Requests" [ref=e179] [cursor=pointer]:
+              - /url: /admin/stock-requests
+        - generic [ref=e181]:
+          - button "Sell" [ref=e182] [cursor=pointer]
+          - generic [ref=e189]:
+            - link "Bills" [ref=e191] [cursor=pointer]:
+              - /url: /admin/bills
+            - link "Orders" [ref=e193] [cursor=pointer]:
+              - /url: /admin/orders
+            - link "Credit Bills" [ref=e195] [cursor=pointer]:
+              - /url: /admin/credit-bills
+            - link "Returns & Refunds" [ref=e197] [cursor=pointer]:
+              - /url: /admin/returns
+            - link "Cash Register" [ref=e199] [cursor=pointer]:
+              - /url: /admin/cash-register
+        - generic [ref=e201]:
+          - button "Coupons" [ref=e202] [cursor=pointer]
+          - generic [ref=e208]:
+            - link "Coupon Management" [ref=e210] [cursor=pointer]:
+              - /url: /admin/coupons
+            - link "Coupon Reports" [ref=e212] [cursor=pointer]:
+              - /url: /admin/coupon-reports
+        - link "Discounts" [ref=e214] [cursor=pointer]:
+          - /url: /admin/discounts
+        - link "Deliveries" [ref=e220] [cursor=pointer]:
+          - /url: /admin/deliveries
+        - link "Expenses" [ref=e227] [cursor=pointer]:
+          - /url: /admin/expenses
+        - generic [ref=e232]:
+          - button "Reports" [ref=e233] [cursor=pointer]
+          - generic [ref=e239]:
+            - link "Analytics" [ref=e241] [cursor=pointer]:
+              - /url: /admin/analytics
+            - link "Advanced Reports" [ref=e243] [cursor=pointer]:
+              - /url: /admin/reports
+            - link "Transaction Report" [ref=e245] [cursor=pointer]:
+              - /url: /admin/transactions
+        - generic [ref=e247]:
+          - button "Employee Management" [ref=e248] [cursor=pointer]
+          - generic [ref=e264]:
+            - link "User List" [ref=e266] [cursor=pointer]:
+              - /url: /admin/users
+            - link "Roles & Permissions" [ref=e268] [cursor=pointer]:
+              - /url: /admin/roles
+        - generic [ref=e270]:
+          - button "Branches" [ref=e271] [cursor=pointer]
+          - generic [ref=e279]:
+            - link "Branches" [ref=e281] [cursor=pointer]:
+              - /url: /admin/branches
+            - link "Branch Inspect" [ref=e283] [cursor=pointer]:
+              - /url: /admin/branch-inspect
+            - link "Audit Logs" [ref=e285] [cursor=pointer]:
+              - /url: /admin/audit-logs
+            - link "Edit Requests" [ref=e287] [cursor=pointer]:
+              - /url: /admin/edit-requests
+            - link "Sync Monitor" [ref=e289] [cursor=pointer]:
+              - /url: /admin/sync
+            - link "Operations Hub" [ref=e291] [cursor=pointer]:
+              - /url: /admin/operations
+        - generic [ref=e293]:
+          - button "System" [ref=e294] [cursor=pointer]
+          - generic [ref=e300]:
+            - link "Security & 2FA" [ref=e302] [cursor=pointer]:
+              - /url: /admin/security
+            - link "Backup" [ref=e304] [cursor=pointer]:
+              - /url: /admin/backup
+            - link "System Health" [ref=e306] [cursor=pointer]:
+              - /url: /admin/system-health
+        - link "Settings" [ref=e308] [cursor=pointer]:
+          - /url: /admin/settings
+    - main [ref=e313]:
+      - generic [ref=e363]:
+        - generic [ref=e364]:
+          - generic [ref=e365]:
+            - heading "Stock Purchases & Bills" [level=1] [ref=e366]
+            - paragraph [ref=e367]: 0 purchase orders
+          - generic [ref=e369]:
+            - button "Refresh" [ref=e370] [cursor=pointer]
+            - button "PO Template" [ref=e376] [cursor=pointer]
+            - button "Import PO (Excel)" [ref=e380] [cursor=pointer]
+            - button "New Stock Purchase" [ref=e384] [cursor=pointer]
+        - generic [ref=e386]:
+          - generic [ref=e387]:
+            - text: Purchase date from
+            - textbox "Purchase date from" [ref=e388]
+          - generic [ref=e389]:
+            - text: To
+            - textbox "To" [ref=e390]
+        - generic [ref=e391]:
+          - button "All" [ref=e392] [cursor=pointer]
+          - button "DRAFT" [ref=e393] [cursor=pointer]
+          - button "SENT" [ref=e394] [cursor=pointer]
+          - button "PARTIAL" [ref=e395] [cursor=pointer]
+          - button "RECEIVED" [ref=e396] [cursor=pointer]
+          - button "CANCELLED" [ref=e397] [cursor=pointer]
+        - table [ref=e399]:
+          - rowgroup [ref=e400]:
+            - row [ref=e401]:
+              - 'columnheader "PO #" [ref=e402]'
+              - columnheader "Supplier" [ref=e403]
+              - columnheader "Branch" [ref=e404]
+              - columnheader "Items" [ref=e405]
+              - columnheader "Total" [ref=e406]
+              - columnheader "Expected" [ref=e407]
+              - columnheader "Status" [ref=e408]
+              - columnheader [ref=e409]
+          - rowgroup [ref=e410]:
+            - row [ref=e411]:
+              - cell "No purchase orders found" [ref=e412]

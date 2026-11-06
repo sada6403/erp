@@ -1,0 +1,236 @@
+- banner:
+  - button "TK Fresh Choice":
+    - img
+    - text: TK Fresh Choice
+    - img
+  - img
+  - text: Main Branch Nov 6, 2026 06:39:53 PM
+  - link "POS Billing":
+    - /url: "#/pos"
+    - img
+    - text: POS Billing
+  - button "Refresh this page":
+    - img
+  - button "Change theme":
+    - img
+  - button "Synchronization in progress" [disabled]:
+    - img
+    - img
+  - button "9+":
+    - img
+    - text: 9+
+  - button "Change my password":
+    - img
+  - text: A
+  - paragraph: Admin
+  - paragraph: Company Admin
+  - img
+  - text: ONLINE
+  - button "Logout":
+    - img
+- complementary:
+  - paragraph: Menu
+  - navigation:
+    - link "Stock & Profit":
+      - /url: "#/admin"
+      - img
+      - text: Stock & Profit
+    - link "Owner Investments":
+      - /url: "#/admin#owner-investments"
+      - img
+      - text: Owner Investments
+    - button "Products":
+      - img
+      - text: Products
+      - img
+    - link "List Products":
+      - /url: "#/admin/products"
+    - link "Categories":
+      - /url: "#/admin/categories"
+    - link "Stock Intelligence":
+      - /url: "#/admin/stock-intelligence"
+    - link "Stock Lookup":
+      - /url: "#/admin/stock-lookup"
+    - link "Stock Count":
+      - /url: "#/admin/stock-count"
+    - link "Purchase Batches & Stock":
+      - /url: "#/admin/batches"
+    - link "Stock Purchases & Bills":
+      - /url: "#/admin/purchase-orders"
+      - img
+      - text: Stock Purchases & Bills
+    - link "Supplier Management":
+      - /url: "#/admin/suppliers"
+      - img
+      - text: Supplier Management
+    - button "Customer Management":
+      - img
+      - text: Customer Management
+      - img
+    - link "Customers":
+      - /url: "#/admin/customers"
+    - link "Installments":
+      - /url: "#/admin/installments"
+    - button "Smart Buy":
+      - img
+      - text: Smart Buy
+      - img
+    - link "Dashboard":
+      - /url: "#/admin/smart-buy"
+    - link "Award Winners":
+      - /url: "#/admin/smart-buy-award"
+    - link "Scheme Master":
+      - /url: "#/admin/scheme-master"
+    - link "Schemes":
+      - /url: "#/admin/chits"
+    - link "Viability Calculator":
+      - /url: "#/admin/smart-buy-calculator"
+    - link "Customers":
+      - /url: "#/admin/chit-customers"
+    - link "Agents":
+      - /url: "#/admin/smart-buy-agents"
+    - link "Payment Reminders":
+      - /url: "#/admin/smart-buy-reminders"
+    - link "Bank Transfers":
+      - /url: "#/admin/smart-buy-transfers"
+    - link "Reports":
+      - /url: "#/admin/smart-buy-reports"
+    - link "Commission Rules":
+      - /url: "#/admin/commission-rules"
+    - link "Admin Configuration":
+      - /url: "#/admin/smart-buy-settings"
+    - button "Stock Transfers":
+      - img
+      - text: Stock Transfers
+      - img
+    - link "Stock Transfers":
+      - /url: "#/admin/stock-transfers"
+    - link "Track Transfer":
+      - /url: "#/admin/track-transfer"
+    - link "Branch Transfers":
+      - /url: "#/admin/branch-transfers"
+    - link "Stock Requests":
+      - /url: "#/admin/stock-requests"
+    - button "Sell":
+      - img
+      - text: Sell
+      - img
+    - link "Bills":
+      - /url: "#/admin/bills"
+    - link "Orders":
+      - /url: "#/admin/orders"
+    - link "Quotations":
+      - /url: "#/admin/quotations"
+    - link "Credit Bills":
+      - /url: "#/admin/credit-bills"
+    - link "Returns & Refunds":
+      - /url: "#/admin/returns"
+    - link "Cash Register":
+      - /url: "#/admin/cash-register"
+    - button "Coupons":
+      - img
+      - text: Coupons
+      - img
+    - link "Coupon Management":
+      - /url: "#/admin/coupons"
+    - link "Coupon Reports":
+      - /url: "#/admin/coupon-reports"
+    - link "Discounts":
+      - /url: "#/admin/discounts"
+      - img
+      - text: Discounts
+    - link "Deliveries":
+      - /url: "#/admin/deliveries"
+      - img
+      - text: Deliveries
+    - link "Expenses":
+      - /url: "#/admin/expenses"
+      - img
+      - text: Expenses
+    - button "Reports":
+      - img
+      - text: Reports
+      - img
+    - link "Analytics":
+      - /url: "#/admin/analytics"
+    - link "Advanced Reports":
+      - /url: "#/admin/reports"
+    - link "Transaction Report":
+      - /url: "#/admin/transactions"
+    - button "Employee Management":
+      - img
+      - text: Employee Management
+      - img
+    - link "User List":
+      - /url: "#/admin/users"
+    - link "Roles & Permissions":
+      - /url: "#/admin/roles"
+    - button "Branches":
+      - img
+      - text: Branches
+      - img
+    - link "Branches":
+      - /url: "#/admin/branches"
+    - link "Branch Inspect":
+      - /url: "#/admin/branch-inspect"
+    - link "Audit Logs":
+      - /url: "#/admin/audit-logs"
+    - link "Edit Requests":
+      - /url: "#/admin/edit-requests"
+    - link "Sync Monitor":
+      - /url: "#/admin/sync"
+    - link "Operations Hub":
+      - /url: "#/admin/operations"
+    - button "System":
+      - img
+      - text: System
+      - img
+    - link "Security & 2FA":
+      - /url: "#/admin/security"
+    - link "Backup":
+      - /url: "#/admin/backup"
+    - link "System Health":
+      - /url: "#/admin/system-health"
+    - link "Settings":
+      - /url: "#/admin/settings"
+      - img
+      - text: Settings
+- main:
+  - heading "Supermarket" [level=1]
+  - paragraph: Stock, profit and owner investment
+  - button "Refresh"
+  - paragraph: Total Available Stock Value (Purchase Cost)
+  - paragraph: Rs.0
+  - paragraph: Total Expected Sales Value
+  - paragraph: Rs.3,346,400
+  - paragraph: Expected Profit from Remaining Stock
+  - paragraph: Rs.0
+  - paragraph: Actual Profit Earned from Sales
+  - paragraph: Rs.0
+  - paragraph: Total Owner Investment
+  - paragraph: Rs.0
+  - paragraph: Historical purchase cost is unknown for 2678 remaining units and 37029 sold units. Cost and profit totals include only known costs.
+  - link "Stock Purchases & Bills":
+    - /url: "#/admin/purchase-orders"
+  - link "Purchase Batches":
+    - /url: "#/admin/batches"
+  - heading "Owner investments" [level=2]
+  - text: Amount
+  - spinbutton "Investment amount"
+  - text: Date
+  - textbox "Investment date": 2026-11-06
+  - button "Record investment" [disabled]
+  - paragraph: Investments are recorded separately from sales and profit.
+  - text: From
+  - textbox "From"
+  - text: To
+  - textbox "To"
+  - table:
+    - rowgroup:
+      - row "Date Owner Type Amount":
+        - columnheader "Date"
+        - columnheader "Owner"
+        - columnheader "Type"
+        - columnheader "Amount"
+    - rowgroup
+  - paragraph: No investments in this date range.

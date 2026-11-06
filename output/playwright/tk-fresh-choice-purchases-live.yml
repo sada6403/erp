@@ -1,0 +1,39 @@
+- main:
+  - heading "Stock Purchases & Bills" [level=1]
+  - paragraph: 0 purchase orders
+  - button "Refresh":
+    - img
+    - text: Refresh
+  - button "PO Template":
+    - img
+    - text: PO Template
+  - button "Import PO (Excel)":
+    - img
+    - text: Import PO (Excel)
+  - button "New Stock Purchase":
+    - img
+    - text: New Stock Purchase
+  - text: Purchase date from
+  - textbox "Purchase date from"
+  - text: To
+  - textbox "To"
+  - button "All"
+  - button "DRAFT"
+  - button "SENT"
+  - button "PARTIAL"
+  - button "RECEIVED"
+  - button "CANCELLED"
+  - table:
+    - rowgroup:
+      - 'row "PO # Supplier Branch Items Total Expected Status"':
+        - 'columnheader "PO #"'
+        - columnheader "Supplier"
+        - columnheader "Branch"
+        - columnheader "Items"
+        - columnheader "Total"
+        - columnheader "Expected"
+        - columnheader "Status"
+        - columnheader
+    - rowgroup:
+      - row "No purchase orders found":
+        - cell "No purchase orders found"

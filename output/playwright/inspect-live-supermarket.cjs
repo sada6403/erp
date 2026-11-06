@@ -1,0 +1,10 @@
+const { chromium } = require('C:/Users/USER/AppData/Local/npm-cache/_npx/31e32ef8478fbf80/node_modules/playwright')
+;(async () => {
+ const browser=await chromium.connectOverCDP('http://127.0.0.1:9337')
+ const page=browser.contexts()[0].pages().find(p=>p.url().includes('5173'))
+ if(!page) throw new Error('Development POS page not found')
+ console.log('Page:',page.url())
+ console.log((await page.locator('body').ariaSnapshot()).slice(0,8000))
+ console.log(await page.evaluate(async()=> { const r=await window.api.settings.get(); return {success:r.success,company:r.data?.company_name,business_type:r.data?.business_type,stock_enabled:r.data?.supermarket_stock_enabled,apiReady:typeof window.api.analytics.supermarketOverview==='function'} }))
+ await browser.close()
+})().catch(e=>{console.error(e.message);process.exit(1)})
