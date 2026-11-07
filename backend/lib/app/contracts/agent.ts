@@ -93,3 +93,25 @@ export interface DeliveryCompleteResponse {
   status: 'delivered'
   delivered_at: string
 }
+
+/** GET /agent/deliveries/:id/bill. `bill_no` is the POS invoice number of the converted app order. */
+export interface AgentBillDto {
+  bill_no: string
+  order_number: string
+  date: string
+  company_name: string
+  branch_name: string | null
+  branch_phone: string | null
+  agent_name: string
+  agent_code: string
+  customer_name: string
+  address: string | null
+  lines: Array<{ name: string; quantity: number; unit: string; unit_price: number; line_total: number }>
+  subtotal: number
+  discount: number
+  delivery_fee: number
+  total: number
+  payment_label: string
+  otp: string | null
+  paid_in_full: boolean
+}

@@ -112,6 +112,12 @@ enough), EAS Build for APK/AAB.
 | i18n | i18next + react-i18next + `expo-localization` (en, ta, si) |
 | Tests | Jest + React Native Testing Library; Maestro for E2E flows |
 
+Approved by Moni on 2026-11-07 (do not ask again): `react-native-nitro-modules` (required peer of
+`react-native-mmkv` v4), `expo-device` (device model/OS for push registration), `expo-constants` (app
+config/version at runtime), `expo-linking` (deep links from pushes and WhatsApp), `expo-splash-screen`
+(hold splash until fonts and session load), `expo-system-ui` (status/navigation bar colours per theme),
+`expo-status-bar` (status bar style per theme). Dev-only: jest, jest-expo, `@react-native/jest-preset`,
+React Native Testing Library, eslint and `eslint-config-expo` (the checks required in section 7).
 Check `mobile/package.json` before adding a library. Use `npx expo install` for Expo-compatible
 versions. Never add a second library for the same job.
 

@@ -341,6 +341,9 @@ const api = {
     get:          (id: string) => ipcRenderer.invoke('orders:get', id),
     create:       (payload: unknown) => ipcRenderer.invoke('orders:create', payload),
     updateStatus: (id: string, status: string, payload?: unknown) => ipcRenderer.invoke('orders:updateStatus', id, status, payload),
+    agentsForOrder: (orderId: string) => ipcRenderer.invoke('orders:agentsForOrder', orderId),
+    assignAgent:    (orderId: string, agentId: string | null) => ipcRenderer.invoke('orders:assignAgent', orderId, agentId),
+    convertToInvoice: (orderId: string, input?: unknown) => ipcRenderer.invoke('orders:convertToInvoice', orderId, input),
   },
 
   // Analytics

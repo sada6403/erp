@@ -244,3 +244,31 @@ test('admin app-access: needs POS key; app key and no key rejected', async () =>
   const inv = await fetch(`${V1}/admin/app-access/invite`, { method: 'POST', headers: { 'x-app-key': seed.app_key, authorization: `Bearer ${agent}`, 'content-type': 'application/json' }, body: JSON.stringify({ targets: [] }) })
   assert.equal(inv.status, 401)
 })
+
+test('agent bill: 409 until the POS invoices the order, then numbered with the invoice number; other roles 403', async () => {
+  const id = seed.delivery_order_id
+  const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
+  try {
+    assert.ok(['127.0.0.1', 'localhost'].includes(process.env.MYSQL_HOST), 'tests only touch a local database')
+    await db.query(`DELETE FROM invoice_items WHERE invoice_id = 'bill-test-inv'`)
+    await db.query(`DELETE FROM invoices WHERE id = 'bill-test-inv'`)
+    assert.equal((await call('GET', `/agent/deliveries/${id}/bill`, { token: agent })).status, 409)
+    const [[ord]] = await db.query(`SELECT branch_id, customer_id FROM customer_orders WHERE id = ?`, [id])
+    const [[cashier]] = await db.query(`SELECT id FROM users LIMIT 1`)
+    await db.query(`INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id, status, bill_type, subtotal, total_amount, source_order_id)
+      VALUES ('bill-test-inv', 'TEST-INV-2026-0001', ?, ?, ?, 'completed', 'RETAIL', 10, 10, ?)`, [ord.branch_id, ord.customer_id, cashier.id, id])
+    await db.query(`INSERT INTO invoice_items (id, invoice_id, product_id, quantity, unit_price, line_total)
+      SELECT 'bill-test-item', 'bill-test-inv', product_id, 1, 10, 10 FROM customer_order_items WHERE order_id = ? LIMIT 1`, [id])
+    const ok = await call('GET', `/agent/deliveries/${id}/bill`, { token: agent })
+    assert.equal(ok.status, 200)
+    assert.equal(ok.json.bill_no, 'TEST-INV-2026-0001')
+    assert.equal(ok.json.lines.length, 1)
+    assert.equal((await call('GET', `/agent/deliveries/${id}/bill`, { token: customer })).status, 403)
+    assert.equal((await call('GET', `/agent/deliveries/${id}/bill`, { token: agent, key: 'npk_wrong' })).status, 401)
+    assert.equal((await call('GET', `/agent/deliveries/${id}/bill`)).status, 401)
+  } finally {
+    await db.query(`DELETE FROM invoice_items WHERE invoice_id = 'bill-test-inv'`)
+    await db.query(`DELETE FROM invoices WHERE id = 'bill-test-inv'`)
+    await db.end()
+  }
+})

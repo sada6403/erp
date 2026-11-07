@@ -189,6 +189,8 @@ function runMigrations(): void {
     ['customer_orders', 'estimated_delivery_date',  "TEXT"],
     ['customer_orders', 'status_history',           "TEXT"],
     ['customer_orders', 'payment_reference',        "TEXT"],
+    ['customer_orders', 'invoice_id',               "TEXT"],
+    ['invoices', 'source_order_id',                 "TEXT"],
     ['customer_order_items', 'variant_id',          "TEXT"],
     ['customer_order_items', 'variant_name',        "TEXT"],
     ['customer_order_items', 'product_name',        "TEXT"],
@@ -200,6 +202,9 @@ function runMigrations(): void {
       console.log(`[DB] Migration: added ${table}.${column}`)
     }
   }
+
+  // One invoice per app order (convert-to-invoice is idempotent).
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_source_order ON invoices(source_order_id) WHERE source_order_id IS NOT NULL`)
 
   // Supplier liability settlements. Payments are immutable ledger rows;
   // suppliers.due_balance stores the current outstanding snapshot.

@@ -5,6 +5,7 @@ import { getDb } from '../database'
 import { enqueuSync } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
+import { settleAppOrderInvoice } from './invoices'
 
 const store = createCompanyStore()
 
@@ -23,7 +24,8 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
     const user = currentUser()
       let sql = `SELECT o.*, b.name branch_name, u.name sales_staff_name,
         (SELECT COUNT(*) FROM customer_order_items oi WHERE oi.order_id=o.id) item_count,
-        ag.name assigned_agent_name
+        ag.name assigned_agent_name,
+        (SELECT invoice_number FROM invoices WHERE id=o.invoice_id OR source_order_id=o.id LIMIT 1) invoice_number
         FROM customer_orders o
         LEFT JOIN branches b ON b.id=o.branch_id
         LEFT JOIN agents ag ON ag.id=o.assigned_agent_id
@@ -128,6 +130,7 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
       db0.prepare(`UPDATE customer_orders SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
         .run({ id, ...patch })
       await enqueuSync('customer_orders', id, 'UPDATE', { id, ...patch })
+      if (patch.payment_status === 'paid') await settleAppOrderInvoice(id, (user?.id as string) || null)
       logAudit(db0, { userId: (user?.id as string) || null, branchId: order.branch_id, action: 'ORDER_STATUS_UPDATED', tableName: 'customer_orders', recordId: id, newValues: { status } })
       return { success: true }
   })
