@@ -67,15 +67,42 @@ export function managesStock(p: ProductRow): boolean {
 }
 
 // ── Pricing ───────────────────────────────────────────────────────────────
-export function priceOf(base: number, discountPct: number): { price: number; original: number | null } {
+/** Tax is added on top of the net price exactly like a POS counter sale (rate in percent, 0 = untaxed). */
+export function withTax(net: number, ratePct: number): number {
+  return ratePct > 0 ? round2(net * (1 + ratePct / 100)) : round2(net)
+}
+
+export function taxRateOf(p: Record<string, unknown>): number {
+  const r = Number(p.tax_rate)
+  return Number.isFinite(r) && r > 0 && r <= 100 ? r : 0
+}
+
+/** Net (pre-tax) unit price after the product discount. */
+export function netPriceOf(base: number, discountPct: number): number {
   const pct = Math.min(100, Math.max(0, discountPct || 0))
-  if (pct <= 0) return { price: round2(base), original: null }
-  return { price: round2(base * (1 - pct / 100)), original: round2(base) }
+  return pct <= 0 ? round2(base) : round2(base * (1 - pct / 100))
+}
+
+/** Same rounding as POS invoice lines: taxable = money(net*qty), tax = money(taxable*rate/100), line = taxable + tax. */
+export function lineMoney(netUnit: number, qty: number, ratePct: number): { taxable: number; tax: number; line_total: number } {
+  const taxable = round2(netUnit * qty)
+  const tax = ratePct > 0 ? round2(taxable * ratePct / 100) : 0
+  return { taxable, tax, line_total: round2(taxable + tax) }
+}
+
+/** Displayed (final) price = net price with tax on top, i.e. what the counter charges. */
+export function priceOf(base: number, discountPct: number, ratePct = 0): { price: number; original: number | null } {
+  const pct = Math.min(100, Math.max(0, discountPct || 0))
+  if (pct <= 0) return { price: withTax(base, ratePct), original: null }
+  return { price: withTax(netPriceOf(base, pct), ratePct), original: withTax(base, ratePct) }
+}
+
+export function variantBase(p: ProductRow, v: Record<string, unknown>): number {
+  return Number(v.selling_price) > 0 ? Number(v.selling_price) : Number(p.selling_price)
 }
 
 export function variantPrice(p: ProductRow, v: Record<string, unknown>): { price: number; original: number | null } {
-  const base = Number(v.selling_price) > 0 ? Number(v.selling_price) : Number(p.selling_price)
-  return priceOf(base, Number(p.discount_pct) || 0)
+  return priceOf(variantBase(p, v), Number(p.discount_pct) || 0, taxRateOf(p))
 }
 
 export async function loadVariants(company: AppCompany, productIds: string[]): Promise<Map<string, Record<string, unknown>[]>> {
@@ -125,7 +152,7 @@ export function mapProduct(
     inStock = manage ? total > 0 : true
     availableQty = manage ? total : null
   } else {
-    const pr = priceOf(Number(p.selling_price), Number(p.discount_pct) || 0)
+    const pr = priceOf(Number(p.selling_price), Number(p.discount_pct) || 0, taxRateOf(p))
     price = pr.price; original = pr.original
     const avail = Math.max(0, stock.product.get(String(p.id)) ?? 0)
     inStock = manage ? avail > 0 : true

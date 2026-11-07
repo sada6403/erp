@@ -272,3 +272,50 @@ test('agent bill: 409 until the POS invoices the order, then numbered with the i
     await db.end()
   }
 })
+
+test('tax on top: catalog price, quote and locked order equal the POS counter price (10% tax); 0% unchanged', async () => {
+  const pid = seed.product_ids[1]
+  const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
+  const money = n => Math.round(n * 100) / 100
+  let before
+  try {
+    assert.ok(['127.0.0.1', 'localhost'].includes(process.env.MYSQL_HOST), 'tests only touch a local database')
+    ;[[before]] = await db.query(`SELECT selling_price, tax_rate, discount_pct, sale_by FROM products WHERE id = ?`, [pid])
+    await db.query(`UPDATE products SET tax_rate = 0, discount_pct = 0, updated_at = NOW() WHERE id = ?`, [pid])
+    const base = Number(before.selling_price)
+    const noTax = await call('GET', `/catalog/products/${pid}`)
+    assert.equal(noTax.status, 200)
+    const hasVariants = (noTax.json.variants || []).length > 0
+    if (hasVariants) return // variant products are covered by the unit price path; pick another seed when needed
+    assert.equal(noTax.json.price, money(base), '0% tax leaves the price unchanged')
+
+    await db.query(`UPDATE products SET tax_rate = 10, updated_at = NOW() WHERE id = ?`, [pid])
+    const taxed = await call('GET', `/catalog/products/${pid}`)
+    assert.equal(taxed.json.price, money(base * 1.1))
+
+    const weight = before.sale_by === 'weight'
+    const qty = weight ? 1.5 : 3
+    const q = await call('POST', '/checkout/quote', { token: customer, body: { items: [{ product_id: pid, quantity: qty }] } })
+    assert.equal(q.status, 200, JSON.stringify(q.json))
+    const taxable = money(base * qty)
+    const lineTotal = money(taxable + money(taxable * 10 / 100)) // counter: taxable + tax, same rounding
+    assert.equal(q.json.lines[0].line_total, lineTotal)
+    assert.equal(q.json.subtotal, lineTotal)
+
+    const addr = { recipient_name: 'Anula', phone: '0771110001', line1: '10 Temple Road', city: 'Colombo' }
+    const o = await call('POST', '/orders', {
+      token: customer, headers: { 'idempotency-key': `tax-${Date.now()}` },
+      body: { items: [{ product_id: pid, quantity: qty }], payment_method: 'cod', address: addr, expected_total: q.json.total },
+    })
+    assert.equal(o.status, 201, JSON.stringify(o.json))
+    const [[row]] = await db.query(`SELECT net_unit_price, tax_rate, tax_amount, line_total FROM customer_order_items WHERE order_id = ?`, [o.json.id])
+    assert.equal(Number(row.net_unit_price), money(base))
+    assert.equal(Number(row.tax_rate), 10)
+    assert.equal(Number(row.tax_amount), money(taxable * 10 / 100))
+    assert.equal(Number(row.line_total), lineTotal)
+    await call('POST', `/orders/${o.json.id}/cancel`, { token: customer })
+  } finally {
+    if (before) await db.query(`UPDATE products SET tax_rate = ?, discount_pct = ?, updated_at = NOW() WHERE id = ?`, [before.tax_rate, before.discount_pct, pid])
+    await db.end()
+  }
+})

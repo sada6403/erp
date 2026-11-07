@@ -8,7 +8,7 @@ import type {
 import type { PaymentMethod } from './contracts/common'
 import { fail, parseJson, round2, toIso, reqStr, optStr, reqNum, optNum, only } from './http'
 import {
-  VISIBLE_SQL, imageVariantUrl, loadStock, loadVariants, managesStock, priceOf, variantPrice,
+  VISIBLE_SQL, imageVariantUrl, lineMoney, loadStock, loadVariants, managesStock, netPriceOf, priceOf, taxRateOf, variantBase, variantPrice, withTax,
   type DbLike, type ProductRow,
 } from './catalogLib'
 import { getSettings, flag } from './settings'
@@ -69,7 +69,7 @@ export function deliveryFeeFor(subtotal: number, settings: Record<string, string
   return round2(flat)
 }
 
-type Priced = { line: QuoteLineDto; product: ProductRow | null; variant: Record<string, unknown> | null }
+type Priced = { line: QuoteLineDto; product: ProductRow | null; variant: Record<string, unknown> | null; net?: number; taxRate?: number; tax?: number }
 
 /** Server-side pricing + stock check for a cart. Works with the txn client when passed. */
 export async function priceCart(
@@ -107,9 +107,11 @@ export async function priceCart(
     } else if (it.variant_id) {
       base.issue = 'NOT_FOUND'; priced.push({ line: base, product: p, variant: null }); canOrder = false; continue
     }
-    const { price } = variant ? variantPrice(p, variant) : priceOf(Number(p.selling_price), Number(p.discount_pct) || 0)
-    base.unit_price = price
-    base.line_total = round2(price * q)
+    const rate = taxRateOf(p)
+    const net = netPriceOf(variant ? variantBase(p, variant) : Number(p.selling_price), Number(p.discount_pct) || 0)
+    const lm = lineMoney(net, q, rate)
+    base.unit_price = withTax(net, rate)
+    base.line_total = lm.line_total
     if (managesStock(p)) {
       const avail = Math.max(0, (variant ? stock.variant.get(String(variant.id)) : stock.product.get(String(p.id))) ?? 0)
       base.available_qty = avail
@@ -121,7 +123,7 @@ export async function priceCart(
     }
     if (base.issue) canOrder = false
     subtotal += base.line_total
-    priced.push({ line: base, product: p, variant })
+    priced.push({ line: base, product: p, variant, net, taxRate: rate, tax: lm.tax })
   }
   return { priced, subtotal: round2(subtotal), canOrder }
 }
@@ -275,9 +277,11 @@ export async function createOrder(
     for (const p of priced) {
       const l = p.line
       await conn.query(
-        `INSERT INTO customer_order_items (id, order_id, product_id, quantity, unit_price, line_total, variant_id, variant_name, product_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [randomUUID(), orderId, l.product_id, l.quantity, l.unit_price, l.line_total, l.variant_id, l.variant_name, l.name])
+        `INSERT INTO customer_order_items (id, order_id, product_id, quantity, unit_price, line_total, variant_id, variant_name, product_name,
+           net_unit_price, tax_rate, tax_amount)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [randomUUID(), orderId, l.product_id, l.quantity, l.unit_price, l.line_total, l.variant_id, l.variant_name, l.name,
+          p.net ?? null, p.taxRate ?? 0, p.tax ?? 0])
       if (managesStock(p.product!)) {
         await conn.query(
           `INSERT INTO stock_reservations (id, order_id, user_id, product_id, variant_id, branch_id, quantity, status)

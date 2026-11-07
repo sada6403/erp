@@ -4,6 +4,9 @@ import type { ProductListItemDto } from './contracts/catalog'
 import { VISIBLE_SQL, listItems, type ProductRow } from './catalogLib'
 import { likeEscape, toIso } from './http'
 
+// Displayed price in SQL: discount first, then tax on top (same order as catalogLib.priceOf).
+const SHOWN_PRICE = (a: string) => `ROUND(ROUND(${a}.selling_price * (1 - COALESCE(${a}.discount_pct, 0) / 100), 2) * (1 + COALESCE(${a}.tax_rate, 0) / 100), 2)`
+
 // Effective change time: product row, stock rows or variant rows (so availability changes reach the delta).
 const EFF = `GREATEST(p.updated_at,
   COALESCE((SELECT MAX(s.updated_at) FROM stocks s WHERE s.product_id = p.id), p.updated_at),
@@ -42,8 +45,8 @@ export async function queryProducts(company: AppCompany, o: ProductQuery, origin
     where.push('(p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ? OR p.brand LIKE ?)')
     vals.push(like, like, like, like)
   }
-  if (o.minPrice != null) { where.push('p.selling_price >= ?'); vals.push(o.minPrice) }
-  if (o.maxPrice != null) { where.push('p.selling_price <= ?'); vals.push(o.maxPrice) }
+  if (o.minPrice != null) { where.push(`${SHOWN_PRICE('p')} >= ?`); vals.push(o.minPrice) }
+  if (o.maxPrice != null) { where.push(`${SHOWN_PRICE('p')} <= ?`); vals.push(o.maxPrice) }
   if (o.inStock) {
     where.push(`(p.is_manage_stock = 0 OR p.track_stock = 0
       OR EXISTS (SELECT 1 FROM stocks s WHERE s.product_id = p.id AND s.quantity - s.damaged_qty > 0)
@@ -69,7 +72,7 @@ export async function queryProducts(company: AppCompany, o: ProductQuery, origin
   } else {
     const off = decode<{ o: number }>(o.cursor)?.o ?? 0
     order = ({
-      newest: 't.eff DESC, t.id', price_asc: 't.selling_price ASC, t.id', price_desc: 't.selling_price DESC, t.id',
+      newest: 't.eff DESC, t.id', price_asc: `${SHOWN_PRICE('t')} ASC, t.id`, price_desc: `${SHOWN_PRICE('t')} DESC, t.id`,
       name: 't.name ASC, t.id', relevance: `(t.name LIKE ?) DESC, t.name ASC, t.id`,
     } as Record<string, string>)[o.sort!] ?? 't.name ASC, t.id'
     if (o.sort === 'relevance') ov.push(likeEscape(o.q ?? '') + '%')

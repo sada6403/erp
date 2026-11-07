@@ -174,6 +174,10 @@ export async function settleAppOrderInvoice(orderId: string, userId: string | nu
   if (inv.customer_id) await syncCustomerRow(db, inv.customer_id)
 }
 
+// App-order lines carry the tax rate that was locked when the customer ordered; counter lines use the product's.
+const lineTaxRate = (item: Record<string, unknown>, real: { tax_rate: number }, isApp: boolean) =>
+  isApp && item.locked_tax_rate != null ? Number(item.locked_tax_rate) || 0 : Number(real.tax_rate) || 0
+
 interface AppOrderSource { id: string; orderNumber: string }
 
 export function registerInvoiceHandlers(ipcMain: IpcMain) {
@@ -278,7 +282,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       // including Company Admin — a product's own configured discount
       // (resolveApplicableDiscount) is the only ceiling now, for every role.
       // A product with no discount rule configured allows 0% discount.
-      let itemsSubtotal = 0, itemsDiscountTotal = 0, itemsTaxTotal = 0
+      let itemsSubtotal = 0, itemsDiscountTotal = 0, itemsTaxTotal = 0, inclusiveTaxTotal = 0
       {
         const TOLERANCE = 0.5 // absorb client-side rounding
         let clientItemDiscountTotal = 0
@@ -300,7 +304,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           const taxable = money(unitPrice * qty - discountAmount)
           itemsSubtotal += unitPrice * qty
           itemsDiscountTotal += discountAmount
-          itemsTaxTotal += appOrder ? inclusiveTax(taxable, Number(real.tax_rate) || 0) : money(taxable * (Number(real.tax_rate) || 0) / 100)
+          if (appOrder && item.tax_inclusive) {
+            const inc = inclusiveTax(taxable, lineTaxRate(item, real, true))
+            itemsTaxTotal += inc; inclusiveTaxTotal += inc
+          } else {
+            itemsTaxTotal += money(taxable * lineTaxRate(item, real, Boolean(appOrder)) / 100)
+          }
           if (unitPrice <= 0) continue
           const auto = resolveApplicableDiscount(db, item.product_id, unitPrice, branchId)
           const allowed = auto?.pct || 0
@@ -312,6 +321,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         itemsSubtotal = money(itemsSubtotal)
         itemsDiscountTotal = money(itemsDiscountTotal)
         itemsTaxTotal = money(itemsTaxTotal)
+        inclusiveTaxTotal = money(inclusiveTaxTotal)
         if (Number.isFinite(minAllowedPct)) {
           const subtotal = Number(payload.subtotal || 0)
           const globalDiscountAmount = Number(payload.discount_amount || 0) - clientItemDiscountTotal
@@ -332,7 +342,8 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const finalDiscountAmount = money(itemsDiscountTotal + globalDiscount)
       const finalTaxAmount = itemsTaxTotal
       const deliveryFee = appOrder ? money(Math.max(0, Number(payload.delivery_fee) || 0)) : 0
-      const finalTotalAmount = appOrder ? money(finalSubtotal - finalDiscountAmount + deliveryFee) : money(finalSubtotal - finalDiscountAmount + finalTaxAmount)
+      // Tax is added on top (counter rule); only price-override / legacy app lines carry it inside the price.
+      const finalTotalAmount = money(finalSubtotal - finalDiscountAmount + (finalTaxAmount - inclusiveTaxTotal) + deliveryFee)
       const finalDueAmount = money(Math.max(0, finalTotalAmount - Number(payload.paid_amount || 0)))
       if (appOrder && payload.items.length === 0) return { success: false, error: 'This order has no items' }
 
@@ -463,10 +474,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           const qty = Number(item.quantity)
           const discountPct = Math.max(0, Math.min(100, Number(item.discount_pct) || 0))
           const discountAmount = money(unitPrice * qty * discountPct / 100)
-          const taxRate = Number(real.tax_rate) || 0
+          const taxRate = lineTaxRate(item, real, Boolean(appOrder))
           const taxableAmount = money(unitPrice * qty - discountAmount)
-          const taxAmount = appOrder ? inclusiveTax(taxableAmount, taxRate) : money(taxableAmount * taxRate / 100)
-          const lineTotal = appOrder ? taxableAmount : money(taxableAmount + taxAmount)
+          const inclusive = Boolean(appOrder && item.tax_inclusive)
+          const taxAmount = inclusive ? inclusiveTax(taxableAmount, taxRate) : money(taxableAmount * taxRate / 100)
+          const lineTotal = inclusive ? taxableAmount : money(taxableAmount + taxAmount)
           const itemRow = {
             id:              crypto.randomUUID(),
             invoice_id:      id,
@@ -802,13 +814,26 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (short.length) return { success: false, error: `Not enough stock to convert this order: ${short.join('; ')}. Nothing was invoiced.` }
     }
 
-    const lines = items.map(i => ({
-      product_id: i.product_id, variant_id: i.variant_id || null, variant_title: i.variant_name || null,
-      quantity: Number(i.quantity), unit_price: overrides.get(String(i.id)) ?? Number(i.unit_price), discount_pct: 0,
-    }))
+    // Lines with the order-time snapshot (net price + locked tax rate) go through the normal counter path (tax added on
+    // top, same rounding), so the invoice equals a counter sale of the same item. Legacy orders without a snapshot and
+    // lines whose price was overridden (entered as the final price) keep the tax inside the price.
+    const lines = items.map(i => {
+      const edited = overrides.has(String(i.id))
+      const snap = !edited && i.net_unit_price != null
+      return {
+        product_id: i.product_id, variant_id: i.variant_id || null, variant_title: i.variant_name || null,
+        quantity: Number(i.quantity), discount_pct: 0,
+        unit_price: snap ? Number(i.net_unit_price) : (overrides.get(String(i.id)) ?? Number(i.unit_price)),
+        tax_inclusive: !snap,
+        locked_tax_rate: i.tax_rate != null ? Number(i.tax_rate) : null,
+      }
+    })
     const fee = money(Number(order.delivery_fee) || 0)
     // The invoice total is items + delivery fee, i.e. exactly what the customer pays and the agent collects.
-    const itemsTotal = money(lines.reduce((s, l) => s + l.unit_price * l.quantity, 0) + fee)
+    const itemsTotal = money(lines.reduce((s, l) => {
+      const taxable = money(l.unit_price * l.quantity)
+      return s + (l.tax_inclusive ? taxable : taxable + money(taxable * (Number(l.locked_tax_rate) || 0) / 100))
+    }, 0) + fee)
     const paidNow = order.payment_status === 'paid'
     const method = order.payment_method === 'bank_transfer' ? 'bank_transfer' : 'cash'
     const payload = {

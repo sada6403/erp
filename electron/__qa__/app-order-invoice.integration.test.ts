@@ -276,19 +276,42 @@ describe('Convert app order to invoice', () => {
     expect([after.p, after.d]).toEqual([550, 0])
   })
 
-  it('extracts tax from a tax-inclusive locked price (product tax_rate > 0)', async () => {
+  it('app order with a taxed product gives the same invoice as a counter sale (subtotal, tax, total)', async () => {
     sharedStoreData.app_settings = {}
-    seedStockedProduct('ao-p10', 110, [{ qty: 10, cost: 50, date: '2026-01-01' }])
+    seedStockedProduct('ao-p10', 100, [{ qty: 20, cost: 50, date: '2026-01-01' }])
     db.prepare(`UPDATE products SET tax_rate=10 WHERE id='ao-p10'`).run()
+
+    // Counter sale: 2 x 100 + 10% tax on top.
+    setSession(ADMIN)
+    const counter = await call('invoices:create', {
+      bill_type: 'RETAIL', branch_id: BR, customer_id: 'ao-cust', paid_amount: 220,
+      items: [{ product_id: 'ao-p10', quantity: 2, unit_price: 100, discount_pct: 0 }],
+      payments: [{ method: 'cash', amount: 220 }],
+    })
+    expect(counter.success).toBe(true)
+    const c = db.prepare('SELECT subtotal, tax_amount, total_amount FROM invoices WHERE id=?').get(counter.data.id) as any
+    expect([c.subtotal, c.tax_amount, c.total_amount]).toEqual([200, 20, 220])
+
+    // App order: the server locked the final price 110 (net 100 + 10%), with the snapshot columns.
     seedAppOrder('ao-o10', 'ao-p10', 2, 110)
+    db.prepare(`UPDATE customer_order_items SET net_unit_price=100, tax_rate=10, tax_amount=20 WHERE order_id='ao-o10'`).run()
+    db.prepare(`UPDATE products SET selling_price=130 WHERE id='ao-p10'`).run() // price moved after the order
     const res = await call('orders:convertToInvoice', 'ao-o10')
     expect(res.success).toBe(true)
-    const inv = db.prepare('SELECT * FROM invoices WHERE id=?').get(res.data.id) as any
-    const item = db.prepare('SELECT * FROM invoice_items WHERE invoice_id=?').get(res.data.id) as any
-    expect(inv.total_amount).toBe(220) // what the customer saw: tax is inside the price
-    expect(inv.tax_amount).toBe(20)    // 220 * 10 / 110
-    expect(item.tax_amount).toBe(20)
-    expect(item.line_total).toBe(220)
-    expect(item.unit_price).toBe(110)
+    const a = db.prepare('SELECT subtotal, tax_amount, total_amount, due_amount FROM invoices WHERE id=?').get(res.data.id) as any
+    const item = db.prepare('SELECT unit_price, tax_amount, line_total FROM invoice_items WHERE invoice_id=?').get(res.data.id) as any
+    expect([a.subtotal, a.tax_amount, a.total_amount]).toEqual([c.subtotal, c.tax_amount, c.total_amount])
+    expect(a.due_amount).toBe(220) // what the customer saw and the agent collects
+    expect([item.unit_price, item.tax_amount, item.line_total]).toEqual([100, 20, 220])
+  })
+
+  it('legacy app order without a snapshot keeps the tax inside the locked price', async () => {
+    sharedStoreData.app_settings = {}
+    seedStockedProduct('ao-p11', 110, [{ qty: 10, cost: 50, date: '2026-01-01' }])
+    db.prepare(`UPDATE products SET tax_rate=10 WHERE id='ao-p11'`).run()
+    seedAppOrder('ao-o11', 'ao-p11', 2, 110)
+    const res = await call('orders:convertToInvoice', 'ao-o11')
+    const inv = db.prepare('SELECT total_amount, tax_amount FROM invoices WHERE id=?').get(res.data.id) as any
+    expect([inv.total_amount, inv.tax_amount]).toEqual([220, 20])
   })
 })
