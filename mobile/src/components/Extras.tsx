@@ -8,6 +8,21 @@ import { Text } from './Text';
 import { Button } from './Button';
 import { Screen } from './Shell';
 
+let devEnd = 0;
+/**
+ * Flash-deal countdown target (ms epoch). The countdown is always on: dev builds start from the demo's 05:42:18,
+ * production counts down to the end of the local day (the server has no per-deal end time yet).
+ */
+export function flashDealsEnd(now = Date.now()): number {
+  if (__DEV__) {
+    if (!devEnd) devEnd = now + (5 * 3600 + 42 * 60 + 18) * 1000;
+    return devEnd;
+  }
+  const d = new Date(now);
+  d.setHours(24, 0, 0, 0);
+  return d.getTime();
+}
+
 /** Flash-deal countdown (HH:MM:SS boxes). `endsAt` is a ms epoch from the server; absent => nothing shown. */
 export function Countdown({ endsAt }: { endsAt: number }) {
   const { t } = useTranslation();

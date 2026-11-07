@@ -17,6 +17,16 @@ interface UiState {
   showToast: (text: string) => void;
   hideToast: (id: number) => void;
 
+  /** In-app push banner (.system-push-banner). `url` is the deep link opened on tap. */
+  push: PushMessage | null;
+  showPush: (title: string, body: string, url?: string | null) => void;
+  hidePush: (id: number) => void;
+
+  /** Product detail sheet (.bottom-sheet #productModal): the product id being shown, or null. */
+  productSheetId: string | null;
+  openProduct: (id: string) => void;
+  closeProduct: () => void;
+
   /** Phone connectivity (NetInfo) and server reachability (axios errors / maintenance). */
   netOnline: boolean;
   serverReachable: boolean;
@@ -36,7 +46,15 @@ interface UiState {
   setUpdateReady: (v: boolean) => void;
 }
 
+export interface PushMessage {
+  id: number;
+  title: string;
+  body: string;
+  url?: string | null;
+}
+
 let toastSeq = 0;
+let pushSeq = 0;
 
 export const useUiStore = create<UiState>()(
   persist(
@@ -48,6 +66,14 @@ export const useUiStore = create<UiState>()(
       toast: null,
       showToast: (text) => set({ toast: { id: ++toastSeq, text } }),
       hideToast: (id) => set((s) => (s.toast?.id === id ? { toast: null } : s)),
+
+      push: null,
+      showPush: (title, body, url) => set({ push: { id: ++pushSeq, title, body, url } }),
+      hidePush: (id) => set((s) => (s.push?.id === id ? { push: null } : s)),
+
+      productSheetId: null,
+      openProduct: (productSheetId) => set({ productSheetId }),
+      closeProduct: () => set({ productSheetId: null }),
 
       netOnline: true,
       serverReachable: true,

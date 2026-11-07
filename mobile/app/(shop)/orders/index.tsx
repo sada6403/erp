@@ -19,7 +19,7 @@ export default function OrdersScreen() {
   const { data, isLoading, isError, refetch, isRefetching } = useOrders();
   if (!loggedIn) return <Redirect href="/login" />;
   return (
-    <Screen onRefresh={refetch} refreshing={isRefetching}>
+    <Screen gap={12} onRefresh={refetch} refreshing={isRefetching}>
       <ScreenHeading title={t('orders.title')} sub={t('orders.sub')} />
       {isLoading ? (
         <SkeletonList rows={4} />
@@ -33,10 +33,10 @@ export default function OrdersScreen() {
           return (
             <Card key={o.id} onPress={() => router.push({ pathname: '/orders/[id]', params: { id: o.id } })} accessibilityLabel={`${t('orders.order')} ${o.order_number}`}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text size={13} weight={800} mono>{o.order_number}</Text>
-                <Badge label={t(`orders.stage.${o.stage}`)} bg={tone.bg} fg={tone.fg} />
+                <Text size={14} weight={800}>{o.order_number}</Text>
+                <Badge label={t(`orders.stage.${o.stage}`)} bg={tone.bg} fg={tone.fg === 'warningText' ? 'warning' : tone.fg} size={11} radius={12} style={{ paddingHorizontal: 8, paddingVertical: 3 }} />
               </View>
-              <Text size={11} color="textMuted" style={{ marginTop: 4 }}>{formatDate(o.created_at)} · {t('orders.items', { count: o.item_count })}</Text>
+              <Text size={12} color="textMuted" style={{ marginTop: 4 }}>{formatDate(o.created_at)} · {t('orders.items', { count: o.item_count })}</Text>
               <Text size={14} weight={800} color="primary" style={{ marginTop: 4 }}>{formatRs(o.total_amount)}</Text>
             </Card>
           );

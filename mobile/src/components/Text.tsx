@@ -11,7 +11,12 @@ export interface TextProps extends RNTextProps {
   /** JetBrains Mono for numbers, OTP and receipts. */
   mono?: boolean;
   align?: TextStyle['textAlign'];
+  /** Unitless CSS-style line-height ratio (not rounded; fractional dp are valid). */
   lineHeightRatio?: number;
+  /** Absolute line height in dp. Wins over lineHeightRatio. */
+  lineHeight?: number;
+  /** CSS letter-spacing in px (== dp). */
+  letterSpacing?: number;
 }
 
 /** App text: theme colour tokens + the right font face for the current language. */
@@ -22,6 +27,8 @@ export function Text({
   mono = false,
   align,
   lineHeightRatio,
+  lineHeight,
+  letterSpacing,
   style,
   ...rest
 }: TextProps) {
@@ -37,7 +44,8 @@ export function Text({
           fontSize: size,
           color: theme.colors[color],
           textAlign: align,
-          lineHeight: lineHeightRatio ? Math.round(size * lineHeightRatio) : undefined,
+          lineHeight: lineHeight ?? (lineHeightRatio ? size * lineHeightRatio : undefined),
+          letterSpacing,
           // Android adds font padding that makes Tamil/Sinhala glyphs clip.
           includeFontPadding: false,
         },
@@ -45,4 +53,10 @@ export function Text({
       ]}
     />
   );
+}
+
+/** Body font family (current language) for raw TextInputs that sit outside <Text>. */
+export function useBodyFont(weight: FontWeight = 400): string {
+  const lang = useThemeStore((s) => s.language);
+  return fontFamily(weight, lang);
 }

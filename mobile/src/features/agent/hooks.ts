@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { AgentDeliveriesResponse, AgentDeliveryDto } from '@contracts/agent';
 import { agentApi } from '@/api/endpoints';
-import type { AgentDashboardExtras, DeliveryOfflineOtp } from '@/api/localTypes';
+import type { DeliveryOfflineOtp } from '@/api/localTypes';
+import type { AgentExtras, CommissionView, MemberView } from './types';
 import { qk } from '@/query/keys';
 import { selectHasRole, useSessionStore } from '@/store/sessionStore';
 import { selectIsOffline, useUiStore } from '@/store/uiStore';
@@ -15,7 +16,7 @@ export function useAgentDashboard() {
   const enabled = useSessionStore(selectHasRole('agent'));
   return useQuery({
     queryKey: qk.agent.dashboard,
-    queryFn: async () => (await agentApi.dashboard()) as Awaited<ReturnType<typeof agentApi.dashboard>> & { extras?: AgentDashboardExtras },
+    queryFn: async () => (await agentApi.dashboard()) as Awaited<ReturnType<typeof agentApi.dashboard>> & { extras?: AgentExtras },
     enabled,
   });
 }
@@ -36,12 +37,12 @@ export function codToCollect(items: AgentDeliveryDto[]): number {
 
 export function useAgentMembers() {
   const enabled = useSessionStore(selectHasRole('agent'));
-  return useQuery({ queryKey: qk.agent.members, queryFn: () => agentApi.members(), enabled });
+  return useQuery({ queryKey: qk.agent.members, queryFn: async () => (await agentApi.members()) as Omit<Awaited<ReturnType<typeof agentApi.members>>, 'items'> & { items: MemberView[] }, enabled });
 }
 
 export function useCommission(month: string) {
   const enabled = useSessionStore(selectHasRole('agent'));
-  return useQuery({ queryKey: qk.agent.commission(month), queryFn: () => agentApi.commission(month), enabled });
+  return useQuery({ queryKey: qk.agent.commission(month), queryFn: async () => (await agentApi.commission(month)) as unknown as CommissionView, enabled });
 }
 
 export function useBill(id: string) {

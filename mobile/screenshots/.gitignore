@@ -1,0 +1,7 @@
+# dev-only tooling
+node_modules/
+# regenerated on every run (diffs are large); demo/ pngs and compare/index.html stay tracked
+diff/
+compare/results.json
+# emulator captures are produced locally by the verification step; remove this line to track them
+emulator/

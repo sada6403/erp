@@ -21,9 +21,9 @@ describe('offline banner text', () => {
     expect(bannerText(i18n.t, true, null, null, NOW)).toBe(en.offline.bannerNoCache);
   });
   it('shows the cache age when offline', () => {
-    expect(bannerText(i18n.t, true, NOW - 5 * 60_000, null, NOW)).toBe('Offline - showing data from 5 minutes ago');
-    expect(bannerText(i18n.t, true, NOW - 3 * 3600_000, null, NOW)).toBe('Offline - showing data from 3 hours ago');
-    expect(bannerText(i18n.t, true, NOW - 1 * 60_000, null, NOW)).toBe('Offline - showing data from 1 minute ago');
+    expect(bannerText(i18n.t, true, NOW - 5 * 60_000, null, NOW)).toBe('Offline — Showing saved products (cached 5 minutes ago)');
+    expect(bannerText(i18n.t, true, NOW - 3 * 3600_000, null, NOW)).toBe('Offline — Showing saved products (cached 3 hours ago)');
+    expect(bannerText(i18n.t, true, NOW - 1 * 60_000, null, NOW)).toBe('Offline — Showing saved products (cached 1 minute ago)');
   });
 });
 

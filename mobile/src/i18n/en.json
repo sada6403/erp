@@ -1,5 +1,7 @@
 {
-  "app": { "name": "Natural Plantation" },
+  "app": {
+    "name": "Natural Plantation"
+  },
   "common": {
     "back": "Back",
     "call": "Call",
@@ -11,16 +13,16 @@
     "whatsapp": "WhatsApp"
   },
   "offline": {
-    "banner": "Offline - showing data from {{age}}",
-    "bannerNoCache": "Offline - no saved data yet",
+    "banner": "Offline — Showing saved products (cached {{age}})",
+    "bannerNoCache": "Offline — No saved products yet",
     "backOnlineGo": "You are back online. You can place your order now.",
     "backOnlineNotify": "You are back online. You can place your order now.",
-    "desc": "Ordering needs an internet connection. You can keep browsing saved items.",
-    "keepBrowsing": "Keep browsing",
-    "notifyMe": "Notify me when online",
+    "desc": "Ordering needs an internet connection. We will notify you as soon as you are back online. Your cart is safe.",
+    "keepBrowsing": "Keep Browsing Saved Catalog",
+    "notifyMe": "Notify Me When Back Online",
     "notifyRegistered": "We will let you know when you are back online.",
     "screenBody": "No internet connection",
-    "title": "You are offline"
+    "title": "No Internet"
   },
   "age": {
     "now": "just now",
@@ -43,8 +45,17 @@
     "body": "We are still working on this feature.",
     "browseShop": "Browse the shop"
   },
-  "header": { "login": "Sign in", "logout": "Sign out", "notifications": "Notifications" },
-  "role": { "customer": "Customer", "smartbuy": "Smart Buy", "agent": "Agent", "agentField": "Field agent" },
+  "header": {
+    "login": "Login",
+    "logout": "Logout",
+    "notifications": "Notifications"
+  },
+  "role": {
+    "customer": "Customer",
+    "smartbuy": "Smart Buy",
+    "agent": "Agent",
+    "agentField": "Field agent"
+  },
   "nav": {
     "groceries": "Groceries",
     "categories": "Categories",
@@ -60,32 +71,43 @@
     "earnings": "Earnings",
     "printBill": "Print Bill"
   },
-  "theme": { "olive": "Olive & Yellow", "purple": "Purple & Pink" },
-  "frequency": { "weekly": "Weekly", "monthly": "Monthly" },
+  "theme": {
+    "olive": "Olive & Yellow (Default)",
+    "purple": "Purple & Pink"
+  },
+  "frequency": {
+    "weekly": "Weekly",
+    "monthly": "Monthly"
+  },
   "home": {
-    "allItems": "All",
-    "bannerBadge": "Fresh",
-    "bannerBody": "Farm fresh groceries delivered to your door",
-    "bannerTitle": "Natural Plantation",
+    "allItems": "All Items",
+    "bannerBadge": "FARM FRESH HARVEST 2026",
+    "bannerBody": "Direct from hill country plantations to your door. Cash on delivery & branch dispatch!",
+    "bannerTitle": "Pure Ceylon Agro & Groceries",
     "endsIn": "Ends in",
-    "exploreDeals": "Explore deals",
-    "fastDelivery": "Fast delivery",
-    "flashDeals": "Flash deals",
+    "exploreDeals": "Explore Flash Deals",
+    "fastDelivery": "2-Hour Branch Delivery",
+    "flashDeals": "Flash Harvest Deals",
     "noResults": "No products found",
     "noResultsBody": "Try a different search or category",
     "products": "Products",
     "search": "Search",
-    "searchPlaceholder": "Search groceries"
+    "searchPlaceholder": "Search rice, tea, cinnamon, oils, teak...",
+    "ctaTag": "SMART BUY INVESTMENT SCHEME",
+    "ctaTitle": "Save Weekly & Win Big Monthly!",
+    "ctaBody": "Deposit from Rs 1,000/week into certified timber and estate schemes. Watch private draw videos in app!",
+    "ctaButton": "View Scheme Plans",
+    "scanLabel": "Scan barcode"
   },
   "product": {
-    "addToCart": "Add",
-    "addToHarvestCart": "Add to cart",
-    "emi": "Easy instalments available",
+    "addToCart": "Add to Cart",
+    "addToHarvestCart": "Add to Harvest Cart",
+    "emi": "EMI available",
     "inStock": "In stock",
     "like": "Add to wishlist",
     "unlike": "Remove from wishlist",
     "outOfStock": "Out of stock",
-    "packageSizes": "Package sizes",
+    "packageSizes": "Available Package Sizes",
     "priceMayChange": "Offline - price may change at checkout",
     "quantity": "Quantity",
     "removedWishlist": "Removed from wishlist",
@@ -94,8 +116,8 @@
     "weight": "Weight"
   },
   "categories": {
-    "title": "Departments",
-    "sub": "Browse by department",
+    "title": "Explore Plantation Departments",
+    "sub": "Certified organic estate harvests and handcrafted items",
     "empty": "No departments yet",
     "count_one": "{{count}} item",
     "count_other": "{{count}} items"
@@ -115,51 +137,61 @@
     "decrease": "Decrease quantity",
     "increase": "Increase quantity",
     "empty": "Your cart is empty",
-    "emptyBody": "Add fresh groceries to get started",
+    "emptyBody": "Explore Ceylon organic red rice, kithul treacle, and hill country tea!",
     "priceNote": "Final prices are confirmed by the server at checkout.",
-    "proceed": "Proceed to checkout",
+    "proceed": "Proceed to Delivery Address",
     "remove": "Remove",
-    "review": "Review your items",
+    "review": "Review Harvest Items",
     "startShopping": "Start shopping",
-    "subtotalApprox": "Subtotal (approx.)"
+    "subtotalApprox": "Subtotal (approx.)",
+    "couponPlaceholder": "Enter promo code (Try: PLANT2026)",
+    "apply": "Apply",
+    "couponOk": "✓ Promo Code Applied: Rs 500 Off your plantation groceries!",
+    "couponBad": "✕ Invalid Promo Code. Try using PLANT2026"
   },
   "checkout": {
     "stepCart": "Cart",
     "stepAddress": "Address",
     "stepPayment": "Payment",
-    "addressTitle": "Delivery address",
+    "addressTitle": "Delivery Address & Branch",
     "addAddress": "Add new address",
     "addrCity": "City",
     "addrLabel": "Label (Home, Work)",
     "addrLine": "Address line",
     "addrName": "Recipient name",
     "saveAddress": "Save address",
-    "backToCart": "Cart",
+    "backToCart": "Back to Cart",
     "branch": "Delivery branch",
     "servicedBy": "Serviced by {{branch}}",
-    "choosePayment": "Choose payment",
-    "speedTitle": "Standard delivery",
-    "speedBody": "Delivered by our branch team, usually within the estimated date.",
-    "paymentTitle": "Payment method",
-    "cod": "Cash on delivery",
-    "codBody": "Pay in cash to the delivery agent",
-    "bank": "Bank transfer",
-    "bankBody": "Transfer to our bank account and enter the reference",
+    "choosePayment": "Choose Payment",
+    "speedTitle": "Fast Field Agent Dispatch",
+    "speedBody": "Delivered by assigned field agent on motorcycle with 4-digit verification OTP.",
+    "paymentTitle": "Select Payment Method",
+    "cod": "Cash on Delivery (COD) with OTP",
+    "codBody": "Pay cash to the field agent upon OTP handover at your doorstep.",
+    "bank": "Bank Slip Transfer (BOC / Commercial)",
+    "bankBody": "Upload deposit slip for branch admin verification.",
     "bankRef": "Transfer reference",
-    "wallet": "Smart Buy wallet",
+    "wallet": "Smart Buy Wallet",
     "subtotal": "Subtotal",
     "deliveryFee": "Delivery fee",
     "pricesIncludeTax": "Prices include taxes",
     "deliveryFeeBranch": "Delivery fee ({{branch}})",
     "total": "Total",
-    "placeOrder": "Place order",
+    "placeOrder": "Place Order",
     "issue": {
       "OUT_OF_STOCK": "Out of stock",
       "INSUFFICIENT_STOCK": "Not enough stock",
       "NOT_FOR_SALE": "Not for sale",
       "NOT_FOUND": "No longer available",
       "INVALID_QUANTITY": "Invalid quantity"
-    }
+    },
+    "walletBody": "Instant debit from verified ledger balance. 0% transaction fee.",
+    "sumSubtotal": "Items Subtotal:",
+    "sumDelivery": "Delivery Fee:",
+    "sumDeliveryBranch": "Delivery Fee ({{branch}}):",
+    "sumCoupon": "Coupon Discount ({{code}}):",
+    "sumTotal": "Total Amount Payable:"
   },
   "confirmed": {
     "title": "Order confirmed",
@@ -187,20 +219,20 @@
       "placed": "Placed",
       "confirmed": "Confirmed",
       "packed": "Packed",
-      "out_for_delivery": "Out for delivery",
+      "out_for_delivery": "Out for Delivery",
       "delivered": "Delivered",
       "cancelled": "Cancelled"
     }
   },
   "auth": {
-    "back": "Back",
+    "back": "Back to Store",
     "changePassword": "Change password",
     "changePasswordSub": "Choose a new password for your account",
     "code": "Verification code",
     "codeSub": "Enter the 6-digit code we sent",
     "confirmPassword": "Confirm password",
-    "createAccount": "Create account",
-    "createPassword": "Create password",
+    "createAccount": "Create Account",
+    "createPassword": "Create a password",
     "created": "Welcome, {{name}}! Your account is ready.",
     "currentPassword": "Current password",
     "email": "Email",
@@ -208,12 +240,12 @@
     "emailTitle": "Verify email",
     "emailUnavailable": "Email verification is not available right now",
     "emailVerified": "Email verified",
-    "forgot": "Forgot password?",
-    "fullName": "Full name",
-    "fullNamePlaceholder": "Your name",
-    "identifier": "Mobile, email or username",
-    "identifierPlaceholder": "07X XXX XXXX or you@example.com",
-    "mobile": "Mobile number",
+    "forgot": "Forgot Password?",
+    "fullName": "Full Name",
+    "fullNamePlaceholder": "Enter your full name",
+    "identifier": "Mobile Number or User ID",
+    "identifierPlaceholder": "Enter Mobile Number or User ID",
+    "mobile": "Mobile Number",
     "newPassword": "New password",
     "password": "Password",
     "passwordChanged": "Password changed",
@@ -225,14 +257,15 @@
     "sendCode": "Send code",
     "setPasswordSub": "Please set a new password to continue",
     "setPasswordTitle": "Set your password",
-    "signIn": "Sign in",
-    "signUp": "Sign up",
+    "signIn": "Sign In",
+    "signUp": "Sign Up",
     "skipForNow": "Skip for now",
-    "subtitle": "Sign in to order, track and manage your account",
+    "subtitle": "Welcome back! Please sign in to continue",
     "tempPassword": "Temporary password",
     "togglePassword": "Show or hide password",
     "verify": "Verify",
-    "welcome": "Welcome back, {{name}}"
+    "welcome": "Welcome back, {{name}}",
+    "rememberMe": "Remember me"
   },
   "validation": {
     "codeInvalid": "Enter the 6-digit code",
@@ -254,13 +287,15 @@
     "notNow": "Not now",
     "pointOrders": "Order confirmations and status",
     "pointDeliveries": "Delivery updates and codes",
-    "pointDraws": "Smart Buy draw results"
+    "pointDraws": "Smart Buy draw results",
+    "justNow": "Just now"
   },
   "notifications": {
     "title": "Notifications",
-    "markAll": "Mark all read",
+    "markAll": "Mark All Read",
     "empty": "No notifications",
-    "emptyBody": "We will let you know when something happens."
+    "emptyBody": "We will let you know when something happens.",
+    "inbox": "Notifications Inbox"
   },
   "channel": {
     "orders": "Orders",
@@ -275,7 +310,7 @@
     "offersSub": "Deals and promotions"
   },
   "settings": {
-    "title": "Settings",
+    "title": "Account & Preferences",
     "sub": "Account and preferences",
     "guest": "Sign in to see your account",
     "member": "Member",
@@ -295,7 +330,18 @@
     "deleteWarning": "This removes your access and personal data. This cannot be undone.",
     "deleteConfirm": "Delete my account",
     "about": "About",
-    "logout": "Sign out"
+    "logout": "Sign out",
+    "themeTitle": "Color Theme (User Selectable)",
+    "themeDesc": "Choose your preferred brand theme. Applied instantly across all screens.",
+    "langTitle": "App Language (i18n)",
+    "accountType": {
+      "customer": "Customer Account",
+      "smartbuy": "Smart Buy Account",
+      "agent": "Agent Account"
+    },
+    "aboutTitle": "{{app}} Mobile v{{version}}",
+    "aboutDesc": "Connected to {{tenant}} API",
+    "logoutFull": "Sign Out / Return to Guest Shop"
   },
   "schemes": {
     "title": "My Schemes",
@@ -309,23 +355,58 @@
     "won": "Winner in cycle {{cycle}}",
     "statement": "View statement",
     "cycleN": "Cycle {{n}}",
-    "payment": "Payment"
+    "payment": "Payment",
+    "cycleOf": "Cycle {{paid}} of {{total}}",
+    "idPrefix": "Scheme ID: #{{id}} • ",
+    "contributionLabel": "{{freq}} Contribution: ",
+    "contributionsPaid": "Contributions: {{n}} Paid ({{amount}})",
+    "target": "Target: {{amount}}",
+    "lastContribution": "Last Contribution:",
+    "paidTick": "{{amount}} (Paid ✓)",
+    "nextDrawLabel": "Next Draw Date:",
+    "tileDraws": "Monthly Draws",
+    "tileDrawsSub": "View winners & proof videos",
+    "tileWallet": "My Wallet",
+    "tileWalletSub": "{{amount}} balance",
+    "tileWalletFallback": "View your balance",
+    "apply": "➕ Apply for Another Smart Buy Scheme"
   },
   "join": {
     "title": "Join Smart Buy",
     "sub": "Choose a scheme and enter your NIC",
     "nic": "NIC number",
     "submit": "Send join request",
-    "devSubmitted": "Join request recorded (dev only)"
+    "devSubmitted": "Join request recorded (dev only)",
+    "heading": "Join Natural Plantation Smart Buy",
+    "blurb": "Deposit weekly into agro-forestry assets with monthly draws and guaranteed return.",
+    "selectPlan": "Select Scheme Plan",
+    "nicLabel": "National Identity Card (NIC) Number",
+    "nicPlaceholder": "1990XXXXXXXX or XXXXXXXXXV",
+    "submitApproval": "Submit for Branch POS Approval",
+    "nicRequired": "Please enter your National Identity Card (NIC) number",
+    "submitted": "✓ Join application submitted! Sent to Kandy POS branch for administrator verification.",
+    "perWeek": "week",
+    "perMonth": "month"
   },
   "draws": {
-    "title": "Draw Results",
-    "sub": "Monthly draw winners",
+    "title": "Monthly Draw Results & Proof",
+    "sub": "Transparent draws conducted at POS branch with tamper-proof video records",
     "empty": "No draws yet",
     "cycle": "Cycle {{n}}",
     "pending": "Winner to be announced",
     "youWon": "Congratulations, you won!",
-    "watch": "Watch draw video",
+    "watch": "Watch Verified Draw Proof Video",
+    "badgeLatest": "🏆 {{month}} CYCLE {{n}} DRAW WINNER",
+    "badgeOther": "{{month}} CYCLE {{n}} WINNER",
+    "winner": "Winner: {{name}}",
+    "prize": "Prize: {{prize}} (Value: {{value}})",
+    "conducted": "Draw held on {{date}}",
+    "secureNote": "App-exclusive signed stream. Watermarked with your Member ID. Screen capture disabled.",
+    "videoTitle": "Official Smart Buy Draw Proof Video",
+    "videoPlaying": "⏸ Playing",
+    "secureStrong": "FLAG_SECURE Active:",
+    "secureRest": "Screenshots and screen recording are disabled for member privacy.",
+    "videoFooter": "This proof video is hosted on private S3 storage and is accessible only to active scheme members via a 10-minute expiring signed HMAC token.",
     "videoSoonTitle": "Draw videos",
     "devPreview": "Dev preview player"
   },
@@ -334,7 +415,12 @@
     "sub": "Your wallet balance and history",
     "balance": "Wallet balance",
     "transactions": "Transactions",
-    "noTransactions": "No transactions yet"
+    "noTransactions": "No transactions yet",
+    "verified": "Verified Wallet Balance",
+    "ledgerBadge": "🛡️ Ledger Authoritative",
+    "explainer": "Usable directly during checkout for organic groceries, plantation timber, or plant saplings.",
+    "ledgerTitle": "Ledger Transaction History",
+    "spendBtn": "🛒 Spend Wallet Balance in Shop"
   },
   "spend": {
     "title": "Spend in shop",
@@ -357,8 +443,9 @@
     "prepaid": "Prepaid",
     "status": {
       "ready_for_delivery": "Ready",
-      "dispatched": "Dispatched",
-      "in_transit": "On the way"
+      "dispatched": "Out for Delivery",
+      "in_transit": "Out for Delivery",
+      "delivered": "Completed"
     },
     "enterOtp": "Enter customer code",
     "otpHelp": "Ask the customer for the 4-digit delivery code.",
@@ -368,21 +455,80 @@
     "complete": "Complete delivery",
     "completed": "Delivery completed",
     "queued": "Saved offline. It will sync when you are online.",
-    "printBill": "Print bill"
+    "printBill": "Print bill",
+    "agentId": "Agent ID",
+    "onDuty": "On Duty",
+    "trustRating": "Customer Trust Rating",
+    "reviews": "{{count}} reviews",
+    "familiesServed": "Total Families Served",
+    "smartBuyMembers": "Smart Buy Members",
+    "onTime": "On-Time Handover",
+    "pendingDrops": "Pending Drops",
+    "codCash": "COD Cash to Collect",
+    "monthCommission": "Month Commission",
+    "earned": "Earned",
+    "goal": "Goal",
+    "commissionDetails": "{{month}} Commission Details",
+    "pdfSlip": "PDF Slip",
+    "slipGenerating": "Generating {{month}} Commission Statement PDF ({{amount}})...",
+    "assignedTitle": "Assigned Field Deliveries (Offline OTP Supported)",
+    "orderNo": "Order #{{id}}",
+    "package": "Package",
+    "codDue": "COD Due",
+    "verifyOtp": "Verify OTP & Complete",
+    "escBill": "ESC/POS Bill",
+    "printReceiptEsc": "Print Receipt (ESC/POS)",
+    "otpBadge": "AGENT FIELD COMPLETION",
+    "completeTitle": "Complete Delivery #{{id}} ({{name}})",
+    "otpDesc": "Ask customer for the 4-digit delivery OTP shown on their app screen. Works offline via salted SHA-256 match.",
+    "cashPre": "Cash of",
+    "cashPost": "collected in full from customer",
+    "cashRequired": "Confirm the cash was collected in full",
+    "verifyFinish": "Verify OTP & Finish Handover",
+    "otpIncomplete": "Please enter all 4 digits of customer OTP",
+    "otpWrong": "Incorrect OTP. Ask customer for the 4 digits in their app.",
+    "otpOk": "OTP Verified Successfully!",
+    "completedToast": "Delivery #{{id}} completed!",
+    "month": {
+      "1": "January",
+      "2": "February",
+      "3": "March",
+      "4": "April",
+      "5": "May",
+      "6": "June",
+      "7": "July",
+      "8": "August",
+      "9": "September",
+      "10": "October",
+      "11": "November",
+      "12": "December"
+    }
   },
   "members": {
-    "title": "Members",
-    "sub": "Your assigned scheme members",
+    "title": "Assigned Scheme Members",
+    "sub": "Weekly Smart Buy contribution collection list for your route",
     "empty": "No members assigned",
     "collect": "Collect cash",
-    "collectSoon": "Cash collection arrives in the next update."
+    "collectSoon": "Cash collection arrives in the next update.",
+    "paidCycle": "Paid Cycle {{n}}",
+    "dueCycle": "Due Cycle {{n}}",
+    "perWeek": "/week",
+    "recordCash": "Record Cash Collection ({{amount}})",
+    "recordCashPlain": "Record Cash Collection",
+    "recorded": "Recorded {{amount}} weekly cash collection from {{name}}!"
   },
   "earnings": {
     "title": "Earnings",
     "total": "Total",
     "pending": "Pending",
     "paid": "Paid",
-    "empty": "No commission this month"
+    "empty": "No commission this month",
+    "summary": "{{month}} Commission",
+    "calc": "Calculated from your completed deliveries and Smart Buy scheme collections.",
+    "printerTitle": "ESC/POS Bluetooth Thermal Printer",
+    "connected": "Connected",
+    "notConnected": "Not connected",
+    "previewReceipt": "Preview Thermal Receipt"
   },
   "bill": {
     "title": "Print Bill",
@@ -391,7 +537,13 @@
     "billNo": "Bill no",
     "sharePdf": "Share as PDF",
     "bluetooth": "Print via Bluetooth",
-    "bluetoothSoon": "Bluetooth printing arrives in the next update."
+    "bluetoothSoon": "Bluetooth printing arrives in the next update.",
+    "modalTitle": "ESC/POS 58mm Thermal Bill Preview",
+    "print": "Print Receipt",
+    "whatsapp": "WhatsApp PDF",
+    "printing": "Printing ESC/POS bill to paired printer \"{{name}}\"...",
+    "printed": "Thermal Receipt Printed Successfully!",
+    "waOpening": "Opening WhatsApp with formatted invoice PDF for customer..."
   },
   "errors": {
     "APP_KEY_INVALID": "This app version is not recognised. Please update.",
@@ -422,5 +574,14 @@
     "INTERNAL": "Server error. Please try again.",
     "NETWORK": "No connection. Check your internet.",
     "UNKNOWN": "Something went wrong. Please try again."
+  },
+  "track": {
+    "orderN": "Order #{{n}}",
+    "eta": "Estimated Delivery:",
+    "otpLabel": "YOUR SECURE DELIVERY OTP",
+    "otpInstruction": "Provide this 4-digit code to field agent {{name}} only after verifying your items.",
+    "otpInstructionNoAgent": "Provide this 4-digit code to the field agent only after verifying your items.",
+    "continueShopping": "← Continue Shopping",
+    "placed": "Order #{{n}} placed! Opening delivery tracking..."
   }
 }

@@ -18,7 +18,8 @@ import { openDeepLink, setupNotifications } from '@/features/push/push';
 import { applyOtaUpdate, checkForOtaUpdate } from '@/features/push/updates';
 import { useSessionStore } from '@/store/sessionStore';
 import { useUiStore } from '@/store/uiStore';
-import { BuyLaterSheet, ToastHost, UpdateSnackbar } from '@/components/Overlays';
+import { BuyLaterSheet, PushBanner, ToastHost, UpdateSnackbar } from '@/components/Overlays';
+import { ProductSheetHost } from '@/features/shop/ProductSheet';
 import { ForceUpdateScreen } from '@/features/common/ForceUpdateScreen';
 
 SplashScreen.preventAutoHideAsync().catch(() => undefined);
@@ -75,7 +76,11 @@ function Bootstrap() {
       openDeepLink(router, typeof url === 'string' ? url : null, !!s.user, s.setPendingRoute);
     };
     const sub = Notifications.addNotificationResponseReceivedListener((r) => open(r.notification.request.content.data?.url));
-    const received = Notifications.addNotificationReceivedListener(() => queryClient.invalidateQueries({ queryKey: ['me', 'notifications'] }));
+    const received = Notifications.addNotificationReceivedListener((n) => {
+      queryClient.invalidateQueries({ queryKey: ['me', 'notifications'] });
+      const c = n.request.content;
+      if (c.title) useUiStore.getState().showPush(c.title, c.body ?? '');
+    });
     Notifications.getLastNotificationResponseAsync()
       .then((r) => r && open(r.notification.request.content.data?.url))
       .catch(() => undefined);
@@ -90,9 +95,11 @@ function Bootstrap() {
   return (
     <>
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-        <Stack.Screen name="notifications" options={{ presentation: 'modal', animation: 'slide_from_bottom' }} />
+        <Stack.Screen name="notifications" options={{ presentation: 'transparentModal', animation: 'fade', contentStyle: { backgroundColor: 'transparent' } }} />
       </Stack>
+      <ProductSheetHost />
       <BuyLaterSheet />
+      <PushBanner />
       <UpdateSnackbar onRestart={applyOtaUpdate} />
       <ToastHost />
     </>

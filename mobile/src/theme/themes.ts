@@ -10,6 +10,8 @@ export interface ThemeColors extends Record<keyof typeof baseColors, string> {
   accent: string;
   accentHover: string;
   accentText: string;
+  /** --card-bg */
+  cardBg: string;
   navActive: string;
   navIndicator: string;
   /** primary at 25% alpha for the active chip shadow */
@@ -36,6 +38,7 @@ export const OliveYellow: Theme = {
     accent: '#F2C230',
     accentHover: '#E2B222',
     accentText: '#1F2937',
+    cardBg: '#FFFFFF',
     navActive: '#5A6B2E',
     navIndicator: 'rgba(90, 107, 46, 0.12)',
     primaryGlow: 'rgba(90, 107, 46, 0.25)',
@@ -55,6 +58,7 @@ export const PurplePink: Theme = {
     accent: '#C93A78',
     accentHover: '#B22E68',
     accentText: '#FFFFFF',
+    cardBg: '#FFFFFF',
     navActive: '#6B3FA0',
     navIndicator: 'rgba(107, 63, 160, 0.12)',
     primaryGlow: 'rgba(107, 63, 160, 0.25)',

@@ -11,7 +11,7 @@ import {
 import { useTranslation } from 'react-i18next';
 import { makeStyles, radii, useTheme, type ThemeColors } from '@/theme';
 import { stepQty, formatQty, type QtyRules } from '@/lib/money';
-import { Text } from './Text';
+import { Text, useBodyFont } from './Text';
 import { Button } from './Button';
 import { Gradient } from './Gradient';
 
@@ -94,17 +94,14 @@ export function Pill({
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ selected: !!active }}
       onPress={onPress}
-      style={{
-        minHeight: 48,
-        justifyContent: 'center',
-      }}
+      hitSlop={{ top: 6, bottom: 6 }}
     >
       <View
         style={{
           minHeight: 36,
           paddingHorizontal: 14,
           paddingVertical: 6,
-          borderRadius: radii.pill,
+          borderRadius: radii.hero,
           borderWidth: 1,
           justifyContent: 'center',
           backgroundColor: active ? t.colors.container : t.colors.surface,
@@ -135,7 +132,7 @@ export function SectionHeader({ icon, title, right }: { icon?: string; title: st
 
 export function ScreenHeading({ title, sub }: { title: string; sub?: string }) {
   return (
-    <View style={{ marginBottom: sub ? 0 : 12 }}>
+    <View>
       <Text size={18} weight={800}>
         {title}
       </Text>
@@ -249,6 +246,9 @@ export function Field({
   const t = useTheme();
   const [focus, setFocus] = React.useState(false);
   const { t: tr } = useTranslation();
+  // .input-with-icon (icon on the left) vs the plain .form-group input.
+  const plain = !left;
+  const font = useBodyFont();
   return (
     <View style={{ marginBottom: 12 }}>
       <Text size={11} weight={700} color="textMuted" style={{ marginBottom: 4 }}>
@@ -258,11 +258,11 @@ export function Field({
         style={{
           flexDirection: 'row',
           alignItems: 'center',
-          minHeight: 48,
-          borderRadius: radii.input,
-          borderWidth: 1.5,
+          minHeight: plain ? 44 : undefined,
+          borderRadius: plain ? radii.chip : radii.input,
+          borderWidth: plain ? 1 : 1.5,
           paddingHorizontal: 12,
-          backgroundColor: focus ? t.colors.surface : t.colors.surfaceSubtle,
+          backgroundColor: plain || focus ? t.colors.surface : t.colors.surfaceSubtle,
           borderColor: error ? t.colors.error : focus ? t.colors.primary : t.colors.surfaceBorder,
         }}
       >
@@ -279,7 +279,7 @@ export function Field({
             setFocus(false);
             input.onBlur?.(e);
           }}
-          style={[{ flex: 1, fontSize: 13, color: t.colors.textMain, paddingVertical: 10 }, input.style]}
+          style={[{ flex: 1, fontSize: 13, fontFamily: font, color: t.colors.textMain, paddingVertical: 10, minHeight: plain ? undefined : 44 }, input.style]}
         />
         {right}
       </View>
@@ -359,7 +359,7 @@ const useQtyStyles = makeStyles((t) => ({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  hit: { minWidth: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  hit: { alignItems: 'center', justifyContent: 'center' },
 }));
 
 /** +/- quantity control. Weight items step by 0.25 kg and show decimals. */
@@ -367,16 +367,16 @@ export function QtyStepper({ qty, unit, rules, onChange }: { qty: number; unit?:
   const s = useQtyStyles();
   const { t } = useTranslation();
   return (
-    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-      <Pressable accessibilityRole="button" accessibilityLabel={t('cart.decrease')} style={s.hit} onPress={() => onChange(stepQty(qty, -1, rules))}>
+    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+      <Pressable accessibilityRole="button" accessibilityLabel={t('cart.decrease')} hitSlop={8} style={s.hit} onPress={() => onChange(stepQty(qty, -1, rules))}>
         <View style={s.btn}>
           <Text size={14} weight={700}>−</Text>
         </View>
       </Pressable>
-      <Text size={13} weight={700} align="center" style={{ minWidth: 34 }}>
+      <Text size={13} weight={700} align="center" style={{ minWidth: 18 }}>
         {formatQty(qty, unit)}
       </Text>
-      <Pressable accessibilityRole="button" accessibilityLabel={t('cart.increase')} style={s.hit} onPress={() => onChange(stepQty(qty, 1, rules))}>
+      <Pressable accessibilityRole="button" accessibilityLabel={t('cart.increase')} hitSlop={8} style={s.hit} onPress={() => onChange(stepQty(qty, 1, rules))}>
         <View style={s.btn}>
           <Text size={14} weight={700}>+</Text>
         </View>

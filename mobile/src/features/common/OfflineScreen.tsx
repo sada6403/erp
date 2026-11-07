@@ -18,8 +18,8 @@ export function OfflineScreen() {
     <Frame tabs={false}>
       <Screen>
         <View style={{ alignItems: 'center', paddingVertical: 48, gap: 10 }}>
-          <Text size={56}>📡</Text>
-          <Text size={18} weight={800} align="center">{t('offline.title')}</Text>
+          <Text size={44}>📡</Text>
+          <Text size={16} weight={800} align="center">{t('offline.title')}</Text>
           <Text size={13} color="textMuted" align="center" lineHeightRatio={1.45}>{t('offline.screenBody')}</Text>
           <Button
             label={offline ? t('common.retry') : t('offline.backOnlineGo')}

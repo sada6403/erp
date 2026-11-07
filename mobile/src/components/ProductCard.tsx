@@ -58,14 +58,14 @@ function ProductCardBase({ product: p, liked, onOpen, onAdd, onToggleLike }: Pro
             accessibilityLabel={liked ? t('product.unlike') : t('product.like')}
             onPress={onToggleLike}
             hitSlop={8}
-            style={{ position: 'absolute', top: 6, right: 6, width: 36, height: 36, borderRadius: 18, backgroundColor: theme.colors.wishlistBg, alignItems: 'center', justifyContent: 'center' }}
+            style={{ position: 'absolute', top: 8, right: 8, width: 32, height: 32, borderRadius: radii.circle, backgroundColor: theme.colors.wishlistBg, alignItems: 'center', justifyContent: 'center' }}
           >
             <Text size={14}>{liked ? '❤️' : '🤍'}</Text>
           </Pressable>
         </View>
         <View style={{ padding: 12, flex: 1 }}>
           {p.category_name ? (
-            <Text size={10} weight={700} color="primary" numberOfLines={1} style={{ textTransform: 'uppercase', letterSpacing: 0.3 }}>
+            <Text size={10} weight={700} color="primary" numberOfLines={1} letterSpacing={0.3} style={{ textTransform: 'uppercase' }}>
               {p.category_name}
             </Text>
           ) : null}
@@ -87,7 +87,6 @@ function ProductCardBase({ product: p, liked, onOpen, onAdd, onToggleLike }: Pro
               {t('product.emi')}
             </Text>
           ) : null}
-          <View style={{ flex: 1 }} />
           <Button
             label={p.in_stock ? t('product.addToCart') : t('product.outOfStock')}
             icon={p.in_stock ? '🛒' : undefined}

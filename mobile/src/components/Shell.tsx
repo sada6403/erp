@@ -4,7 +4,7 @@ import { Pressable, RefreshControl, ScrollView, View, type StyleProp, type ViewS
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
-import { makeStyles, radii, useTheme, BOTTOM_NAV_HEIGHT } from '@/theme';
+import { makeStyles, radii, shadows, useTheme, BOTTOM_NAV_HEIGHT } from '@/theme';
 import { cartLineCount, useCartStore } from '@/store/cartStore';
 import { selectIsLoggedIn, useSessionStore, type NavRole } from '@/store/sessionStore';
 import { useUiStore } from '@/store/uiStore';
@@ -35,9 +35,9 @@ const useHeaderStyles = makeStyles((t) => ({
     backgroundColor: t.colors.surface,
     borderWidth: 1.5,
     borderColor: t.colors.surfaceBorder,
+    ...shadows.avatarLogo,
   },
-  right: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  iconBtnHit: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  right: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   iconBtn: {
     width: 40,
     height: 40,
@@ -85,9 +85,8 @@ const useHeaderStyles = makeStyles((t) => ({
     borderRadius: radii.pill,
   },
   logout: {
-    minHeight: 32,
-    justifyContent: 'center',
     backgroundColor: t.colors.surface,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: t.colors.surfaceBorder,
     paddingHorizontal: 8,
@@ -112,7 +111,7 @@ export function AppHeader() {
   const role = useSessionStore((x) => x.activeRole);
   const branch = useSessionStore((x) => x.branchName);
   const unread = useUnreadCount();
-  const showToast = useUiStore((x) => x.showToast);
+  const showPush = useUiStore((x) => x.showPush);
   return (
     <View style={[s.bar, { paddingTop: Math.max(8, insets.top) }]}>
       <View style={s.left}>
@@ -120,7 +119,7 @@ export function AppHeader() {
           <Image source={logo} style={{ width: '100%', height: '100%' }} contentFit="cover" accessibilityLabel={t('app.name')} />
         </View>
         <View style={{ flexShrink: 1 }}>
-          <Text size={17} weight={800} color="primary" numberOfLines={1} style={{ lineHeight: 20 }}>
+          <Text size={17} weight={800} color="primary" numberOfLines={1} lineHeightRatio={1.15}>
             {t('app.name')}
           </Text>
           {branch ? (
@@ -131,7 +130,7 @@ export function AppHeader() {
         </View>
       </View>
       <View style={s.right}>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('header.notifications')} style={s.iconBtnHit} onPress={() => (loggedIn ? router.push('/notifications') : router.push('/login'))}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('header.notifications')} hitSlop={4} onPress={() => (loggedIn ? router.push('/notifications') : router.push('/login'))}>
           <View style={s.iconBtn}>
             <Text size={15}>🔔</Text>
             {unread > 0 ? (
@@ -144,7 +143,7 @@ export function AppHeader() {
           </View>
         </Pressable>
         {__DEV__ ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Simulate push" style={s.iconBtnHit} onPress={() => showToast('Dev: simulated push')}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Simulate push" hitSlop={4} onPress={() => showPush('⚡ Fresh Suwandel Rice Harvest!', 'Direct from Matale estates: Organic 5kg bags are back in stock with 2-hour dispatch.')}>
             <View style={s.iconBtn}>
               <Text size={15}>⚡</Text>
             </View>
@@ -155,7 +154,7 @@ export function AppHeader() {
             <Text size={11} weight={800} color="primary" numberOfLines={1} style={{ maxWidth: 110 }}>
               {roleLabel(role, user?.agent_code, t)}
             </Text>
-            <Pressable accessibilityRole="button" accessibilityLabel={t('header.logout')} style={s.logout} onPress={() => logout().then(() => router.replace('/'))}>
+            <Pressable accessibilityRole="button" accessibilityLabel={t('header.logout')} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={s.logout} onPress={() => logout().then(() => router.replace('/'))}>
               <Text size={10} weight={800} color="textMuted">
                 {t('header.logout')}
               </Text>
@@ -163,7 +162,7 @@ export function AppHeader() {
           </View>
         ) : (
           <Pressable accessibilityRole="button" accessibilityLabel={t('header.login')} style={s.loginBtn} onPress={() => router.push('/login')}>
-            <Text size={12}>🔑</Text>
+            <Text size={11.5}>🔑</Text>
             <Text size={11.5} weight={800} color="primary">
               {t('header.login')}
             </Text>
@@ -281,18 +280,20 @@ export function Screen({
   refreshing,
   contentStyle,
   padded = true,
+  gap = 14,
 }: {
   children: React.ReactNode;
   onRefresh?: () => void;
   refreshing?: boolean;
   contentStyle?: StyleProp<ViewStyle>;
   padded?: boolean;
+  gap?: number;
 }) {
   const theme = useTheme();
   return (
     <ScrollView
       style={{ flex: 1, backgroundColor: theme.colors.surfaceSubtle }}
-      contentContainerStyle={[{ padding: padded ? 16 : 0, paddingBottom: 24, gap: 14 }, contentStyle]}
+      contentContainerStyle={[{ padding: padded ? 16 : 0, paddingBottom: padded ? 40 : 24, gap }, contentStyle]}
       keyboardShouldPersistTaps="handled"
       refreshControl={onRefresh ? <RefreshControl refreshing={!!refreshing} onRefresh={onRefresh} colors={[theme.colors.primary]} /> : undefined}
     >

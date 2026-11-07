@@ -32,7 +32,7 @@ export function clearStoredPushToken() {
 
 export async function setupNotifications() {
   Notifications.setNotificationHandler({
-    handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
+    handleNotification: async () => ({ shouldShowBanner: false, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
   });
   if (Platform.OS === 'android') {
     await Promise.all(

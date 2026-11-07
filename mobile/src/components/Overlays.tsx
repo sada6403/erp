@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Animated, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Animated, Easing, Modal, Pressable, StyleSheet, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
-import { makeStyles, radii, useTheme } from '@/theme';
+import { makeStyles, radii, shadows, useTheme } from '@/theme';
 import { splitAge } from '@/lib/format';
 import { selectIsOffline, useUiStore } from '@/store/uiStore';
 import { useServerStatus } from '@/features/common/hooks';
@@ -15,11 +16,14 @@ export function BottomSheet({
   onClose,
   children,
   showClose = false,
+  padding,
 }: {
   visible: boolean;
   onClose: () => void;
   children: React.ReactNode;
   showClose?: boolean;
+  /** .alert-sheet overrides the sheet padding with a flat 24 on every side. */
+  padding?: number;
 }) {
   const { t } = useTranslation();
   const theme = useTheme();
@@ -40,10 +44,11 @@ export function BottomSheet({
             backgroundColor: theme.colors.surface,
             borderTopLeftRadius: radii.sheet,
             borderTopRightRadius: radii.sheet,
-            paddingTop: 16,
-            paddingHorizontal: 20,
-            paddingBottom: 24 + insets.bottom,
-            maxHeight: '88%',
+            paddingTop: padding ?? 16,
+            paddingHorizontal: padding ?? 20,
+            paddingBottom: (padding ?? 24) + insets.bottom,
+            maxHeight: '85%',
+            ...shadows.sheet,
             transform: [{ translateY: slide }],
           }}
         >
@@ -79,8 +84,8 @@ export function BuyLaterSheet() {
   const { data } = useServerStatus();
   const message = data?.ordering_enabled === false ? data.maintenance_message : null;
   return (
-    <BottomSheet visible={open} onClose={close}>
-      <View style={{ alignItems: 'center', padding: 8 }}>
+    <BottomSheet visible={open} onClose={close} padding={24}>
+      <View style={{ alignItems: 'center' }}>
         <Text size={44} style={{ marginBottom: 8 }}>📡</Text>
         <Text size={16} weight={800} align="center" style={{ marginBottom: 6 }}>
           {t('offline.title')}
@@ -178,7 +183,7 @@ export function ToastHost() {
         transform: [{ translateY: y }],
       }}
     >
-      <View style={{ backgroundColor: theme.colors.inkSoft, paddingVertical: 12, paddingHorizontal: 20, borderRadius: radii.pill, elevation: 8 }}>
+      <View style={[{ backgroundColor: theme.colors.inkSoft, paddingVertical: 12, paddingHorizontal: 20, borderRadius: radii.hero }, shadows.popover]}>
         <Text size={12} weight={700} color="white" align="center">
           {toast.text}
         </Text>
@@ -210,3 +215,60 @@ const useSnackStyles = makeStyles(() => ({
   wrap: { position: 'absolute', left: 12, right: 12, top: 48 },
   box: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, paddingLeft: 16, borderRadius: radii.control, elevation: 8 },
 }));
+
+/** In-app push banner (.system-push-banner): slides in 50 dp from the top for 4.5 s; tap opens the inbox / deep link. */
+export function PushBanner() {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const theme = useTheme();
+  const push = useUiStore((s) => s.push);
+  const hide = useUiStore((s) => s.hidePush);
+  const [y] = useState(() => new Animated.Value(-170));
+  useEffect(() => {
+    if (!push) return;
+    y.setValue(-170);
+    Animated.timing(y, { toValue: 0, duration: 400, easing: Easing.bezier(0.16, 1, 0.3, 1), useNativeDriver: true }).start();
+    const id = setTimeout(() => {
+      Animated.timing(y, { toValue: -170, duration: 400, easing: Easing.bezier(0.16, 1, 0.3, 1), useNativeDriver: true }).start(() => hide(push.id));
+    }, 4500);
+    return () => clearTimeout(id);
+  }, [push, y, hide]);
+  if (!push) return null;
+  return (
+    <Animated.View style={{ position: 'absolute', top: 50, left: 12, right: 12, transform: [{ translateY: y }], zIndex: 90 }}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={push.title + ". " + push.body}
+        onPress={() => {
+          hide(push.id);
+          router.push('/notifications');
+        }}
+        style={[
+          {
+            flexDirection: 'row',
+            gap: 12,
+            paddingVertical: 12,
+            paddingHorizontal: 14,
+            borderRadius: radii.hero,
+            backgroundColor: theme.colors.pushBanner,
+            borderWidth: 1,
+            borderColor: theme.colors.glass15,
+          },
+          shadows.pushBanner,
+        ]}
+      >
+        <View style={{ width: 38, height: 38, borderRadius: radii.chip, backgroundColor: theme.colors.primary, alignItems: 'center', justifyContent: 'center' }}>
+          <Text size={18}>🌿</Text>
+        </View>
+        <View style={{ flex: 1 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 2 }}>
+            <Text size={11} color="textSubtle">{t('app.name')}</Text>
+            <Text size={11} color="textSubtle">{t('push.justNow')}</Text>
+          </View>
+          <Text size={13} weight={700} color="surfaceSubtle">{push.title}</Text>
+          <Text size={12} color="slate300" lineHeightRatio={1.3}>{push.body}</Text>
+        </View>
+      </Pressable>
+    </Animated.View>
+  );
+}

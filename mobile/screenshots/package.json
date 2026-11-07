@@ -1,0 +1,15 @@
+{
+  "name": "np-mobile-screenshots",
+  "private": true,
+  "type": "module",
+  "description": "DEV-ONLY visual comparison tooling: web-demo spec vs emulator screenshots",
+  "scripts": {
+    "capture:demo": "node capture-demo.mjs",
+    "compare": "node build-compare.mjs"
+  },
+  "devDependencies": {
+    "pixelmatch": "^6.0.0",
+    "playwright": "^1.49.0",
+    "pngjs": "^7.0.0"
+  }
+}

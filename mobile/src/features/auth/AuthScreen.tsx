@@ -5,7 +5,7 @@ import { useForm } from 'react-hook-form';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { makeStyles, radii, useTheme } from '@/theme';
+import { makeStyles, radii, shadows, useTheme } from '@/theme';
 import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
 import { Gradient } from '@/components/Gradient';
@@ -21,26 +21,30 @@ import { loginSchema, registerSchema, resetSchema, type LoginForm, type Register
 
 const logo = require('../../../assets/logo.jpg');
 
+/** The demo pre-fills the sign-in form; only with dev mocks (never in a real build). */
+const DEV_LOGIN = __DEV__ && ENV.useMocks ? { identifier: '0771234567', password: 'dev-password' } : { identifier: '', password: '' };
+
 type Mode = 'login' | 'register' | 'forgot' | 'reset';
 
 const useStyles = makeStyles((t) => ({
   nav: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: t.colors.surfaceBorder },
   back: {
-    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingVertical: 7,
     paddingHorizontal: 14,
-    borderRadius: radii.pill,
+    borderRadius: radii.hero,
     backgroundColor: t.colors.surfaceSubtle,
     borderWidth: 1,
     borderColor: t.colors.surfaceBorder,
   },
   tabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: t.colors.surfaceBorder, marginBottom: 14 },
-  tab: { flex: 1, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  tab: { flex: 1, minHeight: 44, padding: 10, alignItems: 'center', justifyContent: 'center' },
   tabLine: { position: 'absolute', bottom: -1, left: '10%', right: '10%', height: 2, backgroundColor: t.colors.primary },
   demo: { marginTop: 14, paddingTop: 12, borderTopWidth: 1, borderTopColor: t.colors.surfaceBorder, borderStyle: 'dashed' },
-  demoRow: { flexDirection: 'row', gap: 6, marginTop: 8 },
+  check: { width: 16, height: 16, borderRadius: radii.xs - 1, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  demoRow: { flexDirection: 'row', gap: 6 },
   demoCard: {
     flex: 1,
     minHeight: 58,
@@ -51,6 +55,7 @@ const useStyles = makeStyles((t) => ({
     borderColor: t.colors.surfaceBorder,
     borderRadius: radii.chip,
     paddingVertical: 8,
+    paddingHorizontal: 4,
   },
 }));
 
@@ -64,10 +69,11 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
   const showToast = useUiStore((x) => x.showToast);
   const [mode, setMode] = useState<Mode>(initialMode);
   const [show, setShow] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [forgotId, setForgotId] = useState('');
 
-  const loginForm = useForm<LoginForm>({ resolver: zodResolver(loginSchema), defaultValues: { identifier: '', password: '' } });
+  const loginForm = useForm<LoginForm>({ resolver: zodResolver(loginSchema), defaultValues: DEV_LOGIN });
   const regForm = useForm<RegisterForm>({ resolver: zodResolver(registerSchema), defaultValues: { name: '', phone: '', password: '' } });
   const resetForm = useForm<{ code: string; password: string }>({ resolver: zodResolver(resetSchema), defaultValues: { code: '', password: '' } });
 
@@ -143,13 +149,13 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
   });
 
   const eye = (
-    <Pressable accessibilityRole="button" accessibilityLabel={t('auth.togglePassword')} onPress={() => setShow((v) => !v)} style={{ width: 48, height: 48, alignItems: 'center', justifyContent: 'center' }}>
-      <Text size={16}>👁️</Text>
+    <Pressable accessibilityRole="button" accessibilityLabel={t('auth.togglePassword')} onPress={() => setShow((v) => !v)} hitSlop={10} style={{ paddingVertical: 4, paddingHorizontal: 6 }}>
+      <Text size={16} color="textMuted">👁️</Text>
     </Pressable>
   );
 
   const tab = (key: 'login' | 'register', label: string) => (
-    <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected: mode === key }} style={s.tab} onPress={() => setMode(key)}>
+    <Pressable key={key} accessibilityRole="tab" accessibilityState={{ selected: mode === key }} hitSlop={{ top: 2, bottom: 2 }} style={s.tab} onPress={() => setMode(key)}>
       <Text size={12} weight={700} color={mode === key ? 'primary' : 'textMuted'}>
         {label}
       </Text>
@@ -160,18 +166,20 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
   return (
     <View style={{ flex: 1, backgroundColor: theme.colors.surface, paddingTop: insets.top }}>
       <View style={s.nav}>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('auth.back')} style={s.back} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('auth.back')} hitSlop={{ top: 6, bottom: 6 }} style={s.back} onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}>
           <Text size={15} weight={800}>←</Text>
           <Text size={12} weight={700}>{t('auth.back')}</Text>
         </Pressable>
       </View>
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 36 + insets.bottom }} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={{ paddingTop: 18, paddingHorizontal: 16, paddingBottom: 36 + insets.bottom }} keyboardShouldPersistTaps="handled">
         <View style={{ alignItems: 'center', marginBottom: 18 }}>
-          <Gradient from={theme.colors.primary} to={theme.colors.accent} style={{ width: 82, height: 82, borderRadius: 41, padding: 3, marginBottom: 10 }}>
-            <Image source={logo} style={{ width: '100%', height: '100%', borderRadius: 38 }} contentFit="cover" accessibilityLabel={t('app.name')} />
-          </Gradient>
-          <Text size={21} weight={800} color="primary">{t('app.name')}</Text>
-          <Text size={12} weight={500} color="textMuted" style={{ marginBottom: 8 }}>
+          <View style={[{ width: 82, height: 82, borderRadius: radii.circle, marginBottom: 10, backgroundColor: theme.colors.primary }, shadows.card]}>
+            <Gradient from={theme.colors.primary} to={theme.colors.accent} style={{ width: 82, height: 82, borderRadius: radii.circle, padding: 3 }}>
+              <Image source={logo} style={{ width: '100%', height: '100%', borderRadius: radii.circle, backgroundColor: theme.colors.surface }} contentFit="cover" accessibilityLabel={t('app.name')} />
+            </Gradient>
+          </View>
+          <Text size={21} weight={800} color="primary" letterSpacing={-0.3} style={{ marginBottom: 3 }}>{t('app.name')}</Text>
+          <Text size={12} weight={500} color="textMuted" style={{ marginBottom: 8 }} align="center">
             {t('auth.subtitle')}
           </Text>
         </View>
@@ -187,26 +195,32 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
           <View>
             <FormField control={loginForm.control} name="identifier" label={t('auth.identifier')} left="👤" placeholder={t('auth.identifierPlaceholder')} autoCapitalize="none" autoCorrect={false} />
             <FormField control={loginForm.control} name="password" label={t('auth.password')} left="🔒" placeholder="••••••••" secureTextEntry={!show} right={eye} autoCapitalize="none" />
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginVertical: 4 }}>
-              <Pressable accessibilityRole="link" style={{ minHeight: 48, justifyContent: 'center' }} onPress={onForgot}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10, marginBottom: 16 }}>
+              <Pressable accessibilityRole="checkbox" accessibilityState={{ checked: remember }} hitSlop={{ top: 12, bottom: 12, right: 12 }} onPress={() => setRemember((v) => !v)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <View style={[s.check, { borderColor: theme.colors.primary, backgroundColor: remember ? theme.colors.primary : theme.colors.surface }]}>
+                  {remember ? <Text size={10} weight={800} color="white">✓</Text> : null}
+                </View>
+                <Text size={12} weight={600} color="textMuted">{t('auth.rememberMe')}</Text>
+              </Pressable>
+              <Pressable accessibilityRole="link" hitSlop={{ top: 12, bottom: 12, left: 12 }} onPress={onForgot}>
                 <Text size={11.5} weight={700} color="primary" style={{ textDecorationLine: 'underline' }}>{t('auth.forgot')}</Text>
               </Pressable>
             </View>
-            <Button label={`${t('auth.signIn')} ➔`} loading={busy} onPress={onLogin} style={{ marginTop: 2 }} />
+            <Button label={`${t('auth.signIn')} ➔`} variant="loginBlock" fullWidth loading={busy} onPress={onLogin} style={{ marginTop: 6 }} />
 
             {__DEV__ && ENV.useMocks ? (
               <View style={s.demo}>
-                <Text size={11} weight={700} color="textMuted">⚡ Quick Login (dev only):</Text>
+                <Text size={11} weight={700} color="textMuted" style={{ marginBottom: 8 }}>⚡ Quick Login (Demo):</Text>
                 <View style={s.demoRow}>
                   {[
-                    { icon: '🛒', label: t('role.customer'), id: '0771234567' },
-                    { icon: '💎', label: t('role.smartbuy'), id: 'NP-1042' },
-                    { icon: '🛵', label: t('role.agentField'), id: 'NP-AG-204' },
+                    { icon: '🛒', label: 'Customer', id: '0771234567' },
+                    { icon: '💎', label: 'Smart Buy', id: 'NP-1042' },
+                    { icon: '🛵', label: 'Field Agent', id: 'NP-AG-204' },
                   ].map((d) => (
                     <Pressable key={d.id} accessibilityRole="button" accessibilityLabel={d.label} style={s.demoCard} onPress={() => doLogin(d.id, 'dev-password')}>
-                      <Text size={16}>{d.icon}</Text>
-                      <Text size={11} weight={700}>{d.label}</Text>
-                      <Text size={10} weight={700} color="primary">{t('auth.signIn')}</Text>
+                      <Text size={16} style={{ marginBottom: 2 }}>{d.icon}</Text>
+                      <Text size={11} weight={700} style={{ marginBottom: 2 }}>{d.label}</Text>
+                      <Text size={10} weight={700} color="primary">{t('header.login')}</Text>
                     </Pressable>
                   ))}
                 </View>
@@ -220,7 +234,7 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
             <FormField control={regForm.control} name="name" label={t('auth.fullName')} placeholder={t('auth.fullNamePlaceholder')} />
             <FormField control={regForm.control} name="phone" label={t('auth.mobile')} placeholder="07XXXXXXXX" keyboardType="phone-pad" />
             <FormField control={regForm.control} name="password" label={t('auth.password')} placeholder={t('auth.createPassword')} secureTextEntry={!show} right={eye} autoCapitalize="none" hint={t('auth.passwordHint')} />
-            <Button label={`${t('auth.createAccount')} ➔`} loading={busy} onPress={onRegister} />
+            <Button label={`${t('auth.createAccount')} ➔`} variant="loginBlock" fullWidth loading={busy} onPress={onRegister} style={{ marginTop: 6 }} />
           </View>
         ) : null}
 

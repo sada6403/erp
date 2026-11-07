@@ -11,6 +11,11 @@ import type { AgentDeliveryDto } from '@contracts/agent';
 import type { NotificationDto, NotificationSettingsDto } from '@contracts/notifications';
 import { sha256Hex } from '@/lib/sha256';
 import { BANNERS, BRANCHES, CATEGORIES, PRODUCTS, productDetail } from './mockData';
+import {
+  DEMO_ADDRESSES, DEMO_AGENT, DEMO_AGENT_MEMBERS, DEMO_AGENT_STATS, DEMO_COMMISSION, DEMO_COUPON, DEMO_DELIVERIES, DEMO_DELIVERY_FEE, DEMO_DRAWS,
+  DEMO_NOTIFICATIONS, DEMO_PAYMENT_METHODS, DEMO_PRINTER, DEMO_RECEIPT, DEMO_SCHEME, DEMO_SCHEME_2, DEMO_TRACKING, DEMO_USER, DEMO_WALLET, DEMO_WISHLIST_IDS,
+  deliveryItems, productId,
+} from './demoData';
 
 const NOW = () => new Date().toISOString();
 const DELAY = 250;
@@ -21,14 +26,14 @@ function userFor(identifier: string): AuthUser {
   const agent = id.startsWith('NP-AG') || id.includes('AGENT');
   const member = id.startsWith('NP-1') || id.includes('MEMBER');
   return {
-    id: agent ? 'u-agent' : member ? 'u-member' : 'u-customer',
-    name: agent ? 'Kasun Perera' : member ? 'Nimali Fernando' : 'Ruwan Silva',
-    phone: agent ? '0779876543' : '0771234567',
+    id: agent ? 'u-agent' : member ? 'u-member' : DEMO_USER.id,
+    name: agent ? DEMO_AGENT.name : DEMO_USER.name,
+    phone: agent ? DEMO_AGENT.phone : DEMO_USER.phone,
     email: null,
     email_verified: false,
     roles: agent ? ['agent', 'customer'] : member ? ['smartbuy', 'customer'] : ['customer'],
-    member_no: member ? 'NP-1042' : null,
-    agent_code: agent ? 'NP-AG-204' : null,
+    member_no: member ? DEMO_USER.memberId : null,
+    agent_code: agent ? DEMO_AGENT.code : null,
     language: 'en',
     must_change_password: false,
     phone_verified: true,
@@ -37,50 +42,62 @@ function userFor(identifier: string): AuthUser {
 
 const db = {
   user: null as AuthUser | null,
-  addresses: [
-    { id: 'a1', label: 'Home', recipient_name: 'Ruwan Silva', phone: '0771234567', line1: '12 Temple Road', line2: null, city: 'Kandy', district: 'Kandy', postal_code: null, latitude: null, longitude: null, is_default: true },
-  ] as AddressDto[],
-  wishlist: new Set<string>(),
+  addresses: DEMO_ADDRESSES.map((a) => ({ ...a })) as AddressDto[],
+  wishlist: new Set<string>(DEMO_WISHLIST_IDS.map(productId)),
   orders: [] as OrderDto[],
-  notifications: [
-    { id: 'n1', type: 'order_status', channel: 'orders', title: 'Order confirmed', body: 'Your order is being prepared.', url: 'naturalplantation://orders/o-seed', read: false, created_at: NOW() },
-    { id: 'n2', type: 'offer', channel: 'offers', title: 'Weekend deals', body: 'Up to 20% off fresh vegetables.', url: null, read: true, created_at: NOW() },
-  ] as NotificationDto[],
+  notifications: DEMO_NOTIFICATIONS.map(({ age_min, time_label, icon, ...n }) => ({ ...n, created_at: new Date(Date.now() - age_min * 60_000).toISOString(), time_label, icon })) as NotificationDto[],
+  wallet: DEMO_WALLET.balance as number,
+  walletTx: DEMO_WALLET.transactions.map((t) => ({ ...t })) as Array<{ id: string; type: string; amount: number; balance_after: number; source: string | null; note: string; created_at: string }>,
+  couponCode: null as string | null,
+  joinRequests: [] as Array<{ id: string; scheme_id: string; nic: string; status: string; created_at: string }>,
+  completedThisSession: 0,
   settings: { orders: true, deliveries: true, smartbuy: true, account: true, offers: false, quiet_hours_start: null, quiet_hours_end: null } as NotificationSettingsDto,
   deliveries: [] as AgentDeliveryDto[],
   otpByDelivery: {} as Record<string, string>,
   seeded: false,
 };
 
-const STEP_LABELS: Array<[TrackingStep['key'], string]> = [
-  ['placed', 'Order placed'],
-  ['confirmed', 'Confirmed'],
-  ['packed', 'Packed'],
-  ['out_for_delivery', 'Out for delivery'],
-  ['delivered', 'Delivered'],
-];
+const STEP_LABELS: Array<[TrackingStep['key'], string]> = DEMO_TRACKING.steps.map((x) => [x.key, x.label]);
+
+const DEMO_ORDER_STATUS = { dispatched: 'dispatched', delivered: 'delivered' } as const;
 
 function seed() {
   if (db.seeded) return;
   db.seeded = true;
-  const items: OrderItemDto[] = [{ product_id: 'p-tomato', variant_id: null, name: 'Tomato', variant_name: null, unit: 'kg', quantity: 0.5, unit_price: 480, line_total: 240, thumbnail_url: null }];
+  for (const d of DEMO_DELIVERIES) {
+    const items = deliveryItems(d.id);
+    const subtotal = items.reduce((a, i) => a + i.line_total, 0);
+    db.deliveries.push({
+      id: d.id, order_number: d.id, status: DEMO_ORDER_STATUS[d.status], customer_name: d.customer, customer_phone: d.phone, address: d.address,
+      amount_due: d.status === 'delivered' ? 0 : d.amount, payment_method: 'cod', collect_cash: d.status !== 'delivered', created_at: NOW(), items,
+    });
+    db.otpByDelivery[d.id] = d.otp;
+    // Customer 'Sunil' owns NP-ORD-9042 (shown in My Orders / tracking); the agent app sees all three.
+    if (d.id === 'NP-ORD-9042') {
+      db.orders.push({
+        id: d.id, order_number: d.id, status: 'dispatched', stage: 'out_for_delivery', payment_method: 'cod', payment_status: 'pending',
+        total_amount: d.amount, item_count: items.length, created_at: DEMO_TRACKING.steps[0].at ?? NOW(), estimated_delivery_date: NOW(), branch_id: 'b1',
+        branch_name: DEMO_AGENT.branchName, items, subtotal, delivery_fee: DEMO_DELIVERY_FEE, address: d.address, notes: null, needs_call_confirmation: false,
+        can_cancel: false, delivery_otp: d.otp, agent: { name: DEMO_AGENT.name, phone: DEMO_AGENT.phone, code: DEMO_AGENT.code },
+      });
+    }
+  }
+  // Wallet history order shown in the demo ledger (Oct 05, Teak Dining Chair Order #NP-8812)
+  const chair = deliveryItems('NP-ORD-8810')[0];
   db.orders.push({
-    id: 'o-seed', order_number: 'ONL-1023', status: 'dispatched', stage: 'out_for_delivery', payment_method: 'cod', payment_status: 'pending',
-    total_amount: 540, item_count: 1, created_at: NOW(), estimated_delivery_date: NOW(), branch_id: 'b1', branch_name: 'Kandy Branch',
-    items, subtotal: 240, delivery_fee: 300, address: '12 Temple Road, Kandy', notes: null, needs_call_confirmation: false, can_cancel: false,
-    delivery_otp: '4821', agent: { name: 'Kasun Perera', phone: '0779876543', code: 'NP-AG-204' },
+    id: 'NP-8812', order_number: 'NP-8812', status: 'delivered', stage: 'delivered', payment_method: 'cod', payment_status: 'paid', total_amount: 12000, item_count: 1,
+    created_at: '2026-10-05T10:00:00.000Z', estimated_delivery_date: '2026-10-05T10:00:00.000Z', branch_id: 'b1', branch_name: DEMO_AGENT.branchName,
+    items: [{ ...chair, product_id: productId(4), name: 'Plantation Solid Teak Wood Dining Chair', quantity: 1, unit_price: 12000, line_total: 12000 }],
+    subtotal: 12000, delivery_fee: 0, address: DEMO_ADDRESSES[0].line1, notes: null, needs_call_confirmation: false, can_cancel: false, delivery_otp: null,
+    agent: { name: DEMO_AGENT.name, phone: DEMO_AGENT.phone, code: DEMO_AGENT.code },
   });
-  db.deliveries.push(
-    { id: 'o-seed', order_number: 'ONL-1023', status: 'dispatched', customer_name: 'Ruwan Silva', customer_phone: '0771234567', address: '12 Temple Road, Kandy', amount_due: 540, payment_method: 'cod', collect_cash: true, created_at: NOW(), items },
-    { id: 'o-seed-2', order_number: 'ONL-1024', status: 'ready_for_delivery', customer_name: 'Sanduni Weerasinghe', customer_phone: '0712223344', address: '5 Lake View, Kandy', amount_due: 0, payment_method: 'bank_transfer', collect_cash: false, created_at: NOW(), items },
-  );
-  db.otpByDelivery['o-seed'] = '4821';
-  db.otpByDelivery['o-seed-2'] = '1357';
 }
 
 function stepsFor(o: OrderDto): TrackingStep[] {
   const idx = o.stage === 'cancelled' ? 0 : ['placed', 'confirmed', 'packed', 'out_for_delivery', 'delivered'].indexOf(o.stage);
-  return STEP_LABELS.map(([key, label], i) => ({ key, label, done: i <= idx, at: i <= idx ? NOW() : null }));
+  return STEP_LABELS.map(([key, label], i) => ({
+    key, label, done: i <= idx, at: i <= idx ? (o.id === 'NP-ORD-9042' ? DEMO_TRACKING.steps[i].at ?? NOW() : NOW()) : null,
+  }));
 }
 
 function quote(req: QuoteRequest) {
@@ -95,11 +112,12 @@ function quote(req: QuoteRequest) {
     };
   });
   const subtotal = lines.reduce((s, l) => s + l.line_total, 0);
-  const delivery_fee = subtotal >= 5000 ? 0 : 300;
+  const delivery_fee = subtotal > 0 ? DEMO_DELIVERY_FEE : 0;
+  const discount = db.couponCode ? Math.min(DEMO_COUPON.discount, subtotal) : 0;
   return {
-    branch_id: req.branch_id ?? 'b1', lines, subtotal, delivery_fee, total: subtotal + delivery_fee, currency: 'LKR' as const,
+    branch_id: req.branch_id ?? 'b1', lines, subtotal, delivery_fee, total: Math.max(0, subtotal + delivery_fee - discount), discount, coupon_code: db.couponCode, currency: 'LKR' as const,
     can_order: lines.every((l) => !l.issue), ordering_enabled: true, payment_methods: ['cod', 'bank_transfer'] as Array<'cod' | 'bank_transfer'>,
-    wallet: { eligible: false as const }, estimated_delivery_date: NOW(),
+    wallet: { eligible: false as const }, wallet_demo: { eligible: true, balance: db.wallet }, payment_options: DEMO_PAYMENT_METHODS, estimated_delivery_date: NOW(),
   };
 }
 
@@ -118,7 +136,7 @@ const on = (method: string, pattern: string, h: Handler) =>
 on('GET', '/status', () => ({
   ordering_enabled: true, maintenance_message: null, min_app_version: '1.0.0', latest_version: '1.0.0', latest_version_critical: false, apk_url: null,
   server_time: NOW(), company: { name: 'Natural Plantation', currency: 'LKR' }, modules: { smartbuy: true, installments: false },
-  delivery: { flat_fee: 300, free_over: 5000 }, bank_transfer: { enabled: true, instructions: 'Bank of Ceylon - 1234567 - Natural Plantation' },
+  delivery: { flat_fee: DEMO_DELIVERY_FEE, free_over: null }, bank_transfer: { enabled: true, instructions: 'Bank of Ceylon - 1234567 - Natural Plantation' },
 }));
 on('GET', '/watermark', () => ({ server_time: NOW(), areas: { catalog: null, categories: null, banners: null, settings: null } }));
 
@@ -178,7 +196,7 @@ on('POST', '/orders', ({ body }) => {
   const items: OrderItemDto[] = q.lines.map((l) => ({ product_id: l.product_id, variant_id: l.variant_id, name: l.name, variant_name: l.variant_name, unit: l.unit, quantity: l.quantity, unit_price: l.unit_price, line_total: l.line_total, thumbnail_url: null }));
   const o: OrderDto = {
     id: `o-${n}-${Date.now()}`, order_number: `ONL-${1030 + n}`, status: 'pending', stage: 'placed', payment_method: b.payment_method, payment_status: 'pending',
-    total_amount: q.total, item_count: items.length, created_at: NOW(), estimated_delivery_date: NOW(), branch_id: q.branch_id, branch_name: 'Kandy Branch',
+    total_amount: q.total, item_count: items.length, created_at: NOW(), estimated_delivery_date: NOW(), branch_id: q.branch_id, branch_name: DEMO_AGENT.branchName,
     items, subtotal: q.subtotal, delivery_fee: q.delivery_fee, address: db.addresses.find((a) => a.id === b.address_id)?.line1 ?? null, notes: null,
     needs_call_confirmation: false, can_cancel: true, delivery_otp: String(1000 + Math.floor(Math.random() * 9000)), agent: null,
   };
@@ -218,22 +236,84 @@ on('POST', '/me/notifications/read', ({ body }) => {
 on('GET', '/me/notification-settings', () => db.settings);
 on('PUT', '/me/notification-settings', ({ body }) => Object.assign(db.settings, body));
 
-on('GET', '/smartbuy/schemes/open', () => ({ items: [{ id: 's1', name: 'Gold Saver 12', contribution_amount: 5000, frequency: 'monthly', cycle_count: 12, chit_value: 60000, member_count: 12, status: 'open' }] }));
-on('GET', '/smartbuy/me/schemes', () => ({ items: [{ member_id: 'm1', scheme_id: 's1', scheme_number: 'SB-001', name: 'Gold Saver 12', frequency: 'monthly', contribution_amount: 5000, chit_value: 60000, cycle_count: 12, cycles_paid: 4, contributions_paid: 20000, next_draw_date: NOW(), status: 'active', badge: 'Active', won_cycle_no: null, agent_name: 'Kasun Perera' }] }));
-on('GET', '/smartbuy/me/schemes/:id/statement', ({ params }) => ({ scheme_id: params.id, scheme_name: 'Gold Saver 12', total_paid: 20000, rows: [1, 2, 3, 4].map((n) => ({ id: `r${n}`, cycle_no: n, amount: 5000, method: 'cash', receipt_number: `RC-00${n}`, status: 'paid', paid_at: NOW() })) }));
-on('GET', '/smartbuy/me/schemes/:id/draws', ({ params }) => ({ scheme_id: params.id, items: [{ id: 'd1', cycle_no: 3, draw_date: NOW(), method: 'random', winner_label: 'K. Ra... - Member #12', is_me: false, has_video: false }, { id: 'd2', cycle_no: 2, draw_date: NOW(), method: 'random', winner_label: 'Nimali F. - Member #7', is_me: true, has_video: false }] }));
-on('GET', '/smartbuy/wallet', () => ({ balance: 12500, currency: 'LKR' }));
-on('GET', '/smartbuy/wallet/transactions', () => ({ items: [{ id: 't1', type: 'credit', amount: 15000, balance_after: 15000, source: 'Draw prize', created_at: NOW() }, { id: 't2', type: 'debit', amount: -2500, balance_after: 12500, source: 'Shop purchase', created_at: NOW() }] }));
-
-on('GET', '/agent/dashboard', () => ({
-  agent: { id: 'ag1', code: 'NP-AG-204', name: 'Kasun Perera', branch_id: 'b1' },
-  members_count: 18, schemes_count: 2, deliveries_pending: db.deliveries.filter((d) => d.status !== 'delivered').length,
-  deliveries_completed_today: db.deliveries.filter((d) => d.status === 'delivered').length, commission_this_month: 18450, commission_pending: 6200, commission_paid_total: 92000,
-  extras: { rank_label: 'Gold agent', tier: 'Tier 2', branch_name: 'Kandy Branch', goal: { title: 'Monthly goal', subtitle: 'Rs. 6,550 more to unlock the bonus', target: 25000, earned: 18450 } },
+on('GET', '/smartbuy/schemes/open', () => ({
+  items: [DEMO_SCHEME_2, { id: DEMO_SCHEME.scheme_id, name: DEMO_SCHEME.name, frequency: DEMO_SCHEME.frequency, contribution_amount: DEMO_SCHEME.contribution_amount }].map((x) => ({
+    id: x.id, name: x.name, contribution_amount: x.contribution_amount, frequency: x.frequency, cycle_count: 12, chit_value: x.contribution_amount * 12, member_count: 12, status: 'open',
+  })),
 }));
+on('GET', '/smartbuy/me/schemes', () => ({ items: [{ ...DEMO_SCHEME }] }));
+on('GET', '/smartbuy/me/schemes/:id/statement', ({ params }) => ({
+  scheme_id: params.id, scheme_name: DEMO_SCHEME.name, total_paid: DEMO_SCHEME.contributions_paid,
+  rows: Array.from({ length: DEMO_SCHEME.cycles_paid }, (_, k) => k + 1).reverse().map((n) => ({
+    id: `r${n}`, cycle_no: n, amount: DEMO_SCHEME.contribution_amount, method: 'cash', receipt_number: `RC-00${n}`, status: 'paid',
+    paid_at: new Date(Date.UTC(2026, 9, 30) - (DEMO_SCHEME.cycles_paid - n) * 7 * 86_400_000).toISOString(),
+  })),
+}));
+on('GET', '/smartbuy/me/schemes/:id/draws', ({ params }) => ({ scheme_id: params.id, items: DEMO_DRAWS.map((d) => ({ ...d, has_video: false })) }));
+on('GET', '/smartbuy/wallet', () => ({ balance: db.wallet, currency: 'LKR' }));
+on('GET', '/smartbuy/wallet/transactions', () => ({ items: db.walletTx }));
+/** Mock-only: wallet payment at checkout (the real contract only has cod/bank_transfer so far). */
+on('POST', '/checkout/wallet-pay', ({ body }) => {
+  const amount = Number(body.amount ?? 0);
+  if (amount > db.wallet) throw new HttpError(409, 'INSUFFICIENT_WALLET', 'Wallet balance is too low');
+  db.wallet -= amount;
+  db.walletTx.unshift({ id: `t${db.walletTx.length + 1}`, type: 'debit', amount: -amount, balance_after: db.wallet, source: body.reference ?? 'App Checkout', note: 'App Checkout', created_at: NOW() });
+  return { ok: true, balance: db.wallet };
+});
+/** Mock-only: promo code (demo accepts PLANT2026 = Rs 500 off). */
+on('POST', '/checkout/coupon', ({ body }) => {
+  const code = String(body.code ?? '').trim().toUpperCase();
+  if (code !== DEMO_COUPON.code) {
+    db.couponCode = null;
+    throw new HttpError(422, 'INVALID_COUPON', DEMO_COUPON.errorMessage);
+  }
+  db.couponCode = code;
+  return { code, discount: DEMO_COUPON.discount, message: DEMO_COUPON.successMessage };
+});
+on('DELETE', '/checkout/coupon', () => ((db.couponCode = null), { ok: true }));
+/** Mock-only: "Apply for another Smart Buy scheme" (submitted for branch POS approval). */
+on('POST', '/smartbuy/join-requests', ({ body }) => {
+  const r = { id: `jr${db.joinRequests.length + 1}`, scheme_id: body.scheme_id, nic: body.nic, status: 'pending', created_at: NOW() };
+  db.joinRequests.push(r);
+  return r;
+});
+
+on('GET', '/agent/dashboard', () => {
+  const x = DEMO_AGENT_STATS;
+  return {
+    agent: { id: DEMO_AGENT.id, code: DEMO_AGENT.code, name: DEMO_AGENT.name, branch_id: 'b1' },
+    members_count: x.smartbuy_members, schemes_count: 2,
+    deliveries_pending: Math.max(0, x.pending_drops - db.completedThisSession),
+    deliveries_completed_today: db.deliveries.filter((d) => d.status === 'delivered').length,
+    commission_this_month: x.month_commission, commission_pending: 0, commission_paid_total: 0,
+    extras: {
+      rank_label: x.rank_label, rank_detail: x.rank_detail, tier: x.tier, rating: x.rating, review_count: x.review_count, families_served: x.families_served,
+      smartbuy_members: x.smartbuy_members, on_time_pct: x.on_time_pct, on_duty: x.on_duty, branch_name: x.branch_name, cod_to_collect: x.cod_to_collect,
+      goal: x.goal, incentive_banner: x.incentive_banner, badges: x.badges, badge_hints: x.badge_hints,
+    },
+  };
+});
 on('GET', '/agent/schemes', () => ({ items: [] }));
-on('GET', '/agent/members', () => ({ items: [{ member_id: 'm1', customer_name: 'Nimali Fernando', phone_masked: '077 *** 4567', scheme_id: 's1', scheme_name: 'Gold Saver 12', contributions_paid: 20000, status: 'active', won_cycle_no: null }], next_cursor: null }));
-on('GET', '/agent/commission', ({ query }) => ({ month: query.month ?? '2026-11', total: 18450, pending: 6200, approved: 0, paid: 12250, rows: [{ id: 'c1', source: 'Delivery ONL-1020', base_amount: 3000, amount: 150, status: 'paid', created_at: NOW() }, { id: 'c2', source: 'Scheme contribution', base_amount: 5000, amount: 250, status: 'pending', created_at: NOW() }] }));
+on('GET', '/agent/members', () => ({
+  items: DEMO_AGENT_MEMBERS.map((m) => ({
+    member_id: m.member_id, customer_name: m.customer_name, phone_masked: `${m.phone} - ${m.area}`, scheme_id: m.scheme_id, scheme_name: m.scheme_name,
+    contributions_paid: m.contributions_paid, status: m.paid ? 'paid_cycle_7' : 'due_cycle_7', won_cycle_no: null, weekly_amount: m.weekly,
+  })),
+  next_cursor: null,
+}));
+/** Mock-only: agent records a cash collection for a member (demo: Nimal Bandara Rs 1,000). */
+on('POST', '/agent/members/:id/collections', ({ params, body }) => {
+  const m = DEMO_AGENT_MEMBERS.find((x) => x.member_id === params.id);
+  if (!m) throw new HttpError(404, 'NOT_FOUND', 'Not found');
+  (m as { paid: boolean }).paid = true;
+  (m as { contributions_paid: number }).contributions_paid += Number(body.amount ?? m.weekly);
+  return { ok: true, receipt_number: `RC-${Date.now() % 100000}` };
+});
+on('GET', '/agent/commission', ({ query }) => ({
+  month: query.month ?? DEMO_COMMISSION.month, total: DEMO_COMMISSION.total, pending: 0, approved: DEMO_COMMISSION.total, paid: 0, title: DEMO_COMMISSION.title,
+  rows: DEMO_COMMISSION.rows.map((r) => ({ id: r.id, source: r.source, detail: r.detail, color: r.color, base_amount: r.base_amount, amount: r.amount, status: 'approved', created_at: '2026-10-31T00:00:00.000Z' })),
+}));
+on('GET', '/agent/printer', () => ({ name: DEMO_PRINTER.name, title: DEMO_PRINTER.title, connected: true }));
 on('GET', '/agent/deliveries', () => ({
   items: db.deliveries.map((d) => ({ ...d, delivery_otp_hash: `salt$${sha256Hex(`salt${db.otpByDelivery[d.id] ?? ''}`)}` })),
 }));
@@ -247,17 +327,25 @@ on('POST', '/agent/deliveries/:id/complete', ({ params, body }) => {
   if (!d) throw new HttpError(404, 'NOT_FOUND', 'Not found');
   if (db.otpByDelivery[d.id] !== body.otp) throw new HttpError(422, 'OTP_INVALID', 'Wrong code');
   d.status = 'delivered';
+  d.collect_cash = false;
+  db.completedThisSession += 1;
   return { order_id: d.id, status: 'delivered', delivered_at: NOW() };
 });
 on('GET', '/agent/deliveries/:id/bill', ({ params }) => {
   const d = db.deliveries.find((x) => x.id === params.id);
   if (!d) throw new HttpError(404, 'NOT_FOUND', 'Not found');
-  return {
-    bill_no: `B-${d.order_number}`, order_number: d.order_number, date: NOW(), company_name: 'Natural Plantation', branch_name: 'Kandy Branch', branch_phone: '0812223344',
-    agent_name: 'Kasun Perera', agent_code: 'NP-AG-204', customer_name: d.customer_name, address: d.address,
-    lines: (d.items ?? []).map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unit_price: i.unit_price, line_total: i.line_total })),
-    subtotal: 240, discount: 0, delivery_fee: 300, total: 540, payment_label: d.collect_cash ? 'Cash on delivery' : 'Paid', otp: null, paid_in_full: !d.collect_cash,
+  const common = {
+    order_number: d.order_number, company_name: DEMO_RECEIPT.company_name, branch_name: DEMO_RECEIPT.branch_name, branch_phone: DEMO_RECEIPT.branch_phone,
+    agent_name: DEMO_AGENT.name, agent_code: DEMO_AGENT.code, customer_name: d.customer_name, address: d.address,
   };
+  if (d.id === 'NP-ORD-9042') {
+    return { ...common, bill_no: DEMO_RECEIPT.bill_no, date: DEMO_RECEIPT.date, lines: DEMO_RECEIPT.lines, subtotal: DEMO_RECEIPT.subtotal, discount: DEMO_RECEIPT.discount,
+      delivery_fee: DEMO_RECEIPT.delivery_fee, total: DEMO_RECEIPT.total, payment_label: DEMO_RECEIPT.payment_label, otp: db.otpByDelivery[d.id], paid_in_full: true };
+  }
+  const lines = (d.items ?? []).map((i) => ({ name: i.name, quantity: i.quantity, unit: i.unit, unit_price: i.unit_price, line_total: i.line_total }));
+  const subtotal = lines.reduce((a, l) => a + l.line_total, 0);
+  return { ...common, bill_no: d.order_number, date: NOW(), lines, subtotal, discount: 0, delivery_fee: DEMO_DELIVERY_FEE, total: subtotal + DEMO_DELIVERY_FEE,
+    payment_label: d.collect_cash ? 'COD' : 'Paid', otp: d.collect_cash ? null : db.otpByDelivery[d.id], paid_in_full: !d.collect_cash };
 });
 
 function parseQuery(config: InternalAxiosRequestConfig) {

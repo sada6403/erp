@@ -1,0 +1,466 @@
+[
+  {
+    "id": "guest-login-signin-olive",
+    "role": "guest",
+    "screen": "login-signin",
+    "theme": "olive",
+    "label": "Login screen - Sign In tab",
+    "deeplinkHint": "naturalplantation://login"
+  },
+  {
+    "id": "guest-login-signup-olive",
+    "role": "guest",
+    "screen": "login-signup",
+    "theme": "olive",
+    "label": "Login screen - Sign Up tab",
+    "deeplinkHint": "naturalplantation://register"
+  },
+  {
+    "id": "guest-shop-top-olive",
+    "role": "guest",
+    "screen": "shop-top",
+    "theme": "olive",
+    "label": "Guest shop home (logged out, header Login button)",
+    "deeplinkHint": "naturalplantation:// (logged out)"
+  },
+  {
+    "id": "customer-shop-top-olive",
+    "role": "customer",
+    "screen": "shop-top",
+    "theme": "olive",
+    "label": "Customer shop home (top: search, categories, banner)",
+    "deeplinkHint": "naturalplantation://"
+  },
+  {
+    "id": "customer-shop-flash-olive",
+    "role": "customer",
+    "screen": "shop-flash",
+    "theme": "olive",
+    "label": "Customer shop - Flash Harvest Deals + product grid",
+    "deeplinkHint": "naturalplantation://flash-deals"
+  },
+  {
+    "id": "customer-shop-smartbuy-olive",
+    "role": "customer",
+    "screen": "shop-smartbuy",
+    "theme": "olive",
+    "label": "Customer shop - Smart Buy promo block (bottom)",
+    "deeplinkHint": "naturalplantation://smartbuy-promo"
+  },
+  {
+    "id": "customer-categories-olive",
+    "role": "customer",
+    "screen": "categories",
+    "theme": "olive",
+    "label": "Customer categories",
+    "deeplinkHint": "naturalplantation://categories"
+  },
+  {
+    "id": "customer-cart-step1-olive",
+    "role": "customer",
+    "screen": "cart-step1",
+    "theme": "olive",
+    "label": "Cart - step 1 (items)",
+    "deeplinkHint": "naturalplantation://cart"
+  },
+  {
+    "id": "customer-cart-step2-olive",
+    "role": "customer",
+    "screen": "cart-step2",
+    "theme": "olive",
+    "label": "Cart - step 2 (address)",
+    "deeplinkHint": "naturalplantation://checkout (step 2)"
+  },
+  {
+    "id": "customer-cart-step3-olive",
+    "role": "customer",
+    "screen": "cart-step3",
+    "theme": "olive",
+    "label": "Cart - step 3 (payment)",
+    "deeplinkHint": "naturalplantation://checkout (step 3)"
+  },
+  {
+    "id": "customer-track-olive",
+    "role": "customer",
+    "screen": "track",
+    "theme": "olive",
+    "label": "Order tracking",
+    "deeplinkHint": "naturalplantation://orders"
+  },
+  {
+    "id": "customer-settings-olive",
+    "role": "customer",
+    "screen": "settings",
+    "theme": "olive",
+    "label": "Settings (theme + language)",
+    "deeplinkHint": "naturalplantation://settings"
+  },
+  {
+    "id": "customer-product-modal-olive",
+    "role": "customer",
+    "screen": "product-modal",
+    "theme": "olive",
+    "label": "Product detail modal",
+    "deeplinkHint": "naturalplantation://product/101"
+  },
+  {
+    "id": "customer-notifications-modal-olive",
+    "role": "customer",
+    "screen": "notifications-modal",
+    "theme": "olive",
+    "label": "Notifications inbox modal",
+    "deeplinkHint": "naturalplantation://notifications"
+  },
+  {
+    "id": "customer-push-banner-olive",
+    "role": "customer",
+    "screen": "push-banner",
+    "theme": "olive",
+    "label": "In-app push banner over shop",
+    "deeplinkHint": "push notification received (foreground)"
+  },
+  {
+    "id": "customer-offline-bar-olive",
+    "role": "customer",
+    "screen": "offline-bar",
+    "theme": "olive",
+    "label": "Offline alert bar over shop",
+    "deeplinkHint": "naturalplantation://offline (airplane mode)"
+  },
+  {
+    "id": "customer-offline-buylater-olive",
+    "role": "customer",
+    "screen": "offline-buylater",
+    "theme": "olive",
+    "label": "Offline Buy-Later bottom sheet",
+    "deeplinkHint": "naturalplantation://offline (airplane mode, tap Add to Cart)"
+  },
+  {
+    "id": "smartbuy-schemes-olive",
+    "role": "smartbuy",
+    "screen": "schemes",
+    "theme": "olive",
+    "label": "Smart Buy - schemes hub",
+    "deeplinkHint": "naturalplantation://schemes"
+  },
+  {
+    "id": "smartbuy-draws-olive",
+    "role": "smartbuy",
+    "screen": "draws",
+    "theme": "olive",
+    "label": "Smart Buy - draws",
+    "deeplinkHint": "naturalplantation://draws"
+  },
+  {
+    "id": "smartbuy-draw-video-modal-olive",
+    "role": "smartbuy",
+    "screen": "draw-video-modal",
+    "theme": "olive",
+    "label": "Smart Buy - draw proof video modal",
+    "deeplinkHint": "naturalplantation://draw-video/7"
+  },
+  {
+    "id": "smartbuy-wallet-olive",
+    "role": "smartbuy",
+    "screen": "wallet",
+    "theme": "olive",
+    "label": "Smart Buy - wallet",
+    "deeplinkHint": "naturalplantation://wallet"
+  },
+  {
+    "id": "smartbuy-join-modal-olive",
+    "role": "smartbuy",
+    "screen": "join-modal",
+    "theme": "olive",
+    "label": "Smart Buy - join scheme modal",
+    "deeplinkHint": "naturalplantation://join"
+  },
+  {
+    "id": "agent-deliveries-olive",
+    "role": "agent",
+    "screen": "deliveries",
+    "theme": "olive",
+    "label": "Agent - deliveries dashboard (top)",
+    "deeplinkHint": "naturalplantation://deliveries"
+  },
+  {
+    "id": "agent-deliveries-list-olive",
+    "role": "agent",
+    "screen": "deliveries-list",
+    "theme": "olive",
+    "label": "Agent - deliveries list (scrolled to cards)",
+    "deeplinkHint": "naturalplantation://deliveries (scrolled)"
+  },
+  {
+    "id": "agent-otp-modal-olive",
+    "role": "agent",
+    "screen": "otp-modal",
+    "theme": "olive",
+    "label": "Agent - OTP verification modal",
+    "deeplinkHint": "naturalplantation://deliveries/NP-ORD-9042"
+  },
+  {
+    "id": "agent-members-olive",
+    "role": "agent",
+    "screen": "members",
+    "theme": "olive",
+    "label": "Agent - members",
+    "deeplinkHint": "naturalplantation://members"
+  },
+  {
+    "id": "agent-earnings-olive",
+    "role": "agent",
+    "screen": "earnings",
+    "theme": "olive",
+    "label": "Agent - earnings",
+    "deeplinkHint": "naturalplantation://commission"
+  },
+  {
+    "id": "agent-bill-modal-olive",
+    "role": "agent",
+    "screen": "bill-modal",
+    "theme": "olive",
+    "label": "Agent - ESC/POS bill preview modal",
+    "deeplinkHint": "naturalplantation://bill/NP-ORD-9042"
+  },
+  {
+    "id": "agent-commission-statement-olive",
+    "role": "agent",
+    "screen": "commission-statement",
+    "theme": "olive",
+    "label": "Agent - commission statement modal",
+    "deeplinkHint": "naturalplantation://commission (statement)"
+  },
+  {
+    "id": "guest-login-signin-purple",
+    "role": "guest",
+    "screen": "login-signin",
+    "theme": "purple",
+    "label": "Login screen - Sign In tab",
+    "deeplinkHint": "naturalplantation://login"
+  },
+  {
+    "id": "guest-login-signup-purple",
+    "role": "guest",
+    "screen": "login-signup",
+    "theme": "purple",
+    "label": "Login screen - Sign Up tab",
+    "deeplinkHint": "naturalplantation://register"
+  },
+  {
+    "id": "guest-shop-top-purple",
+    "role": "guest",
+    "screen": "shop-top",
+    "theme": "purple",
+    "label": "Guest shop home (logged out, header Login button)",
+    "deeplinkHint": "naturalplantation:// (logged out)"
+  },
+  {
+    "id": "customer-shop-top-purple",
+    "role": "customer",
+    "screen": "shop-top",
+    "theme": "purple",
+    "label": "Customer shop home (top: search, categories, banner)",
+    "deeplinkHint": "naturalplantation://"
+  },
+  {
+    "id": "customer-shop-flash-purple",
+    "role": "customer",
+    "screen": "shop-flash",
+    "theme": "purple",
+    "label": "Customer shop - Flash Harvest Deals + product grid",
+    "deeplinkHint": "naturalplantation://flash-deals"
+  },
+  {
+    "id": "customer-shop-smartbuy-purple",
+    "role": "customer",
+    "screen": "shop-smartbuy",
+    "theme": "purple",
+    "label": "Customer shop - Smart Buy promo block (bottom)",
+    "deeplinkHint": "naturalplantation://smartbuy-promo"
+  },
+  {
+    "id": "customer-categories-purple",
+    "role": "customer",
+    "screen": "categories",
+    "theme": "purple",
+    "label": "Customer categories",
+    "deeplinkHint": "naturalplantation://categories"
+  },
+  {
+    "id": "customer-cart-step1-purple",
+    "role": "customer",
+    "screen": "cart-step1",
+    "theme": "purple",
+    "label": "Cart - step 1 (items)",
+    "deeplinkHint": "naturalplantation://cart"
+  },
+  {
+    "id": "customer-cart-step2-purple",
+    "role": "customer",
+    "screen": "cart-step2",
+    "theme": "purple",
+    "label": "Cart - step 2 (address)",
+    "deeplinkHint": "naturalplantation://checkout (step 2)"
+  },
+  {
+    "id": "customer-cart-step3-purple",
+    "role": "customer",
+    "screen": "cart-step3",
+    "theme": "purple",
+    "label": "Cart - step 3 (payment)",
+    "deeplinkHint": "naturalplantation://checkout (step 3)"
+  },
+  {
+    "id": "customer-track-purple",
+    "role": "customer",
+    "screen": "track",
+    "theme": "purple",
+    "label": "Order tracking",
+    "deeplinkHint": "naturalplantation://orders"
+  },
+  {
+    "id": "customer-settings-purple",
+    "role": "customer",
+    "screen": "settings",
+    "theme": "purple",
+    "label": "Settings (theme + language)",
+    "deeplinkHint": "naturalplantation://settings"
+  },
+  {
+    "id": "customer-product-modal-purple",
+    "role": "customer",
+    "screen": "product-modal",
+    "theme": "purple",
+    "label": "Product detail modal",
+    "deeplinkHint": "naturalplantation://product/101"
+  },
+  {
+    "id": "customer-notifications-modal-purple",
+    "role": "customer",
+    "screen": "notifications-modal",
+    "theme": "purple",
+    "label": "Notifications inbox modal",
+    "deeplinkHint": "naturalplantation://notifications"
+  },
+  {
+    "id": "customer-push-banner-purple",
+    "role": "customer",
+    "screen": "push-banner",
+    "theme": "purple",
+    "label": "In-app push banner over shop",
+    "deeplinkHint": "push notification received (foreground)"
+  },
+  {
+    "id": "customer-offline-bar-purple",
+    "role": "customer",
+    "screen": "offline-bar",
+    "theme": "purple",
+    "label": "Offline alert bar over shop",
+    "deeplinkHint": "naturalplantation://offline (airplane mode)"
+  },
+  {
+    "id": "customer-offline-buylater-purple",
+    "role": "customer",
+    "screen": "offline-buylater",
+    "theme": "purple",
+    "label": "Offline Buy-Later bottom sheet",
+    "deeplinkHint": "naturalplantation://offline (airplane mode, tap Add to Cart)"
+  },
+  {
+    "id": "smartbuy-schemes-purple",
+    "role": "smartbuy",
+    "screen": "schemes",
+    "theme": "purple",
+    "label": "Smart Buy - schemes hub",
+    "deeplinkHint": "naturalplantation://schemes"
+  },
+  {
+    "id": "smartbuy-draws-purple",
+    "role": "smartbuy",
+    "screen": "draws",
+    "theme": "purple",
+    "label": "Smart Buy - draws",
+    "deeplinkHint": "naturalplantation://draws"
+  },
+  {
+    "id": "smartbuy-draw-video-modal-purple",
+    "role": "smartbuy",
+    "screen": "draw-video-modal",
+    "theme": "purple",
+    "label": "Smart Buy - draw proof video modal",
+    "deeplinkHint": "naturalplantation://draw-video/7"
+  },
+  {
+    "id": "smartbuy-wallet-purple",
+    "role": "smartbuy",
+    "screen": "wallet",
+    "theme": "purple",
+    "label": "Smart Buy - wallet",
+    "deeplinkHint": "naturalplantation://wallet"
+  },
+  {
+    "id": "smartbuy-join-modal-purple",
+    "role": "smartbuy",
+    "screen": "join-modal",
+    "theme": "purple",
+    "label": "Smart Buy - join scheme modal",
+    "deeplinkHint": "naturalplantation://join"
+  },
+  {
+    "id": "agent-deliveries-purple",
+    "role": "agent",
+    "screen": "deliveries",
+    "theme": "purple",
+    "label": "Agent - deliveries dashboard (top)",
+    "deeplinkHint": "naturalplantation://deliveries"
+  },
+  {
+    "id": "agent-deliveries-list-purple",
+    "role": "agent",
+    "screen": "deliveries-list",
+    "theme": "purple",
+    "label": "Agent - deliveries list (scrolled to cards)",
+    "deeplinkHint": "naturalplantation://deliveries (scrolled)"
+  },
+  {
+    "id": "agent-otp-modal-purple",
+    "role": "agent",
+    "screen": "otp-modal",
+    "theme": "purple",
+    "label": "Agent - OTP verification modal",
+    "deeplinkHint": "naturalplantation://deliveries/NP-ORD-9042"
+  },
+  {
+    "id": "agent-members-purple",
+    "role": "agent",
+    "screen": "members",
+    "theme": "purple",
+    "label": "Agent - members",
+    "deeplinkHint": "naturalplantation://members"
+  },
+  {
+    "id": "agent-earnings-purple",
+    "role": "agent",
+    "screen": "earnings",
+    "theme": "purple",
+    "label": "Agent - earnings",
+    "deeplinkHint": "naturalplantation://commission"
+  },
+  {
+    "id": "agent-bill-modal-purple",
+    "role": "agent",
+    "screen": "bill-modal",
+    "theme": "purple",
+    "label": "Agent - ESC/POS bill preview modal",
+    "deeplinkHint": "naturalplantation://bill/NP-ORD-9042"
+  },
+  {
+    "id": "agent-commission-statement-purple",
+    "role": "agent",
+    "screen": "commission-statement",
+    "theme": "purple",
+    "label": "Agent - commission statement modal",
+    "deeplinkHint": "naturalplantation://commission (statement)"
+  }
+]

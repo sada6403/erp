@@ -17,7 +17,7 @@ export default function CategoriesScreen() {
   const { data, isLoading, refetch, isRefetching } = useCategories();
   const cats = (data?.items ?? []).filter((c) => !c.parent_id).sort((a, b) => a.sort_order - b.sort_order);
   return (
-    <Screen onRefresh={refetch} refreshing={isRefetching}>
+    <Screen gap={0} onRefresh={refetch} refreshing={isRefetching}>
       <ScreenHeading title={t('categories.title')} sub={t('categories.sub')} />
       {isLoading ? (
         <SkeletonList rows={5} height={64} />

@@ -1,40 +1,28 @@
 import React from 'react';
 import { View } from 'react-native';
-import { useLocalSearchParams } from 'expo-router';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { usePreventScreenCapture } from 'expo-screen-capture';
-import { useTranslation } from 'react-i18next';
-import { useTheme, radii } from '@/theme';
-import { Text } from '@/components/Text';
-import { ComingSoon } from '@/components/Extras';
 import { Screen } from '@/components/Shell';
-import { useWatermark } from '@/features/common/hooks';
+import { DrawsView } from '@/features/smartbuy/DrawsView';
+import { DrawVideoModal } from '@/features/smartbuy/DrawVideoModal';
+import type { DrawView } from '@/features/smartbuy/demo';
+import { useDraws, useMySchemes } from '@/features/smartbuy/hooks';
 
-/** Dev-only player preview; production shows "Coming in the next update" (DrawDto.has_video is false in v1.0). */
-function DevPlayer({ id }: { id: string }) {
-  const { t } = useTranslation();
-  const theme = useTheme();
-  const player = useVideoPlayer(null, (p) => {
-    p.loop = false;
-  });
-  useWatermark({});
-  return (
-    <Screen>
-      <View style={{ borderRadius: radii.card, overflow: 'hidden', backgroundColor: theme.colors.inkDeep, aspectRatio: 16 / 9 }}>
-        <VideoView player={player} style={{ flex: 1 }} nativeControls />
-        <View pointerEvents="none" style={{ position: 'absolute', top: 8, right: 8 }}>
-          <Text size={10} weight={800} color="watermark">{id}</Text>
-        </View>
-      </View>
-      <Text size={12} color="textMuted">{t('draws.devPreview')}</Text>
-    </Screen>
-  );
-}
-
+/** Draw proof video modal over the draws list (demo #videoModal). Capture is blocked (FLAG_SECURE). */
 export default function DrawVideoScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { t } = useTranslation();
+  const router = useRouter();
   usePreventScreenCapture();
-  if (!__DEV__) return <ComingSoon icon="🎬" title={t('draws.videoSoonTitle')} />;
-  return <DevPlayer id={id} />;
+  const schemes = useMySchemes();
+  const draws = useDraws(schemes.data?.items[0]?.scheme_id);
+  const draw = draws.data?.items.find((d) => d.id === id) as DrawView | undefined;
+  const close = () => (router.canGoBack() ? router.back() : router.replace('/draws'));
+  return (
+    <View style={{ flex: 1 }}>
+      <Screen>
+        <DrawsView />
+      </Screen>
+      <DrawVideoModal draw={draw} onClose={close} />
+    </View>
+  );
 }
