@@ -4,6 +4,7 @@ You are building the Natural Plantation customer / Smart Buy / agent mobile app 
 POS ERP. Work fast but safely: parallelise with subagents, never touch production.
 
 ## 0. Read first (in this order)
+0. `docs/mobile-app/RELEASE_PLAN.md` — the 14-day deadline and v1.0 scope. Prioritise by it.
 1. `AGENTS.md` (repo root) — rules. They override anything below if they conflict.
 2. `docs/mobile-app/ARCHITECTURE.md` — the plan. Sections 3, 4, 5, 7, 8, 11 matter most for this run.
 3. `.agent/skills/*/SKILL.md` — load the matching skill before each kind of task.
@@ -48,6 +49,20 @@ Bottom nav per role (as in the demo):
   "Natural Farming" listing). Until then use `com.naturalplantation.app.dev` for dev builds only.
   Never hard-code it elsewhere.
 - Hide Smart Buy and Installments UI when the company's modules disable them (ERP v2.8 business types).
+- **Deadline:** v1.0 on the existing Play listing by 21 Nov 2026. Follow `docs/mobile-app/RELEASE_PLAN.md`.
+  Build 1 goes to Play Internal testing on 11 Nov. Set up EAS build profiles and `expo-updates` from the
+  start so every later fix ships as an update.
+- **Supermarket / grocery rules (POS v2.9.x):**
+  - `products.sale_by` (weight items) → decimal quantities (e.g. 0.25 kg steps), price per kg shown;
+    cart, orders and stock use REAL quantities, never integers.
+  - Hide `not_for_sale` products; show the EMI line only when `enable_emi = 1`; `is_manage_stock = 0`
+    means always available.
+  - Companies with supermarket stock enabled sell FIFO by batch with optional batch selling prices and
+    **no overselling**. The app shows the product's current selling price; the order locks
+    `unit_price` at order time; checkout re-checks stock on the server and reserves it. POS must honour
+    the app order price when converting the order to an invoice (flag it as an open question if the
+    POS conversion path re-prices).
+  - Supplier bills, purchases, capital/investments and profit dashboards are back-office only — not in the app.
 
 ## 3. Repo setup (do first, then report)
 1. `git fetch origin`. Work on branch `feature/mobile-app-foundation` (already has the docs commit).
@@ -83,9 +98,10 @@ Run three workstreams in parallel with subagents; integrate at the end.
 `build-and-verify`
 1. Expo (latest stable SDK) + TypeScript strict + Expo Router + dev client; stack exactly as AGENTS.md §4.
 2. Design system from the web demo tokens; both themes; i18n (en/ta/si); fonts.
-3. Build **all screens listed in §1**, pixel-matched to the demo. Shop + auth wired to the real API.
-   Smart Buy and Agent screens wired to typed mock data behind the same query hooks (flag `MOCK_ONLY`
-   per hook) — they get real endpoints in Phase 2/3.
+3. Build **all screens listed in §1**, pixel-matched to the demo. Shop + auth wired to the real API
+   first; then Smart Buy read-only and Agent deliveries/members/earnings (see `RELEASE_PLAN.md` v1.0
+   scope). Mock data is allowed only in `__DEV__` builds. Any Play build shows "Coming in the next
+   update" for features not yet backed by real endpoints — never fake data.
 4. Offline: persisted cache, offline banner with cache age, buy-later sheet, Notify me.
 5. Push: channels, permission explainer, deep links, inbox. Updates: `expo-updates` + force-update screen.
 6. Screen capture blocked on draw video, wallet, NIC capture.

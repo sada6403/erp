@@ -19,6 +19,8 @@ Owner: Moni (Pynimox). Read `AGENTS.md` first.
 | 28 Oct | **System notifications** shown on the phone outside the app (tray, lock screen, sound), even when the app is closed (§8.1). |
 | 28 Oct | **In-app updates** like the POS desktop auto-updater: JS updates download silently; new native versions prompt inside the app; old versions are forced to update (§8.2). |
 | 28 Oct | **Order/product tracking** plus every standard e-commerce feature customers expect (§11.1). App must stay simple, lightweight and smooth with a written performance budget (§11.2). |
+| 7 Nov | **Approved UI = web demo** https://mobile-app-demo-jet.vercel.app/ (repo `Monishan2003/mobile-app-demo`). App name **Natural Plantation**. Login field accepts mobile number, Smart Buy member number or agent code. Agents collect scheme payments + COD cash (pending until verified in POS). |
+| 7 Nov | **Play Store:** plan to publish as an update to the old "Natural Farming" listing (same package name + upload key, higher versionCode). Package name is read from `ANDROID_PACKAGE`; Moni to confirm the exact package from Play Console. Build kickoff: `docs/mobile-app/CLAUDE_CODE_KICKOFF.md`. |
 
 ---
 
