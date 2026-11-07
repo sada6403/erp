@@ -1,0 +1,83 @@
+{
+  "name": "natural-plantation-mobile",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "dependencies": {
+    "@react-native-community/netinfo": "12.0.1",
+    "@shopify/flash-list": "2.3.2",
+    "@tanstack/query-sync-storage-persister": "^5.107.1",
+    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/react-query-persist-client": "^5.107.1",
+    "axios": "^1.21.0",
+    "expo": "~58.0.23",
+    "expo-constants": "~58.0.15",
+    "expo-dev-client": "~58.0.18",
+    "expo-device": "~58.0.5",
+    "expo-font": "~58.0.11",
+    "expo-image": "~58.0.18",
+    "expo-linking": "~58.0.16",
+    "expo-localization": "~58.0.5",
+    "expo-notifications": "~58.1.8",
+    "expo-print": "~58.0.8",
+    "expo-router": "~58.0.30",
+    "expo-screen-capture": "~58.0.6",
+    "expo-secure-store": "~58.0.2",
+    "expo-sharing": "~58.0.22",
+    "expo-splash-screen": "~58.0.13",
+    "expo-status-bar": "~58.0.4",
+    "expo-system-ui": "~58.0.7",
+    "expo-updates": "~58.0.21",
+    "expo-video": "~58.0.13",
+    "i18next": "^26.7.2",
+    "react": "19.3.0",
+    "react-hook-form": "^7.91.0",
+    "react-i18next": "^17.1.13",
+    "react-native": "0.88.1",
+    "react-native-mmkv": "^4.3.2",
+    "react-native-nitro-modules": "^0.37.2",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-screens": "~4.30.1",
+    "zod": "^4.6.7",
+    "zustand": "^5.1.0"
+  },
+  "devDependencies": {
+    "@react-native/jest-preset": "^0.88.1",
+    "@testing-library/react-native": "^14.1.0",
+    "@types/jest": "^30.0.0",
+    "@types/react": "~19.3.0",
+    "@types/react-test-renderer": "^19.3.1",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "^58.0.4",
+    "jest": "^30.5.2",
+    "jest-expo": "^58.0.14",
+    "react-test-renderer": "^19.3.0",
+    "typescript": "~6.0.3"
+  },
+  "scripts": {
+    "start": "expo start --dev-client",
+    "android": "expo run:android",
+    "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
+    "test": "jest",
+    "doctor": "expo-doctor",
+    "export:android": "expo export --platform android"
+  },
+  "private": true,
+  "jest": {
+    "preset": "jest-expo",
+    "setupFiles": [
+      "<rootDir>/jest.setup.ts"
+    ],
+    "moduleNameMapper": {
+      "^@/(.*)$": "<rootDir>/src/$1",
+      "^@contracts/(.*)$": "<rootDir>/../backend/lib/app/contracts/$1"
+    },
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/android/"
+    ],
+    "transformIgnorePatterns": [
+      "node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@sentry/react-native|native-base|react-native-svg|zustand|@tanstack/.*))"
+    ]
+  }
+}

@@ -1,0 +1,81 @@
+import type { ConfigContext, ExpoConfig } from 'expo/config';
+
+/**
+ * Natural Plantation app config.
+ * Per build profile (eas.json) these come from env: ANDROID_PACKAGE, API_BASE_URL, APP_KEY, APP_ENV.
+ * None of them are secrets: the App Key only identifies the company (AGENTS.md rule 1).
+ * Never put the POS sync api_key here.
+ */
+const APP_ENV = process.env.APP_ENV ?? 'development';
+// Dev default only. The real Play package comes from ANDROID_PACKAGE (Moni supplies it).
+const ANDROID_PACKAGE = process.env.ANDROID_PACKAGE ?? 'com.naturalplantation.app.dev';
+const API_BASE_URL = process.env.API_BASE_URL ?? 'http://10.0.2.2:3000';
+const APP_KEY = process.env.APP_KEY ?? '';
+const EAS_PROJECT_ID = process.env.EAS_PROJECT_ID ?? '';
+const EAS_UPDATE_URL =
+  process.env.EAS_UPDATE_URL ?? (EAS_PROJECT_ID ? `https://u.expo.dev/${EAS_PROJECT_ID}` : '');
+// Mocks are honoured only in __DEV__ builds (see src/dev). Default: on for APP_ENV=development.
+const USE_MOCKS = process.env.USE_MOCKS ? process.env.USE_MOCKS === '1' : APP_ENV === 'development';
+
+export default ({ config }: ConfigContext): ExpoConfig => ({
+  ...config,
+  name: 'Natural Plantation',
+  slug: 'natural-plantation',
+  scheme: 'naturalplantation',
+  version: '1.0.0',
+  orientation: 'portrait',
+  userInterfaceStyle: 'light',
+  icon: './assets/icon.png',
+  android: {
+    package: ANDROID_PACKAGE,
+    versionCode: 1,
+    adaptiveIcon: {
+      backgroundColor: '#E9EDD8',
+      foregroundImage: './assets/android-icon-foreground.png',
+      backgroundImage: './assets/android-icon-background.png',
+      monochromeImage: './assets/android-icon-monochrome.png',
+    },
+    predictiveBackGestureEnabled: false,
+    ...(process.env.GOOGLE_SERVICES_FILE ? { googleServicesFile: process.env.GOOGLE_SERVICES_FILE } : {}),
+    // naturalplantation://orders/ONL-1023 etc.
+    intentFilters: [
+      {
+        action: 'VIEW',
+        category: ['BROWSABLE', 'DEFAULT'],
+        data: [{ scheme: 'naturalplantation' }],
+      },
+    ],
+  },
+  runtimeVersion: { policy: 'appVersion' },
+  updates: {
+    enabled: Boolean(EAS_UPDATE_URL),
+    checkAutomatically: 'ON_LOAD',
+    fallbackToCacheTimeout: 0,
+    ...(EAS_UPDATE_URL ? { url: EAS_UPDATE_URL } : {}),
+  },
+  plugins: [
+    'expo-router',
+    'expo-dev-client',
+    'expo-secure-store',
+    'expo-font',
+    'expo-localization',
+    'expo-video',
+    'expo-sharing',
+    [
+      'expo-splash-screen',
+      { backgroundColor: '#FFFFFF', image: './assets/splash-icon.png', imageWidth: 200 },
+    ],
+    [
+      'expo-notifications',
+      { icon: './assets/android-icon-monochrome.png', color: '#5A6B2E', defaultChannel: 'orders' },
+    ],
+  ],
+  extra: {
+    appEnv: APP_ENV,
+    apiBaseUrl: API_BASE_URL,
+    appKey: APP_KEY,
+    useMocks: USE_MOCKS,
+    androidPackage: ANDROID_PACKAGE,
+    eas: EAS_PROJECT_ID ? { projectId: EAS_PROJECT_ID } : undefined,
+  },
+});
