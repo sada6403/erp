@@ -6,7 +6,7 @@
   "home": { "searchPlaceholder": "ආහාර සොයන්න", "flashDeals": "ෆ්ලෑෂ් දීමනා", "allItems": "සියල්ල" },
   "product": { "addToHarvestCart": "කූඩයට එක් කරන්න", "inStock": "තොගයේ ඇත", "outOfStock": "තොග නැත", "weight": "බර", "quantity": "ප්‍රමාණය" },
   "cart": { "empty": "ඔබේ කූඩය හිස්", "proceed": "ගෙවීමට යන්න", "remove": "ඉවත් කරන්න", "startShopping": "සාප්පු සවාරිය අරඹන්න" },
-  "checkout": { "addressTitle": "බෙදාහැරීමේ ලිපිනය", "paymentTitle": "ගෙවීමේ ක්‍රමය", "cod": "බෙදාහැරීමේදී මුදල්", "bank": "බැංකු මාරුව", "placeOrder": "ඇණවුම් කරන්න", "total": "එකතුව", "subtotal": "උප එකතුව", "deliveryFee": "බෙදාහැරීමේ ගාස්තුව" },
+  "checkout": { "addressTitle": "බෙදාහැරීමේ ලිපිනය", "paymentTitle": "ගෙවීමේ ක්‍රමය", "cod": "බෙදාහැරීමේදී මුදල්", "bank": "බැංකු මාරුව", "placeOrder": "ඇණවුම් කරන්න", "total": "එකතුව", "subtotal": "උප එකතුව", "deliveryFee": "බෙදාහැරීමේ ගාස්තුව", "pricesIncludeTax": "මිල ගණන්වලට බදු ඇතුළත්" },
   "confirmed": { "title": "ඇණවුම තහවුරු විය", "track": "ඇණවුම නිරීක්ෂණය", "continue": "සාප්පු සවාරිය දිගටම" },
   "orders": { "title": "මගේ ඇණවුම්", "empty": "තවම ඇණවුම් නැත", "otpTitle": "බෙදාහැරීමේ කේතය", "cancel": "ඇණවුම අවලංගු කරන්න", "stage": { "placed": "ලැබුණා", "confirmed": "තහවුරුයි", "packed": "ඇසුරුම් කළා", "out_for_delivery": "බෙදාහැරීමට පිටත්ව", "delivered": "බෙදා හැරියා", "cancelled": "අවලංගුයි" } },
   "auth": { "signIn": "පිවිසෙන්න", "signUp": "ලියාපදිංචි වන්න", "password": "මුරපදය", "mobile": "ජංගම අංකය", "fullName": "සම්පූර්ණ නම", "forgot": "මුරපදය අමතකද?", "identifier": "ජංගම, විද්‍යුත් තැපැල් හෝ පරිශීලක නම" },

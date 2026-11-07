@@ -331,7 +331,8 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const finalSubtotal = itemsSubtotal
       const finalDiscountAmount = money(itemsDiscountTotal + globalDiscount)
       const finalTaxAmount = itemsTaxTotal
-      const finalTotalAmount = appOrder ? money(finalSubtotal - finalDiscountAmount) : money(finalSubtotal - finalDiscountAmount + finalTaxAmount)
+      const deliveryFee = appOrder ? money(Math.max(0, Number(payload.delivery_fee) || 0)) : 0
+      const finalTotalAmount = appOrder ? money(finalSubtotal - finalDiscountAmount + deliveryFee) : money(finalSubtotal - finalDiscountAmount + finalTaxAmount)
       const finalDueAmount = money(Math.max(0, finalTotalAmount - Number(payload.paid_amount || 0)))
       if (appOrder && payload.items.length === 0) return { success: false, error: 'This order has no items' }
 
@@ -408,11 +409,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id,
             bill_type, status, valid_until, due_date, approved_by,
             subtotal, discount_amount, tax_amount, total_amount, paid_amount, due_amount,
-            agent_code, agent_name, agent_id, agent_commission_pct, agent_commission_amount, notes, source_order_id)
+            agent_code, agent_name, agent_id, agent_commission_pct, agent_commission_amount, notes, source_order_id, delivery_fee)
           VALUES (@id, @invoice_number, @branch_id, @customer_id, @cashier_id,
             @bill_type, @status, @valid_until, @due_date, @approved_by,
             @subtotal, @discount_amount, @tax_amount, @total_amount, @paid_amount, @due_amount,
-            @agent_code, @agent_name, @agent_id, @agent_commission_pct, @agent_commission_amount, @notes, @source_order_id)
+            @agent_code, @agent_name, @agent_id, @agent_commission_pct, @agent_commission_amount, @notes, @source_order_id, @delivery_fee)
         `).run({
           id,
           invoice_number:  invoiceNumber,
@@ -440,6 +441,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           agent_commission_amount: 0,
           notes:           payload.notes || null,
           source_order_id: appOrder?.id || null,
+          delivery_fee:    deliveryFee,
         })
 
         // Insert line items — money fields recomputed from the product's
@@ -679,7 +681,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         agent_commission_pct: commissionPctForSync,
         agent_commission_amount: agentCommissionAmount,
         notes: payload.notes || null,
-        source_order_id: appOrder?.id || null,
+        source_order_id: appOrder?.id || null, delivery_fee: deliveryFee,
       })
       if (appOrder) {
         await enqueuSync('customer_orders', appOrder.id, 'UPDATE', { id: appOrder.id, invoice_id: id, status: 'ready_for_delivery', released_by: (user?.id as string) || null })
@@ -804,15 +806,16 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       product_id: i.product_id, variant_id: i.variant_id || null, variant_title: i.variant_name || null,
       quantity: Number(i.quantity), unit_price: overrides.get(String(i.id)) ?? Number(i.unit_price), discount_pct: 0,
     }))
-    const itemsTotal = money(lines.reduce((s, l) => s + l.unit_price * l.quantity, 0))
+    const fee = money(Number(order.delivery_fee) || 0)
+    // The invoice total is items + delivery fee, i.e. exactly what the customer pays and the agent collects.
+    const itemsTotal = money(lines.reduce((s, l) => s + l.unit_price * l.quantity, 0) + fee)
     const paidNow = order.payment_status === 'paid'
     const method = order.payment_method === 'bank_transfer' ? 'bank_transfer' : 'cash'
-    const fee = Number(order.delivery_fee) || 0
     const payload = {
-      bill_type: 'RETAIL', branch_id: order.branch_id, customer_id: order.customer_id || null, items: lines,
+      bill_type: 'RETAIL', branch_id: order.branch_id, customer_id: order.customer_id || null, items: lines, delivery_fee: fee,
       paid_amount: paidNow ? itemsTotal : 0,
       payments: paidNow && itemsTotal > 0 ? [{ method, amount: itemsTotal, reference: order.payment_reference || order.order_number }] : [],
-      notes: `App order ${order.order_number}${fee > 0 ? ` | delivery fee ${fee.toFixed(2)} (collected with the order)` : ''}`,
+      notes: `App order ${order.order_number}`,
     }
 
     let result: any

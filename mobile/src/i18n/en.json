@@ -149,6 +149,7 @@
     "wallet": "Smart Buy wallet",
     "subtotal": "Subtotal",
     "deliveryFee": "Delivery fee",
+    "pricesIncludeTax": "Prices include taxes",
     "deliveryFeeBranch": "Delivery fee ({{branch}})",
     "total": "Total",
     "placeOrder": "Place order",

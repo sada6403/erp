@@ -18,6 +18,7 @@ interface TxRow {
   subtotal: number
   discount_amount: number
   tax_amount: number
+  delivery_fee?: number
   total_amount: number
   paid_amount: number
   due_amount: number
@@ -588,6 +589,7 @@ export default function TransactionReportPage() {
             { label: 'Subtotal', value: rows.reduce((a, r) => a + (r.subtotal || 0), 0) },
             { label: 'Discount', value: rows.reduce((a, r) => a + (r.discount_amount || 0), 0) },
             { label: 'Tax', value: rows.reduce((a, r) => a + (r.tax_amount || 0), 0) },
+            { label: 'Delivery income', value: rows.reduce((a, r) => a + (r.delivery_fee || 0), 0) },
             { label: 'Revenue (Page)', value: rows.reduce((a, r) => a + (r.total_amount || 0), 0) },
             { label: 'Collected', value: rows.reduce((a, r) => a + (r.paid_amount || 0), 0) },
             { label: 'Outstanding', value: rows.reduce((a, r) => a + (r.due_amount || 0), 0) },

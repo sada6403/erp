@@ -44,3 +44,7 @@ Screens for these show "Coming in the next update", never mock data.
    Dashboard; if it applies, start the closed test today.
 3. **Review time** is not under our control. Submit v1.0 by day 12.
 4. **Backend deploy** touches production; only after Moni approves (day 11).
+
+## Added 2026-11-07: POS desktop release and branch hygiene
+- Convert-to-invoice lives in the POS desktop (`orders:convertToInvoice`, delivery fee on invoices, new columns). v1.0 therefore also needs a **POS desktop release with these changes installed on all branch PCs before the app goes live**. Plan it for **day 11 (Wed 18 Nov) together with the backend deploy**. Order: backend first (new columns migrate on first API hit), then desktop. Both only with Moni's approval.
+- `main` moves fast (other developers release v2.9.x). Rebase `feature/mobile-app-foundation` on `origin/main` **at least once a day** and report any conflict in POS files (`electron/ipc/invoices.ts`, `orders.ts`, `electron/preload.ts`, `electron/database.ts`) immediately. Last checked 2026-11-07: branch is 0 commits behind `origin/main`.

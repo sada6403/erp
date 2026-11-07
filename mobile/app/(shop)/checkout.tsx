@@ -238,6 +238,7 @@ export default function CheckoutScreen() {
                   <Text size={12} color="textMuted">{selectedBranch ? t('checkout.deliveryFeeBranch', { branch: selectedBranch.name }) : t('checkout.deliveryFee')}</Text>
                   <Text size={12} color="textMuted">{formatRs(quote.data.delivery_fee)}</Text>
                 </View>
+                <Text size={11} color="textSubtle">{t('checkout.pricesIncludeTax')}</Text>
                 <View style={{ height: 1, backgroundColor: theme.colors.surfaceBorder, marginVertical: 8 }} />
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                   <Text size={15} weight={800}>{t('checkout.total')}</Text>

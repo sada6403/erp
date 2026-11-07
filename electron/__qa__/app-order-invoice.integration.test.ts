@@ -151,8 +151,8 @@ function seedStockedProduct(id: string, price: number, batches: { qty: number; c
     VALUES (?,?,?,?,?,?,?,?,1,'available')`).run(`bt-${id}-${i}`, id, BR, `B${i}`, b.qty, b.qty, b.cost, b.date))
 }
 function seedAppOrder(id: string, productId: string, qty: number, lockedPrice: number, extra: Record<string, unknown> = {}) {
-  db.prepare(`INSERT INTO customer_orders (id,order_number,branch_id,customer_id,customer_name,status,payment_status,total_amount,channel,payment_method)
-    VALUES (?,?,?,?,?,?,?,?,'app',?)`).run(id, `ORD-${id}`, BR, 'ao-cust', 'AO Customer', extra.status ?? 'confirmed', extra.payment_status ?? 'unpaid', qty * lockedPrice, extra.payment_method ?? 'cod')
+  db.prepare(`INSERT INTO customer_orders (id,order_number,branch_id,customer_id,customer_name,status,payment_status,total_amount,channel,payment_method,delivery_fee)
+    VALUES (?,?,?,?,?,?,?,?,'app',?,?)`).run(id, `ORD-${id}`, BR, 'ao-cust', 'AO Customer', extra.status ?? 'confirmed', extra.payment_status ?? 'unpaid', qty * lockedPrice + Number(extra.delivery_fee ?? 0), extra.payment_method ?? 'cod', Number(extra.delivery_fee ?? 0))
   db.prepare(`INSERT INTO customer_order_items (id,order_id,product_id,quantity,unit_price,line_total) VALUES (?,?,?,?,?,?)`)
     .run(`${id}-i1`, id, productId, qty, lockedPrice, qty * lockedPrice)
 }
@@ -255,5 +255,40 @@ describe('Convert app order to invoice', () => {
     await call('orders:updateStatus', 'ao-o8', 'delivered', { payment_status: 'paid' })
     const after = db.prepare('SELECT paid_amount p, due_amount d FROM invoices WHERE id=?').get(cod.data.id) as any
     expect([after.p, after.d]).toEqual([100, 0])
+  })
+
+  it('COD due on the invoice equals the order total including the delivery fee, shown separately', async () => {
+    sharedStoreData.app_settings = {}
+    seedStockedProduct('ao-p9', 100, [{ qty: 10, cost: 50, date: '2026-01-01' }])
+    seedAppOrder('ao-o9', 'ao-p9', 2, 100, { delivery_fee: 350 })
+    const res = await call('orders:convertToInvoice', 'ao-o9')
+    const inv = db.prepare('SELECT * FROM invoices WHERE id=?').get(res.data.id) as any
+    const ord = db.prepare('SELECT total_amount t FROM customer_orders WHERE id=?').get('ao-o9') as any
+    expect(ord.t).toBe(550)
+    expect(inv.total_amount).toBe(550)
+    expect(inv.due_amount).toBe(ord.t)
+    expect(inv.delivery_fee).toBe(350)
+    expect(inv.subtotal).toBe(200)
+    expect(stockOf('ao-p9')).toBe(8) // no stock line for the fee
+    expect((db.prepare('SELECT COUNT(*) c FROM invoice_items WHERE invoice_id=?').get(res.data.id) as any).c).toBe(1)
+    await call('orders:updateStatus', 'ao-o9', 'delivered', { payment_status: 'paid' })
+    const after = db.prepare('SELECT paid_amount p, due_amount d FROM invoices WHERE id=?').get(res.data.id) as any
+    expect([after.p, after.d]).toEqual([550, 0])
+  })
+
+  it('extracts tax from a tax-inclusive locked price (product tax_rate > 0)', async () => {
+    sharedStoreData.app_settings = {}
+    seedStockedProduct('ao-p10', 110, [{ qty: 10, cost: 50, date: '2026-01-01' }])
+    db.prepare(`UPDATE products SET tax_rate=10 WHERE id='ao-p10'`).run()
+    seedAppOrder('ao-o10', 'ao-p10', 2, 110)
+    const res = await call('orders:convertToInvoice', 'ao-o10')
+    expect(res.success).toBe(true)
+    const inv = db.prepare('SELECT * FROM invoices WHERE id=?').get(res.data.id) as any
+    const item = db.prepare('SELECT * FROM invoice_items WHERE invoice_id=?').get(res.data.id) as any
+    expect(inv.total_amount).toBe(220) // what the customer saw: tax is inside the price
+    expect(inv.tax_amount).toBe(20)    // 220 * 10 / 110
+    expect(item.tax_amount).toBe(20)
+    expect(item.line_total).toBe(220)
+    expect(item.unit_price).toBe(110)
   })
 })

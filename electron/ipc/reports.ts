@@ -259,7 +259,7 @@ export function registerReportHandlers() {
         SELECT
           i.id, i.invoice_number, i.status,
           COALESCE(i.bill_type,'RETAIL') as bill_type,
-          i.subtotal, i.discount_amount, i.tax_amount,
+          i.subtotal, i.discount_amount, i.tax_amount, i.delivery_fee,
           i.total_amount, i.paid_amount, i.due_amount,
           i.agent_code, i.agent_name, i.agent_commission_pct, i.agent_commission_amount,
           i.notes, i.created_at, i.updated_at,

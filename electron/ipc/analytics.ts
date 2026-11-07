@@ -63,7 +63,8 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
                    COUNT(*) as total_invoices,
                    ROUND(SUM(total_amount), 2) as total_revenue,
                    ROUND(SUM(discount_amount), 2) as total_discount,
-                   ROUND(SUM(tax_amount), 2) as total_tax
+                   ROUND(SUM(tax_amount), 2) as total_tax,
+                   ROUND(SUM(delivery_fee), 2) as total_delivery_income
             FROM invoices
             WHERE branch_id = ? AND status = 'completed'
               AND date(created_at) BETWEEN ? AND ?
@@ -75,7 +76,8 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
                    COUNT(*) as total_invoices,
                    ROUND(SUM(total_amount), 2) as total_revenue,
                    ROUND(SUM(discount_amount), 2) as total_discount,
-                   ROUND(SUM(tax_amount), 2) as total_tax
+                   ROUND(SUM(tax_amount), 2) as total_tax,
+                   ROUND(SUM(delivery_fee), 2) as total_delivery_income
             FROM invoices
             WHERE status = 'completed'
               AND date(created_at) BETWEEN ? AND ?

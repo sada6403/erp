@@ -67,6 +67,7 @@ export default function ProductScreen() {
       {offline || detail.data?.price_note ? (
         <Text size={11} color="warning" weight={600}>{detail.data?.price_note ?? t('product.priceMayChange')}</Text>
       ) : null}
+      <Text size={11} color="textMuted">{t('checkout.pricesIncludeTax')}</Text>
       {p.emi_available ? <Text size={11} color="textMuted" weight={600}>{t('product.emi')}</Text> : null}
       {detail.data?.description || p.short_description ? (
         <Text size={12} color="textMuted" lineHeightRatio={1.45}>{detail.data?.description ?? p.short_description}</Text>

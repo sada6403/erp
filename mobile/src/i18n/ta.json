@@ -6,7 +6,7 @@
   "home": { "searchPlaceholder": "மளிகை தேடுக", "flashDeals": "ஃபிளாஷ் சலுகைகள்", "allItems": "அனைத்தும்" },
   "product": { "addToHarvestCart": "கூடையில் சேர்", "inStock": "இருப்பு உள்ளது", "outOfStock": "இருப்பு இல்லை", "weight": "எடை", "quantity": "அளவு" },
   "cart": { "empty": "உங்கள் கூடை காலி", "proceed": "செக்அவுட்டுக்குச் செல்", "remove": "நீக்கு", "startShopping": "வாங்கத் தொடங்கு" },
-  "checkout": { "addressTitle": "டெலிவரி முகவரி", "paymentTitle": "கட்டண முறை", "cod": "டெலிவரியில் பணம்", "bank": "வங்கிப் பரிமாற்றம்", "placeOrder": "ஆர்டர் செய்", "total": "மொத்தம்", "subtotal": "துணைத் தொகை", "deliveryFee": "டெலிவரி கட்டணம்" },
+  "checkout": { "addressTitle": "டெலிவரி முகவரி", "paymentTitle": "கட்டண முறை", "cod": "டெலிவரியில் பணம்", "bank": "வங்கிப் பரிமாற்றம்", "placeOrder": "ஆர்டர் செய்", "total": "மொத்தம்", "subtotal": "துணைத் தொகை", "deliveryFee": "டெலிவரி கட்டணம்", "pricesIncludeTax": "விலைகளில் வரிகள் அடங்கும்" },
   "confirmed": { "title": "ஆர்டர் உறுதியானது", "track": "ஆர்டரைக் கண்காணி", "continue": "வாங்குவதைத் தொடர" },
   "orders": { "title": "என் ஆர்டர்கள்", "empty": "இன்னும் ஆர்டர்கள் இல்லை", "otpTitle": "டெலிவரி குறியீடு", "cancel": "ஆர்டரை ரத்து செய்", "stage": { "placed": "பெறப்பட்டது", "confirmed": "உறுதி", "packed": "பேக் செய்யப்பட்டது", "out_for_delivery": "டெலிவரிக்கு புறப்பட்டது", "delivered": "வழங்கப்பட்டது", "cancelled": "ரத்து" } },
   "auth": { "signIn": "உள்நுழை", "signUp": "பதிவு செய்", "password": "கடவுச்சொல்", "mobile": "கைபேசி எண்", "fullName": "முழு பெயர்", "forgot": "கடவுச்சொல் மறந்துவிட்டதா?", "identifier": "கைபேசி, மின்னஞ்சல் அல்லது பயனர் பெயர்" },

@@ -191,6 +191,7 @@ function runMigrations(): void {
     ['customer_orders', 'payment_reference',        "TEXT"],
     ['customer_orders', 'invoice_id',               "TEXT"],
     ['invoices', 'source_order_id',                 "TEXT"],
+    ['invoices', 'delivery_fee',                    "REAL NOT NULL DEFAULT 0"],
     ['customer_order_items', 'variant_id',          "TEXT"],
     ['customer_order_items', 'variant_name',        "TEXT"],
     ['customer_order_items', 'product_name',        "TEXT"],
