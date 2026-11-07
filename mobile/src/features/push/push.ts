@@ -37,7 +37,7 @@ export async function setupNotifications() {
   if (Platform.OS === 'android') {
     await Promise.all(
       CHANNELS.map((c) =>
-        Notifications.setNotificationChannelAsync(c.id, { name: c.name, importance: c.importance, sound: 'default', vibrationPattern: [0, 250, 250, 250] }),
+        Notifications.setNotificationChannelAsync(c.id, { name: c.name, importance: c.importance, vibrationPattern: [0, 250, 250, 250] }),
       ),
     );
   }

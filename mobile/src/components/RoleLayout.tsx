@@ -7,6 +7,13 @@ import { useModules } from '@/features/common/hooks';
 import { AppHeader, RoleTabBar } from './Shell';
 import { OfflineBanner } from './Overlays';
 
+/** Expo Router only renders routes declared in the navigator, so each role lists its screens. */
+const SCREENS: Record<NavRole, string[]> = {
+  customer: ['index', 'cart', 'catalog', 'checkout', 'categories', 'flash-deals', 'orders/index', 'smartbuy-promo', 'order-confirmed', 'orders/[id]', 'product/[id]'],
+  smartbuy: ['schemes', 'draws', 'draw-video/[id]', 'wallet', 'spend', 'statement'],
+  agent: ['deliveries/index', 'deliveries/[id]', 'members/index', 'commission', 'bill/index', 'bill/[id]'],
+};
+
 /**
  * Shared layout for the (shop), (smartbuy) and (agent) groups: header, offline banner and a Tabs
  * navigator drawn with the role's own bottom navigation. Smartbuy/agent groups redirect when the
@@ -38,7 +45,11 @@ export function RoleLayout({ role }: { role: NavRole }) {
         backBehavior="history"
         tabBar={() => <RoleTabBar role={role} />}
         screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: theme.colors.surfaceSubtle } }}
-      />
+      >
+        {SCREENS[role].map((name) => (
+          <Tabs.Screen key={name} name={name} />
+        ))}
+      </Tabs>
     </View>
   );
 }
