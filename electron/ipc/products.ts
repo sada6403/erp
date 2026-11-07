@@ -5,7 +5,7 @@ import { getDb, seedProductAttributes } from '../database'
 import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
-import { enqueuSync } from '../services/syncQueue'
+import { enqueuSync, enqueueProductVariantRows } from '../services/syncQueue'
 import { syncStockRow } from '../services/stockSync'
 import { insertStockMovement } from '../services/stockMovement'
 import { logAudit } from '../services/auditLog'
@@ -733,6 +733,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       })()
 
       await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku, product_type: productType })
+      if (Array.isArray(variants) && variants.length > 0) await enqueueProductVariantRows(id)
       if (!isAdmin && edit_request_id) {
         await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
       }
@@ -869,6 +870,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       })()
 
       await enqueuSync('products', id, 'UPDATE', { id, ...nextPayload })
+      if (Array.isArray(variants)) await enqueueProductVariantRows(id)
       if (!isAdmin && edit_request_id) {
         await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
       }

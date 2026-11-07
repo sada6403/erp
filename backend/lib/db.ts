@@ -450,6 +450,11 @@ async function autoMigrate() {
     `ALTER TABLE companies ADD COLUMN clear_data_password_hash VARCHAR(60) NULL`,
     `ALTER TABLE companies ADD COLUMN clear_data_attempts INT NOT NULL DEFAULT 0`,
     `ALTER TABLE companies ADD COLUMN clear_data_locked_until DATETIME NULL`,
+    // Mobile app: App Key identifies the company only (not a secret); previous key has a grace period.
+    `ALTER TABLE companies ADD COLUMN app_key CHAR(36) NULL`,
+    `ALTER TABLE companies ADD COLUMN previous_app_key CHAR(36) NULL`,
+    `ALTER TABLE companies ADD COLUMN previous_app_key_expires_at DATETIME NULL`,
+    `CREATE UNIQUE INDEX uq_companies_app_key ON companies (app_key)`,
   ]
 
   for (const sql of stmts) {

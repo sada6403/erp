@@ -81,3 +81,26 @@ export async function enqueuSync(
     throw error
   }
 }
+
+
+// Variant sync (mobile app prerequisite): product_variants and
+// product_variant_stocks were written locally but never enqueued, so variants
+// never reached the cloud. Push the current full rows for a product (or for a
+// subset of variants) as INSERT; the backend treats INSERT as an upsert.
+export async function enqueueProductVariantRows(productId: string, variantIds?: string[]): Promise<void> {
+  try {
+    const db = getDb()
+    const variants = (db.prepare('SELECT * FROM product_variants WHERE product_id = ?').all(productId) as Record<string, unknown>[])
+      .filter(v => !variantIds || variantIds.includes(String(v.id)))
+    for (const v of variants) {
+      await enqueuSync('product_variants', String(v.id), 'INSERT', v)
+    }
+    const stocks = (db.prepare('SELECT * FROM product_variant_stocks WHERE product_id = ?').all(productId) as Record<string, unknown>[])
+      .filter(s => !variantIds || variantIds.includes(String(s.variant_id)))
+    for (const s of stocks) {
+      await enqueuSync('product_variant_stocks', String(s.id), 'INSERT', s)
+    }
+  } catch {
+    // Non-blocking: sync queue failure shouldn't interrupt main flow
+  }
+}

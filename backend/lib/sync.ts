@@ -60,6 +60,8 @@ export const ALLOWED_TABLES = new Set([
   // Multi-device forced-lock signal (Issue 30) — see comment in
   // lib/auth.ts's ensureTenantCompatibility.
   'data_clear_events',
+  // Mobile app (synced because POS admin screens read/write them).
+  'app_password_reset_requests', 'app_banners', 'app_settings',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
@@ -78,6 +80,10 @@ const RELATED_KEYS: Record<string, Set<string>> = {
   chit_contributions:     new Set(['scheme_id']),
   chit_scheme_branches:   new Set(['scheme_id']),
   withdrawal_requests:    new Set(['scheme_id']),
+  // Variant sync fix (mobile app): variants hang off products, values off attributes.
+  product_variants:       new Set(['product_id']),
+  product_variant_stocks: new Set(['product_id']),
+  product_attribute_values: new Set(['attribute_id']),
 }
 
 // Several tenant tables pre-date complete MySQL foreign-key definitions.

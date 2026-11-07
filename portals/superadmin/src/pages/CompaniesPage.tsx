@@ -1252,6 +1252,20 @@ function ApiKeyModal({ company, onClose, onRegenerated }: {
   const [loading, setLoading]   = useState(false)
   const [error, setError]       = useState('')
   const [confirmed, setConfirmed] = useState(false)
+  const [appKey, setAppKey]     = useState(((company as unknown) as { app_key?: string }).app_key ?? '')
+  const [appBusy, setAppBusy]   = useState(false)
+
+  async function handleGenerateAppKey() {
+    if (appKey && !confirm('Generate a new App Key? The old key keeps working for 48 hours.')) return
+    setAppBusy(true); setError('')
+    try {
+      const updated = await api.update(company.id, { generate_app_key: true }) as unknown as { app_key?: string }
+      setAppKey(updated.app_key ?? '')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate App Key')
+    }
+    setAppBusy(false)
+  }
 
   const graceActive = Boolean(graceExpiresAt) && new Date(graceExpiresAt) > new Date()
 
@@ -1362,6 +1376,16 @@ function ApiKeyModal({ company, onClose, onRegenerated }: {
                 Regenerate API Key
               </button>
             )}
+          </div>
+
+          <div className="border-t border-gray-800 pt-4 space-y-2">
+            <label className="label">Mobile App Key (identifies the company in the Natural Plantation app; not a secret)</label>
+            <div className="flex gap-2">
+              <input className="input flex-1 font-mono text-sm" value={appKey} readOnly placeholder="Not generated yet" />
+              <button className="btn-ghost px-3 text-sm" onClick={handleGenerateAppKey} disabled={appBusy}>
+                {appBusy ? 'Working…' : appKey ? 'Rotate App Key' : 'Generate App Key'}
+              </button>
+            </div>
           </div>
 
           <div className="flex justify-end pt-1">

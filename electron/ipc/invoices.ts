@@ -3,7 +3,7 @@ import type { IpcMain } from 'electron'
 import type Database from 'better-sqlite3'
 import { getDb } from '../database'
 import crypto from 'crypto'
-import { enqueuSync } from '../services/syncQueue'
+import { enqueuSync, enqueueProductVariantRows } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { createCompanyStore } from '../services/companyWorkspace'
 import { insertStockMovement } from '../services/stockMovement'
@@ -640,6 +640,18 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
         await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
+      }
+      // Variant stock was decremented locally; push the changed variant stock rows.
+      {
+        const variantsByProduct = new Map<string, string[]>()
+        for (const itemRow of itemRecords) {
+          const vid = (itemRow as Record<string, unknown>).variant_id
+          if (vid) {
+            const pid = String((itemRow as Record<string, unknown>).product_id)
+            variantsByProduct.set(pid, [...(variantsByProduct.get(pid) || []), String(vid)])
+          }
+        }
+        for (const [pid, vids] of variantsByProduct) await enqueueProductVariantRows(pid, vids)
       }
       for (const itemRow of itemRecords) {
         await enqueuSync('invoice_items', String(itemRow.id), 'INSERT', itemRow)

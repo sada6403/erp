@@ -170,6 +170,28 @@ function runMigrations(): void {
     ['invoice_items',   'variant_id',     "TEXT"],
     ['invoice_items',   'variant_title',  "TEXT"],
     ['stock_movements', 'variant_id',     "TEXT"],
+    // Mobile app (Natural Plantation): synced columns, additive
+    ['products', 'is_online',          "INTEGER NOT NULL DEFAULT 1"],
+    ['products', 'slug',               "TEXT"],
+    ['products', 'gallery',            "TEXT"],
+    ['products', 'short_description',  "TEXT"],
+    ['products', 'unit',               "TEXT"],
+    ['branches', 'latitude',           "REAL"],
+    ['branches', 'longitude',          "REAL"],
+    ['customer_orders', 'channel',                  "TEXT NOT NULL DEFAULT 'pos'"],
+    ['customer_orders', 'app_user_id',              "TEXT"],
+    ['customer_orders', 'assigned_agent_id',        "TEXT"],
+    ['customer_orders', 'delivery_fee',             "REAL NOT NULL DEFAULT 0"],
+    ['customer_orders', 'payment_method',           "TEXT"],
+    ['customer_orders', 'wallet_amount',            "REAL NOT NULL DEFAULT 0"],
+    ['customer_orders', 'delivery_otp_hash',        "TEXT"],
+    ['customer_orders', 'needs_call_confirmation',  "INTEGER NOT NULL DEFAULT 0"],
+    ['customer_orders', 'estimated_delivery_date',  "TEXT"],
+    ['customer_orders', 'status_history',           "TEXT"],
+    ['customer_orders', 'payment_reference',        "TEXT"],
+    ['customer_order_items', 'variant_id',          "TEXT"],
+    ['customer_order_items', 'variant_name',        "TEXT"],
+    ['customer_order_items', 'product_name',        "TEXT"],
   ]
 
   for (const [table, column, definition] of migrations) {
@@ -2683,6 +2705,45 @@ function runMigrations(): void {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       synced_at  TEXT
+    );
+  `)
+
+  // ── Mobile app synced tables (UI is built later in POS: App Access / Online Store) ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_password_reset_requests (
+      id           TEXT PRIMARY KEY,
+      user_id      TEXT NOT NULL,
+      name         TEXT,
+      phone        TEXT,
+      status       TEXT NOT NULL DEFAULT 'pending',
+      requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at  TEXT,
+      resolved_by  TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at    TEXT
+    );
+    CREATE TABLE IF NOT EXISTS app_banners (
+      id         TEXT PRIMARY KEY,
+      title      TEXT NOT NULL,
+      subtitle   TEXT,
+      image_url  TEXT,
+      link_url   TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active  INTEGER NOT NULL DEFAULT 1,
+      starts_at  TEXT,
+      ends_at    TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at  TEXT
+    );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id          TEXT PRIMARY KEY,
+      setting_key TEXT NOT NULL UNIQUE,
+      value       TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at   TEXT
     );
   `)
 

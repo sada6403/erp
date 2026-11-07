@@ -7,7 +7,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "node scripts/start.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node --env-file=.env --test tests/app-api.test.mjs",
+    "seed:app": "node scripts/run-ts.cjs scripts/seed-app-test-company.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",
@@ -19,7 +21,8 @@
     "nodemailer": "^9.0.1",
     "pdfkit": "^0.19.1",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

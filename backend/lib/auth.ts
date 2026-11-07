@@ -4,6 +4,7 @@ import { pool, tenantPool } from './db'
 import { ensureSyncSchema } from './syncSchema'
 import { repairIdenticalStocks } from './stockIdentity'
 import { repairOrphanedSyncData } from './syncDataRepair'
+import { APP_SCHEMA_STATEMENTS } from './appSchema'
 
 export type CompanyContext = {
   id:          string
@@ -1546,7 +1547,7 @@ async function runTenantCompatibility(dbSchema: string) {
      )`,
   ]
 
-  for (const sql of [...statements, ...stockTransferColumns]) {
+  for (const sql of [...statements, ...stockTransferColumns, ...APP_SCHEMA_STATEMENTS]) {
     try {
       await tp.query(sql)
     } catch (error) {
