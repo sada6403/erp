@@ -55,6 +55,8 @@ const SyncMonitorPage = adminPage('SyncMonitorPage')
 const CategoriesPage = adminPage('CategoriesPage')
 const StockCountPage = adminPage('StockCountPage')
 const OrdersPage = adminPage('OrdersPage')
+const AppAccessPage = adminPage('AppAccessPage')
+const OnlineStorePage = adminPage('OnlineStorePage')
 const StockLookupPage = adminPage('StockLookupPage')
 const QuotationsPage = adminPage('QuotationsPage')
 const BillsPage = adminPage('BillsPage')
@@ -338,6 +340,8 @@ export default function App() {
         <Route path="/admin/stock-lookup" element={<RequirePermission permission="inventory"><StockLookupPage /></RequirePermission>} />
         <Route path="/admin/bills" element={<BillsPage />} />
         <Route path="/admin/orders" element={<OrdersPage />} />
+        <Route path="/admin/app-access" element={<RequireSuperAdmin><AppAccessPage /></RequireSuperAdmin>} />
+        <Route path="/admin/online-store" element={<RequireSuperAdmin><OnlineStorePage /></RequireSuperAdmin>} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
         <Route path="/admin/purchase-orders" element={<RequireMainBranch><RequireModule module="purchase_orders"><PurchaseOrdersPage /></RequireModule></RequireMainBranch>} />

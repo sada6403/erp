@@ -22,12 +22,15 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'orders:list', (_e, filters: Record<string, unknown> = {}) => {
     const user = currentUser()
       let sql = `SELECT o.*, b.name branch_name, u.name sales_staff_name,
-        (SELECT COUNT(*) FROM customer_order_items oi WHERE oi.order_id=o.id) item_count
+        (SELECT COUNT(*) FROM customer_order_items oi WHERE oi.order_id=o.id) item_count,
+        ag.name assigned_agent_name
         FROM customer_orders o
         LEFT JOIN branches b ON b.id=o.branch_id
+        LEFT JOIN agents ag ON ag.id=o.assigned_agent_id
         LEFT JOIN users u ON u.id=o.sales_staff_id WHERE 1=1`
       const params: unknown[] = []
       if (filters.status) { sql += ' AND o.status=?'; params.push(filters.status) }
+      if (filters.channel === 'app' || filters.channel === 'pos') { sql += " AND COALESCE(o.channel,'pos')=?"; params.push(filters.channel) }
       if (filters.branch_id) { sql += ' AND o.branch_id=?'; params.push(filters.branch_id) }
       else if (user?.branch_id) { sql += ' AND o.branch_id=?'; params.push(user.branch_id) }
       sql += ' ORDER BY o.created_at DESC LIMIT 300'
@@ -128,4 +131,39 @@ export function registerOrderHandlers(ipcMain: IpcMain) {
       logAudit(db0, { userId: (user?.id as string) || null, branchId: order.branch_id, action: 'ORDER_STATUS_UPDATED', tableName: 'customer_orders', recordId: id, newValues: { status } })
       return { success: true }
   })
+
+  // Agents that can be assigned to an order: active agents of the order's branch.
+  safeHandle(ipcMain, 'orders:agentsForOrder', (_e, orderId: string) => {
+    const user = currentUser()
+    const perms = currentPerms(user)
+    if (!perms.all && !perms.employees && !perms.pos) throw new Error('Access required')
+    const db = getDb()
+    const order = db.prepare('SELECT branch_id FROM customer_orders WHERE id=?').get(orderId) as { branch_id: string | null } | undefined
+    if (!order) throw new Error('Order not found')
+    if (!perms.all && user?.branch_id && order.branch_id !== user.branch_id) throw new Error('Cannot view an order from another branch')
+    const agents = db.prepare(`SELECT id, code, name FROM agents WHERE status='active' AND branch_id IS ? ORDER BY name`).all(order.branch_id)
+    return { success: true, data: agents }
+  })
+
+  safeHandle(ipcMain, 'orders:assignAgent', async (_e, orderId: string, agentId: string | null) => {
+    const user = currentUser()
+    const perms = currentPerms(user)
+    if (!perms.all && !perms.employees && !perms.pos) throw new Error('Access required to assign an agent')
+    const db = getDb()
+    const order = db.prepare('SELECT branch_id, assigned_agent_id, status FROM customer_orders WHERE id=?').get(orderId) as
+      { branch_id: string | null; assigned_agent_id: string | null; status: string } | undefined
+    if (!order) throw new Error('Order not found')
+    if (!perms.all && user?.branch_id && order.branch_id !== user.branch_id) throw new Error('Cannot update an order from another branch')
+    if (['delivered', 'cancelled', 'returned'].includes(order.status)) throw new Error('This order is already closed')
+    if (agentId) {
+      const agent = db.prepare(`SELECT id, branch_id FROM agents WHERE id=? AND status='active'`).get(agentId) as { id: string; branch_id: string | null } | undefined
+      if (!agent) throw new Error('Agent not found or inactive')
+      if ((agent.branch_id || null) !== (order.branch_id || null)) throw new Error("Agent belongs to a different branch than this order")
+    }
+    db.prepare(`UPDATE customer_orders SET assigned_agent_id=?, updated_at=datetime('now') WHERE id=?`).run(agentId || null, orderId)
+    await enqueuSync('customer_orders', orderId, 'UPDATE', { id: orderId, assigned_agent_id: agentId || null })
+    logAudit(db, { userId: (user?.id as string) || null, branchId: order.branch_id, action: 'ORDER_AGENT_ASSIGNED', tableName: 'customer_orders', recordId: orderId, oldValues: { assigned_agent_id: order.assigned_agent_id }, newValues: { assigned_agent_id: agentId || null } })
+    return { success: true }
+  })
+
 }

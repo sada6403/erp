@@ -234,6 +234,22 @@ export class CloudApi {
     return result.url
   }
 
+  // Mobile app access (admin endpoints; x-api-key = POS sync key, called from the main process only).
+  async appAccessList(): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request('/api/app/v1/admin/app-access')
+  }
+
+  async appAccessInvite(input: { targets: Array<{ customer_id?: string; agent_id?: string }>; download_link?: string; sent_by?: string }): Promise<{
+    results: Array<Record<string, unknown>>
+    channel: string
+  }> {
+    return this.request('/api/app/v1/admin/app-access/invite', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(60_000) })
+  }
+
+  async appAccessSetStatus(userId: string, status: 'active' | 'disabled'): Promise<{ ok: boolean }> {
+    return this.request('/api/app/v1/admin/app-access/status', { method: 'POST', body: JSON.stringify({ user_id: userId, status }) })
+  }
+
   private async request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
     const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
     const response = await fetchFn(`${this.baseUrl}${path}`, {

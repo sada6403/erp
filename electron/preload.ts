@@ -305,6 +305,26 @@ const api = {
     logPrint:       (id: string) => ipcRenderer.invoke('branchTransfers:logPrint', id),
   },
 
+  // Mobile app admin (Super Admin only; enforced again in the main process)
+  appAccess: {
+    list:        (filters?: unknown) => ipcRenderer.invoke('appAccess:list', filters),
+    invite:      (targets: unknown) => ipcRenderer.invoke('appAccess:invite', targets),
+    openChat:    (dispatchId: string) => ipcRenderer.invoke('appAccess:openChat', dispatchId),
+    discardChat: (dispatchId: string) => ipcRenderer.invoke('appAccess:discardChat', dispatchId),
+    setStatus:   (userId: string, status: 'active' | 'disabled') => ipcRenderer.invoke('appAccess:setStatus', userId, status),
+    resetRequests: (filters?: unknown) => ipcRenderer.invoke('appAccess:resetRequests', filters),
+    resendTempPassword: (requestId: string) => ipcRenderer.invoke('appAccess:resendTempPassword', requestId),
+  },
+  onlineStore: {
+    bannersList:   () => ipcRenderer.invoke('onlineStore:banners:list'),
+    bannerSave:    (payload: unknown) => ipcRenderer.invoke('onlineStore:banners:save', payload),
+    bannerDelete:  (id: string) => ipcRenderer.invoke('onlineStore:banners:delete', id),
+    productsList:  (filters?: unknown) => ipcRenderer.invoke('onlineStore:products:list', filters),
+    setOnline:     (ids: string[], online: boolean) => ipcRenderer.invoke('onlineStore:products:setOnline', ids, online),
+    settingsGet:   () => ipcRenderer.invoke('onlineStore:settings:get'),
+    settingsSave:  (payload: unknown) => ipcRenderer.invoke('onlineStore:settings:save', payload),
+  },
+
   stockCounts: {
     list:       () => ipcRenderer.invoke('stockCounts:list'),
     create:     (payload: unknown) => ipcRenderer.invoke('stockCounts:create', payload),

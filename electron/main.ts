@@ -17,6 +17,8 @@ import { registerSettingsHandlers, ensureSettingsDefaults } from './ipc/settings
 import { registerAnalyticsHandlers } from './ipc/analytics'
 import { registerAdminHandlers } from './ipc/admin'
 import { registerOrderHandlers } from './ipc/orders'
+import { registerAppAccessHandlers } from './ipc/appAccess'
+import { registerOnlineStoreHandlers } from './ipc/onlineStore'
 import { registerPurchaseHandlers } from './ipc/purchases'
 import { registerInvestmentHandlers } from './ipc/investments'
 import { registerReturnHandlers } from './ipc/returns'
@@ -192,6 +194,8 @@ async function bootstrap() {
   registerAnalyticsHandlers(ipcMain)
   registerAdminHandlers(ipcMain)
   registerOrderHandlers(ipcMain)
+  registerAppAccessHandlers(ipcMain)
+  registerOnlineStoreHandlers(ipcMain)
   registerPurchaseHandlers(ipcMain)
   registerInvestmentHandlers(ipcMain)
   registerReturnHandlers()
