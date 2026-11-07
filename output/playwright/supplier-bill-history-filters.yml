@@ -1,0 +1,76 @@
+- main:
+  - heading "Stock Purchases & Bills" [level=1]
+  - paragraph: 1 uploaded supplier bills
+  - button "Refresh":
+    - img
+    - text: Refresh
+  - button "PO Template":
+    - img
+    - text: PO Template
+  - button "Import PO (Excel)":
+    - img
+    - text: Import PO (Excel)
+  - button "1. Order from Supplier Create order, track progress, then receive stock and upload the supplier bill.":
+    - strong: 1. Order from Supplier
+    - text: Create order, track progress, then receive stock and upload the supplier bill.
+  - button "2. Add Received Stock Directly Search products from the delivered bill and add stock immediately.":
+    - strong: 2. Add Received Stock Directly
+    - text: Search products from the delivered bill and add stock immediately.
+  - button "All Purchases"
+  - button "Purchase Orders"
+  - button "Direct Stock"
+  - button "Date-wise Stock Received"
+  - button "Supplier Bills"
+  - text: Purchase date from
+  - textbox "Purchase date from"
+  - text: To
+  - textbox "To"
+  - textbox "Search purchase history":
+    - /placeholder: Search file name, supplier, invoice number or staff
+  - combobox "Filter supplier":
+    - option "All suppliers" [selected]
+    - option "malibun"
+  - text: Uploaded from
+  - textbox "Uploaded from"
+  - text: Uploaded to
+  - textbox "Uploaded to"
+  - text: Uploaded by
+  - combobox "Uploaded by":
+    - option "All staff" [selected]
+    - option "Admin"
+  - text: File type
+  - combobox "Bill file type":
+    - option "PDF and images" [selected]
+    - option "PDF"
+    - option "Images"
+  - button "All"
+  - button "DRAFT"
+  - button "SENT"
+  - button "PARTIAL"
+  - button "RECEIVED"
+  - button "CANCELLED"
+  - table:
+    - rowgroup:
+      - row "Bill File Supplier Invoice / Purchase Purchase Date Uploaded At Uploaded By File Details Purchase Total Actions":
+        - columnheader "Bill File"
+        - columnheader "Supplier"
+        - columnheader "Invoice / Purchase"
+        - columnheader "Purchase Date"
+        - columnheader "Uploaded At"
+        - columnheader "Uploaded By"
+        - columnheader "File Details"
+        - columnheader "Purchase Total"
+        - columnheader "Actions"
+    - rowgroup:
+      - row "WhatsApp Image 2026-01-16 at 13.26.48.jpeg malibun 001 MAIN-001-PO-2026-0001 | Direct stock 2026-11-06 11/6/2026, 8:11:32 PM Admin image/jpeg 40.1 KB Rs.3,100 Purchase Details":
+        - cell "WhatsApp Image 2026-01-16 at 13.26.48.jpeg":
+          - button "WhatsApp Image 2026-01-16 at 13.26.48.jpeg"
+        - cell "malibun"
+        - cell "001 MAIN-001-PO-2026-0001 | Direct stock"
+        - cell "2026-11-06"
+        - cell "11/6/2026, 8:11:32 PM"
+        - cell "Admin"
+        - cell "image/jpeg 40.1 KB"
+        - cell "Rs.3,100"
+        - cell "Purchase Details":
+          - button "Purchase Details"
