@@ -73,6 +73,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   extra: {
     appEnv: APP_ENV,
     apiBaseUrl: API_BASE_URL,
+    // Dev only: a physical phone reaches the PC via `adb reverse` (see scripts/phone.ps1).
+    apiBaseUrlDevice: process.env.API_BASE_URL_DEVICE ?? 'http://localhost:3000',
     appKey: APP_KEY,
     useMocks: USE_MOCKS,
     androidPackage: ANDROID_PACKAGE,
