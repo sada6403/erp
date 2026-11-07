@@ -3,9 +3,9 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { stagePurchaseBills,persistStagedBills,completeStagedBills,discardStagedBills } from './purchaseBills'
+import { stagePurchaseBills,persistStagedBills,completeStagedBills,discardStagedBills,requireSavedPurchaseBill } from './purchaseBills'
 let db:Database.Database,dir:string,source:string,stored:string
-beforeEach(()=>{dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-bills-'));source=path.join(dir,'supplier.pdf');stored=path.join(dir,'saved');fs.writeFileSync(source,'%PDF-1.4 test supplier bill');db=new Database(':memory:');db.exec(`CREATE TABLE purchase_attachments(id TEXT PRIMARY KEY,purchase_id TEXT,original_name TEXT,stored_name TEXT,relative_path TEXT,mime_type TEXT,file_size INTEGER,uploaded_by TEXT)` )})
+beforeEach(()=>{dir=fs.mkdtempSync(path.join(os.tmpdir(),'purchase-bills-'));source=path.join(dir,'supplier.pdf');stored=path.join(dir,'saved');fs.writeFileSync(source,'%PDF-1.4 test supplier bill');db=new Database(':memory:');db.exec(`CREATE TABLE purchase_attachments(id TEXT PRIMARY KEY,purchase_id TEXT,original_name TEXT,stored_name TEXT,relative_path TEXT,mime_type TEXT,file_size INTEGER,uploaded_by TEXT,is_active INTEGER DEFAULT 1)` )})
 afterEach(()=>{db.close();fs.rmSync(dir,{recursive:true,force:true})})
 describe('supplier bills for order and direct stock entry',()=>{
  it('saves selected files durably and links them to the existing purchase attachment table',()=>{
@@ -31,4 +31,24 @@ describe('supplier bills for order and direct stock entry',()=>{
   discardStagedBills(selection.token,stored,'owner')
   expect(fs.readdirSync(stored)).toEqual([])
  })
+ it('requires an active saved bill and rejects removed bills',()=>{
+  expect(()=>requireSavedPurchaseBill(db,'purchase')).toThrow(/required/)
+  const selection=stagePurchaseBills([source],stored,'owner')
+  persistStagedBills(db,'purchase',selection.token,'owner')
+  expect(()=>requireSavedPurchaseBill(db,'purchase')).not.toThrow()
+  db.prepare('UPDATE purchase_attachments SET is_active=0').run()
+  expect(()=>requireSavedPurchaseBill(db,'purchase')).toThrow(/required/)
+  completeStagedBills(selection.token)
+ })
+ it('rejects empty selections, zero-byte files and a disappeared staged file',()=>{
+  expect(()=>stagePurchaseBills([],stored,'owner')).toThrow(/at least one/)
+  fs.writeFileSync(source,'')
+  expect(()=>stagePurchaseBills([source],stored,'owner')).toThrow()
+  fs.writeFileSync(source,'%PDF-test')
+  const selection=stagePurchaseBills([source],stored,'owner')
+  for(const file of fs.readdirSync(stored))fs.unlinkSync(path.join(stored,file))
+  expect(()=>persistStagedBills(db,'purchase',selection.token,'owner')).toThrow(/missing/)
+  discardStagedBills(selection.token,stored,'owner')
+ })
+
 })

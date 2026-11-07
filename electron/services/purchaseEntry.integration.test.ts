@@ -1,9 +1,12 @@
 import Database from 'better-sqlite3'
 import { beforeEach, afterEach, describe, expect, it } from 'vitest'
 import { repairMissingReceiptPrices } from './receiptProductPricing'
-import { createStockPurchase, type StockPurchaseInput } from './purchaseEntry'
+import { createStockPurchase as savePurchase, type StockPurchaseInput } from './purchaseEntry'
 
 let db: Database.Database
+const createStockPurchase: typeof savePurchase = (database, data, bills) => savePurchase(database,data,bills || (id=>{
+ database.prepare('INSERT INTO purchase_attachments (id,purchase_id) VALUES (?,?)').run('bill-'+id,id)
+}))
 const input=(overrides:Partial<StockPurchaseInput>={}):StockPurchaseInput=>({id:'receipt1',poNumber:'PO-1',branchId:'main',supplierId:'supplier',purchaseType:'direct',purchaseDate:'2026-11-06',items:[{product_id:'rice',quantity:0.75,unit_cost:150,selling_price:250}],...overrides})
 beforeEach(()=>{
  db=new Database(':memory:')
@@ -14,12 +17,12 @@ beforeEach(()=>{
  CREATE TABLE stocks(id TEXT PRIMARY KEY,product_id TEXT,branch_id TEXT,warehouse_id TEXT,quantity REAL,damaged_qty REAL DEFAULT 0,updated_at TEXT);
  CREATE TABLE product_batches(id TEXT PRIMARY KEY,product_id TEXT,branch_id TEXT,batch_number TEXT,expiry_date TEXT,quantity REAL,cost_price REAL,selling_price REAL,po_id TEXT,purchase_item_id TEXT,purchase_date TEXT,original_quantity REAL,sold_quantity REAL,returned_quantity REAL,damaged_quantity REAL,historical_cost_known INTEGER,status TEXT,created_by TEXT,notes TEXT,created_at TEXT DEFAULT (datetime('now')),updated_at TEXT);
  CREATE TABLE stock_movements(id TEXT PRIMARY KEY,product_id TEXT,variant_id TEXT,from_branch_id TEXT,to_branch_id TEXT,quantity REAL,movement_type TEXT,reference_order_id TEXT,reference_transfer_id TEXT,reference_branch_transfer_id TEXT,notes TEXT,created_by TEXT,status TEXT);
- CREATE TABLE purchase_attachments(id TEXT PRIMARY KEY,purchase_id TEXT);`)
+ CREATE TABLE purchase_attachments(id TEXT PRIMARY KEY,purchase_id TEXT,is_active INTEGER DEFAULT 1);`)
 })
 afterEach(()=>db.close())
 describe('two supermarket purchase entry workflows',()=>{
  it('direct receipt updates aggregate stock, fractional movement, batch cost and bill atomically',()=>{
-  const row=createStockPurchase(db,input(),id=>db.prepare('INSERT INTO purchase_attachments VALUES (?,?)').run('bill',id))
+  const row=createStockPurchase(db,input(),id=>db.prepare('INSERT INTO purchase_attachments (id,purchase_id) VALUES (?,?)').run('bill',id))
   expect(row.status).toBe('RECEIVED')
   expect(db.prepare('SELECT quantity FROM stocks').get()).toEqual({quantity:0.75})
   expect(db.prepare('SELECT quantity FROM stock_movements').get()).toEqual({quantity:0.75})
@@ -28,7 +31,7 @@ describe('two supermarket purchase entry workflows',()=>{
   expect(db.prepare('SELECT purchase_id FROM purchase_attachments').get()).toEqual({purchase_id:'receipt1'})
  })
  it('purchase order saves products and bill but does not receive stock prematurely',()=>{
-  const row=createStockPurchase(db,input({purchaseType:'order'}),id=>db.prepare('INSERT INTO purchase_attachments VALUES (?,?)').run('bill',id))
+  const row=createStockPurchase(db,input({purchaseType:'order'}),id=>db.prepare('INSERT INTO purchase_attachments (id,purchase_id) VALUES (?,?)').run('bill',id))
   expect(row.status).toBe('DRAFT')
   expect(db.prepare('SELECT COUNT(*) n FROM stocks').get()).toEqual({n:0})
   expect(db.prepare('SELECT received_qty,selling_price FROM purchase_items').get()).toEqual({received_qty:0,selling_price:250})
@@ -86,6 +89,16 @@ describe('two supermarket purchase entry workflows',()=>{
   expect(db.prepare('SELECT cost_price,selling_price FROM products').get()).toEqual({cost_price:99,selling_price:200})
   expect(()=>createStockPurchase(db,input({id:'failed'}),()=>{throw new Error('bill failed')})).toThrow('bill failed')
   expect(db.prepare('SELECT cost_price,selling_price FROM products').get()).toEqual({cost_price:99,selling_price:200})
+ })
+
+ it.each(['direct','order'] as const)('requires a supplier bill for a %s purchase and rolls back every change',purchaseType=>{
+  expect(()=>savePurchase(db,input({purchaseType}))).toThrow(/Supplier bill upload is required/)
+  for(const table of ['purchase_orders','purchase_items','stocks','product_batches','stock_movements']) expect(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()).toEqual({n:0})
+  expect(db.prepare('SELECT cost_price FROM products').get()).toEqual({cost_price:99})
+ })
+ it('does not accept a no-op upload callback as a bill',()=>{
+  expect(()=>savePurchase(db,input(),()=>{})).toThrow(/Supplier bill upload is required/)
+  expect(db.prepare('SELECT COUNT(*) n FROM stocks').get()).toEqual({n:0})
  })
 
 })

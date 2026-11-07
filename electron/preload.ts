@@ -433,6 +433,7 @@ const api = {
 
   // Purchase Orders
   purchases: {
+    billHistory: (filters?: unknown) => ipcRenderer.invoke('purchases:billHistory',filters),
     refreshProductPrices: (id: string) => ipcRenderer.invoke('purchases:refreshProductPrices',id),
     chooseBills: () => ipcRenderer.invoke('purchases:chooseBills'),
     discardBills: (token: string) => ipcRenderer.invoke('purchases:discardBills',token),

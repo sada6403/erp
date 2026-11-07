@@ -3,8 +3,9 @@ import fs from 'fs'
 import path from 'path'
 import { randomUUID } from 'crypto'
 
-const pending=new Map<string,{owner:string;files:Record<string,unknown>[];created:number}>()
+const pending=new Map<string,{owner:string;directory:string;files:Record<string,unknown>[];created:number}>()
 export function stagePurchaseBills(paths:string[],directory:string,owner:string){
+  if(!paths.length) throw new Error('Upload at least one supplier bill (PDF or image)')
   fs.mkdirSync(directory,{recursive:true})
   const files:Record<string,unknown>[]=[]
   try {
@@ -12,12 +13,12 @@ export function stagePurchaseBills(paths:string[],directory:string,owner:string)
       const ext=path.extname(source).toLowerCase()
       const mime:Record<string,string>={'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg'}
       const stat=fs.statSync(source)
-      if(!mime[ext] || !stat.isFile() || stat.size>15*1024*1024) throw new Error('Choose a PDF/JPG/PNG bill no larger than 15 MB')
+      if(!mime[ext] || !stat.isFile() || stat.size<=0 || stat.size>15*1024*1024) throw new Error('Choose a PDF/JPG/PNG bill no larger than 15 MB')
       const stored=randomUUID()+ext
       fs.copyFileSync(source,path.join(directory,stored))
       files.push({id:randomUUID(),original_name:path.basename(source),stored_name:stored,relative_path:`purchase-invoices/${stored}`,mime_type:mime[ext],file_size:stat.size,uploaded_by:owner})
     }
-    const token=randomUUID(); pending.set(token,{owner,files,created:Date.now()})
+    const token=randomUUID(); pending.set(token,{owner,directory,files,created:Date.now()})
     return {token,files:files.map(file=>({id:file.id,original_name:file.original_name}))}
   } catch(e){ for(const file of files) fs.rmSync(path.join(directory,String(file.stored_name)),{force:true}); throw e }
 }
@@ -25,6 +26,7 @@ export function persistStagedBills(db:Database.Database,purchaseId:string,token:
   if(!token) return
   const entry=pending.get(token)
   if(!entry || entry.owner!==owner || Date.now()-entry.created>3600000) throw new Error('Selected bills expired; select them again')
+  for(const file of entry.files) if(!fs.existsSync(path.join(entry.directory,String(file.stored_name)))) throw new Error('Selected bill file is missing; upload it again')
   for(const file of entry.files) db.prepare(`INSERT INTO purchase_attachments (id,purchase_id,original_name,stored_name,relative_path,mime_type,file_size,uploaded_by)
     VALUES (@id,@purchase_id,@original_name,@stored_name,@relative_path,@mime_type,@file_size,@uploaded_by)`).run({...file,purchase_id:purchaseId})
 }
@@ -34,4 +36,9 @@ export function discardStagedBills(token:string,directory:string,owner:string){
   if(!entry || entry.owner!==owner) return
   for(const file of entry.files) fs.rmSync(path.join(directory,String(file.stored_name)),{force:true})
   pending.delete(token)
+}
+
+/** Used inside the purchase transaction, so a missing bill rolls stock back. */
+export function requireSavedPurchaseBill(db:Database.Database,purchaseId:string){
+  if(!db.prepare('SELECT 1 FROM purchase_attachments WHERE purchase_id=? AND is_active=1 LIMIT 1').get(purchaseId)) throw new Error('Supplier bill upload is required. Upload a PDF or image before saving this purchase.')
 }

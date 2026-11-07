@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 import { createReceiptBatch, ensureLegacyOpeningLayer } from './batchInventory'
+import { requireSavedPurchaseBill } from './purchaseBills'
 import { applyReceiptProductPrices } from './receiptProductPricing'
 import { insertStockMovement } from './stockMovement'
 
@@ -58,6 +59,7 @@ export function createStockPurchase(db: Database.Database, input: StockPurchaseI
       }
     }
     saveBills?.(input.id)
+    requireSavedPurchaseBill(db,input.id)
     return purchase
   })()
 }

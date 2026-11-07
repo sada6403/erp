@@ -17,6 +17,12 @@ import toast from 'react-hot-toast'
 type PO = Record<string, unknown>
 type POItem = Record<string, unknown>
 
+function uploadTime(value:unknown) {
+  if(!value) return 'Not recorded'
+  const text=String(value);const utc=/^\d{4}-\d{2}-\d{2} \d{2}:/.test(text)?text.replace(' ','T')+'Z':text
+  const date=new Date(utc);return Number.isNaN(date.getTime())?text:date.toLocaleString()
+}
+
 const PO_STATUSES = ['DRAFT', 'SENT', 'PARTIAL', 'RECEIVED', 'CANCELLED'] as const
 
 function statusBadge(status: string) {
@@ -40,6 +46,12 @@ export default function PurchaseOrdersPage() {
   const [supplierFilter,setSupplierFilter] = useState('')
   const [search,setSearch] = useState('')
   const [receipts,setReceipts] = useState<PO[]>([])
+  const [billRows,setBillRows] = useState<PO[]>([])
+  const [uploaders,setUploaders] = useState<{id:string;name:string}[]>([])
+  const [uploadedFrom,setUploadedFrom] = useState('')
+  const [uploadedTo,setUploadedTo] = useState('')
+  const [uploadedBy,setUploadedBy] = useState('')
+  const [fileType,setFileType] = useState('')
   const [viewPO, setViewPO]   = useState<(PO & { items?: POItem[] }) | null>(null)
   const [showReceive, setShowReceive] = useState(false)
 
@@ -79,7 +91,7 @@ export default function PurchaseOrdersPage() {
     try {
       const res = await window.api.purchases.importExcel({
         defaultSupplierId: importSupplierId || undefined,
-        markAsReceived: markReceived,
+        markAsReceived: supermarket ? false : markReceived,
       })
       if (!res?.success) {
         if (!res?.cancelled) toast.error(res?.error || 'Import failed')
@@ -98,9 +110,9 @@ export default function PurchaseOrdersPage() {
   const load = async () => {
     setLoading(true)
     try {
-      const filters = { status: statusFilter || undefined, from: from || undefined, to: to || undefined, supplier_id: supplierFilter || undefined, search: search || undefined, purchase_type: ['order','direct'].includes(historyView) ? historyView : undefined, has_bill: historyView === 'bills' }
-      const res = historyView === 'receipts' ? await window.api.purchases.receiptHistory(filters) : await window.api.purchases.list(filters)
-      if (res.success) { if(historyView === 'receipts') setReceipts(res.data as PO[]); else setPOs(res.data as PO[]) }
+      const filters = { status: statusFilter || undefined, from: from || undefined, to: to || undefined, supplier_id: supplierFilter || undefined, search: search || undefined, purchase_type: ['order','direct'].includes(historyView) ? historyView : undefined, has_bill: historyView === 'bills', uploaded_from: uploadedFrom || undefined, uploaded_to: uploadedTo || undefined, uploaded_by: uploadedBy || undefined, file_type: fileType || undefined }
+      const res = historyView === 'bills' ? await window.api.purchases.billHistory(filters) : historyView === 'receipts' ? await window.api.purchases.receiptHistory(filters) : await window.api.purchases.list(filters)
+      if (res.success) { if(historyView === 'bills') { setBillRows(res.data.rows);setUploaders(res.data.uploaders) } else if(historyView === 'receipts') setReceipts(res.data as PO[]); else setPOs(res.data as PO[]) }
       else toast.error(String(res.error || 'Failed to load purchase orders'))
     } catch (err) {
       toast.error('Failed to load purchase orders: ' + String(err))
@@ -108,7 +120,7 @@ export default function PurchaseOrdersPage() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [statusFilter, from, to, historyView, supplierFilter, search])
+  useEffect(() => { load() }, [statusFilter, from, to, historyView, supplierFilter, search, uploadedFrom, uploadedTo, uploadedBy, fileType])
 
   const loadDetail = async (id: string) => {
     try {
@@ -162,7 +174,7 @@ export default function PurchaseOrdersPage() {
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
         title={supermarket ? "Stock Purchases & Bills" : "Purchase Orders"}
-        subtitle={historyView === 'receipts' ? `${receipts.length} stock receipts` : `${pos.length} ${supermarket ? 'purchases' : 'purchase orders'}`}
+        subtitle={historyView === 'bills' ? `${billRows.length} uploaded supplier bills` : historyView === 'receipts' ? `${receipts.length} stock receipts` : `${pos.length} ${supermarket ? 'purchases' : 'purchase orders'}`}
         actions={
           <div className="flex gap-2">
             <button className="btn-ghost btn-sm gap-1.5" onClick={load} disabled={loading}>
@@ -187,7 +199,13 @@ export default function PurchaseOrdersPage() {
       </div>}
       {supermarket && <div className="flex gap-2 flex-wrap px-6 pt-3">{[['all','All Purchases'],['order','Purchase Orders'],['direct','Direct Stock'],['receipts','Date-wise Stock Received'],['bills','Supplier Bills']].map(([key,label])=><button key={key} className={historyView===key?'btn-primary btn-sm':'btn-secondary btn-sm'} onClick={()=>{setHistoryView(key);setFilter('')}}>{label}</button>)}</div>}
       <div hidden={!supermarket} className="flex gap-3 px-6 py-3"><label>Purchase date from<input className="input" type="date" value={from} onChange={e => setFrom(e.target.value)} /></label><label>To<input className="input" type="date" value={to} onChange={e => setTo(e.target.value)} /></label></div>
-      {supermarket && <div className="flex gap-3 px-6 pb-3"><input className="input flex-1" aria-label="Search purchase history" placeholder="Search purchase / bill number or supplier" value={search} onChange={e=>setSearch(e.target.value)} /><select aria-label="Filter supplier" className="input max-w-xs" value={supplierFilter} onChange={e=>setSupplierFilter(e.target.value)}><option value="">All suppliers</option>{suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>}
+      {supermarket && <div className="flex gap-3 px-6 pb-3"><input className="input flex-1" aria-label="Search purchase history" placeholder={historyView==='bills' ? 'Search file name, supplier, invoice number or staff' : 'Search purchase / bill number or supplier'} value={search} onChange={e=>setSearch(e.target.value)} /><select aria-label="Filter supplier" className="input max-w-xs" value={supplierFilter} onChange={e=>setSupplierFilter(e.target.value)}><option value="">All suppliers</option>{suppliers.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}</select></div>}
+      {supermarket && historyView==='bills' && <div className="px-6 pb-3 grid grid-cols-2 xl:grid-cols-4 gap-3">
+        <label className="text-sm">Uploaded from<input aria-label="Uploaded from" type="date" className="input" value={uploadedFrom} onChange={e=>setUploadedFrom(e.target.value)} /></label>
+        <label className="text-sm">Uploaded to<input aria-label="Uploaded to" type="date" className="input" value={uploadedTo} onChange={e=>setUploadedTo(e.target.value)} /></label>
+        <label className="text-sm">Uploaded by<select aria-label="Uploaded by" className="input" value={uploadedBy} onChange={e=>setUploadedBy(e.target.value)}><option value="">All staff</option>{uploaders.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>
+        <label className="text-sm">File type<select aria-label="Bill file type" className="input" value={fileType} onChange={e=>setFileType(e.target.value)}><option value="">PDF and images</option><option value="pdf">PDF</option><option value="image">Images</option></select></label>
+      </div>}
       {/* Status filter tabs */}
       <div className="flex gap-2 px-6 py-3 border-b border-slate-800 overflow-x-auto">
         {['', ...PO_STATUSES].map(s => (
@@ -200,7 +218,13 @@ export default function PurchaseOrdersPage() {
       </div>
 
       <div className="flex-1 overflow-auto">
-        {supermarket && historyView === 'receipts' ? <table className="w-full"><thead><tr>{['Stock Date','Product','Received','Remaining','Unit Cost','Supplier','Purchase','Bills'].map(h=><th key={h} className="table-header">{h}</th>)}</tr></thead><tbody>{receipts.map(row=><tr key={String(row.id)} className="table-row"><td className="table-cell">{String(row.purchase_date||'?')}</td><td className="table-cell">{String(row.product_name)}<small className="block">{String(row.sku)}</small></td><td className="table-cell">{Number(row.original_quantity)}</td><td className="table-cell">{Number(row.quantity)}</td><td className="table-cell">Rs.{Number(row.cost_price).toLocaleString()}</td><td className="table-cell">{String(row.supplier_name||'?')}</td><td className="table-cell">{String(row.po_number)}<small className="block">{row.purchase_type==='direct'?'Direct receipt':'Purchase order'}</small></td><td className="table-cell"><button className="btn-secondary btn-sm" onClick={()=>loadDetail(String(row.po_id))}>Bills ({Number(row.bill_count)}) / View</button></td></tr>)}{!receipts.length&&<tr><td colSpan={8} className="text-center py-12">No stock receipts in this date range.</td></tr>}</tbody></table> : <table className="w-full">
+        {supermarket && historyView === 'receipts' ? <table className="w-full"><thead><tr>{['Stock Date','Product','Received','Remaining','Unit Cost','Supplier','Purchase','Bills'].map(h=><th key={h} className="table-header">{h}</th>)}</tr></thead><tbody>{receipts.map(row=><tr key={String(row.id)} className="table-row"><td className="table-cell">{String(row.purchase_date||'?')}</td><td className="table-cell">{String(row.product_name)}<small className="block">{String(row.sku)}</small></td><td className="table-cell">{Number(row.original_quantity)}</td><td className="table-cell">{Number(row.quantity)}</td><td className="table-cell">Rs.{Number(row.cost_price).toLocaleString()}</td><td className="table-cell">{String(row.supplier_name||'?')}</td><td className="table-cell">{String(row.po_number)}<small className="block">{row.purchase_type==='direct'?'Direct receipt':'Purchase order'}</small></td><td className="table-cell"><button className="btn-secondary btn-sm" onClick={()=>loadDetail(String(row.po_id))}>Bills ({Number(row.bill_count)}) / View</button></td></tr>)}{!receipts.length&&<tr><td colSpan={8} className="text-center py-12">No stock receipts in this date range.</td></tr>}</tbody></table> : supermarket && historyView==='bills' ? <table className="w-full"><thead><tr>{['Bill File','Supplier','Invoice / Purchase','Purchase Date','Uploaded At','Uploaded By','File Details','Purchase Total','Actions'].map(h=><th key={h} className="table-header px-3">{h}</th>)}</tr></thead><tbody>{billRows.map(bill=><tr key={String(bill.id)} className="table-row">
+        <td className="table-cell"><button className="text-sky-400 underline" onClick={async()=>{const r=await window.api.purchases.openAttachment(String(bill.id));if(!r.success)toast.error(r.error||'Could not open bill')}}>{String(bill.original_name)}</button></td>
+        <td className="table-cell">{String(bill.supplier_name||'Unknown supplier')}</td><td className="table-cell">{String(bill.supplier_invoice_number||'No invoice number')}<small className="block">{String(bill.po_number)} | {bill.purchase_type==='direct'?'Direct stock':'Purchase order'}</small></td>
+        <td className="table-cell">{String(bill.purchase_date||'Not recorded')}</td><td className="table-cell">{uploadTime(bill.uploaded_at)}</td><td className="table-cell">{String(bill.uploaded_by_name||'Unknown user')}</td>
+        <td className="table-cell">{String(bill.mime_type)}<small className="block">{(Number(bill.file_size||0)/1024).toFixed(1)} KB</small></td><td className="table-cell">Rs.{Number(bill.total_amount||0).toLocaleString()}</td>
+        <td className="table-cell"><button className="btn-secondary btn-sm" onClick={()=>loadDetail(String(bill.purchase_id))}>Purchase Details</button></td>
+      </tr>)}{!billRows.length&&<tr><td colSpan={9} className="text-center py-12">No uploaded bills match these filters.</td></tr>}</tbody></table> : <table className="w-full">
           <thead className="sticky top-0 bg-surface-900">
             <tr>
               {(supermarket ? ['Purchase / Bill','Supplier','Purchase Date','Items','Total','Expected','Status','Actions'] : ['PO #', 'Supplier', 'Branch', 'Items', 'Total', 'Expected', 'Status', '']).map(h =>
@@ -345,7 +369,8 @@ export default function PurchaseOrdersPage() {
                 </p>
               </div>
 
-              <div className="pt-2 border-t border-slate-700/60">
+              {supermarket && <p className="text-sm text-amber-400">Excel imports create draft orders only. Upload the supplier bill in purchase details before receiving stock.</p>}
+              <div hidden={supermarket} className="pt-2 border-t border-slate-700/60">
                 <label className="flex items-start gap-2.5 cursor-pointer text-slate-300 hover:text-white select-none">
                   <input
                     type="checkbox"
@@ -440,7 +465,7 @@ function PODetailModal({ po, onClose, onReceive, onSend, onCancel, onNotify }:
   const attach = async () => {
     const res = await window.api.purchases.addAttachments(String(po.id))
     if (!res.success) { if (res.error !== 'Cancelled') toast.error(res.error || 'Attachment failed'); return }
-    setDetail(d => ({ ...d, attachments: [...((d.attachments as PO[]) || []), ...(res.data as PO[])] })); toast.success('Invoice attachment saved')
+    const refreshed=await window.api.purchases.get(String(po.id));if(refreshed.success)setDetail(refreshed.data); toast.success('Invoice attachment saved')
   }
   const removeAttachment = async (id: string) => {
     const reason = window.prompt('Reason for correcting/removing this attachment:')
@@ -472,11 +497,11 @@ function PODetailModal({ po, onClose, onReceive, onSend, onCancel, onNotify }:
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <button className="btn-secondary btn-sm" onClick={saveInvoice}>Save Invoice Details</button>
             <button className="btn-secondary btn-sm gap-1" onClick={attach}><Upload size={12}/>Attach PDF / Image</button>
-            <span className="text-slate-400">Status: {String(detail.payment_status || 'unpaid')} · Outstanding Rs.{Number(detail.outstanding_amount || detail.total_amount || 0).toLocaleString()}</span>
+            <span className="text-slate-400">Status: {String(detail.payment_status || 'unpaid')} · Outstanding Rs.{Number(detail.outstanding_amount ?? detail.total_amount ?? 0).toLocaleString()}</span>
           </div>
           <div className="space-y-1">
             {((detail.attachments as PO[]) || []).map(file => <div key={String(file.id)} className="flex items-center justify-between rounded bg-surface-800 px-2 py-1 text-xs">
-              <button className="text-sky-400 hover:underline" onClick={() => window.api.purchases.openAttachment(String(file.id))}>{String(file.original_name)}</button>
+              <div className="min-w-0"><button className="text-sky-400 hover:underline" onClick={() => window.api.purchases.openAttachment(String(file.id))}>{String(file.original_name)}</button><p className="text-xs text-slate-400">Uploaded {uploadTime(file.uploaded_at)} by {String(file.uploaded_by_name||'Unknown user')} | {(Number(file.file_size||0)/1024).toFixed(1)} KB</p></div>
               <button className="text-red-400" onClick={() => removeAttachment(String(file.id))}>Correct / Remove</button>
             </div>)}
             {!((detail.attachments as PO[]) || []).length && <p className="text-xs text-slate-500">No invoice attachments.</p>}
@@ -556,6 +581,7 @@ function ReceivePOModal({ po, onClose, onDone }:
 
   const submit = async () => {
     if(saving) return
+    if(supermarket && !attachmentToken && !((po.attachments as PO[]|undefined)?.length)) {toast.error('Upload a supplier bill before receiving stock.');return}
     if (!purchaseDate) { toast.error('Purchase date is required'); return }
     const items = (po.items || []).map((item: POItem) => ({
       id: item.id,
@@ -574,7 +600,7 @@ function ReceivePOModal({ po, onClose, onDone }:
       <div className="space-y-4">
         <label hidden={!supermarket} className="label">Purchase date<input type="date" className="input" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} /></label>
         <p hidden={!supermarket} className="text-xs text-slate-400">Leave selling price blank to use the product's common price. Enter a price to apply it to this purchase batch.</p>
-        {supermarket && <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} />}
+        {supermarket && <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} required existingCount={(po.attachments as PO[]|undefined)?.length||0} />}
         <table className="w-full text-sm">
           <thead><tr className="border-b border-slate-700">
             <th className="text-left py-2 text-slate-400 font-normal">Product</th>
@@ -637,7 +663,7 @@ function ReceivePOModal({ po, onClose, onDone }:
         </table>
         <div className="flex justify-end gap-3 pt-2">
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary gap-1" onClick={submit} disabled={saving}>
+          <button className="btn-primary gap-1" onClick={submit} disabled={saving || (supermarket && !attachmentToken && !((po.attachments as PO[]|undefined)?.length))}>
             <PackageCheck size={14} /> Confirm Receipt
           </button>
         </div>
@@ -696,6 +722,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
   const save = async () => {
     if (!form.supplier_id) { toast.error('Select a supplier'); return }
     if (form.items.some(i => !i.product_id)) { toast.error('All items need a product'); return }
+    if(supermarket && !attachmentToken) {toast.error('Supplier bill upload is required. Upload a PDF or image.');return}
     if(direct) { const missing=form.items.find(item=>item.selling_price==='' && !(Number(products.find(p=>p.id===item.product_id)?.selling_price)>0)); if(missing) { toast.error('Enter a Selling Price: this product has no common selling price yet.'); return } }
     setSaving(true)
     try {
@@ -752,7 +779,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
         </div>
 
         {supermarket && <div className="grid grid-cols-2 gap-3"><label className="label">{direct?'Stock Received Date':'Purchase Date'}<input aria-label="Purchase date" type="date" className="input" value={form.purchase_date} onChange={e=>setForm(f=>({...f,purchase_date:e.target.value}))} /></label><label className="label">Supplier Bill / Invoice Number<input aria-label="Supplier invoice number" className="input" value={form.supplier_invoice_number} onChange={e=>setForm(f=>({...f,supplier_invoice_number:e.target.value}))} /></label></div>}
-        {supermarket && <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} />}
+        {supermarket && <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} required />}
         {supermarket && <p className="text-xs" style={{color:'var(--text-3)'}}>Purchase Price = what you pay the supplier. Selling Price = what the customer pays. Leave Selling Price as Common only if this product already has a selling price. Receiving stock updates the product prices; older batch costs stay unchanged.</p>}
         {direct && <p className="text-sm" style={{color:'var(--text-3)'}}>Search each product on the supplier bill, enter delivered quantity and purchase price, then save to update stock immediately.</p>}
         {selectedSupplier && (
@@ -864,7 +891,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
 
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-700">
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary gap-1" onClick={save} disabled={saving}>
+          <button className="btn-primary gap-1" onClick={save} disabled={saving || (supermarket && !attachmentToken)}>
             {saving ? 'Saving...' : direct ? 'Save & Receive Stock' : 'Create Purchase Order'}
           </button>
         </div>

@@ -1,6 +1,7 @@
+import { listPurchaseBills, type BillHistoryFilters } from '../services/purchaseBillHistory'
 import { applyReceiptProductPrices, repairMissingReceiptPrices } from '../services/receiptProductPricing'
 import { createStockPurchase } from '../services/purchaseEntry'
-import { stagePurchaseBills, persistStagedBills, completeStagedBills, discardStagedBills } from '../services/purchaseBills'
+import { stagePurchaseBills, persistStagedBills, completeStagedBills, discardStagedBills, requireSavedPurchaseBill } from '../services/purchaseBills'
 import { usesSupermarketStock } from '../services/supermarketModule'
 import { BrowserWindow, dialog, shell, type IpcMain } from 'electron'
 import fs from 'fs'
@@ -305,6 +306,10 @@ Thank you for your partnership!
 }
 
 export function registerPurchaseHandlers(ipcMain: IpcMain) {
+  safeHandleModule(ipcMain,'purchases:billHistory','purchase_orders',(_e,filters:BillHistoryFilters={})=>{
+    const {mainBranchId}=requireMainBranchProcurement();const db=getDb()
+    return {success:true,data:{rows:listPurchaseBills(db,mainBranchId,filters),uploaders:db.prepare(`SELECT DISTINCT u.id,u.name FROM purchase_attachments a JOIN purchase_orders po ON po.id=a.purchase_id JOIN users u ON u.id=a.uploaded_by WHERE po.branch_id=? AND a.is_active=1 ORDER BY u.name`).all(mainBranchId)}}
+  })
   safeHandleModule(ipcMain,'purchases:chooseBills','purchase_orders',async()=>{
     const {user}=requireMainBranchProcurement()
     const selected=await dialog.showOpenDialog({title:'Select supplier bills',properties:['openFile','multiSelections'],filters:[{name:'Supplier bills',extensions:['pdf','png','jpg','jpeg']}]})
@@ -394,8 +399,8 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
           ORDER BY sort_order LIMIT 1
         )
         WHERE pi.po_id=?`).all(id)
-      const attachments = db.prepare(`SELECT id,original_name,mime_type,file_size,uploaded_at,uploaded_by
-        FROM purchase_attachments WHERE purchase_id=? AND is_active=1 ORDER BY uploaded_at DESC`).all(id)
+      const attachments = db.prepare(`SELECT pa.id,pa.original_name,pa.mime_type,pa.file_size,pa.uploaded_at,pa.uploaded_by,u.name uploaded_by_name
+        FROM purchase_attachments pa LEFT JOIN users u ON u.id=pa.uploaded_by WHERE pa.purchase_id=? AND pa.is_active=1 ORDER BY pa.uploaded_at DESC`).all(id)
       return { success: true, data: { ...po as object, items, attachments } }
   })
 
@@ -538,6 +543,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       const receivedProductIds: string[] = []
       const movementRecords: Record<string, unknown>[] = []
       const batchRecords: Record<string, unknown>[] = []
+      if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>) && ['RECEIVED','PARTIAL'].includes(status) && (!Array.isArray(payload.items)||!payload.items.some((item:Record<string,unknown>)=>Number(item.received_qty)>0))) throw new Error('Select received stock and upload a supplier bill before confirming receipt.')
       if ((status === 'RECEIVED' || status === 'PARTIAL') && payload.items) {
         db.transaction(() => {
           let allFullyReceived = true
@@ -617,6 +623,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
           }
 
           persistStagedBills(db,id,payload.attachment_token ? String(payload.attachment_token) : undefined,String(user.id))
+          if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>)) requireSavedPurchaseBill(db,id)
           // Auto-promote PARTIAL to RECEIVED if everything is now received
           if (status === 'PARTIAL' && allFullyReceived) patch.status = 'RECEIVED'
           if (status === 'RECEIVED') patch.received_at = now
@@ -752,6 +759,8 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
 
   // Bulk Import Purchase Orders from Excel (supports Grocery Store Tracker & Food City & Standard POs)
   safeHandleModule(ipcMain, 'purchases:importExcel', 'purchase_orders', async (_e, options?: { branchId?: string; defaultSupplierId?: string; markAsReceived?: boolean }) => {
+    requireMainBranchProcurement()
+    if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>) && options?.markAsReceived !== false) throw new Error('Import as draft orders, then upload a supplier bill before receiving stock.')
     return await importPOsFromExcel(options)
   })
 
@@ -835,6 +844,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
     if (!String(reason || '').trim()) throw new Error('A correction reason is required')
     const row = db.prepare(`SELECT pa.*,po.branch_id FROM purchase_attachments pa JOIN purchase_orders po ON po.id=pa.purchase_id WHERE pa.id=? AND pa.is_active=1`).get(attachmentId) as Record<string, unknown> | undefined
     if (!row || row.branch_id !== mainBranchId) throw new Error('Attachment not found')
+    if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>)) { const active=db.prepare('SELECT COUNT(*) n FROM purchase_attachments WHERE purchase_id=? AND is_active=1').get(row.purchase_id) as {n:number}; if(active.n<=1) throw new Error('Upload a replacement supplier bill before removing the last bill.') }
     db.transaction(() => {
       db.prepare(`UPDATE purchase_attachments SET is_active=0,deleted_by=?,deleted_at=datetime('now'),delete_reason=?,updated_at=datetime('now') WHERE id=?`).run(user.id || null, reason.trim(), attachmentId)
       logAudit(db, { userId: user.id as string, branchId: mainBranchId, action: 'PURCHASE_ATTACHMENT_CORRECTED', tableName: 'purchase_attachments', recordId: attachmentId, oldValues: row, newValues: { reason: reason.trim() } })

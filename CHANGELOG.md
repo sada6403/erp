@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.9.4 - 2026-11-07 - Required supplier bills and detailed upload history
+
+- Supplier PDF/image bills are required for new supermarket purchases and stock receiving. Validation runs inside the transaction so bill failures cannot commit stock or price changes.
+- Existing attached bills can be reused when receiving an order. Removing the last bill requires uploading its replacement first.
+- Supplier Bills now lists individual files with supplier, invoice/purchase reference, purchase date, upload date/time, uploader, file type and size.
+- Added upload-date, uploader, file-type and status filters alongside existing supplier/date/search filters, plus upload metadata in purchase details.
+- Supermarket Excel imports prepare drafts; upload the supplier bill before receiving stock.
+- Corrected the paid-purchase details display so a zero outstanding balance stays zero.
+
 ## 2.9.3 - 2026-11-06 - Supermarket stock purchases and product pricing
 
 - Added two stock-entry options on the existing purchase page: supplier purchase orders with receiving, and direct entry of delivered stock using product search.
