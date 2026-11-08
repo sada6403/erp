@@ -17,8 +17,15 @@ function privateDir(dir){fs.mkdirSync(dir,{recursive:true,mode:0o700});fs.chmodS
 function backupFile(source,destination){fs.copyFileSync(source,destination);fs.chmodSync(destination,0o600)}
 async function cli(binary,args,input,output){
  const child=spawn(binary,args,{env:{...process.env,MYSQL_PWD:cfg.password},stdio:['pipe','pipe','pipe']})
- child.stderr.resume() // Never export database errors/configuration to workflow logs.
- const done=new Promise((resolve,reject)=>{child.once('error',()=>reject(new Error('Database utility could not start')));child.once('close',code=>code===0?resolve():reject(new Error('Database utility failed; see the private server backup state')))})
+ let diagnostic=''
+ child.stderr.on('data',chunk=>{if(diagnostic.length<8192)diagnostic+=String(chunk)})
+ const done=new Promise((resolve,reject)=>{child.once('error',()=>reject(new Error('Database utility could not start')));child.once('close',code=>{
+  if(code===0)return resolve()
+  const error=new Error('Database utility failed')
+  const numeric=diagnostic.match(/ERROR\s+(\d+)/i)
+  error.publicCode=numeric?'MYSQL_'+numeric[1]:'DATABASE_CLI_FAILURE'
+  reject(error)
+ })})
  const streams=[]
  if(input)streams.push(pipeline(fs.createReadStream(input),child.stdin));else child.stdin.end()
  if(output)streams.push(pipeline(child.stdout,fs.createWriteStream(output,{flags:'wx',mode:0o600})));else child.stdout.resume()
@@ -114,4 +121,7 @@ async function publish(){
   throw error
  }
 }
-;(async()=>{if(process.argv[2]==='prepare')await prepare();else if(process.argv[2]==='publish')await publish();else throw new Error('Specify prepare or publish')})().catch(()=>{console.error(`Director deployment stopped at ${stage}. Existing backups remain private on the VPS; no credentials or tenant metadata are logged.`);process.exitCode=1})
+;(async()=>{if(process.argv[2]==='prepare')await prepare();else if(process.argv[2]==='publish')await publish();else throw new Error('Specify prepare or publish')})().catch(error=>{
+ const category=error.publicCode||(/^[A-Z_]+$/.test(error.code||'')?error.code:'VERIFICATION_FAILURE')
+ console.error(`Director deployment stopped at ${stage} (${category}). Existing backups remain private on the VPS; no credentials or tenant metadata are logged.`);process.exitCode=1
+})
