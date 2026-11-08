@@ -23,7 +23,8 @@ async function cli(binary,args,input,output){
   if(code===0)return resolve()
   const error=new Error('Database utility failed')
   const numeric=diagnostic.match(/ERROR\s+(\d+)/i)
-  error.publicCode=numeric?'MYSQL_'+numeric[1]:'DATABASE_CLI_FAILURE'
+  const command=['LOCK TABLES','CREATE','ALTER','DROP','TRIGGER','INSERT','SELECT','REFERENCES'].find(verb=>diagnostic.toUpperCase().includes(verb+' COMMAND DENIED'))
+  error.publicCode=(numeric?'MYSQL_'+numeric[1]:'DATABASE_CLI_FAILURE')+(command?'_'+command.replace(/ /g,'_'):'')
   reject(error)
  })})
  const streams=[]
@@ -52,7 +53,7 @@ async function prepare(){
   backupFile(indexFile,path.join(dir,'index.html'))
   for(const [schema,name]of [[cfg.database,'registry.sql'],[tenant,'tenant.sql']]){
    const destination=path.join(dir,name)
-   await cli('mysqldump',[...args(),'--single-transaction','--routines','--triggers','--no-tablespaces',schema],null,destination)
+   await cli('mysqldump',[...args(),'--single-transaction','--skip-add-locks','--routines','--triggers','--no-tablespaces',schema],null,destination)
    if(fs.statSync(destination).size<100)throw new Error('Backup is empty; refusing migration')
   }
   console.log('Private database/configuration backups completed.')
