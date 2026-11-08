@@ -15,7 +15,7 @@ const cfg={host:url?.hostname||env.MYSQL_HOST||'127.0.0.1',port:Number(url?.port
 const stamp=()=>new Date().toISOString().replace(/[:.]/g,'-')+'-'+crypto.randomBytes(3).toString('hex')
 function privateDir(dir){fs.mkdirSync(dir,{recursive:true,mode:0o700});fs.chmodSync(dir,0o700)}
 function backupFile(source,destination){fs.copyFileSync(source,destination);fs.chmodSync(destination,0o600)}
-async function cli(binary,args,input,output,socketAdmin=false){
+async function cli(binary,args,input,output,socketAdmin=false,capture=false){
  const child=spawn(binary,args,{env:{...process.env,MYSQL_PWD:socketAdmin?'':cfg.password},stdio:['pipe','pipe','pipe']})
  let diagnostic=''
  child.stderr.on('data',chunk=>{if(diagnostic.length<8192)diagnostic+=String(chunk)})
@@ -29,8 +29,12 @@ async function cli(binary,args,input,output,socketAdmin=false){
  })})
  const streams=[]
  if(input)streams.push(pipeline(fs.createReadStream(input),child.stdin));else child.stdin.end()
- if(output)streams.push(pipeline(child.stdout,fs.createWriteStream(output,{flags:'wx',mode:0o600})));else child.stdout.resume()
+ let captured=''
+ if(output)streams.push(pipeline(child.stdout,fs.createWriteStream(output,{flags:'wx',mode:0o600})))
+ else if(capture)child.stdout.on('data',chunk=>{captured+=String(chunk)})
+ else child.stdout.resume()
  await Promise.all([done,...streams])
+ return captured
 }
 const args=()=>[`--host=${cfg.host}`,`--port=${cfg.port}`,`--user=${cfg.user}`]
 async function migration(db){
@@ -58,31 +62,29 @@ async function prepare(){
   }
   console.log('Private database/configuration backups completed.')
   stage='VPS-local restore verification'
-  // Root deployment uses local socket administration only to clean up its own temporary test schema.
+  // Local socket administration is confined to restore/validation/cleanup of generated test schemas.
   // Never grant DROP or other broader privileges to the runtime application account.
   await cli('mysql',['--protocol=socket','--user=root','-e','SELECT 1'],null,null,true)
   // Early failed restore attempts can leave empty, generated test namespaces.
-  const [emptyCandidates]=await db.query("SELECT SCHEMA_NAME name FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE 'pos_director_restore_test_%'")
-  for(const candidate of emptyCandidates){
-   if(!/^pos_director_restore_test_[a-f0-9]{12}$/.test(candidate.name))continue
-   const [[tables]]=await db.query('SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA=?',[candidate.name])
-   if(Number(tables.n)===0)await cli('mysql',['--protocol=socket','--user=root','-e',`DROP DATABASE \`${candidate.name}\``],null,null,true)
+  const candidates=await cli('mysql',['--protocol=socket','--user=root','--batch','--skip-column-names','-e',"SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE 'pos_director_restore_test_%'"],null,null,true,true)
+  for(const name of candidates.trim().split('\n')){
+   if(!/^pos_director_restore_test_[a-f0-9]{12}$/.test(name))continue
+   const tables=await cli('mysql',['--protocol=socket','--user=root','--batch','--skip-column-names','-e',`SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA='${name}'`],null,null,true,true)
+   if(Number(tables.trim())===0)await cli('mysql',['--protocol=socket','--user=root','-e',`DROP DATABASE \`${name}\``],null,null,true)
   }
   // Restore proof is performed on the VPS in a temporary database, never exported.
   restoreSchema='pos_director_restore_test_'+crypto.randomBytes(6).toString('hex')
   await db.query(`CREATE DATABASE \`${restoreSchema}\``)
   // Restoration is a maintenance operation, confined to this generated test database.
   await cli('mysql',['--protocol=socket','--user=root',restoreSchema],path.join(dir,'tenant.sql'),null,true)
-  const restored=await mysql.createConnection({...cfg,database:restoreSchema})
-  try{
-   await migration(restored)
-   const original=await mysql.createConnection({...cfg,database:tenant})
-   try{for(const table of ['invoices','customers']){
-    const [[source]]=await original.query(`SELECT COUNT(*) n FROM \`${table}\``)
-    const [[copy]]=await restored.query(`SELECT COUNT(*) n FROM \`${table}\``)
-    if(String(source.n)!==String(copy.n))throw new Error('Restore verification failed; refusing production migration')
-   }}finally{await original.end()}
-  }finally{await restored.end()}
+  stage='restored test-schema validation'
+  await cli('mysql',['--protocol=socket','--user=root',restoreSchema],root+'/backend/database/migrate-007-management.sql',null,true)
+  const original=await mysql.createConnection({...cfg,database:tenant})
+  try{for(const table of ['invoices','customers']){
+   const [[source]]=await original.query(`SELECT COUNT(*) n FROM \`${table}\``)
+   const copy=await cli('mysql',['--protocol=socket','--user=root','--batch','--skip-column-names',restoreSchema,'-e',`SELECT COUNT(*) FROM \`${table}\``],null,null,true,true)
+   if(String(source.n)!==copy.trim())throw new Error('Restore verification failed; refusing production migration')
+  }}finally{await original.end()}
   await cli('mysql',['--protocol=socket','--user=root','-e',`DROP DATABASE \`${restoreSchema}\``],null,null,true);restoreSchema=null
   stage='confirmed tenant additive migration'
   const target=await mysql.createConnection({...cfg,database:tenant})
