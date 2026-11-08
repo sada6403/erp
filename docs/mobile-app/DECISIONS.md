@@ -45,19 +45,20 @@
 `GET /agent/dashboard` now returns an optional `extras` object: on_duty, branch_name, families_served (distinct customers delivered + chit members), smartbuy_members, cod_to_collect (open unpaid COD orders), on_time_pct (delivered within 24 h of order creation), rank_label/rank_detail/tier (rank by this month's commission among active agents of the same branch; Tier 1 = top 3, Tier 2 = 4-10), goal (from `agents.monthly_target`, only when > 0), incentive_banner (when drops are pending) and badges (Century Club >= 100 deliveries, Quick Courier >= 95% on time with >= 10 deliveries, Top Enroller >= 25 members). Customer rating and review count have no data source, so they stay hidden. The app renders whatever is present and hides the rest.
 
 ## 2026-11-08 Sales force (Run 3): open questions and the defaults I will use
-Nothing here is built until the demo design is approved. Change any default by telling me.
+Nothing here is built until the demo design is approved. Defaults 1-3 and 5-12 approved by Moni on 2026-11-08 (3 and 6 still to confirm with the company); 4 changed and 13 added the same day.
 
 | # | Question | Default |
 |---|---|---|
 | 1 | One app role per level, or one role plus a level? | One `staff` app role; the level (`level_key`) is read server-side from `staff_assignments`. |
 | 2 | Where does the hierarchy live? | New synced `staff_assignments`; `agents.position` stays a free-text label. |
-| 3 | Director / AGM / Manager scope | All company-wide, ordered by rank; AGM sees Manager and below, Manager sees Zonal and below. |
-| 4 | What counts as "achieved"? | Invoiced sales + Smart Buy registrations + collections attributed to the officer's customers; calendar month. |
+| 3 | Director / AGM / Manager scope | All company-wide, ordered by rank; AGM sees Manager and below, Manager sees Zonal and below. | **Confirm with company.**
+| 4 | What counts as "achieved"? (**changed 2026-11-08 after design review**) | Money achievement = invoiced sales **net of returns/cancellations** + Smart Buy contributions **actually collected**, **excluding invoices paid with the Smart Buy wallet** (that money was already counted as contributions). Smart Buy **registrations** are a separate count KPI with their own optional target and do **not** add to the money amount. Period = calendar month, by payment/invoice date. |
 | 5 | Manager target | Roll-up of the team's active targets, unless the manager has an override target. |
-| 6 | Salary threshold and slabs | Global per level, default threshold 50%, overridable per person; basic salary entered in the POS. |
+| 6 | Salary threshold and slabs | Global per level, default threshold 50%, overridable per person; basic salary entered in the POS. | **Confirm with company.** Slab rates in the demo (1.5% / 3% / 4.5%) are placeholders; the calculation reads slabs, threshold and basic salary from `salary_rules` / `commission_slabs`, never from code.
 | 7 | GPS denied during a visit | Visit is saved with `gps_missing` and shown to the manager. |
 | 8 | Visit photos | Private storage, kept 180 days. |
 | 9 | Follow-up reminders | Local scheduled notification at the follow-up time; server push fallback only after a scheduler is approved. |
 | 10 | Card gateway | PayHere sandbox only; amount taken from the server record on the signed callback. |
 | 11 | Existing `agents.monthly_target` | Kept as the fallback target until `staff_targets` has a row for the period. |
 | 12 | Reassign customers/members | Allowed only between Field Officers inside the caller's scope; ledger lines already approved keep their original agent. |
+| 13 | Attribution (**new**) | Credit goes to the officer assigned to the customer **at the time of the sale/collection**; the `agent_id` is stored on the transaction. Reassigning a customer or member never moves past credit. |

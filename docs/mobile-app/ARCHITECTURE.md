@@ -441,9 +441,9 @@ Synced (POS and cloud; added to `ALLOWED_TABLES`, `REQUIRED_SYNC_PARENTS`, the `
 - `branches.region_id` (new column; today a branch reaches a region only through `agents.region_id`).
 - `org_levels(level_key, name, rank, scope_type)`: the 7 rows above, seeded.
 - `staff_assignments(id, staff_id -> agents.id, level_key, scope_type, scope_id, reports_to_staff_id, active_from, active_to)`: the single source of truth for hierarchy and scope. History is kept by closing `active_to`. `agents.position` stays a free-text label.
-- `staff_targets(id, staff_id, period 'YYYY-MM', amount, active_from, deactivated_at, set_by, is_override)`: dynamic, per person per period, history kept. A manager's target is the roll-up of the team's active targets unless an `is_override` row exists.
+- `staff_targets(id, staff_id, period 'YYYY-MM', amount, registrations_target (optional count), active_from, deactivated_at, set_by, is_override)`: dynamic, per person per period, history kept. A manager's target is the roll-up of the team's active targets unless an `is_override` row exists.
 - `salary_rules(id, level_key, basic_salary, threshold_pct default 50, active_from, active_to)` and `commission_slabs(id, salary_rule_id, from_pct, to_pct, rate)`: configurable.
-- `staff_monthly_performance(staff_id, period, target, achieved_sales, smartbuy_regs, collections, achievement_pct, salary_eligible, salary_amount, commission_amount, status)`: computed, then approved, then paid.
+- `staff_monthly_performance(staff_id, period, target, net_sales, contributions_collected, achieved_amount, smartbuy_regs (count KPI, not in the amount), achievement_pct, salary_eligible, salary_amount, commission_amount, status)`: computed, then approved, then paid.
 
 Cloud-only (`backend/lib/appSchema.ts`, mobile originated, high volume):
 - `prospects`, `field_visits(id, staff_id, customer_id|prospect_id, lat, lng, gps_missing, visited_at, outcome, reason, follow_up_at, notes, photo_ref, client_event_id UNIQUE)`, `follow_ups` (derived from visits).
@@ -466,7 +466,9 @@ App roles: widen `AppRole` additively with one `staff` value; the level comes fr
 
 ### 18.5 Calculation rules
 
-- **Achievement %** = achieved / active target for the calendar month. Achieved = invoiced sales + Smart Buy registrations + collections attributed to the officer's customers (each source counted once; attribution columns already exist: `invoices.agent_id`, `chit_members.agent_id`, `chit_contributions.collected_by_agent_id`, `customer_orders.assigned_agent_id`).
+- **Achievement %** = money achieved / active money target for the calendar month (by payment/invoice date). Money achieved = invoiced sales net of returns/cancellations + Smart Buy contributions actually collected, **excluding invoices paid with the Smart Buy wallet** (already counted as contributions). Smart Buy **registrations** are a separate count KPI with an optional own target and never add to the money amount.
+- **Attribution:** credit goes to the officer assigned to the customer at the time of the sale/collection; `agent_id` is stored on the transaction (`invoices.agent_id`, `chit_members.agent_id`, `chit_contributions.collected_by_agent_id`, `customer_orders.assigned_agent_id`). Reassignment never moves past credit.
+- **Rates are data:** threshold, basic salary and slabs are read from `salary_rules` / `commission_slabs`, never hard-coded.
 - **Salary** is paid only if achievement >= `threshold_pct` (default 50, configurable).
 - **Commission** scales with achievement through `commission_slabs`. It is produced through the **existing** commission engine and `commission_ledger` (`electron/services/commissionEngine.ts`), not a second engine.
 - **Approval** reuses the existing chain `pending_manager_approval -> pending_admin_approval -> approved_for_payment -> paid` and `commission_approval_logs`.
