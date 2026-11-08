@@ -4,22 +4,9 @@ on:
 permissions:
   contents: read
 jobs:
-  inspect-director-routing:
+  verify-target-company:
     runs-on: self-hosted
     steps:
-      - name: Read deployment capabilities and public routing
-        shell: bash
-        run: |
-          set -euo pipefail
-          id -un
-          sudo -n -l
-          for p in /var/www/updates /var/www/pos-backend /etc/nginx/sites-enabled; do
-            ls -ld "$p"
-          done
-          grep -R -nE 'server_name|location |proxy_pass|root |include |alias ' /etc/nginx/sites-enabled /etc/nginx/conf.d || true
-          if test -r /usr/local/bin/pos-deploy; then
-            sed -n '1,125p' /usr/local/bin/pos-deploy
-          fi
-          command -v mysqldump || true
-          command -v mysql || true
-          curl --fail --silent http://127.0.0.1:4001/api/health
+      - uses: actions/checkout@v4
+      - name: Verify the requested company without exporting metadata
+        run: node scripts/inspect-director-vps.cjs
