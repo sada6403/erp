@@ -61,10 +61,18 @@ async function prepare(){
   // Root deployment uses local socket administration only to clean up its own temporary test schema.
   // Never grant DROP or other broader privileges to the runtime application account.
   await cli('mysql',['--protocol=socket','--user=root','-e','SELECT 1'],null,null,true)
+  // Early failed restore attempts can leave empty, generated test namespaces.
+  const [emptyCandidates]=await db.query("SELECT SCHEMA_NAME name FROM information_schema.SCHEMATA WHERE SCHEMA_NAME LIKE 'pos_director_restore_test_%'")
+  for(const candidate of emptyCandidates){
+   if(!/^pos_director_restore_test_[a-f0-9]{12}$/.test(candidate.name))continue
+   const [[tables]]=await db.query('SELECT COUNT(*) n FROM information_schema.TABLES WHERE TABLE_SCHEMA=?',[candidate.name])
+   if(Number(tables.n)===0)await cli('mysql',['--protocol=socket','--user=root','-e',`DROP DATABASE \`${candidate.name}\``],null,null,true)
+  }
   // Restore proof is performed on the VPS in a temporary database, never exported.
   restoreSchema='pos_director_restore_test_'+crypto.randomBytes(6).toString('hex')
   await db.query(`CREATE DATABASE \`${restoreSchema}\``)
-  await cli('mysql',[...args(),restoreSchema],path.join(dir,'tenant.sql'),null)
+  // Restoration is a maintenance operation, confined to this generated test database.
+  await cli('mysql',['--protocol=socket','--user=root',restoreSchema],path.join(dir,'tenant.sql'),null,true)
   const restored=await mysql.createConnection({...cfg,database:restoreSchema})
   try{
    await migration(restored)
