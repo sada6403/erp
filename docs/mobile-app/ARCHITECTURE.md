@@ -414,3 +414,75 @@ How:
 - [ ] OTA hosting: EAS Update (check current pricing for the expected user count) or self-hosted on the VPS?
 - [ ] Live agent location on the map during delivery — wanted? (agents' consent + battery)
 - [ ] Product reviews: who moderates them in POS?
+
+---
+
+## 18. Sales force (Run 3 proposal, design first, nothing built yet)
+
+One app, one login page. After login the role decides the dashboard. Status: **proposal, awaiting Moni's approval of the demo design.**
+
+### 18.1 Hierarchy and scope
+
+| Rank | Level (`level_key`) | Scope | Sees / controls |
+|---|---|---|---|
+| 1 | Director (`director`) | whole company | everyone below |
+| 2 | Assistant General Manager (`agm`) | whole company | Manager and below |
+| 3 | Manager (`manager`) | whole company | Zonal Manager and below |
+| 4 | Zonal Manager (`zonal_manager`) | one zone | Regional Manager and below in the zone |
+| 5 | Regional Manager (`regional_manager`) | one region | Branch Manager and below in the region |
+| 6 | Branch Manager (`branch_manager`) | one branch | Field Officers of the branch |
+| 7 | Field Officer (`field_officer`, = `agents` row) | self | own customers, visits, targets |
+
+Each level sees and controls only **strict descendants** inside its scope: team view, target vs achievement, visits and follow-ups, collections, assign targets, reassign customers/members, activate/deactivate subordinates (every change audited in `audit_logs`). Nobody can read or change peers, ancestors, or other scopes, and nobody can raise their own target or salary.
+
+### 18.2 Data model (additive only, see skill `erp-schema-change`)
+
+Synced (POS and cloud; added to `ALLOWED_TABLES`, `REQUIRED_SYNC_PARENTS`, the `syncService` pull list, a desktop migration, and `enqueuSync` on write):
+- `branches.region_id` (new column; today a branch reaches a region only through `agents.region_id`).
+- `org_levels(level_key, name, rank, scope_type)`: the 7 rows above, seeded.
+- `staff_assignments(id, staff_id -> agents.id, level_key, scope_type, scope_id, reports_to_staff_id, active_from, active_to)`: the single source of truth for hierarchy and scope. History is kept by closing `active_to`. `agents.position` stays a free-text label.
+- `staff_targets(id, staff_id, period 'YYYY-MM', amount, active_from, deactivated_at, set_by, is_override)`: dynamic, per person per period, history kept. A manager's target is the roll-up of the team's active targets unless an `is_override` row exists.
+- `salary_rules(id, level_key, basic_salary, threshold_pct default 50, active_from, active_to)` and `commission_slabs(id, salary_rule_id, from_pct, to_pct, rate)`: configurable.
+- `staff_monthly_performance(staff_id, period, target, achieved_sales, smartbuy_regs, collections, achievement_pct, salary_eligible, salary_amount, commission_amount, status)`: computed, then approved, then paid.
+
+Cloud-only (`backend/lib/appSchema.ts`, mobile originated, high volume):
+- `prospects`, `field_visits(id, staff_id, customer_id|prospect_id, lat, lng, gps_missing, visited_at, outcome, reason, follow_up_at, notes, photo_ref, client_event_id UNIQUE)`, `follow_ups` (derived from visits).
+- `smartbuy_join_requests` (already planned in section 4; the agent-initiated variant carries `agent_id`; NIC photos private).
+- `payment_transactions(id, provider, order_id|contribution_id, amount, status, provider_ref, callback_hash)`.
+
+App roles: widen `AppRole` additively with one `staff` value; the level comes from `staff_assignments`, never from the client. Installed apps must keep working (AGENTS rule 13).
+
+### 18.3 Server-side scoping (security)
+
+- New `scopeOf(user)` in `backend/lib/app/` resolves the caller to a subtree of staff ids and branch ids from `staff_assignments`. It is loaded in `requireAppUser` on every request (not stored in the JWT, so a change applies immediately).
+- Every manager query filters on that subtree (`staff_id IN (...)` or `branch_id IN (...)`). An id outside the subtree answers 404.
+- Mutations (assign target, reassign customer/member, activate/deactivate) only on strict descendants, with an `audit_logs` row.
+- Salary and commission data are visible only to the person, their upward chain, and HR/admin (`all` permission).
+- Tests per level: own scope OK; sibling, other scope and ancestor denied; no token; wrong App Key.
+
+### 18.4 App API (planned, `/api/app/v1/...`)
+
+`GET /staff/me/dashboard`, `GET /staff/team` (tree, scoped), `GET /staff/{id}/performance?period=`, `GET/POST /staff/{id}/targets`, `POST /staff/{id}/active`, `POST /staff/customers/{id}/reassign`, `GET /staff/leaderboard`, `GET /staff/alerts`, `POST /visits` (idempotent on `client_event_id`), `GET /visits/today`, `GET /visits/report` (scoped), `POST /smartbuy/join-requests` (agent initiated, multipart), `GET /staff/me/statement?period=`, `POST /payments/card/intent`, `POST /payments/card/callback` (provider call, no user auth, signature verified).
+
+### 18.5 Calculation rules
+
+- **Achievement %** = achieved / active target for the calendar month. Achieved = invoiced sales + Smart Buy registrations + collections attributed to the officer's customers (each source counted once; attribution columns already exist: `invoices.agent_id`, `chit_members.agent_id`, `chit_contributions.collected_by_agent_id`, `customer_orders.assigned_agent_id`).
+- **Salary** is paid only if achievement >= `threshold_pct` (default 50, configurable).
+- **Commission** scales with achievement through `commission_slabs`. It is produced through the **existing** commission engine and `commission_ledger` (`electron/services/commissionEngine.ts`), not a second engine.
+- **Approval** reuses the existing chain `pending_manager_approval -> pending_admin_approval -> approved_for_payment -> paid` and `commission_approval_logs`.
+- A monthly job computes `staff_monthly_performance`, then enters the approval chain.
+
+### 18.6 Field visits, offline, reminders
+
+- A visit is GPS + time + outcome (`purchased` -> create order / Smart Buy join, `not_interested` + reason, `come_back` + date/time, `not_at_home`, `already_member`), notes, optional photo. GPS denied: saved with `gps_missing`, shown to the manager.
+- Offline: new outbox item type `visit` (idempotency key = `client_event_id`), same flush rules as deliveries.
+- Reminders: a local scheduled notification at `follow_up_at` (Expo notifications date trigger, deep link in `data.url`) plus a server push fallback through `notification_jobs`. The server fallback needs a scheduler hitting `/cron/notifications` (none exists today): **stop and ask before deploying one**.
+- Managers see visit reports and follow-up compliance (due vs done) for their subtree.
+
+### 18.7 Card payment
+
+Hosted page only (PayHere first), behind a provider-agnostic `PaymentProvider` interface (`createIntent`, `verifyCallback`). The app opens the hosted URL; card data never touches the app or server. The callback signature is verified server-side and the amount is taken from the server record, never from the client. Sandbox keys only until Moni approves live keys.
+
+### 18.8 POS desktop additions
+
+Hierarchy page (assignments), targets page, salary rules and slabs page, performance approvals (reusing the commission approval screens), Smart Buy join-request approval page. Patterns: `electron/ipc/regions.ts`, `src/pages/admin/RegionsPage.tsx`, `commissions:ledger:approve`.

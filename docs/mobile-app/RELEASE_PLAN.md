@@ -48,3 +48,9 @@ Screens for these show "Coming in the next update", never mock data.
 ## Added 2026-11-07: POS desktop release and branch hygiene
 - Convert-to-invoice lives in the POS desktop (`orders:convertToInvoice`, delivery fee on invoices, new columns). v1.0 therefore also needs a **POS desktop release with these changes installed on all branch PCs before the app goes live**. Plan it for **day 11 (Wed 18 Nov) together with the backend deploy**. Order: backend first (new columns migrate on first API hit), then desktop. Both only with Moni's approval.
 - `main` moves fast (other developers release v2.9.x). Rebase `feature/mobile-app-foundation` on `origin/main` **at least once a day** and report any conflict in POS files (`electron/ipc/invoices.ts`, `orders.ts`, `electron/preload.ts`, `electron/database.ts`) immediately. Last checked 2026-11-07: branch is 0 commits behind `origin/main`.
+
+## Proposed 2026-11-08: Sales force (Run 3) split between v1.0 and v1.1
+Not approved yet; see ARCHITECTURE.md section 18.
+- **v1.0 (21 Nov, if the demo is approved this week):** hierarchy + role dashboards (read-only), targets set in the POS, field visits with offline outbox and follow-up reminders (local notifications), agent-initiated Smart Buy join with POS approval.
+- **v1.1:** salary/commission payroll and approvals, card payments live (sandbox code may ship earlier behind a flag, never live keys), in-app target assignment, server-side reminder fallback (needs a scheduler).
+- Risk to v1.0: this adds POS desktop migrations (`branches.region_id`, `staff_assignments`, `staff_targets`) to the day-11 POS release; backend first, then desktop, only with Moni's approval.
