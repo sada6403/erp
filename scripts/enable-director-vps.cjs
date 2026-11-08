@@ -15,8 +15,8 @@ const cfg={host:url?.hostname||env.MYSQL_HOST||'127.0.0.1',port:Number(url?.port
 const stamp=()=>new Date().toISOString().replace(/[:.]/g,'-')+'-'+crypto.randomBytes(3).toString('hex')
 function privateDir(dir){fs.mkdirSync(dir,{recursive:true,mode:0o700});fs.chmodSync(dir,0o700)}
 function backupFile(source,destination){fs.copyFileSync(source,destination);fs.chmodSync(destination,0o600)}
-async function cli(binary,args,input,output){
- const child=spawn(binary,args,{env:{...process.env,MYSQL_PWD:cfg.password},stdio:['pipe','pipe','pipe']})
+async function cli(binary,args,input,output,socketAdmin=false){
+ const child=spawn(binary,args,{env:{...process.env,MYSQL_PWD:socketAdmin?'':cfg.password},stdio:['pipe','pipe','pipe']})
  let diagnostic=''
  child.stderr.on('data',chunk=>{if(diagnostic.length<8192)diagnostic+=String(chunk)})
  const done=new Promise((resolve,reject)=>{child.once('error',()=>reject(new Error('Database utility could not start')));child.once('close',code=>{
@@ -53,11 +53,14 @@ async function prepare(){
   backupFile(indexFile,path.join(dir,'index.html'))
   for(const [schema,name]of [[cfg.database,'registry.sql'],[tenant,'tenant.sql']]){
    const destination=path.join(dir,name)
-   await cli('mysqldump',[...args(),'--single-transaction','--skip-add-locks','--routines','--triggers','--no-tablespaces',schema],null,destination)
+   await cli('mysqldump',[...args(),'--single-transaction','--skip-add-locks','--skip-add-drop-table','--routines','--triggers','--no-tablespaces',schema],null,destination)
    if(fs.statSync(destination).size<100)throw new Error('Backup is empty; refusing migration')
   }
   console.log('Private database/configuration backups completed.')
   stage='VPS-local restore verification'
+  // Root deployment uses local socket administration only to clean up its own temporary test schema.
+  // Never grant DROP or other broader privileges to the runtime application account.
+  await cli('mysql',['--protocol=socket','--user=root','-e','SELECT 1'],null,null,true)
   // Restore proof is performed on the VPS in a temporary database, never exported.
   restoreSchema='pos_director_restore_test_'+crypto.randomBytes(6).toString('hex')
   await db.query(`CREATE DATABASE \`${restoreSchema}\``)
@@ -72,7 +75,7 @@ async function prepare(){
     if(String(source.n)!==String(copy.n))throw new Error('Restore verification failed; refusing production migration')
    }}finally{await original.end()}
   }finally{await restored.end()}
-  await db.query(`DROP DATABASE \`${restoreSchema}\``);restoreSchema=null
+  await cli('mysql',['--protocol=socket','--user=root','-e',`DROP DATABASE \`${restoreSchema}\``],null,null,true);restoreSchema=null
   stage='confirmed tenant additive migration'
   const target=await mysql.createConnection({...cfg,database:tenant})
   try{
@@ -85,7 +88,7 @@ async function prepare(){
   fs.writeFileSync(path.join(stateDir,'prepared-v1.json'),JSON.stringify({backupDirectory:dir,preparedAt:new Date().toISOString()}),{mode:0o600})
   console.log('Director setup backup, restore verification and target-only additive migration completed. Private backups remain on the VPS.')
  }finally{
-  if(restoreSchema&&/^pos_director_restore_test_[a-f0-9]{12}$/.test(restoreSchema))await db.query(`DROP DATABASE \`${restoreSchema}\``).catch(()=>{})
+  if(restoreSchema&&/^pos_director_restore_test_[a-f0-9]{12}$/.test(restoreSchema))await cli('mysql',['--protocol=socket','--user=root','-e',`DROP DATABASE \`${restoreSchema}\``],null,null,true).catch(()=>{})
   await db.end()
  }
 }
