@@ -1,6 +1,23 @@
 import type { OrderItemDto, OrderStatus } from './orders'
 
+/** Optional, derived dashboard figures; every field may be absent. */
+export interface AgentDashboardExtrasDto {
+  on_duty?: boolean
+  branch_name?: string | null
+  families_served?: number
+  smartbuy_members?: number
+  cod_to_collect?: number
+  on_time_pct?: number | null
+  rank_label?: string
+  rank_detail?: string | null
+  tier?: string
+  goal?: { title: string; subtitle: string; target: number; earned: number }
+  incentive_banner?: string
+  badges?: string[]
+}
+
 export interface AgentDashboardResponse {
+  extras?: AgentDashboardExtrasDto
   agent: { id: string; code: string; name: string; branch_id: string | null }
   members_count: number
   schemes_count: number
