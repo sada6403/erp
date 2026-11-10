@@ -1,0 +1,285 @@
+name: Release Desktop Only
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: 'Expected desktop version in package.json (e.g. 2.9.5)'
+        required: true
+        default: '2.9.5'
+        type: string
+      expected_commit:
+        description: 'Approved full 40-char commit SHA to build and publish'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-vps-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      commit_sha: ${{ steps.check.outputs.commit_sha }}
+      short_sha: ${{ steps.check.outputs.short_sha }}
+      prev_version: ${{ steps.check.outputs.prev_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate commit SHA, version, and HTTPS update feed
+        id: check
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          EXPECTED_COMMIT: ${{ inputs.expected_commit }}
+          ACTUAL_COMMIT: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$EXPECTED_COMMIT" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "ERROR: expected_commit must be a full 40-character commit SHA (got: $EXPECTED_COMMIT)" >&2
+            exit 1
+          fi
+
+          if [[ "${EXPECTED_COMMIT,,}" != "${ACTUAL_COMMIT,,}" ]]; then
+            echo "ERROR: Checked-out commit $ACTUAL_COMMIT does not match approved expected_commit $EXPECTED_COMMIT" >&2
+            exit 1
+          fi
+
+          if [[ ! "$EXPECTED_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: expected_version must match semver X.Y.Z (got: $EXPECTED_VERSION)" >&2
+            exit 1
+          fi
+
+          pkg_version="$(node -p "require('./package.json').version")"
+          lock_root_version="$(node -p "require('./package-lock.json').version")"
+          lock_pkg_version="$(node -p "require('./package-lock.json').packages[''].version")"
+          publish_url="$(node -p "(require('./package.json').build && require('./package.json').build.publish && require('./package.json').build.publish.url) || ''")"
+
+          if [[ "$pkg_version" != "$EXPECTED_VERSION" || "$lock_root_version" != "$EXPECTED_VERSION" || "$lock_pkg_version" != "$EXPECTED_VERSION" ]]; then
+            echo "ERROR: Version mismatch: package.json=$pkg_version lock_root=$lock_root_version lock_pkg=$lock_pkg_version expected=$EXPECTED_VERSION" >&2
+            exit 1
+          fi
+
+          if [[ "$publish_url" != "https://updates.nfplantation.com/" ]]; then
+            echo "ERROR: Expected HTTPS publish.url https://updates.nfplantation.com/, got '$publish_url'" >&2
+            exit 1
+          fi
+
+          if ! grep -Eq "^## ${EXPECTED_VERSION//./\\.} " CHANGELOG.md; then
+            echo "ERROR: CHANGELOG.md does not contain heading for version $EXPECTED_VERSION" >&2
+            exit 1
+          fi
+
+          prev_version="$(curl --fail --silent --show-error https://updates.nfplantation.com/latest.yml \
+            | sed -nE 's/^version:[[:space:]]*([^[:space:]]+).*/\1/p' \
+            | head -n 1)"
+
+          if [[ -z "$prev_version" ]]; then
+            echo "ERROR: Could not read live previous version from https://updates.nfplantation.com/latest.yml" >&2
+            exit 1
+          fi
+
+          echo "Verified commit SHA: $ACTUAL_COMMIT"
+          echo "Verified target version: $pkg_version (live currently: $prev_version)"
+          echo "version=$pkg_version" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$ACTUAL_COMMIT" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${ACTUAL_COMMIT:0:7}" >> "$GITHUB_OUTPUT"
+          echo "prev_version=$prev_version" >> "$GITHUB_OUTPUT"
+
+  build-desktop:
+    needs: validate
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies and native Electron bindings
+        shell: pwsh
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx electron-builder install-app-deps
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Run TypeScript, unit, and SQLite integration checks
+        shell: pwsh
+        run: |
+          npm run typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx tsc -p tsconfig.electron.json --noEmit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:unit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:integration
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Windows NSIS installer
+        shell: pwsh
+        run: |
+          npm run build:win
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate installer filename, size, SHA-512, and app-update.yml
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = $env:RELEASE_VERSION
+          $installerName = "Enterprise POS ERP Setup $version.exe"
+          $installerPath = "release/$installerName"
+          $blockmapPath = "$installerPath.blockmap"
+          $latestPath = 'release/latest.yml'
+          $appUpdatePath = 'release/win-unpacked/resources/app-update.yml'
+
+          foreach ($p in @($installerPath, $blockmapPath, $latestPath, $appUpdatePath)) {
+            if (-not (Test-Path -LiteralPath $p)) {
+              throw "Missing build artifact: $p"
+            }
+          }
+
+          $fileInfo = Get-Item -LiteralPath $installerPath
+          $stream = [System.IO.File]::OpenRead($fileInfo.FullName)
+          try {
+            $sha = [System.Security.Cryptography.SHA512]::Create()
+            $computedSha512 = [System.Convert]::ToBase64String($sha.ComputeHash($stream))
+          } finally {
+            $stream.Dispose()
+          }
+
+          $metadata = Get-Content -LiteralPath $latestPath -Raw
+          if ($metadata -notmatch "(?m)^version:\s*$([regex]::Escape($version))\s*$") {
+            throw "latest.yml version mismatch"
+          }
+          if ($metadata -notmatch "(?m)^path:\s*$([regex]::Escape($installerName))\s*$") {
+            throw "latest.yml path mismatch"
+          }
+          if ($metadata -notmatch "(?m)^\s*size:\s*$($fileInfo.Length)\s*$") {
+            throw "latest.yml size mismatch (expected $($fileInfo.Length))"
+          }
+          if ($metadata -notmatch "(?m)^sha512:\s*$([regex]::Escape($computedSha512))\s*$") {
+            throw "latest.yml SHA-512 mismatch (expected $computedSha512)"
+          }
+
+          $appUpdate = Get-Content -LiteralPath $appUpdatePath -Raw
+          if ($appUpdate -notmatch '(?m)^url:\s*https://updates\.nfplantation\.com/\s*$') {
+            throw "app-update.yml does not point to https://updates.nfplantation.com/"
+          }
+
+          Write-Host "Validated $installerName (size=$($fileInfo.Length), sha512=$computedSha512)"
+
+      - name: Upload immutable desktop installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.short_sha }}
+          path: |
+            release/Enterprise POS ERP Setup ${{ needs.validate.outputs.version }}.exe
+            release/latest.yml
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload installer blockmap and updater diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-release-diagnostics-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.short_sha }}
+          path: |
+            release/Enterprise POS ERP Setup ${{ needs.validate.outputs.version }}.exe.blockmap
+            release/win-unpacked/resources/app-update.yml
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-desktop:
+    needs:
+      - validate
+      - build-desktop
+    runs-on: self-hosted
+    timeout-minutes: 15
+    steps:
+      - name: Archive existing live rollback metadata before publication
+        env:
+          PREV_VERSION: ${{ needs.validate.outputs.prev_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf rollback-meta && mkdir -p rollback-meta
+          curl --fail --silent --show-error https://updates.nfplantation.com/latest.yml -o rollback-meta/latest.yml
+          cp rollback-meta/latest.yml "rollback-meta/latest-${PREV_VERSION}.yml"
+          encoded_prev="Enterprise%20POS%20ERP%20Setup%20${PREV_VERSION}.exe"
+          curl --fail --silent --head "https://updates.nfplantation.com/${encoded_prev}" >/dev/null
+          curl --fail --silent --head "http://72.61.115.222/updates/${encoded_prev}" >/dev/null
+
+      - name: Upload immutable rollback metadata artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-rollback-${{ needs.validate.outputs.prev_version }}-before-${{ needs.validate.outputs.version }}
+          path: rollback-meta/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Prepare clean VPS staging directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/pos-desktop-release rollback-meta
+          mkdir -p /tmp/pos-desktop-release
+
+      - name: Download verified desktop release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: desktop-release-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.short_sha }}
+          path: /tmp/pos-desktop-release
+
+      - name: Validate staged files and publish via desktop-only VPS entrypoint
+        env:
+          RELEASE_DIR: /tmp/pos-desktop-release
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          installer="$RELEASE_DIR/Enterprise POS ERP Setup $RELEASE_VERSION.exe"
+          metadata="$RELEASE_DIR/latest.yml"
+          [[ -f "$installer" && -f "$metadata" ]] || { echo "Missing staged release files" >&2; exit 1; }
+          actual_sha="$(openssl dgst -sha512 -binary "$installer" | openssl base64 -A)"
+          declared_sha="$(sed -nE 's/^sha512:[[:space:]]*(.+)[[:space:]]*$/\1/p' "$metadata" | tail -n 1)"
+          [[ "$actual_sha" == "$declared_sha" ]] || { echo "Staged SHA-512 mismatch before publish" >&2; exit 1; }
+          : > "$RELEASE_DIR/.publish-request"
+          sudo /usr/local/bin/pos-deploy
+
+      - name: Clean VPS staging directory even on failure
+        if: always()
+        shell: bash
+        run: rm -rf /tmp/pos-desktop-release
+
+      - name: Verify public HTTPS, HTTP, and rollback installer availability
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          PREV_VERSION: ${{ needs.validate.outputs.prev_version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          https_meta="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 https://updates.nfplantation.com/latest.yml)"
+          grep -Eq "^version:[[:space:]]*$RELEASE_VERSION[[:space:]]*$" <<< "$https_meta"
+          grep -Fq "path: Enterprise POS ERP Setup $RELEASE_VERSION.exe" <<< "$https_meta"
+
+          http_meta="$(curl --fail --silent --show-error --retry 5 --retry-delay 2 http://72.61.115.222/updates/latest.yml)"
+          grep -Eq "^version:[[:space:]]*$RELEASE_VERSION[[:space:]]*$" <<< "$http_meta"
+
+          encoded_new="Enterprise%20POS%20ERP%20Setup%20${RELEASE_VERSION}.exe"
+          encoded_prev="Enterprise%20POS%20ERP%20Setup%20${PREV_VERSION}.exe"
+          curl --fail --silent --head "https://updates.nfplantation.com/${encoded_new}" >/dev/null
+          curl --fail --silent --head "https://updates.nfplantation.com/${encoded_prev}" >/dev/null
+          curl --fail --silent --head "http://72.61.115.222/updates/${encoded_prev}" >/dev/null
+          curl --fail --silent --show-error https://updates.nfplantation.com/ >/dev/null
