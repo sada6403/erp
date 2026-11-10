@@ -11,6 +11,9 @@ describe('company branding cloud fields', () => {
       'company_website',
       'company_tin',
       'invoice_note',
+      'company_legal_name',
+      'support_email',
+      'support_phone',
     ]))
   })
 

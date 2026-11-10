@@ -1,5 +1,6 @@
 import type { AgentBillDto } from '@/api/localTypes';
 import { formatQty } from '@/lib/money';
+import { colomboParts } from '@/lib/format';
 
 /** 58mm ESC/POS paper = 32 columns. Printed text is fixed English, as on the demo receipt. */
 export const RECEIPT_WIDTH = 32;
@@ -28,10 +29,11 @@ function wrapName(name: string, width = 20): string[] {
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 function stamp(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '';
-  const h = d.getHours();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}  ${pad2(h % 12 === 0 ? 12 : h % 12)}:${pad2(d.getMinutes())} ${h >= 12 ? 'PM' : 'AM'}`;
+  // Sri Lanka time whatever the phone's timezone is (server sends UTC).
+  const p = colomboParts(iso);
+  if (!p) return '';
+  const h = p.hour;
+  return `${p.year}-${pad2(p.month + 1)}-${pad2(p.day)}  ${pad2(h % 12 === 0 ? 12 : h % 12)}:${pad2(p.minute)} ${h >= 12 ? 'PM' : 'AM'}`;
 }
 
 /** Thermal receipt text for a delivery bill (same layout as the demo billModal). Shows bill_no as the invoice number. */
@@ -40,6 +42,7 @@ export function buildBillText(b: AgentBillDto & { tagline?: string | null }): st
   if (b.tagline) out.push(center(b.tagline));
   const branch = [b.branch_name, b.branch_phone ? `Tel: ${b.branch_phone}` : null].filter(Boolean).join(' • ');
   if (branch) out.push(center(branch));
+  if (b.company_tin) out.push(center(`Reg: ${b.company_tin}`));
   out.push(EQ);
   out.push(`Bill No   : ${b.bill_no}`);
   out.push(`Order ID  : ${b.order_number}`);
@@ -59,7 +62,8 @@ export function buildBillText(b: AgentBillDto & { tagline?: string | null }): st
   out.push(totalRow('Delivery Fee', rs(b.delivery_fee)), DASH, totalRow(`TOTAL (${b.payment_label})`, rs(b.total)), EQ);
   if (b.paid_in_full) out.push(center('PAID IN FULL - CASH RECEIVED'));
   if (b.otp) out.push(center(`CUSTOMER OTP: ${b.otp}`));
-  out.push(center('Thank you for choosing Ceylon'), center('Natural Plantation!'), EQ);
+  if (b.footer_note) out.push(...wrapName(b.footer_note, RECEIPT_WIDTH).map((l) => center(l)));
+  out.push(...wrapName(`Thank you for choosing ${b.company_name}!`, RECEIPT_WIDTH).map((l) => center(l)), EQ);
   return out.join('\n');
 }
 

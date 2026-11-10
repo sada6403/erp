@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic'
 const BRANDING_KEYS = [
   'company_name', 'company_address', 'company_phone', 'company_email',
   'company_website', 'company_tin', 'invoice_note',
+  'company_legal_name', 'support_email', 'support_phone',
   'company_logo_url', 'login_logo_url', 'pos_bill_logo_url',
   'invoice_logo_url', 'favicon_url', 'brand_color', 'footer_text',
 ] as const
@@ -104,7 +105,8 @@ export async function PUT(request: NextRequest) {
 
   await pool.query(
     `UPDATE companies
-        SET branding_json = ?,
+        SET updated_at = CURRENT_TIMESTAMP,
+            branding_json = ?,
             brand_logo_url = COALESCE(?, brand_logo_url),
             brand_color = COALESCE(?, brand_color)
       WHERE id = ?`,

@@ -119,6 +119,10 @@ export interface AgentBillDto {
   company_name: string
   branch_name: string | null
   branch_phone: string | null
+  /** From POS company settings; optional so older servers still parse */
+  company_tin?: string | null
+  company_address?: string | null
+  footer_note?: string | null
   agent_name: string
   agent_code: string
   customer_name: string

@@ -122,7 +122,7 @@ SMART BUY සාමාජිකයන්
 ---
 ## Other store fields
 - **Category:** Shopping. **Tags:** Shopping, Lifestyle.
-- **Contact email / phone / website:** `[SUPPORT EMAIL]`, `[SUPPORT PHONE]`, `[WEBSITE]`.
-- **Privacy policy URL:** `[HOSTED privacy-policy.html]`. **Account deletion URL:** `[HOSTED account-deletion.html]`.
+- **Contact email / phone / website:** the Support Email, Support Phone and Website entered in POS Settings > Company Information (shown by `GET /api/app/v1/company`).
+- **Privacy policy URL:** `privacy_url` from `GET /api/app/v1/company` (`<API base>/legal/privacy?c=<slug>`). **Account deletion URL:** `delete_account_url` from the same call (`/legal/delete-account?c=<slug>`). Both pages are generated from POS company settings, so fill Legal Name, Address, Support Email and Support Phone there first (the endpoint's `missing` list shows what is still empty). The old static HTML files with placeholders were removed.
 - **Release notes v1.0.0 (en):** `Welcome to the new Natural Plantation app: a faster shop, order tracking, your Smart Buy statement, and English, Tamil and Sinhala.`
 - **Assets:** 8 phone screenshots + feature graphic 1024x500 in `docs/play/assets/` (see `ASSETS.md`).

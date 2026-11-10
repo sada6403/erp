@@ -9,6 +9,7 @@ import { cartLineCount, useCartStore } from '@/store/cartStore';
 import { selectIsLoggedIn, useSessionStore, type NavRole } from '@/store/sessionStore';
 import { useUiStore } from '@/store/uiStore';
 import { useUnreadCount } from '@/features/notifications/hooks';
+import { useCompany } from '@/features/common/hooks';
 import { logout } from '@/features/auth/session';
 import { Text } from './Text';
 import { OfflineBanner } from './Overlays';
@@ -111,6 +112,7 @@ export function AppHeader() {
   const role = useSessionStore((x) => x.activeRole);
   const branch = useSessionStore((x) => x.branchName);
   const unread = useUnreadCount();
+  const company = useCompany();
   const showPush = useUiStore((x) => x.showPush);
   return (
     <View style={[s.bar, { paddingTop: Math.max(8, insets.top) }]}>
@@ -120,7 +122,7 @@ export function AppHeader() {
         </View>
         <View style={{ flexShrink: 1 }}>
           <Text size={17} weight={800} color="primary" numberOfLines={1} lineHeightRatio={1.15}>
-            {t('app.name')}
+            {company?.name || t('app.name')}
           </Text>
           {branch ? (
             <Text size={11} weight={600} color="textMuted" numberOfLines={1}>

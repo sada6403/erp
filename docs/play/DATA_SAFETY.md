@@ -10,7 +10,7 @@ APK against the declaration, and a wrong answer can get an update rejected. Re-c
 **Does your app collect or share any of the required user data types?** Yes.
 **Is all of the user data collected by your app encrypted in transit?** Yes, provided the production build's `API_BASE_URL` is an `https://` URL (set it in the production EAS profile; the dev manifest allows cleartext only in debug builds).
 **Do you provide a way for users to request that their data is deleted?** Yes. In app: Settings > Delete account.
-Web: `[HOSTED account-deletion.html]` (Play requires this URL in the form).
+Web: `<API base>/legal/delete-account?c=<company slug>` (served live by the backend from POS company settings; the exact URL is `delete_account_url` in `GET /api/app/v1/company`). Play requires this URL in the form.
 
 ### Data types
 | Category | Type | Collected | Shared | Required or optional | Purposes |
@@ -43,7 +43,7 @@ Contains ads: **No**.
 ## 2. App content declarations
 | Item | Answer |
 |---|---|
-| Privacy policy URL | `[HOSTED privacy-policy.html]` |
+| Privacy policy URL | `<API base>/legal/privacy?c=<company slug>` (live page; exact URL is `privacy_url` in `GET /api/app/v1/company`) |
 | App access | Restricted: reviewer logins from `APP_ACCESS.md` |
 | Target audience | 18+ (adults) |
 | Content rating (IARC questionnaire) | Shopping app; no violence, no user-generated content, no chat, no gambling; "Smart Buy draws" are savings-scheme draws among members: answer the gambling question honestly (see section 3) |

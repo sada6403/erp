@@ -1,6 +1,7 @@
 import type { AxiosInstance } from 'axios';
 import type { OkResponse } from '@contracts/common';
 import type { StatusResponse, WatermarkResponse } from '@contracts/status';
+import type { CompanyProfileResponse } from '@contracts/company';
 import type {
   ChangePasswordRequest,
   ChangePasswordResponse,
@@ -85,6 +86,7 @@ const post = async <T>(url: string, body?: unknown, headers?: Record<string, str
 export const statusApi = {
   status: () => get<StatusResponse>('/status'),
   watermark: () => get<WatermarkResponse>('/watermark'),
+  company: () => get<CompanyProfileResponse>('/company'),
 };
 
 export const authApi = {

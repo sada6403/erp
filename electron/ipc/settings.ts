@@ -41,6 +41,9 @@ const DEFAULTS = {
   company_email: '',
   company_website: '',
   company_tin: '',
+  company_legal_name: '',
+  support_email: '',
+  support_phone: '',
   invoice_note: 'Goods once sold will not be taken back or exchanged.',
   // Business Type & Industry configuration
   supermarket_stock_enabled: false,

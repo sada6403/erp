@@ -1,5 +1,6 @@
 import { appRoute } from '@/lib/app/context'
 import { toIso } from '@/lib/app/http'
+import { pool } from '@/lib/db'
 import { VISIBLE_SQL } from '@/lib/app/catalogLib'
 import type { WatermarkResponse } from '@/lib/app/contracts/status'
 
@@ -16,6 +17,7 @@ export const GET = appRoute({ auth: 'optional' }, async ({ company, user }): Pro
     categories: await max(`SELECT MAX(updated_at) AS m FROM categories`),
     banners: await max(`SELECT MAX(updated_at) AS m FROM app_banners`),
     settings: await max(`SELECT MAX(updated_at) AS m FROM app_settings`),
+    company: toIso((await pool.query<{ m: unknown }>(`SELECT updated_at AS m FROM companies WHERE id = ?`, [company.id])).rows[0]?.m),
   }
   if (user) {
     areas.orders = await max(`SELECT MAX(updated_at) AS m FROM customer_orders WHERE app_user_id = ? OR (customer_id IS NOT NULL AND customer_id = ?)`, [user.userId, user.customerId])

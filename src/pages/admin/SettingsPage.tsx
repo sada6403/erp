@@ -54,6 +54,9 @@ export default function SettingsPage() {
     company_email: '',
     company_website: '',
     company_tin: '',
+    company_legal_name: '',
+    support_email: '',
+    support_phone: '',
     invoice_note: 'Goods once sold will not be taken back or exchanged.',
     branch_name: '',
     business_type: 'retail',
@@ -479,6 +482,12 @@ function GeneralSettings({ form, f, setForm }: { form: Record<string, any>; f: (
         <div className="grid grid-cols-2 gap-3">
           <Field label="Website"><input value={form.company_website} onChange={f('company_website')} className="input" placeholder="www.company.lk" /></Field>
           <Field label="TIN / Reg. No."><input value={form.company_tin} onChange={f('company_tin')} className="input" placeholder="VAT Reg / Business Reg" /></Field>
+        </div>
+        <p className="text-xs mb-1" style={{ color: 'var(--text-3)' }}>Used by the mobile app and its public Privacy Policy / Delete Account pages. Leave blank to fall back to the name, email and phone above.</p>
+        <Field label="Legal Name (registered business name)"><input value={form.company_legal_name} onChange={f('company_legal_name')} className="input" placeholder="Nature Plantation (Pvt) Ltd" /></Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Support Email"><input value={form.support_email} onChange={f('support_email')} className="input" placeholder="support@company.lk" /></Field>
+          <Field label="Support Phone / WhatsApp"><input value={form.support_phone} onChange={f('support_phone')} className="input" placeholder="+94 77 000 0000" /></Field>
         </div>
         <Field label="Invoice Terms / Note"><input value={form.invoice_note} onChange={f('invoice_note')} className="input" /></Field>
       </Section>

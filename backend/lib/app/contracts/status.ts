@@ -21,6 +21,8 @@ export interface WatermarkResponse {
     categories: string | null
     banners: string | null
     settings: string | null
+    /** Company profile (POS Settings) last changed */
+    company: string | null
     /** Present only with a valid token */
     orders?: string | null
     notifications?: string | null

@@ -345,7 +345,15 @@
     },
     "aboutTitle": "{{app}} Mobile v{{version}}",
     "aboutDesc": "Connected to {{tenant}} API",
-    "logoutFull": "Sign Out / Return to Guest Shop"
+    "logoutFull": "Sign Out / Return to Guest Shop",
+    "companyContact": "Help & contact",
+    "companyContactSub": "Questions about an order or your account? Reach us here.",
+    "companyCall": "Call us",
+    "companyEmail": "Email us",
+    "companyWebsite": "Website",
+    "companyRegNo": "Reg. no.",
+    "companyPrivacy": "Privacy policy",
+    "companyDeleteInfo": "Account deletion info"
   },
   "schemes": {
     "title": "My Schemes",

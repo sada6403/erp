@@ -16,7 +16,7 @@ export default function HomeScreen() {
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<string | null>(null);
   const { items, isLoading, isError, refetch } = useProducts({ q, categoryId: cat });
-  useWatermark({ catalog: [qk.catalog.products], categories: [qk.catalog.categories], banners: [qk.catalog.banners] });
+  useWatermark({ catalog: [qk.catalog.products], categories: [qk.catalog.categories], banners: [qk.catalog.banners], company: [qk.company] });
 
   const header = (
     <View>

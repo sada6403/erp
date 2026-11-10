@@ -17,6 +17,12 @@ export function useServerStatus() {
   });
 }
 
+/** Company profile from POS Settings (name, contacts, legal links). Cached offline; refreshed when /watermark says it changed. */
+export function useCompany() {
+  const q = useQuery({ queryKey: qk.company, queryFn: statusApi.company, staleTime: 10 * 60_000 });
+  return q.data ?? null;
+}
+
 /** Company modules; defaults to enabled until /status says otherwise. */
 export function useModules() {
   const { data } = useServerStatus();
@@ -60,7 +66,7 @@ export function useServerActionGuard() {
  * Polls /watermark every 10 s while the screen is focused and invalidates only the changed areas.
  * Pass the map of area -> query keys to invalidate.
  */
-export function useWatermark(areas: Partial<Record<'catalog' | 'categories' | 'banners' | 'orders' | 'notifications' | 'deliveries', readonly (readonly unknown[])[]>>) {
+export function useWatermark(areas: Partial<Record<'catalog' | 'categories' | 'banners' | 'company' | 'orders' | 'notifications' | 'deliveries', readonly (readonly unknown[])[]>>) {
   const focused = useIsFocused();
   const offline = useUiStore(selectIsOffline);
   const qc = useQueryClient();

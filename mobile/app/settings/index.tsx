@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Linking, Pressable, View } from 'react-native';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
@@ -16,6 +16,7 @@ import { useSessionStore } from '@/store/sessionStore';
 import { logout } from '@/features/auth/session';
 import { getPermissionStatus } from '@/features/push/push';
 import { authApi } from '@/api/endpoints';
+import { useCompany } from '@/features/common/hooks';
 import { selectIsOffline, useUiStore } from '@/store/uiStore';
 
 /** Card title row (.settings-card-title): emoji + title, 14/800, 4 dp below. */
@@ -35,6 +36,7 @@ export default function SettingsScreen() {
   const user = useSessionStore((s) => s.user);
   const role = useSessionStore((s) => s.activeRole);
   const branch = useSessionStore((s) => s.branchName);
+  const company = useCompany();
   const setActiveRole = useSessionStore((s) => s.setActiveRole);
   const patchUser = useSessionStore((s) => s.patchUser);
   const { theme: themeKey, language, setTheme, setLanguage } = useThemeStore();
@@ -220,11 +222,31 @@ export default function SettingsScreen() {
           </Card>
         ) : null}
 
+        {/* Help & contact: everything comes from POS company settings, nothing is hard-coded in the app */}
+        {company && (company.support_phone || company.support_email || company.website || company.address) ? (
+          <Card radius={radii.card} padding={16}>
+            <CardTitle icon="💬" title={t('settings.companyContact')} />
+            <Text size={11} color="textMuted" lineHeightRatio={1.4} style={{ marginBottom: 8 }}>
+              {t('settings.companyContactSub')}
+            </Text>
+            <Text size={13} weight={700}>{company.legal_name}</Text>
+            {company.address ? <Text size={12} color="textMuted" lineHeightRatio={1.4}>{company.address}</Text> : null}
+            {company.tin ? <Text size={11} color="textMuted">{t('settings.companyRegNo')}: {company.tin}</Text> : null}
+            <View style={{ marginTop: 10, gap: 8 }}>
+              {company.support_phone ? <Button label={`📞 ${t('settings.companyCall')}: ${company.support_phone}`} variant="secondaryBlock" fullWidth onPress={() => Linking.openURL(`tel:${company.support_phone}`)} /> : null}
+              {company.support_email ? <Button label={`✉️ ${t('settings.companyEmail')}: ${company.support_email}`} variant="secondaryBlock" fullWidth onPress={() => Linking.openURL(`mailto:${company.support_email}`)} /> : null}
+              {company.website ? <Button label={`🌐 ${t('settings.companyWebsite')}: ${company.website}`} variant="secondaryBlock" fullWidth onPress={() => Linking.openURL(/^https?:/i.test(company.website!) ? company.website! : `https://${company.website}`)} /> : null}
+              <Button label={`🔒 ${t('settings.companyPrivacy')}`} variant="secondaryBlock" fullWidth onPress={() => Linking.openURL(company.privacy_url)} />
+              <Button label={`🗑️ ${t('settings.companyDeleteInfo')}`} variant="secondaryBlock" fullWidth onPress={() => Linking.openURL(company.delete_account_url)} />
+            </View>
+          </Card>
+        ) : null}
+
         {/* App info + sign out */}
         <Card radius={radii.card} padding={16}>
-          <CardTitle icon="ℹ️" title={t('settings.aboutTitle', { app: t('app.name'), version: Constants.expoConfig?.version ?? '1.0.0' })} />
+          <CardTitle icon="ℹ️" title={t('settings.aboutTitle', { app: company?.name || t('app.name'), version: Constants.expoConfig?.version ?? '1.0.0' })} />
           <Text size={11} color="textMuted" lineHeightRatio={1.4} style={{ marginBottom: 12 }}>
-            {t('settings.aboutDesc', { tenant: branch ?? t('app.name') })}
+            {t('settings.aboutDesc', { tenant: branch ?? (company?.name || t('app.name')) })}
             {ENV.appEnv !== 'production' ? ` • ${ENV.appEnv}` : ''}
           </Text>
           {user ? (

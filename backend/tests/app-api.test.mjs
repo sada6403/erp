@@ -373,3 +373,56 @@ test('tax on top: catalog price, quote and locked order equal the POS counter pr
     await db.end()
   }
 })
+
+// ── company profile (POS Settings -> app + public legal pages) ─────────────
+test('company profile: public with app key, follows POS settings, feeds the legal pages, no placeholders', async () => {
+  assert.equal((await call('GET', '/company', { key: null })).status, 401)
+  assert.equal((await call('GET', '/company', { key: 'npk_wrong' })).status, 401)
+  const before = await call('GET', '/company')
+  assert.equal(before.status, 200, JSON.stringify(before.json))
+  assert.ok(before.json.name)
+  const slug = new URL(before.json.privacy_url).searchParams.get('c')
+  assert.ok(slug, 'privacy_url carries the company slug')
+  const wm0 = (await call('GET', '/watermark')).json.areas.company
+  const pos = (body, method = 'PUT') => fetch(`${BASE}/api/company/branding`, { method, headers: { 'x-api-key': seed.pos_api_key, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const KEYS = ['company_legal_name', 'support_email', 'support_phone', 'company_address', 'company_tin', 'company_website', 'invoice_note']
+  const saved = (await (await pos(undefined, 'GET')).json()).branding
+  try {
+    await new Promise((r) => setTimeout(r, 1100)) // updated_at has 1 s resolution
+    const put = await pos({
+      company_legal_name: 'Acme <b>Estates</b> (Pvt) Ltd', support_email: 'help@acme.example', support_phone: '+94 77 111 2222',
+      company_address: 'No 1, Test Road, Kandy', company_tin: 'PV-12345', company_website: 'www.acme.example', invoice_note: 'Thanks & come again',
+    })
+    assert.equal(put.status, 200, await put.text())
+    const after = (await call('GET', '/company')).json
+    assert.equal(after.legal_name, 'Acme <b>Estates</b> (Pvt) Ltd')
+    assert.equal(after.support_email, 'help@acme.example')
+    assert.equal(after.tin, 'PV-12345')
+    assert.deepEqual(after.missing, [])
+    assert.notEqual((await call('GET', '/watermark')).json.areas.company, wm0, 'watermark company area moves so apps refetch')
+
+    for (const page of ['privacy', 'delete-account']) {
+      const res = await fetch(`${BASE}/legal/${page}?c=${slug}`)
+      assert.equal(res.status, 200)
+      assert.match(res.headers.get('content-type'), /text\/html/)
+      const html = await res.text()
+      assert.ok(html.includes('Acme &lt;b&gt;Estates&lt;/b&gt; (Pvt) Ltd'), 'legal name is HTML-escaped')
+      assert.ok(!html.includes('<b>Estates</b>'))
+      assert.ok(html.includes('help@acme.example') && html.includes('+94 77 111 2222'))
+      assert.ok(!/\[(COMPANY|SUPPORT|ACCOUNT|PRIVACY|DATE)[^\]]*\]/i.test(html), 'no [PLACEHOLDER] left')
+    }
+    assert.ok((await (await fetch(`${BASE}/legal/privacy?c=${slug}`)).text()).includes('No 1, Test Road, Kandy'))
+
+    // a missing field is left out and reported, never printed as a placeholder
+    await pos({ support_email: null, support_phone: null, company_address: null })
+    const blank = (await call('GET', '/company')).json
+    assert.ok(blank.missing.includes('company_address'))
+    const html = await (await fetch(`${BASE}/legal/delete-account?c=${slug}`)).text()
+    assert.ok(!html.includes('null') && !html.includes('undefined') && !html.includes('Email: <a'))
+  } finally {
+    const restore = {}
+    for (const k of KEYS) restore[k] = saved[k] ?? null
+    await pos(restore)
+  }
+  assert.equal((await fetch(`${BASE}/legal/privacy?c=no-such-company`)).status, 404)
+})

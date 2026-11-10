@@ -2,6 +2,7 @@ import { appRoute, need } from '@/lib/app/context'
 import { fail, round2 } from '@/lib/app/http'
 import { loadAgentOrder, requireAgent } from '@/lib/app/agentLib'
 import { loadAgent } from '@/lib/app/ordersLib'
+import { loadCompanyProfile } from '@/lib/companyProfile'
 import type { AgentBillDto } from '@/lib/app/contracts/agent'
 
 export const runtime = 'nodejs'
@@ -18,6 +19,7 @@ export const GET = appRoute({ auth: 'user', roles: ['agent'] }, async (c): Promi
     `SELECT ii.*, p.name AS pname, p.unit AS punit, p.sale_by FROM invoice_items ii
        LEFT JOIN products p ON p.id = ii.product_id WHERE ii.invoice_id = ? ORDER BY ii.id`, [inv[0].id])
   const { rows: br } = await company.tp.query<Record<string, unknown>>(`SELECT name, phone FROM branches WHERE id = ?`, [o.branch_id])
+  const prof = await loadCompanyProfile(company.id, c.origin)
   const agent = await loadAgent(company.tp, user.agentId)
   const subtotal = round2(lines.reduce((s, l) => s + Number(l.unit_price) * Number(l.quantity), 0))
   const total = round2(Number(inv[0].total_amount) || 0)
@@ -26,7 +28,9 @@ export const GET = appRoute({ auth: 'user', roles: ['agent'] }, async (c): Promi
   return {
     bill_no: String(inv[0].invoice_number), order_number: String(o.order_number),
     date: new Date(String(inv[0].created_at)).toISOString(),
-    company_name: company.name, branch_name: br[0]?.name ? String(br[0].name) : null, branch_phone: br[0]?.phone ? String(br[0].phone) : null,
+    company_name: prof?.legal_name || prof?.name || company.name,
+    company_tin: prof?.tin ?? null, company_address: prof?.address ?? null, footer_note: prof?.invoice_note ?? null,
+    branch_name: br[0]?.name ? String(br[0].name) : null, branch_phone: br[0]?.phone ? String(br[0].phone) : null,
     agent_name: agent?.name ?? '', agent_code: agent?.code ?? '',
     customer_name: String(o.customer_name || 'Customer'), address: o.customer_address ? String(o.customer_address) : null,
     lines: lines.map(l => ({

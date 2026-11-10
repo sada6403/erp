@@ -5,6 +5,7 @@
 export const qk = {
   status: ['status'] as const,
   watermark: ['status', 'watermark'] as const,
+  company: ['status', 'company'] as const,
 
   catalog: {
     all: ['catalog'] as const,
