@@ -8,6 +8,7 @@ import { useUiStore } from '@/store/uiStore';
 import { fontScale, makeStyles, radii, useTheme } from '@/theme';
 import { SB_DEMO } from './demo';
 import { useOpenSchemes } from './hooks';
+import { useCompany } from '@/features/common/hooks';
 import { Overlay, SheetSurface } from './Overlay';
 
 const useStyles = makeStyles((t) => ({
@@ -28,6 +29,7 @@ const useStyles = makeStyles((t) => ({
 /** Join Smart Buy bottom sheet (demo #joinSchemeModal). Submit is demo-mock only; release builds disable it. */
 export function JoinSheet({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
+  const company = useCompany();
   const theme = useTheme();
   const st = useStyles();
   const showToast = useUiStore((s) => s.showToast);
@@ -53,7 +55,7 @@ export function JoinSheet({ onClose }: { onClose: () => void }) {
     <Overlay onClose={onClose} align="bottom">
       <SheetSurface onClose={onClose}>
         <ScrollView keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-          <Text size={18.72} weight={700} style={{ paddingRight: 40 }}>{t('join.heading')}</Text>
+          <Text size={18.72} weight={700} style={{ paddingRight: 40 }}>{t('join.heading', { app: company?.name || t('app.name') })}</Text>
           <Text size={fontScale.s16} style={{ marginBottom: 16 }}>{t('join.blurb')}</Text>
           <View style={st.group}>
             <Text size={fontScale.s11} weight={700} color="textMuted" style={{ marginBottom: 4 }}>{t('join.selectPlan')}</Text>

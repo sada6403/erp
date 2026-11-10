@@ -18,6 +18,7 @@ import { authApi } from '@/api/endpoints';
 import { useSessionStore } from '@/store/sessionStore';
 import { useUiStore } from '@/store/uiStore';
 import { homeRouteFor, login, register } from './session';
+import { useCompany } from '@/features/common/hooks';
 import { loginSchema, registerSchema, resetSchema, type LoginForm, type RegisterForm } from './schemas';
 
 const logo = require('../../../assets/logo.jpg');
@@ -65,6 +66,7 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
   const s = useStyles();
   const theme = useTheme();
   const { t } = useTranslation();
+  const company = useCompany();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const showToast = useUiStore((x) => x.showToast);
@@ -182,7 +184,7 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
               <Image source={logo} style={{ width: '100%', height: '100%', borderRadius: radii.circle, backgroundColor: theme.colors.surface }} contentFit="cover" accessibilityLabel={t('app.name')} />
             </Gradient>
           </View>
-          <Text size={21} weight={800} color="primary" letterSpacing={-0.3} style={{ marginBottom: 3 }}>{t('app.name')}</Text>
+          <Text size={21} weight={800} color="primary" letterSpacing={-0.3} style={{ marginBottom: 3 }}>{company?.name || t('app.name')}</Text>
           <Text size={12} weight={500} color="textMuted" style={{ marginBottom: 8 }} align="center">
             {mode === 'register' ? t('auth.subtitleRegister') : mode === 'reset' ? t('auth.subtitleReset') : t('auth.subtitle')}
           </Text>
