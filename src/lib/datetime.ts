@@ -25,3 +25,8 @@ export function installColomboDefault(): void {
     proto[name] = wrapped as never
   }
 }
+
+/** Today's date (YYYY-MM-DD) on the Sri Lanka calendar, for business dates (purchase date, filters). */
+export function colomboToday(now: number = Date.now()): string {
+  return new Date(now + 330 * 60_000).toISOString().slice(0, 10)
+}

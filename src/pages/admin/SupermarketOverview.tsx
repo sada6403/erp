@@ -3,8 +3,9 @@ import { Link, useLocation } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
+import { colomboToday } from '../../lib/datetime'
 
-const today = () => new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10)
+const today = () => colomboToday()
 const money = (n: unknown) => `Rs.${Number(n || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
 export default function SupermarketOverview({ view = 'stock' }: { view?: 'stock' | 'investments' }) {
   const { hash } = useLocation()

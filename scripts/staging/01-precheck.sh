@@ -26,7 +26,16 @@ systemctl is-active mysql mariadb 2>/dev/null | head -n2
 if mysql -uroot -e 'SELECT VERSION()' >/dev/null 2>&1; then echo "root via socket: OK"; else echo "root via socket: NO (03-setup will use production DB admin credentials from the prod .env)"; fi
 hr "Timezone (app order times were off by 5h30 on a local DB whose MySQL zone was not UTC; the API reads DB times as UTC)"
 timedatectl 2>/dev/null | grep -E 'Time zone|Local time' || date
-mysql -uroot -N -e "SELECT CONCAT('mysql global=', @@global.time_zone, ' system=', @@system_time_zone, ' NOW=', NOW(), ' UTC=', UTC_TIMESTAMP())" 2>/dev/null || echo "mysql time zone: could not read as root"
+# READ-ONLY. Decides the timezone rollout path in PRODUCTION_RUNBOOK.md section 3a.
+tzrow=$(mysql -uroot -N -e "SELECT CONCAT(@@global.time_zone, '|', @@system_time_zone, '|', NOW(), '|', UTC_TIMESTAMP(), '|', TIMESTAMPDIFF(MINUTE, UTC_TIMESTAMP(), NOW()))" 2>/dev/null || true)
+if [ -n "$tzrow" ]; then
+  IFS='|' read -r tz_global tz_system tz_now tz_utc tz_diff <<<"$tzrow"
+  echo "mysql @@global.time_zone=$tz_global  @@system_time_zone=$tz_system  NOW()=$tz_now  UTC_TIMESTAMP()=$tz_utc  offset_min=$tz_diff"
+  if [ "$tz_diff" = "0" ]; then echo "TZ VERDICT: MySQL already writes UTC -> the UTC session switch changes nothing for existing rows (runbook 3a path A)."
+  else echo "TZ VERDICT: MySQL is NOT UTC (offset ${tz_diff} min) -> existing rows hold local-time stamps. Use runbook 3a path B: SYNC_PULL_OVERLAP_MINUTES=${tz_diff#-} BEFORE deploying the code, tested on staging first."; fi
+else
+  echo "mysql time zone: could not read as root (run: SELECT @@global.time_zone, @@system_time_zone, NOW(), UTC_TIMESTAMP(); with the production DB admin user)"
+fi
 hr "Existing backups";       ls -1d /root/backup-* 2>/dev/null || echo "none"
 hr "Certbot certs";          certbot certificates 2>/dev/null | grep -E 'Certificate Name|Domains|Expiry' || echo "none / certbot missing"
 echo; echo "PRECHECK DONE (nothing was changed)"

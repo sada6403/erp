@@ -2123,7 +2123,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         db.prepare(`
           UPDATE installments
           SET paid_amount=paid_amount+?, due_amount=?, remaining_installments=?,
-              last_paid_date=date('now'), next_due_date=?, status=?, updated_at=datetime('now')
+              last_paid_date=date('now','+330 minutes'), next_due_date=?, status=?, updated_at=datetime('now')
           WHERE id=?
         `).run(amount, Math.max(0, dueAmount), Math.max(0, Number(inst.installment_count || 0) - Number(paidRows.count || 0)), next?.due_date || null, dueAmount <= 0.01 ? 'completed' : 'active', id)
       }
@@ -2184,7 +2184,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       db.prepare(`
         UPDATE installments
         SET paid_amount=paid_amount+?, due_amount=?, remaining_installments=?,
-            last_paid_date=date('now'), next_due_date=?, status=?, updated_at=datetime('now')
+            last_paid_date=date('now','+330 minutes'), next_due_date=?, status=?, updated_at=datetime('now')
         WHERE id=?
       `).run(Number(payment.amount || 0), Math.max(0, dueAmount), Math.max(0, Number(inst.installment_count || 0) - Number(paidRows.count || 0)), next?.due_date || null, dueAmount <= 0.01 ? 'completed' : 'active', payment.installment_id)
     }

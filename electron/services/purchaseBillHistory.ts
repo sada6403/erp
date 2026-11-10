@@ -4,8 +4,8 @@ export function listPurchaseBills(db:Database.Database,branchId:string,filters:B
  const where=['po.branch_id=?','a.is_active=1'];const args:unknown[]=[branchId]
  if(filters.from){where.push('date(COALESCE(po.purchase_date,po.created_at))>=date(?)');args.push(filters.from)}
  if(filters.to){where.push('date(COALESCE(po.purchase_date,po.created_at))<=date(?)');args.push(filters.to)}
- if(filters.uploaded_from){where.push("date(a.uploaded_at,'localtime')>=date(?)");args.push(filters.uploaded_from)}
- if(filters.uploaded_to){where.push("date(a.uploaded_at,'localtime')<=date(?)");args.push(filters.uploaded_to)}
+ if(filters.uploaded_from){where.push("date(a.uploaded_at,'+330 minutes')>=date(?)");args.push(filters.uploaded_from)}
+ if(filters.uploaded_to){where.push("date(a.uploaded_at,'+330 minutes')<=date(?)");args.push(filters.uploaded_to)}
  if(filters.status){where.push('po.status=?');args.push(filters.status)}
  if(filters.supplier_id){where.push('po.supplier_id=?');args.push(filters.supplier_id)}
  if(filters.uploaded_by){where.push('a.uploaded_by=?');args.push(filters.uploaded_by)}

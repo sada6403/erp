@@ -16,6 +16,7 @@ import * as XLSX from 'xlsx'
 import { safeHandle } from './ipcHandler'
 import { PHONE_RE, EMAIL_RE, NIC_RE, validateContactFields } from '../services/contactValidation'
 import { simulateSmartBuyScheme, findBreakEvenMembers, maxEarlyWinners, type ViabilityInputs } from '../services/smartBuyViability'
+import { colomboToday } from '../lib/colomboDate'
 
 const store = createCompanyStore()
 
@@ -2362,7 +2363,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
         db.prepare(`
           UPDATE chit_members
-          SET redemption_type=?, won_cycle_no=?, product_received_at=date('now'),
+          SET redemption_type=?, won_cycle_no=?, product_received_at=date('now','+330 minutes'),
               installment_id=NULL, status='redeemed',
               claim_status='pending_claim', claim_due_date=?, entitlement_value=?, voucher_id=?,
               updated_at=datetime('now')
@@ -2372,7 +2373,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           table: 'chit_members', id: String(winner.id), op: 'UPDATE',
           row: {
             id: winner.id, redemption_type: isFinalCycle ? 'final_batch' : 'draw',
-            won_cycle_no: cycleNo, product_received_at: new Date().toISOString().slice(0, 10),
+            won_cycle_no: cycleNo, product_received_at: colomboToday(),
             installment_id: null, status: 'redeemed',
             claim_status: 'pending_claim', claim_due_date: claimDueDate, entitlement_value: entitlementValue,
             voucher_id: voucher.couponId,
@@ -2521,14 +2522,14 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
       db.prepare(`
         UPDATE chit_members
-        SET redemption_type='early', product_received_at=date('now'), installment_id=?,
+        SET redemption_type='early', product_received_at=date('now','+330 minutes'), installment_id=?,
             contributions_paid=contributions_paid+?, status='redeemed', updated_at=datetime('now')
         WHERE id=?
       `).run(repayment?.installmentId || null, amount, memberId)
       enqueue.push({
         table: 'chit_members', id: memberId, op: 'UPDATE',
         row: {
-          id: memberId, redemption_type: 'early', product_received_at: new Date().toISOString().slice(0, 10),
+          id: memberId, redemption_type: 'early', product_received_at: colomboToday(),
           installment_id: repayment?.installmentId || null,
           contributions_paid: money(Number(member.contributions_paid || 0) + amount), status: 'redeemed',
         },

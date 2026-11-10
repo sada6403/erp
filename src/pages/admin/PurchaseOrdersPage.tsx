@@ -13,6 +13,7 @@ import PurchaseBillPicker from '@/components/shared/PurchaseBillPicker'
 import NumberInput from '@/components/shared/NumberInput'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 import toast from 'react-hot-toast'
+import { colomboToday } from '../../lib/datetime'
 
 type PO = Record<string, unknown>
 type POItem = Record<string, unknown>
@@ -568,7 +569,7 @@ function ReceivePOModal({ po, onClose, onDone }:
   const { isSupermarket: supermarket } = useBusinessType()
   const [attachmentToken,setAttachmentToken] = useState('')
   const [saving,setSaving] = useState(false)
-  const [purchaseDate, setPurchaseDate] = useState(new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10))
+  const [purchaseDate, setPurchaseDate] = useState(colomboToday())
   const [prices, setPrices] = useState<Record<string, string>>({})
   const [qtys, setQtys] = useState<Record<string, number>>(() => {
     const init: Record<string, number> = {}
@@ -682,7 +683,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
   const [sendWhatsApp, setSendWhatsApp] = useState(false)
   const [sendEmail, setSendEmail]       = useState(false)
   const [form, setForm] = useState({
-    supplier_id: '', expected_date: '', notes: '', purchase_date: new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10), supplier_invoice_number: '',
+    supplier_id: '', expected_date: '', notes: '', purchase_date: colomboToday(), supplier_invoice_number: '',
     items: [{ product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }]
   })
   const [saving, setSaving] = useState(false)

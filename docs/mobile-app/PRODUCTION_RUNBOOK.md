@@ -74,6 +74,18 @@ Therefore the merge **is** the backend deploy and possibly the desktop release.
   4. pm2 logs for `pos-backend`: no repeating errors in 5 minutes.
 - **Rollback:** as step 2.
 
+## 3a. Timezone rollout (UTC sessions vs sync cursors) - complete BEFORE the section 3 deploy
+The new backend runs every MySQL connection with `SET time_zone='+00:00'`, so `CURRENT_TIMESTAMP`/`NOW()` are UTC. Sync pulls `updated_at > cursor`.
+
+1. **Precheck (read-only):** `scripts/staging/01-precheck.sh` prints `@@global.time_zone`, `@@system_time_zone`, `NOW()`, `UTC_TIMESTAMP()` and a `TZ VERDICT`. Or run by hand: `SELECT @@global.time_zone, @@system_time_zone, NOW(), UTC_TIMESTAMP();`
+2. **Path A - MySQL already UTC (offset 0):** nothing to convert. Deploy normally.
+3. **Path B - MySQL is not UTC (for example +05:30):** existing rows carry local stamps (5h30 ahead of true UTC) and every device cursor sits on them. New UTC rows would sort 5h30 behind those cursors and devices would miss them for 5h30. Do this, in order:
+   1. Set `SYNC_PULL_OVERLAP_MINUTES=330` in the production backend `.env` **before** deploying the new code (the setting is harmless on the old code). Every pull then re-reads the last 330 minutes; re-sent rows are idempotent upserts (last-write-wins by id), so nothing is missed and nothing is duplicated.
+   2. Deploy the backend (section 3). Keep the overlap for 7 days (until every device has pulled past the switch), then remove it and restart.
+   3. Do **not** bulk-convert old timestamps with `CONVERT_TZ`: rows written by the POS/JS (`toISOString`) are already UTC and would be shifted twice. The overlap is the safe path. If a one-time conversion is ever required, generate it per column on staging, diff the row counts, and have Moni approve it first.
+4. **Prove it on staging first:** restore the production backup on staging (section 1), run the precheck there, set the overlap, deploy the new code, create a change from the app and from the POS, and confirm a POS device with an old cursor receives both within one sync cycle. The automated simulation of mixed old-local and new-UTC rows is `backend/tests/sync-tz.test.mjs` (`npm test` in `backend/`).
+5. **POS desktop (local SQLite):** the POS writes `datetime('now')` / `toISOString()` (UTC). The POS now displays Asia/Colombo and reads bare SQLite stamps as UTC; no data is converted on the PCs.
+
 ## 4. Real-company App Key and product re-push
 1. Super Admin portal -> company -> generate App Key (`npk_...`). The key goes into the production EAS profile (build env `APP_KEY`, read by `mobile/app.config.ts`) — it identifies the company only, it is not a secret like the sync key.
 2. Products created before the deploy lack the new columns; do the one-time re-push from the POS per branch PC (use the POS's existing full-sync / product re-push action; confirm the exact menu name on a branch PC before the day, it was not re-checked for this plan).
