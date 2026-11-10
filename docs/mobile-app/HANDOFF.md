@@ -72,6 +72,14 @@ Next:
 9. One final report: staging URL, test logins (seed only), APK path/size, verified items, failures/skips,
    rollback commands, the single step to go to production.
 
+## Git push from the agent shell (read this once)
+The agent shell sets `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never`, so Git Credential Manager cannot show its sign-in and `git push` hangs. The GitHub credential is already saved in Windows Credential Manager. Push with those two variables cleared for that command only:
+
+- bash: `GIT_TERMINAL_PROMPT= GCM_INTERACTIVE= git -c core.autocrlf=true -c credential.interactive=true push origin feature/mobile-app-foundation`
+- PowerShell: `$env:GIT_TERMINAL_PROMPT=$null; $env:GCM_INTERACTIVE=$null; git -c core.autocrlf=true -c credential.interactive=true push origin feature/mobile-app-foundation`
+
+Then confirm with `git ls-remote origin feature/mobile-app-foundation`. Never ask for or handle the GitHub password or token.
+
 ## 6. Hard limits (only reasons to stop and ask Moni)
 - Any change to production: `/var/www/pos-backend`, its process, production databases (dump only), existing
   nginx sites, `pos-deploy`, the deploy workflow, `main`.
