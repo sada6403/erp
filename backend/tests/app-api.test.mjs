@@ -7,14 +7,16 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import mysql from 'mysql2/promise'
 
-const seedFile = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.seed-output.json')
-if (!existsSync(seedFile)) throw new Error('Run `npm run seed:app` first (.seed-output.json missing).')
+// `npm test` (scripts/test-run.cjs) seeds a fresh isolated tenant and points SEED_FILE at it.
+const seedFile = process.env.SEED_FILE || path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '.seed-output.json')
+if (!existsSync(seedFile)) throw new Error('Run `npm test` (fresh tenant) or `npm run seed:app` first.')
 const seed = JSON.parse(readFileSync(seedFile, 'utf8'))
 const BASE = process.env.TEST_BASE_URL || seed.base_url
 const V1 = `${BASE}/api/app/v1`
 
 async function call(method, p, { key = seed.app_key, token, body, headers = {} } = {}) {
-  const h = { ...headers }
+  // Every request comes from its own client IP so the app rate limiters (per IP) never trip a test. Production is unchanged.
+  const h = { 'x-forwarded-for': `10.${Math.floor(Math.random() * 250)}.${Math.floor(Math.random() * 250)}.${1 + Math.floor(Math.random() * 250)}`, ...headers }
   if (key) h['x-app-key'] = key
   if (token) h.authorization = `Bearer ${token}`
   if (body !== undefined) h['content-type'] = 'application/json'

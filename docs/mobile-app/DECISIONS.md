@@ -81,3 +81,10 @@ Nothing here is built until the demo design is approved. Defaults 1-3 and 5-12 a
 | App usage | Header title, Settings About, a new "Help & contact" card (call / email / website / privacy / delete info, hidden when nothing is set), delivery bill (company/legal name, Reg no., invoice note, "Thank you for choosing <name>!"). Receipt time is now Asia/Colombo. Nothing company-specific is left in app code except offline fallbacks (`app.name`). |
 | Legal pages | `GET /legal/privacy` and `/legal/delete-account` are served by the backend as live HTML from the same profile (`?c=<slug>`, or the only active company). Values are HTML-escaped; missing fields are left out, never shown as `[PLACEHOLDER]`; "last updated" = company profile change date in Colombo time. The static `docs/play/*.html` files with placeholders were deleted; Play forms use `privacy_url` / `delete_account_url`. |
 | Not done here | Push/WhatsApp message texts: the backend builds them from `loadCompanyProfile()` where company name is used; no hard-coded company name existed in them. Admin must fill Legal Name, Address, Support Email and Phone in POS before the Play listing (see `missing`). |
+
+## 2026-11-10 Deterministic backend tests
+| Topic | Decision |
+|---|---|
+| Fresh data | `npm test` (`backend/scripts/test-run.cjs`) seeds a uniquely named tenant (`App Test <run id>`, `SEED_FRESH=1`) into a temp file, runs `app-api` + `sync-tz` against it, then deletes the tenant and its schema (`--cleanup` refuses any name that is not a fresh test tenant). Nothing depends on earlier runs or phone testing. The long-lived "App Test Company" used on the phone is never touched by tests; `npm run seed:app` still seeds it. |
+| Rate limits | No server change. The test client sends a random `X-Forwarded-For` per request so the per-IP app limiters never trip. Production limits are untouched. |
+| Result | 3 consecutive runs: 26/26 each. |

@@ -6,12 +6,17 @@ import { mkdir, writeFile } from 'fs/promises'
 import path from 'path'
 import sharp from 'sharp'
 import { pool } from '../lib/db'
-import { createTenant } from '../lib/tenant'
+import { createTenant, deleteTenant } from '../lib/tenant'
 import { ensureTenantCompatibility } from '../lib/auth'
 import { hashPassword } from '../lib/app/security'
 
 const BASE = process.env.SEED_BASE_URL || 'http://localhost:3000'
-const COMPANY_NAME = 'App Test Company'
+// SEED_FRESH=1: an isolated, uniquely named tenant (used by `npm test`, deleted afterwards with --cleanup).
+// SEED_OUTPUT: where to write the details (default backend/.seed-output.json).
+const FRESH = process.env.SEED_FRESH === '1'
+const RUN = Date.now().toString(36) + Math.random().toString(36).slice(2, 5)
+const COMPANY_NAME = FRESH ? `App Test ${RUN}` : 'App Test Company'
+const OUTPUT = process.env.SEED_OUTPUT || path.join(process.cwd(), '.seed-output.json')
 const PASSWORD = 'Test@1234'
 
 const host = String(process.env.MYSQL_HOST || '127.0.0.1')
@@ -39,15 +44,28 @@ async function ctx(schema: string) {
   return { tp: tenantPool(schema) }
 }
 
+async function cleanup() {
+  const { readFile, rm } = await import('fs/promises')
+  const out = JSON.parse(await readFile(OUTPUT, 'utf8')) as { company_id: string }
+  const { rows } = await pool.query(`SELECT name FROM companies WHERE id = ?`, [out.company_id])
+  const name = String((rows[0] as Row | undefined)?.name ?? '')
+  if (!name.startsWith('App Test ') || name === 'App Test Company') { console.error(`Refusing to delete company "${name}": not a fresh test tenant.`); process.exit(1) }
+  await deleteTenant(out.company_id)
+  await rm(OUTPUT, { force: true })
+  console.log(`Deleted test tenant ${name}`)
+  process.exit(0)
+}
+
 async function main() {
-  const existing = await pool.query(`SELECT id, db_schema, api_key, app_key FROM companies WHERE name = ? LIMIT 1`, [COMPANY_NAME])
+  if (process.argv.includes('--cleanup')) return cleanup()
+  const existing = FRESH ? { rows: [] } : await pool.query(`SELECT id, db_schema, api_key, app_key FROM companies WHERE name = ? LIMIT 1`, [COMPANY_NAME])
   if (existing.rows[0]) {
     console.log('Test company already exists. Re-using .seed-output.json from the earlier run (delete the company to reseed).')
     process.exit(0)
   }
 
   const t = await createTenant({
-    name: COMPANY_NAME, email: 'apptest@example.test', adminEmail: 'apptest-admin@example.test', adminName: 'App Test Admin',
+    name: COMPANY_NAME, email: `apptest-${RUN}@example.test`, adminEmail: `apptest-admin-${RUN}@example.test`, adminName: 'App Test Admin',
     adminPassword: 'Admin@12345', clearDataPassword: 'Clear@12345', trialDays: 365, createdBy: 'seed-app-test-company',
   })
   const appKey = 'npk_' + randomUUID().replace(/-/g, '')
@@ -213,7 +231,7 @@ async function main() {
     delivery_order_id: orderId,
     delivery_order_number: otpOrderNumber,
   }
-  await writeFile(path.join(process.cwd(), '.seed-output.json'), JSON.stringify(out, null, 2))
+  await writeFile(OUTPUT, JSON.stringify(out, null, 2))
 
   console.log('\n=== App test company seeded (LOCAL ONLY) ===')
   console.log('App Key        :', appKey)
