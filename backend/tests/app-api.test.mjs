@@ -109,6 +109,23 @@ test('orders: create (idempotent), list, detail, tracking', async () => {
   assert.equal(tr.status, 200)
   assert.equal(tr.json.steps[0].key, 'placed')
 })
+test('orders: Play reviewer account orders are tagged TEST in the notes; normal accounts are not', async () => {
+  const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
+  try {
+    const body = { items: [{ product_id: seed.product_ids[0], quantity: 1 }], payment_method: 'cod', address: { recipient_name: 'Review', phone: '0771110003', line1: '8 Hill Street', city: 'Galle' }, notes: 'leave at gate' }
+    const phone = seed.logins.other_customer.identifier
+    await db.query('UPDATE app_users SET is_review_account = 1 WHERE phone = ?', [phone])
+    const flagged = await call('POST', '/orders', { token: other, body, headers: { 'idempotency-key': `rv-${Date.now()}` } })
+    assert.equal(flagged.status, 201, JSON.stringify(flagged.json))
+    const [[row]] = await db.query('SELECT notes FROM customer_orders WHERE id = ?', [flagged.json.id])
+    assert.match(row.notes, /^\[TEST ORDER - Play review\] leave at gate/)
+    await db.query('UPDATE app_users SET is_review_account = 0 WHERE phone = ?', [phone])
+    const normal = await call('POST', '/orders', { token: other, body, headers: { 'idempotency-key': `rv2-${Date.now()}` } })
+    assert.equal(normal.status, 201)
+    const [[row2]] = await db.query('SELECT notes FROM customer_orders WHERE id = ?', [normal.json.id])
+    assert.equal(row2.notes, 'leave at gate')
+  } finally { await db.end() }
+})
 test('orders: other user gets 404, no token 401, wrong key 401, agent role 403', async () => {
   assert.equal((await call('GET', `/orders/${orderId}`, { token: other })).status, 404)
   assert.equal((await call('GET', `/orders/${orderId}/tracking`, { token: other })).status, 404)
