@@ -128,7 +128,10 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
       const res = await authApi.forgot({ identifier: id });
       setForgotId(id);
       showToast(res.message);
-      if (res.method === 'email_code') setMode('reset');
+      if (res.method === 'email_code') {
+        resetForm.reset({ code: '', password: '' });
+        setMode('reset');
+      }
     } catch (e) {
       showToast(errorMessage(e, t));
     } finally {
@@ -181,7 +184,7 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
           </View>
           <Text size={21} weight={800} color="primary" letterSpacing={-0.3} style={{ marginBottom: 3 }}>{t('app.name')}</Text>
           <Text size={12} weight={500} color="textMuted" style={{ marginBottom: 8 }} align="center">
-            {mode === 'register' ? t('auth.subtitleRegister') : t('auth.subtitle')}
+            {mode === 'register' ? t('auth.subtitleRegister') : mode === 'reset' ? t('auth.subtitleReset') : t('auth.subtitle')}
           </Text>
         </View>
 
