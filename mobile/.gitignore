@@ -20,3 +20,8 @@ coverage/
 npm-debug.*
 expo-env.d.ts
 screenshots/tmp/
+*.pem
+*.pfx
+key.properties
+credentials.json
+android/keystores/
