@@ -1,4 +1,4 @@
-import { appRoute } from '@/lib/app/context'
+import { agentDeactivated, appRoute } from '@/lib/app/context'
 import { fail, only, reqStr, optStr } from '@/lib/app/http'
 import {
   LOCK_MINUTES, MAX_FAILED_LOGINS, agentCodeOf, burnPasswordCheck, findUserByIdentifier, issueTokens, toAuthUser, verifyPassword,
@@ -22,6 +22,7 @@ export const POST = appRoute({ auth: 'none', limiter: 'auth' }, async ({ company
   }
   const id = String(row.id)
   if (row.status === 'disabled') fail(403, 'ACCOUNT_DISABLED', 'This account is disabled. Contact your branch.')
+  if (String(row.roles ?? '').replace(/[\[\]"\s]/g, '') === 'agent' && await agentDeactivated(company.tp, row.agent_id)) fail(403, 'ACCOUNT_DISABLED', 'This account is disabled. Contact your branch.')
   const lockedUntil = row.locked_until ? new Date(row.locked_until as string | Date) : null
   if (lockedUntil && lockedUntil.getTime() > Date.now()) {
     fail(403, 'ACCOUNT_LOCKED', `Too many attempts. Try again in ${Math.ceil((lockedUntil.getTime() - Date.now()) / 60000)} minutes.`)

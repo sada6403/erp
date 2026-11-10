@@ -1,4 +1,4 @@
-import { appRoute } from '@/lib/app/context'
+import { agentDeactivated, appRoute } from '@/lib/app/context'
 import { fail, only, reqStr, optStr } from '@/lib/app/http'
 import { REFRESH_TTL_MS, agentCodeOf, issueTokens, sha256, toAuthUser } from '@/lib/app/security'
 import type { RefreshResponse } from '@/lib/app/contracts/auth'
@@ -24,6 +24,7 @@ export const POST = appRoute({ auth: 'none', limiter: 'auth' }, async ({ company
   const u = await company.tp.query<Record<string, unknown>>(`SELECT * FROM app_users WHERE id = ? AND deleted_at IS NULL`, [t.user_id])
   const row = u.rows[0]
   if (!row || row.status !== 'active') fail(401, 'UNAUTHORIZED', 'Sign in required')
+  if (String(row.roles ?? '').replace(/[\[\]"\s]/g, '') === 'agent' && await agentDeactivated(company.tp, row.agent_id)) fail(403, 'ACCOUNT_DISABLED', 'This account is disabled. Contact your branch.')
   // Rotate: atomically revoke the presented token (only one concurrent caller wins).
   const upd = await company.tp.query(`UPDATE app_refresh_tokens SET revoked_at = NOW() WHERE id = ? AND revoked_at IS NULL`, [t.id])
   if (Number((upd.rows as unknown as { affectedRows?: number }).affectedRows) === 0) fail(401, 'UNAUTHORIZED', 'Sign in required')

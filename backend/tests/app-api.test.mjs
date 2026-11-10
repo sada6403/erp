@@ -428,3 +428,54 @@ test('company profile: public with app key, follows POS settings, feeds the lega
   }
   assert.equal((await fetch(`${BASE}/legal/privacy?c=no-such-company`)).status, 404)
 })
+
+// ── disabled / deactivated accounts lose access immediately ─────────────────
+test('disable: next call denied, refresh denied, push tokens gone; re-enable: login works again', async () => {
+  const phone = `07${Math.floor(10000000 + Math.random() * 89999999)}`
+  const reg = await call('POST', '/auth/register', { body: { name: 'Disable Me', phone, password: 'Disable@1234' } })
+  assert.equal(reg.status, 201, JSON.stringify(reg.json))
+  const { access_token, refresh_token } = reg.json.tokens
+  const id = reg.json.user.id
+  const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
+  const adm = (status) => fetch(`${V1}/admin/app-access/status`, { method: 'POST', headers: { 'x-api-key': seed.pos_api_key, 'content-type': 'application/json' }, body: JSON.stringify({ user_id: id, status }) })
+  try {
+    await db.query(`INSERT INTO app_devices (id, user_id, expo_push_token, platform) VALUES (UUID(), ?, 'ExponentPushToken[disable-test]', 'android')`, [id])
+    assert.equal((await call('GET', '/me', { token: access_token })).status, 200)
+    assert.equal((await adm('disabled')).status, 200)
+    const denied = await call('GET', '/me', { token: access_token })
+    assert.equal(denied.status, 403)
+    assert.equal(denied.json.error.code, 'ACCOUNT_DISABLED')
+    assert.equal((await call('GET', '/orders', { token: access_token })).status, 403)
+    assert.ok([401, 403].includes((await call('POST', '/auth/refresh', { body: { refresh_token } })).status))
+    assert.equal((await call('POST', '/auth/login', { body: { identifier: phone, password: 'Disable@1234' } })).json.error.code, 'ACCOUNT_DISABLED')
+    const [[dev]] = await db.query(`SELECT COUNT(*) AS n FROM app_devices WHERE user_id = ?`, [id])
+    assert.equal(Number(dev.n), 0, 'push tokens removed')
+    const [[rt]] = await db.query(`SELECT COUNT(*) AS n FROM app_refresh_tokens WHERE user_id = ? AND revoked_at IS NULL`, [id])
+    assert.equal(Number(rt.n), 0, 'refresh tokens revoked')
+    assert.equal((await adm('active')).status, 200)
+    const again = await call('POST', '/auth/login', { body: { identifier: phone, password: 'Disable@1234' } })
+    assert.equal(again.status, 200)
+    assert.equal((await call('GET', '/me', { token: again.json.tokens.access_token })).status, 200)
+  } finally { await db.end() }
+})
+
+test('deactivated agent (POS): agent routes, login and refresh denied at once; reactivated: works again', async () => {
+  const a = await call('POST', '/auth/login', { body: { identifier: seed.logins.agent.identifier, password: seed.password } })
+  assert.equal(a.status, 200)
+  const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
+  try {
+    assert.equal((await call('GET', '/agent/dashboard', { token: a.json.tokens.access_token })).status, 200)
+    await db.query(`UPDATE agents SET status = 'inactive' WHERE id = ?`, [seed.agent_id])
+    const d = await call('GET', '/agent/dashboard', { token: a.json.tokens.access_token })
+    assert.equal(d.status, 403)
+    assert.equal(d.json.error.code, 'ACCOUNT_DISABLED')
+    assert.equal((await call('POST', '/auth/login', { body: { identifier: seed.logins.agent.identifier, password: seed.password } })).json.error.code, 'ACCOUNT_DISABLED')
+    assert.equal((await call('POST', '/auth/refresh', { body: { refresh_token: a.json.tokens.refresh_token } })).json.error.code, 'ACCOUNT_DISABLED')
+  } finally {
+    await db.query(`UPDATE agents SET status = 'active' WHERE id = ?`, [seed.agent_id])
+    await db.end()
+  }
+  const back = await call('POST', '/auth/login', { body: { identifier: seed.logins.agent.identifier, password: seed.password } })
+  assert.equal(back.status, 200)
+  assert.equal((await call('GET', '/agent/dashboard', { token: back.json.tokens.access_token })).status, 200)
+})

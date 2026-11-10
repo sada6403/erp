@@ -7,6 +7,8 @@ import { clearUserCache } from '@/query/queryClient';
 import { useSessionStore, defaultRoleFor } from '@/store/sessionStore';
 import { useCartStore } from '@/store/cartStore';
 import { useOutboxStore, uuid } from '@/store/outboxStore';
+import i18n from '@/i18n';
+import { useUiStore } from '@/store/uiStore';
 import { getStoredPushToken, clearStoredPushToken } from '@/features/push/push';
 
 const DEVICE_KEY = 'np-device-id';
@@ -23,9 +25,10 @@ export function getDeviceId(): string {
 
 export function initSession() {
   setDeviceIdProvider(getDeviceId);
-  setSessionExpiredHandler(() => {
+  setSessionExpiredHandler((reason) => {
     clearUserCache();
     useSessionStore.getState().clear();
+    if (reason === 'ACCOUNT_DISABLED' || reason === 'ACCOUNT_LOCKED') useUiStore.getState().showToast(i18n.t(`errors.${reason}`));
   });
 }
 

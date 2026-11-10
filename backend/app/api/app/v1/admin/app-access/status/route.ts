@@ -16,6 +16,8 @@ export async function POST(req: NextRequest) {
     if (Number((r.rows as unknown as { affectedRows?: number }).affectedRows) === 0) fail(404, 'NOT_FOUND', 'User not found')
     if (status === 'disabled') {
       await company.tp.query(`UPDATE app_refresh_tokens SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL`, [userId]).catch(() => undefined)
+      // No more push notifications to a disabled account's phones.
+      await company.tp.query(`DELETE FROM app_devices WHERE user_id = ?`, [userId]).catch(() => undefined)
     }
     return NextResponse.json({ ok: true })
   } catch (err) {

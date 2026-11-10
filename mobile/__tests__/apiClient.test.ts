@@ -85,6 +85,20 @@ describe('api client', () => {
     expect(calls).toEqual(['POST /auth/login']);
   });
 
+  it.each(['ACCOUNT_DISABLED', 'ACCOUNT_LOCKED'])('signs the user out at once on 403 %s (no refresh attempt)', async (code) => {
+    const { client, calls, tokens, onSessionExpired } = setup((c) => fail(c, 403, code));
+    await expect(client.get('/orders')).rejects.toMatchObject({ code });
+    expect(tokens.current).toBeNull();
+    expect(onSessionExpired).toHaveBeenCalledWith(code);
+    expect(calls).toEqual(['GET /orders']);
+  });
+
+  it('a disabled account at login only shows the error (nothing to sign out)', async () => {
+    const { client, onSessionExpired } = setup((c) => fail(c, 403, 'ACCOUNT_DISABLED'));
+    await expect(client.post('/auth/login', { identifier: 'x', password: 'y' })).rejects.toMatchObject({ code: 'ACCOUNT_DISABLED' });
+    expect(onSessionExpired).not.toHaveBeenCalled();
+  });
+
   it('maps network errors to NETWORK and reports unreachable', async () => {
     const { client, onReachability } = setup((c) => new AxiosError('Network Error', 'ERR_NETWORK', c));
     const err = await client.get('/status').catch((e: unknown) => e);

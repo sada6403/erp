@@ -5,11 +5,11 @@ import { createApiClient } from './client';
 import { secureTokenStore } from './tokenStore';
 
 let instance: AxiosInstance | null = null;
-let sessionExpiredHandler: (() => void) | null = null;
+let sessionExpiredHandler: ((reason?: string) => void) | null = null;
 let deviceIdProvider: (() => string | undefined) | undefined;
 
 /** Registered by the session layer so the client can sign the user out when refresh is rejected. */
-export function setSessionExpiredHandler(fn: (() => void) | null) {
+export function setSessionExpiredHandler(fn: ((reason?: string) => void) | null) {
   sessionExpiredHandler = fn;
 }
 
@@ -32,7 +32,7 @@ export function getClient(): AxiosInstance {
     appVersion: ENV.appVersion,
     tokens: secureTokenStore,
     deviceId: () => deviceIdProvider?.(),
-    onSessionExpired: () => sessionExpiredHandler?.(),
+    onSessionExpired: (reason) => sessionExpiredHandler?.(reason),
     onReachability: (ok) => useUiStore.getState().setServerReachable(ok),
     adapter,
   });

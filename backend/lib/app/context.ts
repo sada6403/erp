@@ -71,6 +71,18 @@ export async function resolveAppCompany(req: NextRequest): Promise<AppCompany> {
   return { id: c.id, dbSchema: c.db_schema, name: c.name, slug: c.slug, tp: tenantPool(c.db_schema) }
 }
 
+type TenantQuery = Pick<AppCompany['tp'], 'query'>
+
+/**
+ * True when the POS has deactivated the agent record behind an app user. Such a user keeps no agent access;
+ * if agent was their only role the whole account is treated as disabled.
+ */
+export async function agentDeactivated(tp: TenantQuery, agentId: unknown): Promise<boolean> {
+  if (!agentId) return false
+  const { rows } = await tp.query<{ status: string | null }>(`SELECT status FROM agents WHERE id = ? LIMIT 1`, [String(agentId)])
+  return !!rows[0] && String(rows[0].status ?? 'active') !== 'active'
+}
+
 export async function requireAppUser(
   req: NextRequest,
   company: AppCompany,
@@ -101,7 +113,13 @@ export async function requireAppUser(
   if (!u) fail(401, 'UNAUTHORIZED', 'Sign in required')
   if (u.status === 'disabled') fail(403, 'ACCOUNT_DISABLED', 'This account is disabled. Contact your branch.')
   if (u.status === 'locked') fail(403, 'ACCOUNT_LOCKED', 'This account is locked.')
-  const userRoles = parseJson<AppRole[]>(u.roles, [])
+  let userRoles = parseJson<AppRole[]>(u.roles, [])
+  let agentId: string | null = u.agent_id ? String(u.agent_id) : null
+  if (agentId && await agentDeactivated(company.tp, agentId)) {
+    userRoles = userRoles.filter(r => r !== 'agent')
+    agentId = null
+    if (!userRoles.length) fail(403, 'ACCOUNT_DISABLED', 'This account is disabled. Contact your branch.')
+  }
   const mustChange = Number(u.must_change_password) === 1
   if (mustChange && !opts.allowPasswordChangePending) fail(403, 'PASSWORD_CHANGE_REQUIRED', 'Please set a new password first.')
   if (roles && !roles.some(r => userRoles.includes(r))) fail(403, 'FORBIDDEN', 'Not allowed for this account')
@@ -110,7 +128,7 @@ export async function requireAppUser(
     userId: String(u.id),
     roles: userRoles,
     customerId: u.customer_id ? String(u.customer_id) : null,
-    agentId: u.agent_id ? String(u.agent_id) : null,
+    agentId,
     name: String(u.name),
     phone: u.phone ? String(u.phone) : null,
     email: u.email ? String(u.email) : null,

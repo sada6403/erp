@@ -45,7 +45,8 @@ export interface ApiClientOptions {
   tokens: TokenStore;
   deviceId?: () => string | undefined;
   /** Called when the refresh token is rejected: the user must sign in again. */
-  onSessionExpired?: () => void;
+  /** `reason` is set to the error code when the server ended the session (ACCOUNT_DISABLED / ACCOUNT_LOCKED). */
+  onSessionExpired?: (reason?: string) => void;
   /** Called with false on network error / 5xx, true on any successful response. */
   onReachability?: (reachable: boolean) => void;
   onTokensRotated?: (tokens: AuthTokens) => void;
@@ -122,6 +123,16 @@ export function createApiClient(opts: ApiClientOptions): AxiosInstance {
       else if (appError.status != null) opts.onReachability?.(true);
 
       const url = config?.url ?? '';
+      // The branch disabled/locked this account: end the session at once (login attempts show their own message).
+      if (
+        appError.status === 403 &&
+        (appError.code === 'ACCOUNT_DISABLED' || appError.code === 'ACCOUNT_LOCKED') &&
+        !url.startsWith('/auth/login')
+      ) {
+        await opts.tokens.clear();
+        opts.onSessionExpired?.(appError.code);
+        throw appError;
+      }
       const canRefresh =
         appError.status === 401 &&
         config != null &&
