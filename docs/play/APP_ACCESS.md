@@ -36,7 +36,7 @@ All accounts are test accounts; any order placed with them is tagged TEST and is
    Try: Team dashboard, Targets, Field visits.
 
 Language can be changed in Settings (English / Tamil / Sinhala). Card payments and some Smart Buy actions show "Coming in the next update"; Cash on delivery works.
-If a login ever shows "Incorrect ID or password", please contact monimomj@gmail.com and we will fix it within a few hours.
+If a login ever shows "Incorrect ID or password", please contact <SUPPORT EMAIL> and we will fix it within a few hours.
 ```
 
 ## Pre-submission checklist
