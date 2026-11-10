@@ -3,6 +3,7 @@ import Modal from '@/components/shared/Modal'
 import { Printer, FileDown, FileSpreadsheet } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { buildInvoicePrintPayload, type InvoiceDetail } from '@/lib/invoicePrint'
+import { parseUtc } from '../../lib/datetime'
 
 const fmt = (n: unknown) => Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -107,7 +108,7 @@ export default function InvoiceDetailModal({ invoiceId, onClose }: { invoiceId: 
             </div>
             <div className="card">
               <p className="text-xs text-slate-400 mb-1">Date</p>
-              <p className="font-medium" style={{ color: 'var(--text-1)' }}>{new Date(detail.created_at).toLocaleString()}</p>
+              <p className="font-medium" style={{ color: 'var(--text-1)' }}>{parseUtc(detail.created_at).toLocaleString()}</p>
               <p className="text-xs mt-0.5" style={{ color: 'var(--text-3)' }}>{detail.status}</p>
             </div>
           </div>

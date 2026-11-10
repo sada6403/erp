@@ -109,6 +109,20 @@ test('orders: create (idempotent), list, detail, tracking', async () => {
   assert.equal(tr.status, 200)
   assert.equal(tr.json.steps[0].key, 'placed')
 })
+
+test('timezone: timestamps are stored and returned as UTC (ISO, Z), not shifted by the DB server timezone', async () => {
+  const d = await call('GET', `/orders/${orderId}`, { token: customer })
+  assert.equal(d.status, 200)
+  assert.match(d.json.created_at, /Z$/, 'API timestamps are ISO-8601 UTC')
+  const skew = Math.abs(Date.now() - new Date(d.json.created_at).getTime())
+  assert.ok(skew < 5 * 60 * 1000, `created_at is ${Math.round(skew / 60000)} min away from now (a +05:30 DB timezone leak would show 330)`)
+  // The row itself, read with a UTC session, must agree.
+  const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema, timezone: '+00:00' })
+  try {
+    const [[row]] = await db.query(`SELECT created_at FROM customer_orders WHERE id = ?`, [orderId])
+    assert.ok(Math.abs(Date.now() - new Date(row.created_at).getTime()) < 5 * 60 * 1000)
+  } finally { await db.end() }
+})
 test('orders: Play reviewer account orders are tagged TEST in the notes; normal accounts are not', async () => {
   const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
   try {
@@ -229,7 +243,14 @@ test('agent delivery: wrong OTP 400, correct OTP completes once (idempotent), ot
   const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
   try {
     assert.ok(['127.0.0.1', 'localhost'].includes(process.env.MYSQL_HOST), 'tests only re-arm a local database')
-    await db.query(`UPDATE customer_orders SET status = 'ready_for_delivery', payment_status = 'unpaid', delivered_at = NULL WHERE id = ?`, [id])
+    await db.query(`DELETE FROM payments WHERE invoice_id = 'cod-test-inv'`)
+    await db.query(`DELETE FROM invoices WHERE id = 'cod-test-inv'`)
+    await db.query(`UPDATE customer_orders SET status = 'ready_for_delivery', payment_status = 'unpaid', payment_method = 'cod', paid_amount = 0, invoice_id = NULL, delivered_at = NULL WHERE id = ?`, [id])
+    const [[o]] = await db.query(`SELECT branch_id, customer_id, total_amount FROM customer_orders WHERE id = ?`, [id])
+    const [[cashier]] = await db.query(`SELECT id FROM users LIMIT 1`)
+    await db.query(`INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id, status, bill_type, subtotal, total_amount, paid_amount, due_amount)
+      VALUES ('cod-test-inv', 'TEST-COD-0001', ?, ?, ?, 'completed', 'RETAIL', ?, ?, 0, ?)`, [o.branch_id, o.customer_id, cashier.id, o.total_amount, o.total_amount, o.total_amount])
+    await db.query(`UPDATE customer_orders SET invoice_id = 'cod-test-inv' WHERE id = ?`, [id])
     await db.query(`DELETE FROM app_request_receipts WHERE scope = 'delivery'`)
   } finally { await db.end() }
   assert.equal((await call('GET', `/agent/deliveries/${id}`, { token: customer })).status, 403)
@@ -250,6 +271,22 @@ test('agent delivery: wrong OTP 400, correct OTP completes once (idempotent), ot
   assert.equal(replay.json.delivered_at, ok.json.delivered_at)
   const tr = await call('GET', `/orders/${id}/tracking`, { token: customer })
   assert.equal(tr.json.status, 'delivered')
+
+  // COD: cash collected settles the order and its invoice, and a payment row is written exactly once.
+  const chk = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
+  try {
+    const [[o]] = await chk.query(`SELECT total_amount, paid_amount, payment_status FROM customer_orders WHERE id = ?`, [id])
+    assert.equal(o.payment_status, 'paid')
+    assert.equal(Number(o.paid_amount), Number(o.total_amount))
+    const [[i]] = await chk.query(`SELECT total_amount, paid_amount, due_amount, status FROM invoices WHERE id = 'cod-test-inv'`)
+    assert.equal(Number(i.paid_amount), Number(i.total_amount))
+    assert.equal(Number(i.due_amount), 0)
+    assert.equal(i.status, 'paid')
+    const [pays] = await chk.query(`SELECT method, amount FROM payments WHERE invoice_id = 'cod-test-inv'`)
+    assert.equal(pays.length, 1)
+    assert.equal(pays[0].method, 'cash')
+    assert.equal(Number(pays[0].amount), Number(o.total_amount))
+  } finally { await chk.end() }
 })
 
 // ── Admin (POS) endpoints: x-api-key, NOT the app key ────────────────────

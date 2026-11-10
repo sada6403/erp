@@ -45,9 +45,34 @@ export const POST = appRoute({ auth: 'user', roles: ['agent'], limiter: 'otp' },
 
   const deliveredAt = new Date()
   const cod = String(o.payment_method || '') === 'cod'
-  await company.tp.query(
-    `UPDATE customer_orders SET status = 'delivered', delivered_at = ?, payment_status = ? WHERE id = ? AND status NOT IN ('delivered','cancelled','returned')`,
-    [deliveredAt, cod ? 'paid' : String(o.payment_status), params.id])
+  // COD: the agent collected the cash, so the order and its invoice are fully paid and the customer's due is cleared.
+  const conn = await company.tp.connect()
+  try {
+    await conn.query('START TRANSACTION')
+    const upd = await conn.query<Record<string, unknown>>(
+      `UPDATE customer_orders SET status = 'delivered', delivered_at = ?, payment_status = ?, paid_amount = IF(?, total_amount, paid_amount)
+       WHERE id = ? AND status NOT IN ('delivered','cancelled','returned')`,
+      [deliveredAt, cod ? 'paid' : String(o.payment_status), cod ? 1 : 0, params.id])
+    if (cod && Number((upd.rows as unknown as { affectedRows?: number }).affectedRows ?? 1) > 0 && o.invoice_id) {
+      const inv = await conn.query<Record<string, unknown>>(
+        `SELECT id, customer_id, total_amount, paid_amount FROM invoices WHERE id = ? FOR UPDATE`, [o.invoice_id])
+      const row = inv.rows[0]
+      const due = row ? Number(row.total_amount) - Number(row.paid_amount) : 0
+      if (row && due > 0) {
+        await conn.query(
+          `INSERT INTO payments (id, invoice_id, method, amount, reference, received_by, paid_at, updated_at) VALUES (?, ?, 'cash', ?, ?, NULL, ?, ?)`,
+          [randomUUID(), row.id, due, `COD ${String(o.order_number || params.id)}`, deliveredAt, deliveredAt])
+        await conn.query(`UPDATE invoices SET paid_amount = total_amount, due_amount = 0, status = 'paid', updated_at = ? WHERE id = ?`, [deliveredAt, row.id])
+        if (row.customer_id) await conn.query(`UPDATE customers SET outstanding = GREATEST(outstanding - ?, 0), updated_at = ? WHERE id = ?`, [due, deliveredAt, row.customer_id])
+      }
+    }
+    await conn.query('COMMIT')
+  } catch (e) {
+    await conn.query('ROLLBACK').catch(() => undefined)
+    throw e
+  } finally {
+    conn.release()
+  }
   await onOrderStatusChanged(company.tp, params.id)
   const resp: DeliveryCompleteResponse = { order_id: params.id, status: 'delivered', delivered_at: deliveredAt.toISOString() }
   try {

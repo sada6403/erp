@@ -1,4 +1,6 @@
 import './lib/api'
+import { installColomboDefault } from './lib/datetime'
+installColomboDefault()
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { HashRouter } from 'react-router-dom'

@@ -49,10 +49,12 @@ export default function DeliveryDetailScreen() {
           ))}
         </Card>
       ) : null}
-      <Card>
-        <Text size={12} color="textMuted">{d.collect_cash ? t('agent.cashToCollect') : t('agent.prepaid')}</Text>
-        <Text size={22} weight={800} color={d.collect_cash ? 'warning' : 'success'} mono>{formatRs(d.collect_cash ? d.amount_due : 0)}</Text>
-      </Card>
+      {finished ? null : (
+        <Card>
+          <Text size={12} color="textMuted">{d.collect_cash ? t('agent.cashToCollect') : t('agent.prepaid')}</Text>
+          <Text size={22} weight={800} color={d.collect_cash ? 'warning' : 'success'} mono>{formatRs(d.collect_cash ? d.amount_due : 0)}</Text>
+        </Card>
+      )}
       {finished ? (
         <Card>
           <Text size={14} weight={800} color="success" align="center">{`✅ ${t('agent.delivered')}`}</Text>

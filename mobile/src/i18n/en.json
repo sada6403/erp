@@ -144,10 +144,10 @@
     "review": "Review Harvest Items",
     "startShopping": "Start shopping",
     "subtotalApprox": "Subtotal (approx.)",
-    "couponPlaceholder": "Enter promo code (Try: PLANT2026)",
+    "couponPlaceholder": "Enter promo code",
     "apply": "Apply",
     "couponOk": "✓ Promo Code Applied: Rs 500 Off your plantation groceries!",
-    "couponBad": "✕ Invalid Promo Code. Try using PLANT2026"
+    "couponBad": "✕ Invalid promo code"
   },
   "checkout": {
     "stepCart": "Cart",

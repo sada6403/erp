@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { X, FileText, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useCartStore } from '@/store/cartStore'
+import { parseUtc } from '../../lib/datetime'
 
 interface Props { onClose: () => void }
 
@@ -58,7 +59,7 @@ export default function HeldInvoicesModal({ onClose }: Props) {
                 <p className="text-sm font-medium" style={{ color: 'var(--text-1)' }}>
                   {String(h.customer_name || 'Walk-in')} · {String(h.item_count)} item(s)
                 </p>
-                <p className="text-xs text-slate-500">{String(h.bill_type)} · {new Date(h.created_at as string).toLocaleTimeString()}</p>
+                <p className="text-xs text-slate-500">{String(h.bill_type)} · {parseUtc(h.created_at).toLocaleTimeString()}</p>
               </div>
               <p className="text-sm font-bold text-brand-400">
                 {recalling === h.id ? 'Recalling…' : `Rs.${Number(h.total_amount).toLocaleString()}`}

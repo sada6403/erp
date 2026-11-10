@@ -11,6 +11,14 @@ const APP_ENV = process.env.APP_ENV ?? 'development';
 const ANDROID_PACKAGE = process.env.ANDROID_PACKAGE ?? 'com.naturalplantation.app.dev';
 const API_BASE_URL = process.env.API_BASE_URL ?? 'http://10.0.2.2:3000';
 const APP_KEY = process.env.APP_KEY ?? '';
+// eas.json carries "__SET_AT_BUILD__" placeholders for production. Real values are supplied at build time
+// (eas env / --environment variables) and never committed. A production build must not ship with a placeholder.
+if (APP_ENV === 'production') {
+  const missing = Object.entries({ ANDROID_PACKAGE, API_BASE_URL, APP_KEY })
+    .filter(([, v]) => !v || v.includes('__SET_AT_BUILD__'))
+    .map(([k]) => k);
+  if (missing.length) throw new Error(`Production build needs real values for: ${missing.join(', ')} (set them at build time, see docs/mobile-app).`);
+}
 const EAS_PROJECT_ID = process.env.EAS_PROJECT_ID ?? '';
 const EAS_UPDATE_URL =
   process.env.EAS_UPDATE_URL ?? (EAS_PROJECT_ID ? `https://u.expo.dev/${EAS_PROJECT_ID}` : '');

@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useTheme, radii } from '@/theme';
-import { splitCountdown } from '@/lib/format';
+import { COLOMBO_OFFSET_MIN, splitCountdown } from '@/lib/format';
 import { Text } from './Text';
 import { Button } from './Button';
 import { Screen } from './Shell';
@@ -18,9 +18,10 @@ export function flashDealsEnd(now = Date.now()): number {
     if (!devEnd) devEnd = now + (5 * 3600 + 42 * 60 + 18) * 1000;
     return devEnd;
   }
-  const d = new Date(now);
-  d.setHours(24, 0, 0, 0);
-  return d.getTime();
+  // Flash deals end at midnight Colombo time, whatever the phone's timezone.
+  const day = 86_400_000;
+  const shifted = now + COLOMBO_OFFSET_MIN * 60_000;
+  return Math.floor(shifted / day) * day + day - COLOMBO_OFFSET_MIN * 60_000;
 }
 
 /** Flash-deal countdown (HH:MM:SS boxes). `endsAt` is a ms epoch from the server; absent => nothing shown. */

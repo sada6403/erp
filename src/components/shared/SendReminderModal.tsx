@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Modal from '@/components/shared/Modal'
 import { Send, AlertTriangle } from 'lucide-react'
 import toast from 'react-hot-toast'
+import { parseUtc } from '../../lib/datetime'
 
 type Row = Record<string, unknown>
 const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -72,7 +73,7 @@ export default function SendReminderModal({ memberId, cycleNo, onClose, onSent }
           </div>
           {preview.lastReminder ? (
             <p className="text-xs" style={{ color: 'var(--text-3)' }}>
-              Last Reminder Sent: {new Date(String((preview.lastReminder as Row).sent_at)).toLocaleString()}
+              Last Reminder Sent: {parseUtc((preview.lastReminder as Row).sent_at).toLocaleString()}
             </p>
           ) : (
             <p className="text-xs" style={{ color: 'var(--text-3)' }}>No reminder sent yet for this cycle.</p>

@@ -1,11 +1,11 @@
-import { pad2 } from '@/lib/format';
+import { colomboParts, pad2 } from '@/lib/format';
 
 type TFn = (key: string) => string;
 
-/** Current month as YYYY-MM. */
+/** Current month as YYYY-MM, on the Colombo calendar (the server's reporting month). */
 export const thisMonth = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+  const p = colomboParts(Date.now())!;
+  return `${p.year}-${pad2(p.month + 1)}`;
 };
 
 /** "2026-10" -> "October 2026" (month names come from i18n). */

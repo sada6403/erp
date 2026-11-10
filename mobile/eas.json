@@ -34,7 +34,10 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "APP_ENV": "production"
+        "APP_ENV": "production",
+        "ANDROID_PACKAGE": "__SET_AT_BUILD__",
+        "API_BASE_URL": "__SET_AT_BUILD__",
+        "APP_KEY": "__SET_AT_BUILD__"
       },
       "credentialsSource": "remote"
     }

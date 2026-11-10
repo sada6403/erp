@@ -55,7 +55,7 @@ const DeliveryCard = React.memo(function DeliveryCard({ d }: { d: DeliveryItem }
       {d.address ? <Text size={11} color="textMuted" style={{ marginTop: 2 }}>{d.address}</Text> : null}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8, marginBottom: 10, paddingBottom: 8, borderBottomWidth: 1, borderStyle: 'dashed', borderBottomColor: theme.colors.surfaceBorder }}>
         {pkg ? <Text size={11} style={{ flex: 1 }}>{t('agent.package')}: <Text size={11} style={{ fontStyle: 'italic' }}>{pkg}</Text></Text> : <View style={{ flex: 1 }} />}
-        {d.collect_cash ? (
+        {done ? null : d.collect_cash ? (
           <Text size={11}>{t('agent.codDue')}: <Text size={11} weight={800} color="error">{formatRs(d.amount_due)}</Text></Text>
         ) : (
           <Text size={11} weight={800} color="success">{t('agent.prepaid')}</Text>

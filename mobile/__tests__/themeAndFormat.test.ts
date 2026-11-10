@@ -1,5 +1,6 @@
 import { OliveYellow, PurplePink, themes, DEFAULT_THEME, TOUCH_TARGET, BOTTOM_NAV_HEIGHT } from '@/theme';
-import { compareVersions, formatDate, formatPhone, normalizePhone, classifyIdentifier, splitAge, splitCountdown } from '@/lib/format';
+import { thisMonth } from '@/features/agent/month';
+import { compareVersions, formatDate, formatTime, formatPhone, normalizePhone, classifyIdentifier, splitAge, splitCountdown } from '@/lib/format';
 import { sha256Hex, verifyDeliveryOtp } from '@/lib/sha256';
 import { lerpColor } from '@/lib/color';
 
@@ -31,8 +32,17 @@ describe('themes', () => {
 
 describe('format helpers', () => {
   it('formats dates dd MMM yyyy', () => {
-    expect(formatDate(new Date(2026, 10, 7))).toBe('07 Nov 2026');
+    expect(formatDate('2026-11-07T06:00:00Z')).toBe('07 Nov 2026');
     expect(formatDate(null)).toBe('');
+  });
+
+  it('shows Sri Lanka time (UTC+05:30) for UTC timestamps, whatever the device timezone', () => {
+    // 20:00 UTC on 7 Nov is already 01:30 on 8 Nov in Colombo.
+    expect(formatDate('2026-11-07T20:00:00Z')).toBe('08 Nov 2026');
+    expect(formatTime('2026-11-07T20:00:00Z')).toBe('01:30 AM');
+    expect(formatTime('2026-11-07T06:30:00.000Z')).toBe('12:00 PM');
+    expect(formatTime('2026-11-07T18:29:00Z')).toBe('11:59 PM');
+    expect(thisMonth).toBeDefined();
   });
 
   it('normalises Sri Lankan phone numbers and classifies identifiers', () => {

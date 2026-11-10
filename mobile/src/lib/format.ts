@@ -32,23 +32,34 @@ function pad(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-/** dd MMM yyyy */
-export function formatDate(value: string | number | Date | null | undefined): string {
-  if (value == null || value === '') return '';
+/**
+ * The server stores and sends UTC. Everything the user sees is Sri Lanka time (Asia/Colombo, UTC+05:30, no DST),
+ * whatever the phone's own timezone is. A fixed offset avoids relying on Intl timezone data in Hermes.
+ */
+export const COLOMBO_OFFSET_MIN = 330;
+
+/** Calendar parts of an instant, as read on a clock in Colombo. `month` is 0-11. */
+export function colomboParts(value: string | number | Date | null | undefined): { year: number; month: number; day: number; hour: number; minute: number } | null {
+  if (value == null || value === '') return null;
   const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return `${pad(d.getDate())} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  if (Number.isNaN(d.getTime())) return null;
+  const c = new Date(d.getTime() + COLOMBO_OFFSET_MIN * 60_000);
+  return { year: c.getUTCFullYear(), month: c.getUTCMonth(), day: c.getUTCDate(), hour: c.getUTCHours(), minute: c.getUTCMinutes() };
 }
 
-/** hh:mm AM/PM */
+/** dd MMM yyyy (Colombo time) */
+export function formatDate(value: string | number | Date | null | undefined): string {
+  const p = colomboParts(value);
+  return p ? `${pad(p.day)} ${MONTHS[p.month]} ${p.year}` : '';
+}
+
+/** hh:mm AM/PM (Colombo time) */
 export function formatTime(value: string | number | Date | null | undefined): string {
-  if (value == null || value === '') return '';
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  const h = d.getHours();
-  const suffix = h >= 12 ? 'PM' : 'AM';
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${pad(h12)}:${pad(d.getMinutes())} ${suffix}`;
+  const p = colomboParts(value);
+  if (!p) return '';
+  const suffix = p.hour >= 12 ? 'PM' : 'AM';
+  const h12 = p.hour % 12 === 0 ? 12 : p.hour % 12;
+  return `${pad(h12)}:${pad(p.minute)} ${suffix}`;
 }
 
 export type AgeUnit = 'now' | 'minutes' | 'hours' | 'days';
