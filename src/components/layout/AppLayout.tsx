@@ -850,6 +850,7 @@ export default function AppLayout() {
             )}
             {isSupermarket && (isAdmin || Boolean(permissions.reports)) && <SidebarLink to="/admin/stock-profit" icon={BarChart3} label="Stock & Profit" collapsed={!sidebarOpen} />}
             {isSupermarket && isAdmin && <SidebarLink to="/admin/investments" icon={Coins} label="Owner Investments" collapsed={!sidebarOpen} />}
+            {isSupermarket && isAdmin && <SidebarLink to="/admin/management" icon={UserCog} label="Management Control" collapsed={!sidebarOpen} />}
             {NAV_GROUPS
               .filter(group => procurementAllowed || !['Purchase Orders', 'Supplier Management'].includes(group.label))
               .map(group => (

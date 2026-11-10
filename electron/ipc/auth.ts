@@ -50,6 +50,7 @@ function readPermissions(user: Record<string, unknown>): Record<string, boolean>
 function resolveSessionScope(user: Record<string, unknown>): { portal: 'admin' | 'pos'; scope: AuthScope } {
   const roleObj = user.role as Record<string, unknown> | undefined
   const roleName = String(user.role_name || roleObj?.name || '').trim().toLowerCase()
+  if (String(user.role_id || roleObj?.id || '') === 'management-web-only' || roleName === 'management web only') throw new Error('This account is restricted to its assigned management platform')
   // roles.session_scope is the stable identifier for restricted-portal roles
   // (replaces matching on the role's display name, which breaks silently if
   // the role gets renamed). Falls back to the legacy name match only for

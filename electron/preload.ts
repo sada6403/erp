@@ -2,6 +2,12 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // Expose typed IPC bridge to the renderer process
 const api = {
+  management: {
+    connect: (payload: unknown) => ipcRenderer.invoke('management:connect', payload),
+    read: (resource: string) => ipcRenderer.invoke('management:read', resource),
+    write: (resource: string, payload: unknown) => ipcRenderer.invoke('management:write', resource, payload),
+    disconnect: () => ipcRenderer.invoke('management:disconnect'),
+  },
   // Auth
   auth: {
     login:   (payload: unknown) => ipcRenderer.invoke('auth:login', payload),

@@ -1,0 +1,1907 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#060B1A">
+<meta name="description" content="Enterprise POS ERP Director Portal. Executive supermarket investment, sales, gross profit, and branch performance analytics.">
+
+<title>Enterprise POS ERP — Director Portal & Download</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+/* ==========================================================================
+   DESIGN TOKENS & SYSTEM VARIABLES
+   ========================================================================== */
+:root {
+  --bg-base: #060B1A;
+  --bg-deep: #080F20;
+  --bg-elevated: #0B1630;
+  --bg-glass: rgba(11, 22, 48, 0.72);
+  --bg-glass-strong: rgba(11, 22, 48, 0.88);
+  --bg-surface-subtle: rgba(255, 255, 255, 0.03);
+  --bg-surface-hover: rgba(255, 255, 255, 0.06);
+
+  --blue-600: #2563EB;
+  --blue-500: #3B82F6;
+  --cyan-400: #38BDF8;
+  --indigo-500: #6366F1;
+  --text-primary: #F8FAFC;
+  --text-secondary: #CBD5E1;
+  --text-muted: #94A3B8;
+
+  --border-subtle: rgba(148, 163, 184, 0.12);
+  --border-strong: rgba(148, 163, 184, 0.24);
+  --border-glow: rgba(59, 130, 246, 0.4);
+
+  --success: #10B981;
+  --success-bg: rgba(16, 185, 129, 0.12);
+  --danger: #EF4444;
+  --danger-bg: rgba(239, 68, 68, 0.12);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 4px 16px -2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 24px 48px -12px rgba(0, 0, 0, 0.65);
+  --shadow-glow: 0 0 50px -10px rgba(59, 130, 246, 0.35);
+  --shadow-glow-cyan: 0 0 40px -10px rgba(56, 189, 248, 0.25);
+
+  --duration-micro: 150ms;
+  --duration-fast: 250ms;
+  --duration-normal: 400ms;
+  --duration-slow: 700ms;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ==========================================================================
+   RESET & BASE STYLES
+   ========================================================================== */
+*, *::before, *::after {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-secondary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.6;
+}
+
+body {
+  min-height: 100vh;
+  position: relative;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Accessible Skip Link */
+.skip-link {
+  position: absolute;
+  top: -100px;
+  left: 24px;
+  background: var(--blue-600);
+  color: #fff;
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  font-size: 14px;
+  z-index: 1000;
+  transition: top var(--duration-fast) var(--ease-out);
+  text-decoration: none;
+}
+.skip-link:focus {
+  top: 24px;
+  outline: 3px solid var(--cyan-400);
+}
+
+/* ==========================================================================
+   AMBIENT BACKGROUND LIGHTING & GRID
+   ========================================================================== */
+.ambient-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.ambient-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(148, 163, 184, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 50% 40%, black 40%, transparent 85%);
+  -webkit-mask-image: radial-gradient(circle at 50% 40%, black 40%, transparent 85%);
+}
+
+.ambient-orb {
+  position: absolute;
+  border-radius: var(--radius-full);
+  filter: blur(120px);
+  opacity: 0.65;
+  will-change: transform;
+}
+
+.orb-1 {
+  top: -150px;
+  left: -150px;
+  width: 650px;
+  height: 650px;
+  background: radial-gradient(circle, rgba(37, 99, 235, 0.35) 0%, rgba(37, 99, 235, 0) 70%);
+  animation: drift-1 18s ease-in-out infinite alternate;
+}
+
+.orb-2 {
+  top: 25%;
+  right: -180px;
+  width: 580px;
+  height: 580px;
+  background: radial-gradient(circle, rgba(56, 189, 248, 0.25) 0%, rgba(99, 102, 241, 0) 70%);
+  animation: drift-2 22s ease-in-out infinite alternate;
+}
+
+.orb-3 {
+  bottom: -200px;
+  left: 20%;
+  width: 700px;
+  height: 700px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.22) 0%, rgba(37, 99, 235, 0) 70%);
+  animation: drift-3 25s ease-in-out infinite alternate;
+}
+
+@keyframes drift-1 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(80px, 60px, 0) scale(1.1); }
+}
+@keyframes drift-2 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(-70px, 80px, 0) scale(0.95); }
+}
+@keyframes drift-3 {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  100% { transform: translate3d(60px, -70px, 0) scale(1.08); }
+}
+
+/* ==========================================================================
+   LAYOUT STRUCTURE (Desktop 58% / 42% split)
+   ========================================================================== */
+.viewport-wrapper {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  padding: var(--space-8) var(--space-10);
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.app-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(380px, 460px);
+  gap: var(--space-12);
+  align-items: start;
+  flex: 1;
+  padding-bottom: var(--space-12);
+}
+
+/* ==========================================================================
+   LEFT COLUMN — BRAND & PRODUCT STAGE
+   ========================================================================== */
+.product-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+/* Top bar */
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.brand-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  text-decoration: none;
+  color: inherit;
+}
+
+.logo-wrapper {
+  position: relative;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-md);
+  padding: 2px;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(56, 189, 248, 0.1));
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.logo-wrapper img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: calc(var(--radius-md) - 2px);
+  display: block;
+}
+
+.brand-text-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-name {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.brand-edition {
+  font-size: 12px;
+  color: var(--cyan-400);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 14px;
+  background: rgba(37, 99, 235, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.28);
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  color: #93C5FD;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.pulse-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--radius-full);
+  background-color: var(--success);
+  box-shadow: 0 0 8px var(--success);
+  animation: pulse-glow 2.4s infinite var(--ease-in-out);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.85); }
+}
+
+/* Hero Typography */
+.hero-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: 720px;
+}
+
+.eyebrow-container {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.eyebrow-text {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--cyan-400);
+}
+
+.eyebrow-line {
+  height: 1px;
+  width: 44px;
+  background: linear-gradient(90deg, var(--cyan-400), transparent);
+}
+
+.hero-title {
+  font-size: clamp(2.4rem, 4.4vw, 3.8rem);
+  font-weight: 800;
+  line-height: 1.08;
+  letter-spacing: -0.035em;
+  color: var(--text-primary);
+}
+
+.hero-line {
+  display: block;
+}
+
+.hero-gradient {
+  background: linear-gradient(135deg, #FFFFFF 20%, var(--cyan-400) 75%, var(--blue-500) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.hero-description {
+  font-size: 16px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+  max-width: 620px;
+}
+
+/* ==========================================================================
+   INTERACTIVE DASHBOARD PREVIEW (CSS / SVG ONLY)
+   ========================================================================== */
+.preview-stage {
+  position: relative;
+  perspective: 1200px;
+  margin-top: var(--space-2);
+}
+
+.dashboard-window {
+  position: relative;
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    0 30px 60px -12px rgba(0, 0, 0, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  padding: var(--space-5);
+  transform: rotateX(2deg) rotateY(-1deg);
+  transition: transform var(--duration-fast) var(--ease-out);
+  overflow: hidden;
+}
+
+.window-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-4);
+}
+
+.window-dots {
+  display: flex;
+  gap: 7px;
+}
+
+.window-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: var(--radius-full);
+}
+.dot-red { background: #EF4444; opacity: 0.8; }
+.dot-yellow { background: #F59E0B; opacity: 0.8; }
+.dot-green { background: #10B981; opacity: 0.8; }
+
+.window-tag {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  padding: 3px 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.window-tag::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--cyan-400);
+}
+
+.preview-body {
+  display: grid;
+  grid-template-columns: 60px 1fr;
+  gap: var(--space-4);
+}
+
+/* Mock Sidebar */
+.mock-sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: center;
+  padding-top: var(--space-2);
+}
+
+.mock-nav-item {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  background: transparent;
+  transition: all var(--duration-micro) var(--ease-out);
+}
+.mock-nav-item.active {
+  background: rgba(59, 130, 246, 0.16);
+  color: var(--cyan-400);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+/* Mock Main View */
+.mock-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.mock-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.mock-metric-card {
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mock-metric-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.mock-metric-value {
+  font-size: 17px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.mock-metric-delta {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--success);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* Mock Chart Canvas */
+.mock-chart-container {
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mock-chart-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.svg-chart {
+  width: 100%;
+  height: 90px;
+  overflow: visible;
+}
+
+.chart-line {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  animation: draw-chart 1.8s var(--ease-out) 0.6s forwards;
+}
+
+@keyframes draw-chart {
+  to { stroke-dashoffset: 0; }
+}
+
+.mock-bars-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  height: 38px;
+  gap: 8px;
+  padding-top: var(--space-2);
+  border-top: 1px solid rgba(148, 163, 184, 0.08);
+}
+
+.mock-bar {
+  flex: 1;
+  background: rgba(59, 130, 246, 0.22);
+  border-radius: 4px 4px 0 0;
+  transform-origin: bottom;
+  transform: scaleY(0);
+  animation: grow-bar 1s var(--ease-out) 1s forwards;
+}
+.mock-bar:hover {
+  background: var(--cyan-400);
+}
+
+@keyframes grow-bar {
+  to { transform: scaleY(1); }
+}
+
+/* Floating Chips */
+.floating-chip {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 8px 14px;
+  background: rgba(8, 15, 32, 0.88);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-full);
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.5);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  pointer-events: none;
+}
+
+.chip-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--cyan-400);
+}
+
+.chip-1 {
+  top: -14px;
+  right: 28px;
+  animation: chip-bob-1 7s ease-in-out infinite;
+}
+
+.chip-2 {
+  bottom: 24px;
+  left: -20px;
+  animation: chip-bob-2 8s ease-in-out infinite 1s;
+}
+
+@keyframes chip-bob-1 {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes chip-bob-2 {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(8px); }
+}
+
+/* ==========================================================================
+   FEATURE CARDS GRID
+   ========================================================================== */
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-4);
+  margin-top: var(--space-2);
+}
+
+.feature-card {
+  position: relative;
+  background: var(--bg-surface-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  transition: all var(--duration-fast) var(--ease-out);
+  overflow: hidden;
+}
+
+.feature-card:hover {
+  background: var(--bg-surface-hover);
+  border-color: var(--border-strong);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.feature-icon-tile {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--cyan-400);
+  transition: all var(--duration-fast) var(--ease-out);
+}
+
+.feature-card:hover .feature-icon-tile {
+  background: rgba(37, 99, 235, 0.22);
+  color: #fff;
+  box-shadow: 0 0 16px rgba(56, 189, 248, 0.35);
+  transform: scale(1.04);
+}
+
+.feature-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.feature-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.55;
+}
+
+/* Trust Strip */
+.trust-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.trust-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.trust-item svg {
+  color: var(--cyan-400);
+}
+
+/* ==========================================================================
+   RIGHT COLUMN — DIRECTOR LOGIN & DOWNLOAD SECTION
+   ========================================================================== */
+.access-stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  position: sticky;
+  top: var(--space-8);
+}
+
+/* Glass Card */
+.glass-panel {
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow:
+    var(--shadow-lg),
+    var(--shadow-glow),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  padding: var(--space-8);
+  position: relative;
+  overflow: hidden;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+/* Gradient highlight line on top border */
+.glass-panel::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 20%;
+  right: 20%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan-400), transparent);
+  opacity: 0.6;
+}
+
+.panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+
+.header-icon-badge {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--blue-600), var(--cyan-400));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.4);
+  margin-bottom: var(--space-2);
+}
+
+.panel-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  color: var(--text-primary);
+}
+
+.panel-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* Form Styles */
+.form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: flex;
+  justify-content: space-between;
+}
+
+.input-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-icon {
+  position: absolute;
+  left: 14px;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+  pointer-events: none;
+  transition: color var(--duration-micro) var(--ease-out);
+}
+
+.text-input {
+  width: 100%;
+  padding: 13px 14px 13px 44px;
+  background: rgba(6, 11, 26, 0.85);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  outline: none;
+  transition: all var(--duration-micro) var(--ease-out);
+}
+
+.text-input::placeholder {
+  color: #475569;
+}
+
+.text-input:focus {
+  border-color: var(--blue-500);
+  background: rgba(6, 11, 26, 0.95);
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22);
+}
+
+.input-container:focus-within .input-icon {
+  color: var(--cyan-400);
+}
+
+/* Password Toggle */
+.password-toggle-btn {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--duration-micro) var(--ease-out);
+}
+
+.password-toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.password-toggle-btn:focus-visible {
+  outline: 2px solid var(--blue-500);
+  outline-offset: 2px;
+}
+
+/* Error Banner */
+.error-banner {
+  display: none;
+  padding: var(--space-3) var(--space-4);
+  background: var(--danger-bg);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: var(--radius-md);
+  color: #FECDD3;
+  font-size: 13px;
+  line-height: 1.5;
+  animation: error-nudge 0.35s var(--ease-out);
+}
+
+.error-banner:not(:empty) {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+}
+
+@keyframes error-nudge {
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+  100% { transform: translateX(0); }
+}
+
+/* Submit Button */
+.submit-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 14px var(--space-6);
+  background: linear-gradient(135deg, var(--blue-600) 0%, #1D4ED8 100%);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: var(--radius-md);
+  color: #FFFFFF;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  box-shadow:
+    0 4px 14px rgba(37, 99, 235, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.25);
+  transition: all var(--duration-fast) var(--ease-out);
+  overflow: hidden;
+  margin-top: var(--space-2);
+}
+
+.submit-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow:
+    0 8px 24px rgba(37, 99, 235, 0.55),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.submit-btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.submit-btn:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.submit-btn:focus-visible {
+  outline: 3px solid var(--cyan-400);
+  outline-offset: 3px;
+}
+
+/* Shimmer Effect */
+.submit-btn::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 60%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transform: skewX(-20deg);
+  pointer-events: none;
+}
+
+.submit-btn:hover:not(:disabled)::after {
+  left: 140%;
+  transition: left 0.75s var(--ease-in-out);
+}
+
+.panel-footnote {
+  margin-top: var(--space-5);
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  text-align: center;
+}
+
+/* ==========================================================================
+   DOWNLOAD SECTION (Windows Module)
+   ========================================================================== */
+.download-card {
+  background: var(--bg-glass-strong);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-md);
+  padding: var(--space-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  position: relative;
+  overflow: hidden;
+}
+
+.download-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.download-brand-group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.windows-logo-box {
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius-md);
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #60A5FA;
+}
+
+.download-title-group h3 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.download-title-group p {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.version-pill {
+  padding: 4px 10px;
+  background: rgba(148, 163, 184, 0.1);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--cyan-400);
+  font-variant-numeric: tabular-nums;
+}
+
+.download-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 13px var(--space-6);
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.2) 0%, rgba(56, 189, 248, 0.15) 100%);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-out);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.download-btn:hover {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.35) 0%, rgba(56, 189, 248, 0.25) 100%);
+  border-color: var(--cyan-400);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-glow-cyan);
+}
+
+.download-btn:active {
+  transform: scale(0.98);
+}
+
+.download-btn:focus-visible {
+  outline: 3px solid var(--cyan-400);
+  outline-offset: 3px;
+}
+
+.download-arrow-icon {
+  width: 18px;
+  height: 18px;
+  transition: transform var(--duration-fast) var(--ease-out);
+}
+
+.download-btn:hover .download-arrow-icon {
+  transform: translateY(2px);
+}
+
+.download-subtext {
+  font-size: 11px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* ==========================================================================
+   FOOTER
+   ========================================================================== */
+.app-footer {
+  margin-top: auto;
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.footer-brand {
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ==========================================================================
+   RESPONSIVE BREAKPOINTS
+   ========================================================================== */
+@media (max-width: 1023px) {
+  .viewport-wrapper {
+    padding: var(--space-6) var(--space-6);
+  }
+
+  .app-grid {
+    grid-template-columns: 1fr;
+    gap: var(--space-8);
+  }
+
+  .access-stage {
+    position: static;
+    max-width: 520px;
+    margin: 0 auto;
+    width: 100%;
+  }
+
+  .hero-content {
+    max-width: 100%;
+  }
+
+  .dashboard-window {
+    transform: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .viewport-wrapper {
+    padding: var(--space-4) var(--space-4);
+  }
+
+  .app-grid {
+    gap: var(--space-6);
+  }
+
+  .top-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-3);
+  }
+
+  .hero-title {
+    font-size: 2.2rem;
+  }
+
+  .features-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-body {
+    grid-template-columns: 1fr;
+  }
+
+  .mock-sidebar {
+    display: none;
+  }
+
+  .mock-metrics-row {
+    grid-template-columns: 1fr;
+  }
+
+  .floating-chip {
+    display: none;
+  }
+
+  .glass-panel {
+    padding: var(--space-5);
+  }
+
+  .text-input {
+    font-size: 16px; /* Prevents mobile browser auto-zoom */
+  }
+
+  .app-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* ==========================================================================
+   ACCESSIBILITY & REDUCED MOTION
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .ambient-orb, .pulse-dot, .chip-1, .chip-2 {
+    animation: none !important;
+  }
+
+  .chart-line {
+    stroke-dashoffset: 0 !important;
+  }
+
+  .mock-bar {
+    transform: scaleY(1) !important;
+  }
+
+  .dashboard-window {
+    transform: none !important;
+  }
+}
+</style>
+</head>
+
+<body>
+
+<!-- Accessible Skip Link -->
+<a href="#director-login-card" class="skip-link">Skip to Director Login</a>
+
+<!-- Ambient Lighting Background -->
+<div class="ambient-bg" aria-hidden="true">
+  <div class="ambient-grid"></div>
+  <div class="ambient-orb orb-1"></div>
+  <div class="ambient-orb orb-2"></div>
+  <div class="ambient-orb orb-3"></div>
+</div>
+
+<div class="viewport-wrapper">
+
+  <main class="app-grid">
+
+    <!-- ====================================================================
+         LEFT STAGE: BRAND & PRODUCT SHOWCASE
+         ==================================================================== -->
+    <section class="product-stage" aria-label="Product Overview">
+
+      <!-- Top Bar: Logo, Brand & Status Badge -->
+      <header class="top-bar">
+        <a href="/" class="brand-identity" aria-label="Enterprise POS ERP Home">
+          <div class="logo-wrapper">
+            <img src="logo.png" alt="Enterprise POS ERP Logo" width="48" height="48">
+          </div>
+          <div class="brand-text-block">
+            <span class="brand-name">Enterprise POS ERP</span>
+            <span class="brand-edition">Supermarket & Multi-Branch Suite</span>
+          </div>
+        </a>
+
+        <div class="status-badge" role="status" aria-label="Official Release Status">
+          <span class="pulse-dot" aria-hidden="true"></span>
+          <span>Official Release</span>
+        </div>
+      </header>
+
+      <!-- Hero Headline & Description -->
+      <div class="hero-content">
+        <div class="eyebrow-container" aria-hidden="true">
+          <span class="eyebrow-text">Smart Business Management Software</span>
+          <span class="eyebrow-line"></span>
+        </div>
+
+        <h1 class="hero-title">
+          <span class="hero-line">One Intelligent Platform.</span>
+          <span class="hero-line hero-gradient">Complete Business Control.</span>
+        </h1>
+
+        <p class="hero-description">
+          Unify POS billing, FIFO batch inventory tracking, customer accounts, and real-time executive profit intelligence in one secure, high-performance platform.
+        </p>
+      </div>
+
+      <!-- Dashboard Preview Mockup (CSS/SVG Only) -->
+      <div class="preview-stage" id="preview-stage" aria-label="Illustrative preview of Director analytics dashboard">
+        
+        <!-- Floating Chip 1 -->
+        <div class="floating-chip chip-1" aria-hidden="true">
+          <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          <span>Invoice #4829 generated</span>
+        </div>
+
+        <!-- Floating Chip 2 -->
+        <div class="floating-chip chip-2" aria-hidden="true">
+          <svg class="chip-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+          </svg>
+          <span>FIFO batch stock verified</span>
+        </div>
+
+        <!-- Window Container -->
+        <div class="dashboard-window" id="dashboard-window">
+          
+          <div class="window-header">
+            <div class="window-dots" aria-hidden="true">
+              <span class="window-dot dot-red"></span>
+              <span class="window-dot dot-yellow"></span>
+              <span class="window-dot dot-green"></span>
+            </div>
+            <div class="window-tag" aria-hidden="true">Illustrative preview</div>
+          </div>
+
+          <div class="preview-body">
+            
+            <!-- Left Mock Sidebar -->
+            <div class="mock-sidebar" aria-hidden="true">
+              <div class="mock-nav-item active">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="3" y="3" width="7" height="7"></rect>
+                  <rect x="14" y="3" width="7" height="7"></rect>
+                  <rect x="14" y="14" width="7" height="7"></rect>
+                  <rect x="3" y="14" width="7" height="7"></rect>
+                </svg>
+              </div>
+              <div class="mock-nav-item">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"></path>
+                  <line x1="3" y1="6" x2="21" y2="6"></line>
+                  <path d="M16 10a4 4 0 0 1-8 0"></path>
+                </svg>
+              </div>
+              <div class="mock-nav-item">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <line x1="18" y1="20" x2="18" y2="10"></line>
+                  <line x1="12" y1="20" x2="12" y2="4"></line>
+                  <line x1="6" y1="20" x2="6" y2="14"></line>
+                </svg>
+              </div>
+            </div>
+
+            <!-- Main Mock Content -->
+            <div class="mock-main">
+              
+              <!-- Metrics Cards -->
+              <div class="mock-metrics-row">
+                <div class="mock-metric-card">
+                  <span class="mock-metric-label">Total Revenue</span>
+                  <span class="mock-metric-value" data-counter-target="1480250" data-counter-prefix="Rs. ">Rs. 1,480,250</span>
+                  <span class="mock-metric-delta">↑ 18.4%</span>
+                </div>
+                <div class="mock-metric-card">
+                  <span class="mock-metric-label">Gross Margin</span>
+                  <span class="mock-metric-value" data-counter-target="34.8" data-counter-suffix="%">34.8%</span>
+                  <span class="mock-metric-delta">↑ 4.2%</span>
+                </div>
+                <div class="mock-metric-card">
+                  <span class="mock-metric-label">Active Outlets</span>
+                  <span class="mock-metric-value" data-counter-target="8" data-counter-suffix=" Branches">8 Branches</span>
+                  <span class="mock-metric-delta" style="color: var(--cyan-400);">Connected</span>
+                </div>
+              </div>
+
+              <!-- Animated Area & Line Chart -->
+              <div class="mock-chart-container" aria-hidden="true">
+                <div class="mock-chart-header">
+                  <span>Sales & Profit Real-Time Trajectory</span>
+                  <span style="color: var(--cyan-400); font-size: 11px;">Live Sync Active</span>
+                </div>
+
+                <svg class="svg-chart" viewBox="0 0 500 90" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.32" />
+                      <stop offset="100%" stop-color="#2563EB" stop-opacity="0.0" />
+                    </linearGradient>
+                  </defs>
+                  <!-- Area Fill -->
+                  <path d="M 0 80 Q 80 40 160 55 T 320 25 T 500 15 L 500 90 L 0 90 Z" fill="url(#chartGradient)" />
+                  <!-- Line Stroke -->
+                  <path class="chart-line" d="M 0 80 Q 80 40 160 55 T 320 25 T 500 15" fill="none" stroke="#38BDF8" stroke-width="2.5" stroke-linecap="round" />
+                </svg>
+
+                <!-- Mini Bar Columns -->
+                <div class="mock-bars-row">
+                  <div class="mock-bar" style="height: 45%;"></div>
+                  <div class="mock-bar" style="height: 65%;"></div>
+                  <div class="mock-bar" style="height: 38%;"></div>
+                  <div class="mock-bar" style="height: 82%;"></div>
+                  <div class="mock-bar" style="height: 70%;"></div>
+                  <div class="mock-bar" style="height: 94%;"></div>
+                  <div class="mock-bar" style="height: 60%;"></div>
+                  <div class="mock-bar" style="height: 88%;"></div>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- Feature Grid (4 Pillars) -->
+      <div class="features-grid" role="region" aria-label="Core Capabilities">
+        
+        <article class="feature-card">
+          <div class="feature-icon-tile" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+          </div>
+          <h2 class="feature-title">Inventory Intelligence</h2>
+          <p class="feature-desc">Real-time stock visibility with automated FIFO batch tracking, purchase cost auditing, and supplier bill capture.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon-tile" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="2" y="4" width="20" height="16" rx="2"></rect>
+              <line x1="2" y1="10" x2="22" y2="10"></line>
+            </svg>
+          </div>
+          <h2 class="feature-title">Smart POS Billing</h2>
+          <p class="feature-desc">High-velocity checkout with multi-tender splits, barcode scanning, offline autonomy, and immediate receipt printing.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon-tile" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+              <circle cx="9" cy="7" r="4"></circle>
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+            </svg>
+          </div>
+          <h2 class="feature-title">Customer Management</h2>
+          <p class="feature-desc">Customer profile verification, purchase history, loyalty credits, and credit sales management.</p>
+        </article>
+
+        <article class="feature-card">
+          <div class="feature-icon-tile" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="20" x2="18" y2="10"></line>
+              <line x1="12" y1="20" x2="12" y2="4"></line>
+              <line x1="6" y1="20" x2="6" y2="14"></line>
+            </svg>
+          </div>
+          <h2 class="feature-title">Reports & Analytics</h2>
+          <p class="feature-desc">Comprehensive executive visibility into COGS, net profit margins, ROI, and date-filtered multi-branch performance.</p>
+        </article>
+
+      </div>
+
+      <!-- Trust Strip -->
+      <footer class="trust-strip" aria-label="Security and Trust">
+        <div class="trust-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+          <span>Bank-Grade Encryption</span>
+        </div>
+        <div class="trust-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+            <line x1="8" y1="21" x2="16" y2="21"></line>
+            <line x1="12" y1="17" x2="12" y2="21"></line>
+          </svg>
+          <span>Windows Desktop App</span>
+        </div>
+        <div class="trust-item">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+          <span>Offline-First Sync Engine</span>
+        </div>
+      </footer>
+
+    </section>
+
+
+    <!-- ====================================================================
+         RIGHT STAGE: DIRECTOR LOGIN & DESKTOP DOWNLOAD
+         ==================================================================== -->
+    <aside class="access-stage" aria-label="Portal Access and Download">
+
+      <!-- Director Login Card -->
+      <div class="glass-panel" id="director-login-card">
+        
+        <div class="panel-header">
+          <div class="header-icon-badge" aria-hidden="true">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+          </div>
+          <h2 class="panel-title" id="director-login-title">Director Login</h2>
+          <p class="panel-subtitle">Welcome Back &bull; Authorized executive access</p>
+        </div>
+
+        <form id="director-login-form" class="form-stack" novalidate>
+          
+          <!-- Company Field -->
+          <div class="field-group">
+            <label class="field-label" for="company-input">Company name / ID</label>
+            <div class="input-container">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+                <line x1="9" y1="22" x2="9" y2="22.01"></line>
+                <line x1="15" y1="22" x2="15" y2="22.01"></line>
+                <line x1="9" y1="6" x2="9" y2="6.01"></line>
+                <line x1="15" y1="6" x2="15" y2="6.01"></line>
+                <line x1="9" y1="10" x2="9" y2="10.01"></line>
+                <line x1="15" y1="10" x2="15" y2="10.01"></line>
+                <line x1="9" y1="14" x2="9" y2="14.01"></line>
+                <line x1="15" y1="14" x2="15" y2="14.01"></line>
+              </svg>
+              <input
+                id="company-input"
+                name="company"
+                class="text-input"
+                type="text"
+                required
+                autocomplete="organization"
+                placeholder="e.g., acme-retail"
+                aria-required="true"
+              >
+            </div>
+          </div>
+
+          <!-- Email / Username Field -->
+          <div class="field-group">
+            <label class="field-label" for="email-input">Director email / User ID</label>
+            <div class="input-container">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                <circle cx="12" cy="7" r="4"></circle>
+              </svg>
+              <input
+                id="email-input"
+                name="email"
+                class="text-input"
+                type="email"
+                required
+                autocomplete="username"
+                placeholder="director@company.com"
+                aria-required="true"
+              >
+            </div>
+          </div>
+
+          <!-- Password Field with Show/Hide Toggle -->
+          <div class="field-group">
+            <label class="field-label" for="password-input">Password</label>
+            <div class="input-container">
+              <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+              </svg>
+              <input
+                id="password-input"
+                name="password"
+                class="text-input"
+                type="password"
+                required
+                autocomplete="current-password"
+                placeholder="••••••••"
+                aria-required="true"
+                style="padding-right: 48px;"
+              >
+              <button
+                type="button"
+                id="password-toggle"
+                class="password-toggle-btn"
+                aria-label="Show password"
+                aria-pressed="false"
+              >
+                <!-- Eye Icon -->
+                <svg id="eye-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+                <!-- Eye Off Icon (hidden initially) -->
+                <svg id="eye-off-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- Error Alert Banner -->
+          <div id="director-login-error" class="error-banner" role="alert" aria-live="polite"></div>
+
+          <!-- Submit Button -->
+          <button id="director-login-button" type="submit" class="submit-btn">
+            <span id="btn-text">Sign in to Director Dashboard</span>
+            <svg id="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
+
+          <p class="panel-footnote">
+            Director accounts have read-only reporting access.<br>
+            Managed by your Company Admin in POS.
+          </p>
+
+        </form>
+
+      </div>
+
+
+      <!-- Download Section Module -->
+      <section class="download-card" aria-label="Desktop Client Download">
+        
+        <div class="download-header">
+          <div class="download-brand-group">
+            <div class="windows-logo-box" aria-hidden="true">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.9-1.801"/>
+              </svg>
+            </div>
+            <div class="download-title-group">
+              <h3>Windows Desktop POS</h3>
+              <p>Official 64-bit Edition</p>
+            </div>
+          </div>
+
+          <span class="version-pill">v<span id="version">Loading...</span></span>
+        </div>
+
+        <a id="downloadBtn" class="download-btn" href="#" role="button">
+          <svg class="download-arrow-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          <span>Download for Windows</span>
+        </a>
+
+        <p class="download-subtext">
+          Compatible with Windows 10 & 11 · Automatic cloud synchronization
+        </p>
+
+      </section>
+
+    </aside>
+
+  </main>
+
+  <!-- Portal Footer -->
+  <footer class="app-footer">
+    <div>
+      <span class="footer-brand">Enterprise POS ERP</span> · Supermarket Management & Branch Intelligence
+    </div>
+    <div>
+      <span>NF Plantation Pvt Ltd</span> · Authorized Software Distribution
+    </div>
+  </footer>
+
+</div>
+
+<!-- ==========================================================================
+     LOGIC & INTERACTION ENGINE
+     ========================================================================== -->
+<script>
+(function() {
+  'use strict';
+
+  // 1. Password Visibility Toggle
+  const toggleBtn = document.getElementById('password-toggle');
+  const passwordInput = document.getElementById('password-input');
+  const eyeIcon = document.getElementById('eye-icon');
+  const eyeOffIcon = document.getElementById('eye-off-icon');
+
+  if (toggleBtn && passwordInput) {
+    toggleBtn.addEventListener('click', function() {
+      const isPassword = passwordInput.getAttribute('type') === 'password';
+      passwordInput.setAttribute('type', isPassword ? 'text' : 'password');
+      toggleBtn.setAttribute('aria-pressed', isPassword ? 'true' : 'false');
+      toggleBtn.setAttribute('aria-label', isPassword ? 'Hide password' : 'Show password');
+      eyeIcon.style.display = isPassword ? 'none' : 'block';
+      eyeOffIcon.style.display = isPassword ? 'block' : 'none';
+      passwordInput.focus();
+    });
+  }
+
+  // 2. Fetch Release Metadata (Preserved Logic)
+  async function loadUpdateInfo() {
+    try {
+      const response = await fetch('/latest.yml?_=' + Date.now(), { cache: 'no-store' });
+      if (!response.ok) throw new Error('Update manifest unreachable');
+      const text = await response.text();
+
+      const versionMatch = text.match(/version:\s*(.+)/);
+      const pathMatch = text.match(/path:\s*(.+)/);
+
+      if (versionMatch) {
+        const versionEl = document.getElementById('version');
+        if (versionEl) versionEl.innerText = versionMatch[1].trim();
+      }
+
+      if (pathMatch) {
+        let installer = pathMatch[1].trim().replace(/['"]/g, '');
+        installer = encodeURI(installer);
+        const btn = document.getElementById('downloadBtn');
+        if (btn) btn.href = '/' + installer;
+      }
+    } catch (error) {
+      const versionEl = document.getElementById('version');
+      if (versionEl && versionEl.innerText === 'Loading...') {
+        versionEl.innerText = 'Latest';
+      }
+      console.warn('Update check status:', error.message);
+    }
+  }
+
+  loadUpdateInfo();
+
+  // 3. Director Login Form Submission (Preserved Logic with Premium UI Feedback)
+  const loginForm = document.getElementById('director-login-form');
+  const submitBtn = document.getElementById('director-login-button');
+  const btnText = document.getElementById('btn-text');
+  const errorBanner = document.getElementById('director-login-error');
+
+  if (loginForm) {
+    loginForm.addEventListener('submit', async function(event) {
+      event.preventDefault();
+      
+      const companyVal = loginForm.elements.company.value.trim();
+      const emailVal = loginForm.elements.email.value.trim();
+      const passwordVal = loginForm.elements.password.value;
+
+      // Inline field validation
+      if (!companyVal) {
+        showError('Please enter your company name or ID.');
+        loginForm.elements.company.focus();
+        return;
+      }
+      if (!emailVal) {
+        showError('Please enter your Director email address.');
+        loginForm.elements.email.focus();
+        return;
+      }
+      if (!passwordVal) {
+        showError('Please enter your password.');
+        loginForm.elements.password.focus();
+        return;
+      }
+
+      setLoading(true);
+      clearError();
+
+      try {
+        const response = await fetch('/api/management/login', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            company: companyVal,
+            email: emailVal,
+            password: passwordVal,
+            platform: 'director'
+          })
+        });
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+          throw new Error(result.error || 'Authentication failed. Please verify your credentials.');
+        }
+
+        // Success state transition
+        loginForm.elements.password.value = '';
+        if (btnText) btnText.textContent = 'Redirecting…';
+        submitBtn.style.background = 'linear-gradient(135deg, #10B981, #059669)';
+        
+        setTimeout(function() {
+          window.location.assign('/director');
+        }, 220);
+
+      } catch (err) {
+        showError(err instanceof Error ? err.message : 'Unable to sign in. Please try again.');
+        loginForm.elements.password.value = '';
+        setLoading(false);
+      }
+    });
+  }
+
+  function setLoading(isLoading) {
+    if (!submitBtn) return;
+    submitBtn.disabled = isLoading;
+    loginForm.setAttribute('aria-busy', isLoading ? 'true' : 'false');
+    if (btnText) {
+      btnText.textContent = isLoading ? 'Authenticating…' : 'Sign in to Director Dashboard';
+    }
+  }
+
+  function showError(msg) {
+    if (!errorBanner) return;
+    errorBanner.textContent = msg;
+    errorBanner.style.display = 'flex';
+  }
+
+  function clearError() {
+    if (!errorBanner) return;
+    errorBanner.textContent = '';
+    errorBanner.style.display = 'none';
+  }
+
+  // 4. Subtle Mouse-Reactive 3D Tilt for Dashboard Preview
+  const previewStage = document.getElementById('preview-stage');
+  const dashboardWindow = document.getElementById('dashboard-window');
+  const prefersReduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (previewStage && dashboardWindow && !prefersReduced && window.innerWidth >= 1024) {
+    previewStage.addEventListener('mousemove', function(e) {
+      const rect = previewStage.getBoundingClientRect();
+      const x = (e.clientX - rect.left) / rect.width - 0.5;
+      const y = (e.clientY - rect.top) / rect.height - 0.5;
+      const tiltX = -y * 6; // Max 6 deg
+      const tiltY = x * 6;
+      dashboardWindow.style.transform = `rotateX(${tiltX}deg) rotateY(${tiltY}deg) translateY(-2px)`;
+    });
+
+    previewStage.addEventListener('mouseleave', function() {
+      dashboardWindow.style.transform = 'rotateX(2deg) rotateY(-1deg) translateY(0)';
+    });
+  }
+
+  // 5. Metric Counter on Entrance (rAF counter)
+  if (!prefersReduced) {
+    const counterElements = document.querySelectorAll('[data-counter-target]');
+    let counterStarted = false;
+
+    function runCounters() {
+      if (counterStarted) return;
+      counterStarted = true;
+      const duration = 1400; // ms
+      const startTime = performance.now();
+
+      function update(currentTime) {
+        const elapsed = currentTime - startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        const easeProgress = 1 - Math.pow(1 - progress, 3); // cubic ease-out
+
+        counterElements.forEach(function(el) {
+          const target = parseFloat(el.getAttribute('data-counter-target'));
+          const prefix = el.getAttribute('data-counter-prefix') || '';
+          const suffix = el.getAttribute('data-counter-suffix') || '';
+          const isDecimal = String(target).includes('.');
+          
+          let currentVal;
+          if (isDecimal) {
+            currentVal = (target * easeProgress).toFixed(1);
+          } else {
+            currentVal = Math.round(target * easeProgress).toLocaleString('en-US');
+          }
+
+          el.textContent = prefix + currentVal + suffix;
+        });
+
+        if (progress < 1) {
+          requestAnimationFrame(update);
+        }
+      }
+
+      requestAnimationFrame(update);
+    }
+
+    // Trigger counters on window load or intersection
+    if ('IntersectionObserver' in window && previewStage) {
+      const observer = new IntersectionObserver(function(entries) {
+        if (entries[0].isIntersecting) {
+          runCounters();
+          observer.disconnect();
+        }
+      }, { threshold: 0.2 });
+      observer.observe(previewStage);
+    } else {
+      setTimeout(runCounters, 400);
+    }
+  }
+
+  // 6. Pause Animations when Tab is Inactive (Performance Optimization)
+  document.addEventListener('visibilitychange', function() {
+    const orbs = document.querySelectorAll('.ambient-orb');
+    if (document.hidden) {
+      orbs.forEach(function(o) { o.style.animationPlayState = 'paused'; });
+    } else {
+      orbs.forEach(function(o) { o.style.animationPlayState = 'running'; });
+    }
+  });
+
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,50 @@
+- generic [ref=e3]:
+  - img "Logo" [ref=e5]
+  - generic [ref=e6]: Official Release
+  - heading "Enterprise POS ERP" [level=1] [ref=e7]
+  - generic [ref=e8]: Smart Business Management Software
+  - paragraph [ref=e9]:
+    - link "Director Login" [ref=e10] [cursor=pointer]:
+      - /url: "#director-login-title"
+  - generic [ref=e11]: Version Loading...
+  - link "Download Now" [ref=e12] [cursor=pointer]:
+    - /url: "#"
+  - generic [ref=e13]: Windows Desktop Application
+  - region [ref=e14]:
+    - heading "Director Login" [level=2] [ref=e15]
+    - paragraph [ref=e16]: View your supermarket investment, sales, profit, ROI and branch performance.
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - text: Company ID
+        - textbox "Company ID" [ref=e19]:
+          - /placeholder: Company ID from your POS Admin
+      - generic [ref=e20]:
+        - text: Director email / User ID
+        - textbox "Director email / User ID" [ref=e21]:
+          - /placeholder: director@example.com
+      - generic [ref=e22]:
+        - text: Password
+        - textbox "Password" [ref=e23]
+      - button "Sign in to Director Dashboard" [ref=e24] [cursor=pointer]
+      - alert [ref=e25]
+      - generic [ref=e26]: Your POS Admin manages Director accounts and access. This login opens reports only.
+  - generic [ref=e27]:
+    - generic [ref=e28]:
+      - heading "Inventory Management" [level=3] [ref=e29]
+      - paragraph [ref=e30]: Track stock and products efficiently.
+    - generic [ref=e31]:
+      - heading "POS Billing" [level=3] [ref=e32]
+      - paragraph [ref=e33]: Fast and reliable billing operations.
+    - generic [ref=e34]:
+      - heading "Customer Management" [level=3] [ref=e35]
+      - paragraph [ref=e36]: Manage customer records with ease.
+    - generic [ref=e37]:
+      - heading "Reports & Analytics" [level=3] [ref=e38]
+      - paragraph [ref=e39]: Powerful business insights and reporting.
+  - generic [ref=e40]:
+    - generic [ref=e41]: Trusted by Businesses
+    - generic [ref=e42]: Enterprise Grade
+    - generic [ref=e43]: Secure Updates
+  - generic [ref=e44]:
+    - strong [ref=e45]: NF Plantation Pvt Ltd
+    - text: Official Software Download Portal

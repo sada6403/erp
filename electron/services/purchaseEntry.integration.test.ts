@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { beforeEach, afterEach, describe, expect, it } from 'vitest'
 import { repairMissingReceiptPrices } from './receiptProductPricing'
+import { requireSavedPurchaseBill } from './purchaseBills'
 import { createStockPurchase as savePurchase, type StockPurchaseInput } from './purchaseEntry'
 
 let db: Database.Database
@@ -21,6 +22,18 @@ beforeEach(()=>{
 })
 afterEach(()=>db.close())
 describe('two supermarket purchase entry workflows',()=>{
+ it('allows an order without a bill while leaving stock and product prices unchanged',()=>{
+  const row=savePurchase(db,input({purchaseType:'order'}))
+  expect(row.status).toBe('DRAFT')
+  for(const table of ['stocks','product_batches','stock_movements','purchase_attachments']) expect(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()).toEqual({n:0})
+  expect(db.prepare('SELECT received_qty FROM purchase_items').get()).toEqual({received_qty:0})
+  expect(db.prepare('SELECT cost_price,selling_price FROM products').get()).toEqual({cost_price:99,selling_price:200})
+ })
+ it('rejects direct stock without a bill and rolls back all inventory and price changes',()=>{
+  expect(()=>savePurchase(db,input())).toThrow(/Supplier bill upload is required/)
+  for(const table of ['purchase_orders','purchase_items','stocks','product_batches','stock_movements']) expect(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()).toEqual({n:0})
+  expect(db.prepare('SELECT cost_price,selling_price FROM products').get()).toEqual({cost_price:99,selling_price:200})
+ })
  it('direct receipt updates aggregate stock, fractional movement, batch cost and bill atomically',()=>{
   const row=createStockPurchase(db,input(),id=>db.prepare('INSERT INTO purchase_attachments (id,purchase_id) VALUES (?,?)').run('bill',id))
   expect(row.status).toBe('RECEIVED')
@@ -91,10 +104,11 @@ describe('two supermarket purchase entry workflows',()=>{
   expect(db.prepare('SELECT cost_price,selling_price FROM products').get()).toEqual({cost_price:99,selling_price:200})
  })
 
- it.each(['direct','order'] as const)('requires a supplier bill for a %s purchase and rolls back every change',purchaseType=>{
-  expect(()=>savePurchase(db,input({purchaseType}))).toThrow(/Supplier bill upload is required/)
-  for(const table of ['purchase_orders','purchase_items','stocks','product_batches','stock_movements']) expect(db.prepare(`SELECT COUNT(*) n FROM ${table}`).get()).toEqual({n:0})
-  expect(db.prepare('SELECT cost_price FROM products').get()).toEqual({cost_price:99})
+ it('requires a bill at the receiving gate for an order created without one',()=>{
+  savePurchase(db,input({purchaseType:'order'}))
+  expect(()=>requireSavedPurchaseBill(db,'receipt1')).toThrow(/Supplier bill upload is required/)
+  db.prepare('INSERT INTO purchase_attachments (id,purchase_id) VALUES (?,?)').run('delivery-bill','receipt1')
+  expect(()=>requireSavedPurchaseBill(db,'receipt1')).not.toThrow()
  })
  it('does not accept a no-op upload callback as a bill',()=>{
   expect(()=>savePurchase(db,input(),()=>{})).toThrow(/Supplier bill upload is required/)

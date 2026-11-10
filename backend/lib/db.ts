@@ -479,7 +479,7 @@ async function autoMigrate() {
 
 // Run once on cold start (Next.js module cache ensures single execution per process)
 declare global { var _posErpMigrated: boolean | undefined }
-if (!global._posErpMigrated) {
+if (process.env.POS_DISABLE_AUTO_MIGRATIONS !== '1' && !global._posErpMigrated) {
   global._posErpMigrated = true
   autoMigrate().catch(e => console.error('[autoMigrate] fatal:', e))
 }
