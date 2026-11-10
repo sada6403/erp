@@ -1,0 +1,130 @@
+# Production runbook — Natural Plantation app v1.0
+
+**PLAN ONLY. Nothing here has been run.** Every step that touches production needs Moni's explicit
+go-ahead in chat first (HANDOFF §6). Target: v1.0 live on Play by **21 Nov 2026** (submit by 19 Nov).
+Each step lists what to do, how to check it worked, and how to undo it.
+
+Owners: **Moni** = approvals, Play Console, passwords. **Claude** = scripts, builds, checks.
+**Sabiharan** = the other developer who releases POS v2.9.x from `main` and owns the VPS root access.
+
+## Order at a glance
+| # | Step | Touches production? |
+|---|---|---|
+| 0 | Preconditions (staging green, key check, Firebase, reviewer text) | No |
+| 1 | Backup + restore test | Read only |
+| 2 | Merge plan with the main developer | `main` |
+| 3 | Backend deploy | Yes |
+| 4 | Real-company App Key + one-time product re-push | Yes (data) |
+| 5 | Reviewer accounts | Yes (data) |
+| 6 | POS desktop release to branch PCs | Yes |
+| 7 | Production AAB via EAS (Play upload key) | No (build) |
+| 8 | Play Internal testing | Play |
+| 9 | Play Production | Play |
+| 10 | Watch + OTA fixes | — |
+
+Rule: backend first, then POS desktop, then the app goes live. New cloud columns migrate on the first API
+hit, and the app needs them before any app order can reach a POS.
+
+## 0. Preconditions (all must be true)
+- Staging (`STAGING_SETUP.md`) passed `06-verify.sh` and a staging APK was tried on a real phone for every role.
+- Upload-key check: Moni pastes the Play "Upload key certificate" SHA-1/SHA-256 and the local
+  `keytool -list -v -keystore C:\secure\nf-keys\nf-release-key.jks -alias nf-farming` output (Moni types the
+  password, Claude never sees it). MATCH -> go on. NO MATCH -> request an upload-key reset in Play Console
+  (Setup > App signing > Request upload key reset), wait for Google, then re-check.
+- Keystore stored in EAS (`eas credentials`, Moni types passwords); then delete the WhatsApp copy of the keystore.
+- Firebase project exists, `google-services.json` for package `nfgroups.naturefarming.app` is in place.
+- Play Console: trader status declaration done; Data safety, financial-features declaration, privacy and
+  account-deletion URLs filled in from `docs/play/`; "App access" text from `docs/play/APP_ACCESS.md` pasted.
+- Production access: if Play requires a closed test (>= 12 testers for 14 days) the 21 Nov date is not reachable; tell Moni immediately.
+- All branches green: `npm test` in `backend/`, `npm run typecheck`, mobile `npm test` + `npx tsc --noEmit` + `npx eslint .`.
+- Branch is rebased on the current `origin/main` and the CI run on the branch has no conflicts in
+  `electron/ipc/invoices.ts`, `orders.ts`, `electron/preload.ts`, `electron/database.ts`.
+
+## 1. Backup + restore test (do this first, every time)
+Run `scripts/staging/02-backup.sh` (read-only dumps into `/root/backup-<ts>/`).
+- **Check:** `SHA256SUMS` present, one `.sql.gz` per production database, restore-test one into a scratch DB
+  (command in `STAGING_SETUP.md` step 2), table count > 0.
+- **Rollback:** nothing changed; delete the scratch DB.
+- Also record: current pm2 list, current production commit (`git -C /var/www/pos-backend log -1`), live POS
+  desktop version (`https://updates.nfplantation.com/latest.yml`).
+- Remember the two update directories (memory note): any desktop release must sync BOTH `/var/www/updates`
+  and `/var/www/html/updates` or auto-update silently breaks.
+
+## 2. Merge plan with the main developer
+`main` auto-deploys to production on every push (`deploy-vps.yml`), and a desktop version bump publishes the installer.
+Therefore the merge **is** the backend deploy and possibly the desktop release.
+1. Agree a freeze window with Sabiharan (no other pushes to `main` during the deploy hour). Moni confirms.
+2. Rebase `feature/mobile-app-foundation` on `origin/main`, fix conflicts, rerun all tests.
+3. Open a PR `feature/mobile-app-foundation` -> `main`; Sabiharan reviews the POS-file changes (invoices, orders, preload, database, sync).
+4. Decide the desktop version: bump `package.json` only if the desktop release goes out in the same merge (step 6);
+   otherwise the workflow still deploys the backend but skips the desktop publish (it compares the version with `latest.yml`).
+5. Merge only on Moni's "go". `paths-ignore` already keeps `mobile/**` and `docs/**` commits from deploying.
+- **Check:** GitHub Actions "Deploy VPS" green; `pm2 list` shows `pos-backend` restarted once; `curl https://posadmin.nfplantation.com/api/health` -> 200/401.
+- **Rollback:** `git revert -m 1 <merge>` on `main` (the deploy script resets the VPS to `origin/main`), push, wait for the deploy; or
+  on the VPS `git -C /var/www/pos-backend reset --hard <previous-commit>` then run `/usr/local/bin/pos-deploy`'s build/restart lines by hand.
+  Cloud schema changes are additive only (new tables/columns) and need no rollback; old code ignores them.
+
+## 3. Backend deploy (happens at the merge)
+- What changes: `/api/app/v1/*`, `ensureTenantCompatibility` additions (`app_*` tables, new columns on `products`,
+  `branches`, `customer_orders`, `customer_order_items`, `invoices`), sync `RELATED_KEYS`, notification queue (push + WhatsApp stay dry-run).
+- **Check (right after deploy):**
+  1. `curl -s https://posadmin.nfplantation.com/api/health -H "x-api-key: <sync key>"` OK.
+  2. A POS client syncs normally (Sync indicator green, no error toast).
+  3. `GET /api/app/v1/status` with the real App Key (step 4) returns 200.
+  4. pm2 logs for `pos-backend`: no repeating errors in 5 minutes.
+- **Rollback:** as step 2.
+
+## 4. Real-company App Key and product re-push
+1. Super Admin portal -> company -> generate App Key (`npk_...`). The key goes into the production EAS profile (build env `APP_KEY`, read by `mobile/app.config.ts`) — it identifies the company only, it is not a secret like the sync key.
+2. Products created before the deploy lack the new columns; do the one-time re-push from the POS per branch PC (use the POS's existing full-sync / product re-push action; confirm the exact menu name on a branch PC before the day, it was not re-checked for this plan).
+- **Check:** the app shop shows real products with prices equal to the POS (tax on top rule, DECISIONS 2026-11-07), variants present, images load.
+- **Rollback:** rotate the App Key in Super Admin (old key stays valid for the grace period, then dies); set `ordering_enabled = 0` in POS > Online Store to stop app orders instantly.
+
+## 5. Reviewer accounts (real company)
+```
+cd backend
+set REVIEW_COMPANY_NAME=<exact company name>
+set REVIEW_PASSWORD=<strong password Moni chooses>
+node scripts/run-ts.cjs scripts/create-review-accounts.ts            (dry run first)
+set REVIEW_CONFIRM_COMPANY=<exact company name>
+node scripts/run-ts.cjs scripts/create-review-accounts.ts --apply
+```
+Run it on the VPS in `/var/www/pos-backend/backend` (it needs production `.env`), only after Moni's go.
+- **Check:** log in to the **production** app build with each reviewer login (customer, Smart Buy, Field Officer, Branch Manager once built) and see real screens; place a test order, confirm the POS shows notes `[TEST ORDER - Play review]`.
+- **Rollback:** disable the accounts: `UPDATE app_users SET status='disabled' WHERE is_review_account=1;` and delete the `[PLAY REVIEW]` scheme/customer/agent rows from the POS.
+- Put the exact "App access" text (with the password Moni chose) into Play Console; the password is not stored in git.
+
+## 6. POS desktop release to branch PCs (before app launch)
+The convert-to-invoice, App Access, Online Store and assign-agent features live in the desktop app.
+1. Bump `package.json` version; merge as in step 2; the workflow builds the Windows installer and publishes it to `updates.nfplantation.com` (both update directories).
+2. Branch PCs auto-update on next start. Moni checks each branch PC shows the new version (check how the POS displays its version before the day).
+- **Check:** one branch PC places a counter sale, receives one test app order, converts it to an invoice (price locked, delivery fee in total, tax like a counter sale).
+- **Rollback:** republish the previous installer + `latest.yml` to BOTH update directories; PCs on the new version keep working against the (additive) cloud schema.
+
+## 7. Production AAB (Moni types passwords where asked)
+```
+cd mobile
+eas build --platform android --profile production      (credentialsSource: remote, Play upload key)
+```
+`versionCode 6`, `versionName 1.0.0`, package `nfgroups.naturefarming.app`, mocks off, `APP_KEY` = real company key, production API URL, Firebase file present.
+- **Check:** AAB size and the size Play reports (<= 25 MB download), `bundletool` install on the phone, cold start <= 2.5 s, login with a reviewer account, place a TEST order, see push dry-run logged.
+- **Rollback:** nothing is published yet; discard the build.
+
+## 8. Play Internal testing
+Upload the AAB to Internal testing, add Moni + boss + team emails (<= 100).
+- **Check:** install from the Play link on 2+ phones (different Android versions); each role logs in; deep links from pushes work; Data safety and declarations show no errors in the Console "Publishing overview".
+- **Rollback:** halt the testing rollout or remove testers; production still serves versionCode 4.
+
+## 9. Play Production
+Promote the same build to Production (staged rollout 20% -> 50% -> 100% over 2-3 days if time allows; full rollout if the date is tight).
+Play review can take hours to days: submit by 19 Nov.
+- **Check:** Play Console "Releases overview" = In review/Available; crash rate and ANR in Android vitals stay under bad-behaviour thresholds.
+- **Rollback:** Play cannot revert a release; instead halt the rollout and push versionCode 7 containing the previous JS, or ship an OTA JS fix (step 10). The old Flutter build (code 4) cannot be re-promoted if code 6 is already higher; hence the staged rollout.
+
+## 10. After launch
+- Fix JS/UI bugs with `eas update` on the production channel (no Play review). Native changes need a new Play build.
+- Watch for 48 h: `pm2 logs pos-backend`, app order counts, "Login failed" rate, Play vitals.
+- Kill switches (no deploy needed): `ordering_enabled=0`, `maintenance_message`, `min_app_version` (POS > Online Store), rotate the App Key, disable a user in POS > App Access.
+
+## One-line go decision
+Go to production when: staging verified, backup restored once, upload key = MATCH, reviewer text ready, Sabiharan agreed the freeze window, Moni said "go" in chat.

@@ -224,6 +224,8 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE categories ADD COLUMN image_url TEXT NULL`,
   `ALTER TABLE branches ADD COLUMN latitude DECIMAL(10,7) NULL`,
   `ALTER TABLE branches ADD COLUMN longitude DECIMAL(10,7) NULL`,
+  // Google Play reviewer accounts (cloud-only table): their orders are tagged TEST in the order notes.
+  `ALTER TABLE app_users ADD COLUMN is_review_account TINYINT(1) NOT NULL DEFAULT 0`,
   `ALTER TABLE customer_orders ADD COLUMN channel VARCHAR(8) NOT NULL DEFAULT 'pos'`,
   `ALTER TABLE customer_orders ADD COLUMN app_user_id VARCHAR(191) NULL`,
   `ALTER TABLE customer_orders ADD COLUMN assigned_agent_id VARCHAR(191) NULL`,

@@ -250,6 +250,9 @@ export async function createOrder(
       await conn.query(`UPDATE app_users SET customer_id = ? WHERE id = ? AND customer_id IS NULL`, [customerId, user.userId])
     }
 
+    const reviewer = await conn.query<{ r: number }>(`SELECT is_review_account AS r FROM app_users WHERE id = ?`, [user.userId])
+    const orderNotes = Number(reviewer.rows[0]?.r) === 1 ? `[TEST ORDER - Play review] ${notes ?? ''}`.trim().slice(0, 500) : notes
+
     orderId = randomUUID()
     const now = new Date().toISOString()
     const days = Number(settings.estimated_delivery_days) || 2
@@ -267,7 +270,7 @@ export async function createOrder(
              total_amount, paid_amount, notes, channel, app_user_id, delivery_fee, payment_method, delivery_otp_hash,
              needs_call_confirmation, estimated_delivery_date, status_history, payment_reference)
            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'unpaid', ?, 0, ?, 'app', ?, ?, ?, ?, ?, ?, ?, ?)`,
-          [orderId, orderNumber, branchId, customerId, addr.recipient_name, addr.phone, addressText(addr), total, notes,
+          [orderId, orderNumber, branchId, customerId, addr.recipient_name, addr.phone, addressText(addr), total, orderNotes,
             user.userId, fee, pm, deliveryOtpHash(orderId), needsCall, eta, JSON.stringify([{ status: 'pending', at: now }]), paymentRef])
         break
       } catch (e) {
