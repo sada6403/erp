@@ -24,6 +24,9 @@ echo "prod .env present: $([ -f /var/www/pos-backend/backend/.env ] && echo yes 
 hr "MySQL"
 systemctl is-active mysql mariadb 2>/dev/null | head -n2
 if mysql -uroot -e 'SELECT VERSION()' >/dev/null 2>&1; then echo "root via socket: OK"; else echo "root via socket: NO (03-setup will use production DB admin credentials from the prod .env)"; fi
+hr "Timezone (app order times were off by 5h30 on a local DB whose MySQL zone was not UTC; the API reads DB times as UTC)"
+timedatectl 2>/dev/null | grep -E 'Time zone|Local time' || date
+mysql -uroot -N -e "SELECT CONCAT('mysql global=', @@global.time_zone, ' system=', @@system_time_zone, ' NOW=', NOW(), ' UTC=', UTC_TIMESTAMP())" 2>/dev/null || echo "mysql time zone: could not read as root"
 hr "Existing backups";       ls -1d /root/backup-* 2>/dev/null || echo "none"
 hr "Certbot certs";          certbot certificates 2>/dev/null | grep -E 'Certificate Name|Domains|Expiry' || echo "none / certbot missing"
 echo; echo "PRECHECK DONE (nothing was changed)"

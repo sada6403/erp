@@ -44,3 +44,24 @@ Windows native build note: the repo path is too long for CMake/ninja (260 chars)
 short-path mirror (`C:\np`, copy of `mobile/` incl. node_modules; `android/build.gradle` and `android/app/build.gradle`
 set `buildStagingDirectory` to `C:/b/<module>`). `mobile/android/` is generated and git-ignored; Metro and all JS
 come from the real `mobile/` folder, so only native changes need a rebuild.
+
+## 2026-11-10 local phone E2E (realme RMX3231, Android 11, dev build, local seeded TEST company)
+Passed on the phone: login by phone number and agent code; auto-login after app restart; Smart Buy home, draws, notifications
+inbox, settings (theme, language); shop browse, variant sheet, cart (survives restart), address, COD checkout (order ONL-1021),
+order tracking with delivery OTP; agent dashboard, assigned delivery, OTP verify + cash confirm -> order `delivered`/`paid`, and the
+customer's tracking timeline updates; wallet/statement/draw-video/spend/join screens correctly block screenshots (FLAG_SECURE).
+Not covered: manager / field-officer sales-force screens (not built yet), first-login temp-password flow, register, forgot password,
+Bluetooth printing, push delivery (needs FCM).
+Fixed during the run:
+- Order tracking screen kept showing the previous user's order and delivery OTP after Logout -> now redirects to login.
+- Settings showed "(User Selectable)", "(i18n)" and hex colour codes -> removed.
+- Agent commission lines showed the raw table name `chit_contributions` -> readable label from the API.
+Open observations (not changed):
+- `customer_orders.paid_amount` stays 0 after a COD order is marked paid on delivery (only `payment_status` changes); check how POS reports use it.
+- Agent delivery card still says "Cash to collect Rs 1,050" next to "Delivered" after the cash was collected.
+- Order list/notification times looked 5h30 ahead on the local PC (MySQL zone not UTC). Check the VPS zone (added to `scripts/staging/01-precheck.sh`).
+- Cart promo box shows the hint "Try: PLANT2026" (not a real code, AGENTS/DECISIONS say no coupon in v1.0); search bar camera icon only shows "coming soon".
+- Cart, checkout address step take ~8 s to load addresses over the dev USB tunnel; measure again on a release build.
+- Production EAS profile has no `API_BASE_URL` / `APP_KEY` / `ANDROID_PACKAGE`; dev manifest has SYSTEM_ALERT_WINDOW (dev client).
+Tips for driving the phone with adb: `adb shell input text` drops digits when sent fast (use keyevents with a short sleep); tapping a field
+can shift the layout when the keyboard opens; secure screens return empty screencaps until the app is restarted.
