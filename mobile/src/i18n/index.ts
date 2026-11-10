@@ -7,7 +7,7 @@ import si from './si.json';
 import { useThemeStore } from '@/store/themeStore';
 import type { Lang } from '@/theme/fonts';
 
-export const LANGS: Array<{ code: Lang; label: string }> = [
+export const LANGS: { code: Lang; label: string }[] = [
   { code: 'en', label: 'English' },
   { code: 'ta', label: 'தமிழ்' },
   { code: 'si', label: 'සිංහල' },

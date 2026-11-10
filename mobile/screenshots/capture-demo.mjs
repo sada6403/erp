@@ -1,3 +1,4 @@
+/* global selectTheme, AppState, switchRole, updateHeaderLoginUI -- these live in the web demo page and run inside page.evaluate */
 // DEV-ONLY: captures every screen/state of the spec web-demo, per theme, at Pixel-like 412x915 @2.625x.
 // Usage: node capture-demo.mjs [--demo <dir>] [--only <substring>] [--theme olive|purple]
 import http from 'node:http';

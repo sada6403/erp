@@ -5,10 +5,9 @@ import type { CreateOrderRequest, QuoteRequest } from '@contracts/orders';
 import type { AddressInput } from '@contracts/addresses';
 import { addressApi, catalogApi, orderApi, wishlistApi } from '@/api/endpoints';
 import { qk } from '@/query/keys';
-import { useUiStore } from '@/store/uiStore';
+import { useUiStore , selectIsOffline } from '@/store/uiStore';
 import { selectIsLoggedIn, useSessionStore } from '@/store/sessionStore';
 import { useOutboxStore } from '@/store/outboxStore';
-import { selectIsOffline } from '@/store/uiStore';
 
 export interface ProductSnapshot {
   items: ProductListItemDto[];
@@ -70,7 +69,8 @@ export function filterProducts(items: ProductListItemDto[], f: ProductFilter): P
 
 export function useProducts(filter: ProductFilter) {
   const query = useProductSnapshot();
-  const items = useMemo(() => filterProducts(query.data?.items ?? [], filter), [query.data, filter.q, filter.categoryId]);
+  const { q, categoryId } = filter;
+  const items = useMemo(() => filterProducts(query.data?.items ?? [], { q, categoryId }), [query.data, q, categoryId]);
   return { ...query, items };
 }
 

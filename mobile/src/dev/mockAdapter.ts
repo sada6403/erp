@@ -47,9 +47,9 @@ const db = {
   orders: [] as OrderDto[],
   notifications: DEMO_NOTIFICATIONS.map(({ age_min, time_label, icon, ...n }) => ({ ...n, created_at: new Date(Date.now() - age_min * 60_000).toISOString(), time_label, icon })) as NotificationDto[],
   wallet: DEMO_WALLET.balance as number,
-  walletTx: DEMO_WALLET.transactions.map((t) => ({ ...t })) as Array<{ id: string; type: string; amount: number; balance_after: number; source: string | null; note: string; created_at: string }>,
+  walletTx: DEMO_WALLET.transactions.map((t) => ({ ...t })) as { id: string; type: string; amount: number; balance_after: number; source: string | null; note: string; created_at: string }[],
   couponCode: null as string | null,
-  joinRequests: [] as Array<{ id: string; scheme_id: string; nic: string; status: string; created_at: string }>,
+  joinRequests: [] as { id: string; scheme_id: string; nic: string; status: string; created_at: string }[],
   completedThisSession: 0,
   settings: { orders: true, deliveries: true, smartbuy: true, account: true, offers: false, quiet_hours_start: null, quiet_hours_end: null } as NotificationSettingsDto,
   deliveries: [] as AgentDeliveryDto[],
@@ -57,7 +57,7 @@ const db = {
   seeded: false,
 };
 
-const STEP_LABELS: Array<[TrackingStep['key'], string]> = DEMO_TRACKING.steps.map((x) => [x.key, x.label]);
+const STEP_LABELS: [TrackingStep['key'], string][] = DEMO_TRACKING.steps.map((x) => [x.key, x.label]);
 
 const DEMO_ORDER_STATUS = { dispatched: 'dispatched', delivered: 'delivered' } as const;
 
@@ -116,7 +116,7 @@ function quote(req: QuoteRequest) {
   const discount = db.couponCode ? Math.min(DEMO_COUPON.discount, subtotal) : 0;
   return {
     branch_id: req.branch_id ?? 'b1', lines, subtotal, delivery_fee, total: Math.max(0, subtotal + delivery_fee - discount), discount, coupon_code: db.couponCode, currency: 'LKR' as const,
-    can_order: lines.every((l) => !l.issue), ordering_enabled: true, payment_methods: ['cod', 'bank_transfer'] as Array<'cod' | 'bank_transfer'>,
+    can_order: lines.every((l) => !l.issue), ordering_enabled: true, payment_methods: ['cod', 'bank_transfer'] as ('cod' | 'bank_transfer')[],
     wallet: { eligible: false as const }, wallet_demo: { eligible: true, balance: db.wallet }, payment_options: DEMO_PAYMENT_METHODS, estimated_delivery_date: NOW(),
   };
 }
@@ -129,7 +129,7 @@ class HttpError extends Error {
   }
 }
 
-const routes: Array<[string, RegExp, Handler]> = [];
+const routes: [string, RegExp, Handler][] = [];
 const on = (method: string, pattern: string, h: Handler) =>
   routes.push([method, new RegExp(`^${pattern.replace(/:([a-z_]+)/g, '(?<$1>[^/]+)')}$`), h]);
 

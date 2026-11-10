@@ -16,7 +16,7 @@ export interface AgentBillDto {
   agent_code: string;
   customer_name: string;
   address: string | null;
-  lines: Array<{ name: string; quantity: number; unit: string; unit_price: number; line_total: number }>;
+  lines: { name: string; quantity: number; unit: string; unit_price: number; line_total: number }[];
   subtotal: number;
   discount: number;
   delivery_fee: number;

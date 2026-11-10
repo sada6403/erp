@@ -162,7 +162,7 @@ export function categoriesDto(): CategoryDto[] {
 
 /* ------------------------------------------------------- cart / wishlist */
 /** The demo opens with these three lines in the cart (qty 1 each). The cart is client state, so the mock API cannot seed it; use this to prefill the cart store in dev. */
-export const DEMO_CART: Array<{ productId: number; qty: number }> = [
+export const DEMO_CART: { productId: number; qty: number }[] = [
   { productId: 101, qty: 1 },
   { productId: 1, qty: 1 },
   { productId: 102, qty: 1 },
@@ -189,7 +189,7 @@ export const DEMO_BANNER = {
   searchPlaceholder: 'Search rice, tea, cinnamon, oils, teak...',
 } as const;
 
-export function bannersDto(): Array<BannerDto & { badge: string; cta: string; pill: string }> {
+export function bannersDto(): (BannerDto & { badge: string; cta: string; pill: string })[] {
   return [{ id: 'bn1', title: DEMO_BANNER.title, subtitle: DEMO_BANNER.body, image_url: null, link_url: null, sort_order: 1, badge: DEMO_BANNER.badge, cta: DEMO_BANNER.cta, pill: DEMO_BANNER.pill }];
 }
 
@@ -359,7 +359,7 @@ export const DEMO_TRACKING = {
 };
 
 /* ----------------------------------------------------------- notifications */
-export const DEMO_NOTIFICATIONS: Array<Omit<NotificationDto, 'created_at'> & { age_min: number; time_label: string; icon: string }> = [
+export const DEMO_NOTIFICATIONS: (Omit<NotificationDto, 'created_at'> & { age_min: number; time_label: string; icon: string })[] = [
   { id: 'n1', type: 'order_status', channel: 'orders', title: 'Order Dispatched (#NP-ORD-9042)', body: 'Agent Kamal Perera is out for delivery with your plantation groceries.', url: null, read: false, age_min: 10, time_label: '10 min ago', icon: '📦' },
   { id: 'n2', type: 'draw_result', channel: 'smartbuy', title: 'Cycle 7 Draw Result Published', body: 'Watch the verified draw video in Smart Buy now. Member #NP-1042 won!', url: null, read: false, age_min: 60, time_label: '1 hour ago', icon: '🏆' },
   { id: 'n3', type: 'wallet', channel: 'smartbuy', title: 'Wallet Credited: Rs 5,000.00', body: 'Cycle 6 dividend bonus has been added to your ledger.', url: null, read: true, age_min: 24 * 60, time_label: 'Yesterday', icon: '💰' },

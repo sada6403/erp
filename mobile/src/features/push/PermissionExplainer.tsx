@@ -35,7 +35,7 @@ export function PermissionExplainer() {
     }
   };
 
-  const points: Array<[string, string]> = [
+  const points: [string, string][] = [
     ['📦', t('push.pointOrders')],
     ['🛵', t('push.pointDeliveries')],
     ['🏆', t('push.pointDraws')],
