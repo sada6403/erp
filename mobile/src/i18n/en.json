@@ -331,9 +331,9 @@
     "deleteConfirm": "Delete my account",
     "about": "About",
     "logout": "Sign out",
-    "themeTitle": "Color Theme (User Selectable)",
+    "themeTitle": "Color theme",
     "themeDesc": "Choose your preferred brand theme. Applied instantly across all screens.",
-    "langTitle": "App Language (i18n)",
+    "langTitle": "App language",
     "accountType": {
       "customer": "Customer Account",
       "smartbuy": "Smart Buy Account",

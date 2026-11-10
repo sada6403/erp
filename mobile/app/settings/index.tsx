@@ -155,9 +155,6 @@ export default function SettingsScreen() {
                     <Text size={13} weight={700}>
                       {t(th.nameKey)}
                     </Text>
-                    <Text size={10} color="textMuted">
-                      Primary {th.colors.primary} • Accent {th.colors.accent}
-                    </Text>
                   </View>
                   {active ? (
                     <Text size={16} weight={800} color="primary">

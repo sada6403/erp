@@ -6,6 +6,14 @@ import type { CommissionResponse } from '@/lib/app/contracts/agent'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
+// The ledger stores the source table name; the app shows a readable label instead.
+const SOURCE_LABELS: Record<string, string> = {
+  chit_contributions: 'Smart Buy contribution',
+  invoices: 'Sale commission',
+  customer_orders: 'Delivery commission',
+}
+const sourceLabel = (table: unknown) => SOURCE_LABELS[String(table)] ?? 'Commission'
+
 export const GET = appRoute({ auth: 'user', roles: ['agent'] }, async (c): Promise<CommissionResponse> => {
   const { company, user, req } = need(c)
   const agentId = requireAgent(user)
@@ -20,7 +28,7 @@ export const GET = appRoute({ auth: 'user', roles: ['agent'] }, async (c): Promi
   return {
     month, total: sum(() => true), pending: sum(s => s.startsWith('pending')), approved: sum(s => s === 'approved'), paid: sum(s => s === 'paid'),
     rows: rows.map(r => ({
-      id: String(r.id), source: String(r.source_table), base_amount: Number(r.base_amount), amount: Number(r.total_commission),
+      id: String(r.id), source: sourceLabel(r.source_table), base_amount: Number(r.base_amount), amount: Number(r.total_commission),
       status: String(r.status), created_at: toIso(r.created_at) as string,
     })),
   }
