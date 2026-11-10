@@ -65,3 +65,17 @@ Open observations (not changed):
 - Production EAS profile has no `API_BASE_URL` / `APP_KEY` / `ANDROID_PACKAGE`; dev manifest has SYSTEM_ALERT_WINDOW (dev client).
 Tips for driving the phone with adb: `adb shell input text` drops digits when sent fast (use keyevents with a short sleep); tapping a field
 can shift the layout when the keyboard opens; secure screens return empty screencaps until the app is restarted.
+
+## 2026-11-10 Step 2: untouched auth flows on the phone (local backend, TEST company)
+| Flow | Result |
+|---|---|
+| First login with temp password (0771110002) | PASS: forced "Set your password" screen, mismatch shows "Passwords do not match", save clears `must_change_password` in the DB, then email step, Skip works, lands on Smart Buy home. |
+| Verify email | PASS (by design): no SMTP locally, so the app shows the "email unavailable" toast and stays on the step; the code is logged by the dev server only. Real code entry needs SMTP (staging). |
+| Register | PASS: client validation (name/phone/password), duplicate phone rejected, new phone creates the account and signs in as Customer. |
+| Forgot password | PASS: no verified email -> `app_password_reset_requests` row `pending` + generic toast. The email-code path needs SMTP. |
+| Logout / login role switching | PASS: customer -> agent (AG001) -> customer; header, tabs and data follow the role, nothing from the previous role shows. Orders screen is FLAG_SECURE (screenshots are blank by design). |
+
+Fixed after the run: stale "Enter your mobile..." error stays after typing (login form now validates on touch); Sign Up tab said "Welcome back! Please sign in"; duplicate phone showed "This already exists." (now "This mobile number is already registered. Please sign in."); a guest tapping a product heart queued a wishlist add (401, later applied to whoever signs in next) - guests are now sent to Login. New strings are in en/ta/si (ta/si are drafts for native review).
+
+Observations for Step 5 (design): the company name in the header is cut to "N..." (customer/Smart Buy) or "..." (agent) next to the role chip; the "Temporary password" field is not prefilled after login.
+Local DB note: rows written before the UTC session switch are 5h30 ahead; for Step 4 sync checks on this local DB set `SYNC_PULL_OVERLAP_MINUTES=330` (see PRODUCTION_RUNBOOK 3a).

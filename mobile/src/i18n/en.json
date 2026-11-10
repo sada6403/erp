@@ -113,6 +113,7 @@
     "removedWishlist": "Removed from wishlist",
     "save": "Save {{pct}}%",
     "savedWishlist": "Saved to wishlist",
+    "loginToSave": "Sign in to save favourites",
     "weight": "Weight"
   },
   "categories": {
@@ -261,6 +262,8 @@
     "signUp": "Sign Up",
     "skipForNow": "Skip for now",
     "subtitle": "Welcome back! Please sign in to continue",
+    "subtitleRegister": "Create your account to start shopping",
+    "phoneTaken": "This mobile number is already registered. Please sign in.",
     "tempPassword": "Temporary password",
     "togglePassword": "Show or hide password",
     "verify": "Verify",

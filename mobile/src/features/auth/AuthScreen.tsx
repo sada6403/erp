@@ -12,6 +12,7 @@ import { Gradient } from '@/components/Gradient';
 import { FormField } from '@/components/FormField';
 import { zodResolver } from '@/lib/zodResolver';
 import { errorMessage } from '@/lib/errors';
+import { toAppError } from '@/api/client';
 import { ENV } from '@/lib/env';
 import { authApi } from '@/api/endpoints';
 import { useSessionStore } from '@/store/sessionStore';
@@ -73,7 +74,7 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
   const [busy, setBusy] = useState(false);
   const [forgotId, setForgotId] = useState('');
 
-  const loginForm = useForm<LoginForm>({ resolver: zodResolver(loginSchema), defaultValues: DEV_LOGIN });
+  const loginForm = useForm<LoginForm>({ resolver: zodResolver(loginSchema), defaultValues: DEV_LOGIN, mode: 'onTouched' });
   const regForm = useForm<RegisterForm>({ resolver: zodResolver(registerSchema), defaultValues: { name: '', phone: '', password: '' } });
   const resetForm = useForm<{ code: string; password: string }>({ resolver: zodResolver(resetSchema), defaultValues: { code: '', password: '' } });
 
@@ -110,7 +111,7 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
       const res = await register(v);
       finish(res.user, t('auth.created', { name: res.user.name }));
     } catch (e) {
-      showToast(errorMessage(e, t));
+      showToast(toAppError(e).status === 409 ? t('auth.phoneTaken') : errorMessage(e, t));
     } finally {
       setBusy(false);
     }
@@ -180,7 +181,7 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
           </View>
           <Text size={21} weight={800} color="primary" letterSpacing={-0.3} style={{ marginBottom: 3 }}>{t('app.name')}</Text>
           <Text size={12} weight={500} color="textMuted" style={{ marginBottom: 8 }} align="center">
-            {t('auth.subtitle')}
+            {mode === 'register' ? t('auth.subtitleRegister') : t('auth.subtitle')}
           </Text>
         </View>
 

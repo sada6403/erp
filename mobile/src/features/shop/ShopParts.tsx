@@ -186,7 +186,8 @@ export function ProductGrid({
   const add = useCartStore((s) => s.add);
   const showToast = useUiStore((s) => s.showToast);
   const openProduct = useUiStore((s) => s.openProduct);
-  const { ids, toggle } = useWishlist();
+  const { ids, toggle, loggedIn } = useWishlist();
+  const router = useRouter();
   const theme = useTheme();
 
   const addToCart = useCallback(
@@ -202,10 +203,16 @@ export function ProductGrid({
   );
   const like = useCallback(
     (p: ProductListItemDto) => {
+      // A guest has no wishlist: never queue the item (it would later land in whoever signs in next).
+      if (!loggedIn) {
+        showToast(t('product.loginToSave'));
+        router.push('/login' as never);
+        return;
+      }
       const nowLiked = toggle(p);
       showToast(nowLiked ? t('product.savedWishlist') : t('product.removedWishlist'));
     },
-    [toggle, showToast, t],
+    [toggle, loggedIn, router, showToast, t],
   );
 
   return (
