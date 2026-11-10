@@ -722,7 +722,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
   const save = async () => {
     if (!form.supplier_id) { toast.error('Select a supplier'); return }
     if (form.items.some(i => !i.product_id)) { toast.error('All items need a product'); return }
-    if(supermarket && !attachmentToken) {toast.error('Supplier bill upload is required. Upload a PDF or image.');return}
+    if(supermarket && direct && !attachmentToken) {toast.error('Supplier bill upload is required. Upload a PDF or image.');return}
     if(direct) { const missing=form.items.find(item=>item.selling_price==='' && !(Number(products.find(p=>p.id===item.product_id)?.selling_price)>0)); if(missing) { toast.error('Enter a Selling Price: this product has no common selling price yet.'); return } }
     setSaving(true)
     try {
@@ -779,7 +779,10 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
         </div>
 
         {supermarket && <div className="grid grid-cols-2 gap-3"><label className="label">{direct?'Stock Received Date':'Purchase Date'}<input aria-label="Purchase date" type="date" className="input" value={form.purchase_date} onChange={e=>setForm(f=>({...f,purchase_date:e.target.value}))} /></label><label className="label">Supplier Bill / Invoice Number<input aria-label="Supplier invoice number" className="input" value={form.supplier_invoice_number} onChange={e=>setForm(f=>({...f,supplier_invoice_number:e.target.value}))} /></label></div>}
-        {supermarket && <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} required />}
+        {supermarket && <>
+          <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} required={direct} />
+          {!direct && <p className="text-sm" style={{color:'var(--text-3)'}}>Supplier bill is optional when placing an order. Send the order by WhatsApp or email, then upload the supplier bill when receiving stock.</p>}
+        </>}
         {supermarket && <p className="text-xs" style={{color:'var(--text-3)'}}>Purchase Price = what you pay the supplier. Selling Price = what the customer pays. Leave Selling Price as Common only if this product already has a selling price. Receiving stock updates the product prices; older batch costs stay unchanged.</p>}
         {direct && <p className="text-sm" style={{color:'var(--text-3)'}}>Search each product on the supplier bill, enter delivered quantity and purchase price, then save to update stock immediately.</p>}
         {selectedSupplier && (
@@ -891,7 +894,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
 
         <div className="flex justify-end gap-3 pt-2 border-t border-slate-700">
           <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary gap-1" onClick={save} disabled={saving || (supermarket && !attachmentToken)}>
+          <button className="btn-primary gap-1" onClick={save} disabled={saving || (supermarket && direct && !attachmentToken)}>
             {saving ? 'Saving...' : direct ? 'Save & Receive Stock' : 'Create Purchase Order'}
           </button>
         </div>

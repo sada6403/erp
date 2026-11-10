@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.9.5 - 2026-11-10 - POS Management Control, Terminal Isolation & Draft PO Workflow Fix
+
+- Added the Company-Admin-only Management Control menu (`/admin/management`) with secure HTTPS Electron IPC integration for managing Director/management accounts, branch/region/zone scopes, sales targets, salary & commission policies, payroll drafts/approvals, and live session revocation without exposing tokens or Cloud API keys to the renderer.
+- Enforced POS operational terminal isolation blocking `Management Web Only` staff accounts from cashier/POS terminal logins while preserving full access for authorized POS roles.
+- Fixed supermarket Draft Purchase Order creation so staff can place and share purchase orders (WhatsApp/Email) without an upfront supplier invoice while leaving inventory, FIFO stock batches, and prices unchanged; direct stock entries and the order receiving gate (`PARTIAL` / `RECEIVED`) continue strictly enforcing mandatory supplier PDF/image bills inside the transaction.
+- Migrated desktop auto-updater feed URL (`publish.url`) to HTTPS (`https://updates.nfplantation.com/`) while preserving backward-compatible update hosting for existing v2.9.4 installations.
+
 ## 2.9.4 - 2026-11-07 - Required supplier bills and detailed upload history
 
 - Supplier PDF/image bills are required for new supermarket purchases and stock receiving. Validation runs inside the transaction so bill failures cannot commit stock or price changes.

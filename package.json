@@ -1,6 +1,6 @@
 {
   "name": "pos-erp",
-  "version": "2.9.4",
+  "version": "2.9.5",
   "description": "Enterprise Multi Branch Offline-First POS ERP for Furniture & Electronics",
   "main": "dist-electron/main.js",
   "author": "Enterprise POS ERP",
@@ -109,7 +109,7 @@
     ],
     "publish": {
       "provider": "generic",
-      "url": "http://72.61.115.222/updates/"
+      "url": "https://updates.nfplantation.com/"
     }
   }
 }
