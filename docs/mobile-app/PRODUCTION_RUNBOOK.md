@@ -142,10 +142,16 @@ Play review can take hours to days: submit by 19 Nov.
 Go to production when: staging verified, backup restored once, upload key = MATCH, reviewer text ready, Sabiharan agreed the freeze window, Moni said "go" in chat.
 
 ## Backups on the VPS: retention rule (Moni, 2026-11-12)
-- Backups live in `/root/backup-<timestamp>/` (nginx, pm2 list, one `.sql.gz` per database, `SHA256SUMS`). The first full set (`backup-20261112-081656`) is ~0.4 MB; the server has ~60 GB free (38 % used).
+- Backups live in `/root/backup-<timestamp>/` (nginx, pm2 list, one `.sql.gz` per MySQL database, the PostgreSQL and MongoDB dumps below, `SHA256SUMS`). The first full set (`backup-20261112-081656`) is ~0.4 MB; the server has ~60 GB free (38 % used).
 - **Keep the last 2 backups.** Take a new one before every change to production, restore-test one dump (STAGING_SETUP §2), and only then is the oldest-but-two eligible for removal.
 - **Never delete a backup without Moni's explicit approval**, even an old one. The agent lists candidates (`ls -d /root/backup-* | sort`, size with `du -sh`) and asks.
 - Check free space before every backup: `df -h /` must show > 10 GB free; if the sum of backups grows past 5 GB, tell Moni instead of deleting.
+
+### Other engines on the VPS (read-only dumps, services untouched)
+- PostgreSQL `nature_farming`: `su postgres -c "pg_dump -Fc nature_farming" > pg_nature_farming.dump`. Verify: `createdb scratch_verify_pg`, `pg_restore --no-owner -d scratch_verify_pg`, compare per-table row counts, `dropdb`.
+- MongoDB (`nf-farming`, `nf-plantation`, `nf_farming`, `nf_plantation`; no auth, localhost): `mongodump --db <name> --gzip --archive=mongo_<name>.archive.gz`. Verify: `mongorestore --gzip --archive=... --nsFrom '<name>.*' --nsTo 'scratch_verify_<x>.*'`, compare per-collection document and index counts, drop the scratch DB.
+- Never stop, restart or reconfigure these services. Confirm no `scratch_verify*` database is left afterwards.
+- Set verified 2026-11-12 in `/root/backup-20261112-144809-v2` (11 files in `SHA256SUMS`, `sha256sum -c` clean): nature_farming 10 tables / 34 rows; nf-farming 35 collections / 99,677 docs (160 MB); nf-plantation 39 / 194; nf_farming 27 / 0 (empty); nf_plantation 20 / 91. All restores matched exactly.
 - Copies made for staging (`/root/staging-copy/`) are separate and small; remove them with the staging rollback (`99-rollback.sh`).
 
 ## New in Step 6: private uploads (join NIC photos, bank slips)
