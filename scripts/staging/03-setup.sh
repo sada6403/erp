@@ -78,6 +78,10 @@ chmod 600 "$STATE"
 # ---- build + start (low priority so production stays responsive) ----
 cd "$APP_DIR/backend"
 echo "[setup] npm ci"; nice -n 10 npm ci --no-audit --no-fund
+# ---- master schema: load saas-schema.sql into the STAGING db only (strip its CREATE DATABASE/USE pos_erp_saas lines) ----
+sed -e '/^CREATE DATABASE IF NOT EXISTS pos_erp_saas/d' -e '/^USE pos_erp_saas;/d' "$APP_DIR/backend/database/saas-schema.sql" | MYSQL_PWD="$DB_PASS" mysql -u"$STG_USER" "$STG_DB"
+# seed tooling (run-ts.cjs needs esbuild, a root devDependency not installed by backend npm ci)
+(cd "$APP_DIR/backend" && npm i --no-save --no-audit --no-fund esbuild@0.25.12 >/dev/null)
 echo "[setup] next build"; nice -n 10 npm run build
 PORT="$PORT" pm2 start "npm start" --name pos-staging --cwd "$APP_DIR/backend" --max-memory-restart 700M
 pm2 save >/dev/null
