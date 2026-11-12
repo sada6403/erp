@@ -1,6 +1,6 @@
 {
   "file": "security",
-  "generated_at": "2026-11-10T17:14:16.965Z",
+  "generated_at": "2026-11-12T10:43:50.750Z",
   "rows": [
     {
       "id": "SEC-01",
@@ -33,16 +33,17 @@
       "id": "SEC-04",
       "action": "Another customer / agent tries to read, track, download, cancel a customer order",
       "api": "POST /orders -> 201; other: 4 calls -> 404; agent: 4 calls -> 403; other list excludes it",
-      "cloud": "customer_orders {\"id\":\"01bfba08-4763-4c0f-a5d5-317362f2f3f1\",\"order_number\":\"ONL-1001\",\"app_user_id\":\"60ff9b38-77e3-4afc-9bb2-ac357785fc77\",\"customer_id\":\"8e23bdcf-23cf-4b50-aa67-2a39ab063892\",\"status\":\"pending\",\"total_amount\":\"730.00\",\"created_at\":\"2026-11-10 17:13:31\"} unchanged after the cancel attempt",
+      "cloud": "customer_orders {\"id\":\"3d4460e2-ac34-410e-9f8b-a7573b2f18f3\",\"order_number\":\"ONL-1001\",\"app_user_id\":\"11a553d0-2dc7-4853-aeec-d27fe783c904\",\"customer_id\":\"f35b8fe3-d267-47a7-8055-a58237da33e6\",\"status\":\"pending\",\"total_amount\":\"730.00\",\"created_at\":\"2026-11-12 10:42:39\"} unchanged after the cancel attempt",
       "pos": "n/a",
-      "reverse": 156,
+      "reverse": "n/a",
+      "ms": 188,
       "result": "PASS"
     },
     {
       "id": "SEC-05",
       "action": "Other customer edits/deletes an address, reads wishlist and notifications, marks another user's notification read",
       "api": "PUT/DELETE -> 404; wishlist + notifications lists exclude owner data",
-      "cloud": "address {\"id\":\"3269a494-9087-44f6-ab9f-ee4bda52c48f\"}; app_notifications {\"id\":\"ad45cf6b-04b0-4701-a783-34e036792afc\",\"user_id\":\"60ff9b38-77e3-4afc-9bb2-ac357785fc77\",\"read_at\":null} (read_at null)",
+      "cloud": "address {\"id\":\"6fbcfabe-183f-42ee-bcaf-4841c0cfa15c\"}; app_notifications {\"id\":\"1d992212-1545-41a4-b0ce-d48512c0b3f1\",\"user_id\":\"11a553d0-2dc7-4853-aeec-d27fe783c904\",\"read_at\":null} (read_at null)",
       "pos": "n/a",
       "reverse": "n/a",
       "result": "PASS"
@@ -51,7 +52,7 @@
       "id": "SEC-06",
       "action": "Other member / agent reads a Smart Buy statement, draws, wallet",
       "api": "statement + draws: other -> 403/404, agent -> 403; lists exclude the scheme",
-      "cloud": "scheme a9e5d0c4-42e2-4b20-8352-3dc47d0efbba",
+      "cloud": "scheme 348d0d8b-07f2-4c6c-82ca-3339f260b17e",
       "pos": "n/a",
       "reverse": "n/a",
       "result": "PASS"
@@ -60,9 +61,10 @@
       "id": "SEC-07",
       "action": "Agent touches an order that is not assigned to them; lists show only their own deliveries and members",
       "api": "unassigned order: detail/bill/status/complete -> 404; list ids subset of assigned",
-      "cloud": "customer_orders.assigned_agent_id = 3603aec1-da8d-4a6b-bdb9-d24c66056134: 1 order(s); chit_members agent_id = 3603aec1-da8d-4a6b-bdb9-d24c66056134: 4",
+      "cloud": "customer_orders.assigned_agent_id = 46b50be0-b48e-492a-9dfa-2e4c6b46a4ee: 1 order(s); chit_members agent_id = 46b50be0-b48e-492a-9dfa-2e4c6b46a4ee: 4",
       "pos": "Deliveries screen shows the same assigned set",
-      "reverse": 121,
+      "reverse": "n/a",
+      "ms": 169,
       "result": "PASS"
     },
     {
@@ -96,7 +98,7 @@
       "id": "SEC-11",
       "action": "Cross-tenant: A token+B key, B user on A order ids, catalogs, POS sync feed",
       "api": "token/key mix -> 401; A order id inside B -> 404 (read, track, cancel); catalogs and /api/sync customers disjoint",
-      "cloud": "schemas pos_erp_app_test_mway3yxnl1y_mway3yyl vs pos_erp_app_test_mway5z1d7x8_mway5z2c: customer_orders 01bfba08-4763-4c0f-a5d5-317362f2f3f1 absent in B",
+      "cloud": "schemas pos_erp_app_test_mwdf2vw4jc0_mwdf2vxy vs pos_erp_app_test_mwdf3xmv8q9_mwdf3xpa: customer_orders 3d4460e2-ac34-410e-9f8b-a7573b2f18f3 absent in B",
       "pos": "n/a",
       "reverse": "n/a",
       "result": "PASS"
@@ -104,11 +106,11 @@
     {
       "id": "CO-01",
       "action": "Edit legal name / support email / phone / address / TIN in POS company settings and save",
-      "api": "PUT /api/company/branding (via SyncService.pushBrandingToCloud) -> GET /company legal_name ok, /watermark areas.company 2026-11-10T17:11:27.000Z -> 2026-11-10T17:14:10.000Z, /legal/privacy shows it",
-      "cloud": "pos_erp_saas.companies.branding_json {\"company_legal_name\":\"Sec Legal mway3y8h (Pvt) Ltd\",\"support_email\":\"help-mway3y8h@sec.example\",\"support_phone\":\"0112223344\",\"company_tin\":\"PV-mway3y8h\"} updated_at 2026-11-10T17:14:10.000Z",
+      "api": "PUT /api/company/branding (via SyncService.pushBrandingToCloud) -> GET /company legal_name ok, /watermark areas.company 2026-11-12T10:41:15.000Z -> 2026-11-12T10:43:37.000Z, /legal/privacy shows it",
+      "cloud": "pos_erp_saas.companies.branding_json {\"company_legal_name\":\"Sec Legal mwdf2uu0 (Pvt) Ltd\",\"support_email\":\"help-mwdf2uu0@sec.example\",\"support_phone\":\"0112223344\",\"company_tin\":\"PV-mwdf2uu0\"} updated_at 2026-11-12T10:43:37.000Z",
       "pos": "Settings -> Company Information (local app_settings, store key company_branding_synced)",
       "reverse": "POS -> app: visible on next /company fetch (app polls /watermark every 10 s)",
-      "ms": 647,
+      "ms": 1259,
       "result": "PASS"
     },
     {
@@ -116,19 +118,19 @@
       "action": "Cloud branding edited elsewhere -> POS settings (SyncService.syncBranding)",
       "api": "PUT /api/company/branding -> 200",
       "cloud": "branding_json has the new legal name / support email / phone",
-      "pos": "POS app_settings: company_legal_name=Round mway3y8h Ltd, support_email=round-mway3y8h@sec.example, support_phone=0771234567",
+      "pos": "POS app_settings: company_legal_name=Round mwdf2uu0 Ltd, support_email=round-mwdf2uu0@sec.example, support_phone=0771234567",
       "reverse": "cloud -> POS",
-      "ms": 637,
+      "ms": 950,
       "result": "PASS"
     },
     {
       "id": "CO-03",
       "action": "POS: hide product from the online store + rename its category",
       "api": "GET /catalog/products no longer lists it, removed_ids has it, detail 404; /catalog/categories shows the new name",
-      "cloud": "products {\"id\":\"13c08ab2-5f63-4778-8eef-e11024fa4c9b\",\"is_online\":0,\"updated_at\":\"2026-11-10 17:14:13\"}; categories.name = Renamed mway3y8h",
+      "cloud": "products {\"id\":\"3fde0388-4556-4278-8972-38dcad5d4990\",\"is_online\":0,\"updated_at\":\"2026-11-12 10:43:42\"}; categories.name = Renamed mwdf2uu0",
       "pos": "Products screen (online flag) / Categories",
       "reverse": "POS -> app",
-      "ms": 1621,
+      "ms": 3163,
       "result": "PASS"
     }
   ]

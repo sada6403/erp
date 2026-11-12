@@ -71,12 +71,14 @@ export function TrackingView({ id }: { id: string }) {
             </Text>
           </View>
         </View>
-        <Text size={12} color="textMuted">
-          {t('track.eta')}{' '}
-          <Text size={12} weight={700} color="textMuted">
-            {o.estimated_delivery_date ? formatDate(o.estimated_delivery_date) : `${formatDate(o.created_at)} ${formatTime(o.created_at)}`}
+        {o.estimated_delivery_date ? (
+          <Text size={12} color="textMuted">
+            {t('track.eta')}{' '}
+            <Text size={12} weight={700} color="textMuted">
+              {formatDate(o.estimated_delivery_date)}
+            </Text>
           </Text>
-        </Text>
+        ) : null}
       </Card>
 
       {/* .otp-security-box */}

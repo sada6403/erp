@@ -134,7 +134,8 @@ export async function buildQuote(company: AppCompany, items: CartLineInput[], br
   const { priced, subtotal, canOrder } = await priceCart(company.tp, items, branchId)
   const fee = priced.length ? deliveryFeeFor(subtotal, settings) : 0
   const ordering = flag(settings.ordering_enabled)
-  const days = Number(settings.estimated_delivery_days) || 2
+  // A delivery date is promised only when the POS settings define one (estimated_delivery_days); no built-in default.
+  const days = Number(settings.estimated_delivery_days) || 0
   return {
     branch_id: branchId,
     lines: priced.map(p => p.line),
@@ -143,7 +144,7 @@ export async function buildQuote(company: AppCompany, items: CartLineInput[], br
     ordering_enabled: ordering,
     payment_methods: flag(settings.bank_transfer_enabled) ? ['cod', 'bank_transfer'] : ['cod'],
     wallet: { eligible: false },
-    estimated_delivery_date: new Date(Date.now() + days * 86400000).toISOString(),
+    estimated_delivery_date: days > 0 ? new Date(Date.now() + days * 86400000).toISOString() : null,
   }
 }
 
@@ -255,8 +256,8 @@ export async function createOrder(
 
     orderId = randomUUID()
     const now = new Date().toISOString()
-    const days = Number(settings.estimated_delivery_days) || 2
-    const eta = new Date(Date.now() + days * 86400000)
+    const days = Number(settings.estimated_delivery_days) || 0
+    const eta = days > 0 ? new Date(Date.now() + days * 86400000) : null
     const needsCall = !user.phoneVerified && pm === 'cod' ? 1 : 0
     let orderNumber = ''
     for (let attempt = 0; attempt < 6; attempt++) {

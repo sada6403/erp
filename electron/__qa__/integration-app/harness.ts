@@ -107,7 +107,9 @@ export async function cloudDb(seed: Seed) {
     .filter(l => l && !l.startsWith('#') && l.includes('='))
     .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim().replace(/^['"]|['"]$/g, '')] }))
   const conn = await mysql.createConnection({
-    host: env.MYSQL_HOST, port: Number(env.MYSQL_PORT || 3306), user: env.MYSQL_USER, password: env.MYSQL_PASSWORD,
+    // INT_MYSQL_* points the staging run at an SSH tunnel to the staging database (never production)
+    host: process.env.INT_MYSQL_HOST || env.MYSQL_HOST, port: Number(process.env.INT_MYSQL_PORT || env.MYSQL_PORT || 3306),
+    user: process.env.INT_MYSQL_USER || env.MYSQL_USER, password: process.env.INT_MYSQL_PASSWORD || env.MYSQL_PASSWORD,
     database: seed.db_schema, timezone: '+00:00', dateStrings: true,
   })
   await conn.query(`SET time_zone = '+00:00'`)
@@ -127,6 +129,9 @@ export type CloudDb = Awaited<ReturnType<typeof cloudDb>>
  */
 export async function createPos(state: { data: Record<string, any>; directory: string }, seed: Seed) {
   state.directory = fs.mkdtempSync(path.join(os.tmpdir(), 'np-pos-'))
+  // Each run used to leave ~150 MB of throwaway POS data behind (the disk filled up). Remove this run's own directory when the process ends.
+  const ownDir = state.directory
+  process.once('exit', () => { try { fs.rmSync(ownDir, { recursive: true, force: true, maxRetries: 3 }) } catch { /* best effort */ } })
   state.data = { app_settings: { cloud_api_url: BASE_URL, cloud_api_key: seed.pos_api_key }, device_id: `int-test-${Date.now()}`, device_branch_id: seed.branches.main }
   const database = await import('../../database')
   await database.initDatabase()
