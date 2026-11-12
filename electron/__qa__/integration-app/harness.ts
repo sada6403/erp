@@ -60,14 +60,14 @@ export interface ApiResult<T = any> { status: number; json: T; ms: number }
 
 /** Mobile-app API client (`/api/app/v1`). Every call uses its own client IP so rate limits never interfere. */
 export function appApi(seed: Seed) {
-  const call = async <T = any>(method: string, p: string, opts: { token?: string | null; body?: unknown; headers?: Record<string, string>; key?: string | null } = {}): Promise<ApiResult<T>> => {
+  const call = async <T = any>(method: string, p: string, opts: { token?: string | null; body?: unknown; form?: FormData; headers?: Record<string, string>; key?: string | null } = {}): Promise<ApiResult<T>> => {
     const h: Record<string, string> = { 'x-forwarded-for': randomIp(), ...(opts.headers ?? {}) }
     const key = opts.key === undefined ? seed.app_key : opts.key
     if (key) h['x-app-key'] = key
     if (opts.token) h.authorization = `Bearer ${opts.token}`
     if (opts.body !== undefined) h['content-type'] = 'application/json'
     const t0 = Date.now()
-    const res = await fetch(`${BASE_URL}/api/app/v1${p}`, { method, headers: h, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) })
+    const res = await fetch(`${BASE_URL}/api/app/v1${p}`, { method, headers: h, body: opts.form ?? (opts.body === undefined ? undefined : JSON.stringify(opts.body)) })
     let json: any = null
     try { json = await res.json() } catch { /* not json */ }
     return { status: res.status, json, ms: Date.now() - t0 }
@@ -75,6 +75,8 @@ export function appApi(seed: Seed) {
   return {
     get: <T = any>(p: string, o?: Parameters<typeof call>[2]) => call<T>('GET', p, o),
     post: <T = any>(p: string, body?: unknown, o: Parameters<typeof call>[2] = {}) => call<T>('POST', p, { ...o, body: body ?? {} }),
+    /** multipart/form-data (NIC photos, bank slips) */
+    postForm: <T = any>(p: string, form: FormData, o: Parameters<typeof call>[2] = {}) => call<T>('POST', p, { ...o, form }),
     put: <T = any>(p: string, body?: unknown, o: Parameters<typeof call>[2] = {}) => call<T>('PUT', p, { ...o, body: body ?? {} }),
     patch: <T = any>(p: string, body?: unknown, o: Parameters<typeof call>[2] = {}) => call<T>('PATCH', p, { ...o, body: body ?? {} }),
     del: <T = any>(p: string, o?: Parameters<typeof call>[2]) => call<T>('DELETE', p, o),
@@ -97,7 +99,8 @@ export function posAdmin(seed: Seed) {
     try { json = await res.json() } catch { /* not json */ }
     return { status: res.status, json, ms: Date.now() - t0 }
   }
-  return { get: <T = any>(p: string) => call<T>('GET', p), post: <T = any>(p: string, b: unknown = {}) => call<T>('POST', p, b), put: <T = any>(p: string, b: unknown = {}) => call<T>('PUT', p, b), call }
+  const raw = async (p: string) => { const res = await fetch(`${BASE_URL}/api/app/v1/admin${p}`, { headers: { 'x-api-key': seed.pos_api_key } }); return { status: res.status, type: res.headers.get('content-type') || '', bytes: Buffer.from(await res.arrayBuffer()) } }
+  return { raw, get: <T = any>(p: string) => call<T>('GET', p), post: <T = any>(p: string, b: unknown = {}) => call<T>('POST', p, b), put: <T = any>(p: string, b: unknown = {}) => call<T>('PUT', p, b), call }
 }
 
 /** Direct read access to the tenant's MySQL schema (UTC strings as stored). Use it for the "exact cloud rows" evidence. */
@@ -163,7 +166,7 @@ export async function createPos(state: { data: Record<string, any>; directory: s
     async syncUntil(check: () => boolean, tries = 3): Promise<number> {
       const t0 = Date.now()
       for (let i = 0; i < tries; i++) { await this.sync(); if (check()) return Date.now() - t0 }
-      throw new Error('POS data did not arrive after sync')
+      throw new Error(`POS data did not arrive after sync (pull errors: ${JSON.stringify(state.data.sync_pull_errors ?? {})}; cycle error: ${state.data.sync_cycle_error ?? 'none'})`)
     },
     get: <T = any>(sql: string, ...p: unknown[]) => db.prepare(sql).get(...p) as T | undefined,
     all: <T = any>(sql: string, ...p: unknown[]) => db.prepare(sql).all(...p) as T[],

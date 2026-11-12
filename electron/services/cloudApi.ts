@@ -250,6 +250,41 @@ export class CloudApi {
     return this.request('/api/app/v1/admin/app-access/status', { method: 'POST', body: JSON.stringify({ user_id: userId, status }) })
   }
 
+  // Smart Buy join requests + bank slips (admin endpoints; private images come back as bytes).
+  async joinRequestsList(status?: string): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request(`/api/app/v1/admin/join-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`)
+  }
+
+  async joinRequestDecide(id: string, input: { decision: 'approve' | 'reject'; reason?: string; decided_by?: string }): Promise<Record<string, unknown>> {
+    return this.request(`/api/app/v1/admin/join-requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) })
+  }
+
+  async joinRequestPhoto(id: string, side: 'front' | 'back'): Promise<{ contentType: string; bytes: Buffer }> {
+    return this.requestBinary(`/api/app/v1/admin/join-requests/${encodeURIComponent(id)}/photo?side=${side}`)
+  }
+
+  async paymentSlipsList(status?: string): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request(`/api/app/v1/admin/payment-slips${status ? `?status=${encodeURIComponent(status)}` : ''}`)
+  }
+
+  async paymentSlipDecide(id: string, input: { decision: 'verify' | 'reject'; reason?: string; reviewed_by?: string }): Promise<Record<string, unknown>> {
+    return this.request(`/api/app/v1/admin/payment-slips/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) })
+  }
+
+  async paymentSlipImage(id: string): Promise<{ contentType: string; bytes: Buffer }> {
+    return this.requestBinary(`/api/app/v1/admin/payment-slips/${encodeURIComponent(id)}/image`)
+  }
+
+  private async requestBinary(path: string): Promise<{ contentType: string; bytes: Buffer }> {
+    const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
+    const response = await fetchFn(`${this.baseUrl}${path}`, {
+      signal: AbortSignal.timeout(30_000),
+      headers: { 'x-api-key': this.apiKey, ...(this.deviceId ? { 'x-device-id': this.deviceId } : {}) },
+    })
+    if (!response.ok) throw new Error(`Image request failed with HTTP ${response.status}`)
+    return { contentType: response.headers.get('content-type') || 'image/webp', bytes: Buffer.from(await response.arrayBuffer()) }
+  }
+
   private async request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
     const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
     const response = await fetchFn(`${this.baseUrl}${path}`, {

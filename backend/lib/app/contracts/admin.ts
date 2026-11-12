@@ -59,3 +59,64 @@ export interface AppAccessStatusRequest {
   user_id: string
   status: 'active' | 'disabled'
 }
+
+// ── Join requests: POS review (x-api-key) ──
+export interface AdminJoinRequestDto {
+  id: string
+  source: 'agent' | 'self'
+  agent_code: string | null
+  agent_name: string | null
+  scheme_id: string
+  scheme_name: string
+  full_name: string
+  phone: string
+  nic_number: string
+  address: string | null
+  notes: string | null
+  has_nic_front: boolean
+  has_nic_back: boolean
+  customer_id: string | null
+  status: 'pending' | 'approved' | 'rejected'
+  reject_reason: string | null
+  decided_by: string | null
+  decided_at: string | null
+  member_id: string | null
+  created_at: string
+}
+export interface AdminJoinRequestsResponse {
+  items: AdminJoinRequestDto[]
+}
+export interface AdminDecisionRequest {
+  decision: 'approve' | 'reject'
+  /** Required for reject */
+  reason?: string
+  decided_by?: string
+}
+export interface AdminJoinDecisionResponse {
+  ok: true
+  status: 'approved' | 'rejected'
+  member_id: string | null
+  customer_id: string | null
+}
+
+// ── Bank slips: POS verification ──
+export interface AdminSlipDto {
+  id: string
+  order_id: string
+  order_number: string
+  customer_name: string | null
+  order_total: number
+  reference: string | null
+  status: 'pending' | 'verified' | 'rejected'
+  reject_reason: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+}
+export interface AdminSlipsResponse {
+  items: AdminSlipDto[]
+}
+export interface AdminSlipDecisionResponse {
+  ok: true
+  status: 'verified' | 'rejected'
+}

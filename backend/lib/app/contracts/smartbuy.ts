@@ -81,3 +81,34 @@ export interface WalletTransactionDto {
 export interface WalletTransactionsResponse {
   items: WalletTransactionDto[]
 }
+
+// ── Join requests (agent initiated now, customer self join later; same flow) ──
+export type JoinRequestStatus = 'pending' | 'approved' | 'rejected'
+export interface JoinRequestDto {
+  id: string
+  source: 'agent' | 'self'
+  scheme_id: string
+  scheme_name: string
+  full_name: string
+  phone_masked: string | null
+  status: JoinRequestStatus
+  /** Only when rejected */
+  reject_reason: string | null
+  created_at: string
+  decided_at: string | null
+}
+export interface JoinRequestsResponse {
+  items: JoinRequestDto[]
+  next_cursor: string | null
+}
+/** POST /smartbuy/join-requests is multipart/form-data: these text fields + files `nic_front` and `nic_back`. */
+export interface JoinRequestFields {
+  scheme_id: string
+  full_name: string
+  phone: string
+  nic_number: string
+  address?: string
+  notes?: string
+  /** Idempotency key; the same id returns the original request */
+  client_event_id: string
+}

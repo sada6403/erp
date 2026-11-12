@@ -315,6 +315,14 @@ const api = {
     resetRequests: (filters?: unknown) => ipcRenderer.invoke('appAccess:resetRequests', filters),
     resendTempPassword: (requestId: string) => ipcRenderer.invoke('appAccess:resendTempPassword', requestId),
   },
+  appRequests: {
+    joinList:    (filters?: unknown) => ipcRenderer.invoke('joinRequests:list', filters),
+    joinPhoto:   (id: string, side: 'front' | 'back') => ipcRenderer.invoke('joinRequests:photo', id, side),
+    joinDecide:  (id: string, decision: 'approve' | 'reject', reason?: string) => ipcRenderer.invoke('joinRequests:decide', id, decision, reason),
+    slipList:    (filters?: unknown) => ipcRenderer.invoke('paymentSlips:list', filters),
+    slipImage:   (id: string) => ipcRenderer.invoke('paymentSlips:image', id),
+    slipDecide:  (id: string, decision: 'verify' | 'reject', reason?: string) => ipcRenderer.invoke('paymentSlips:decide', id, decision, reason),
+  },
   onlineStore: {
     bannersList:   () => ipcRenderer.invoke('onlineStore:banners:list'),
     bannerSave:    (payload: unknown) => ipcRenderer.invoke('onlineStore:banners:save', payload),

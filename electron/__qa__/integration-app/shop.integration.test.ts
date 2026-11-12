@@ -189,8 +189,9 @@ describe('checkout and orders', () => {
     })
   })
 
-  it('SHOP-04 bank-transfer order: payment reference stored, unpaid, in POS; slip upload not in v1', async () => {
+  it('SHOP-04 bank-transfer order: payment reference stored, unpaid, in POS; slip image upload is SLIP-01 in join-slip.integration.test.ts', async () => {
     await scenario('SHOP-04', 'Bank transfer order + slip reference', async () => {
+      await sleep(1100) // local dev runs without SYNC_PULL_OVERLAP_MINUTES: an order in the same DB second as the previous pull cursor would be skipped
       const items = [{ product_id: seed.product_ids[1], quantity: 1 }]
       const address_ = address('B')
       const o = await api.post('/orders', { items, branch_id: seed.branches.main, address: address_, payment_method: 'bank_transfer', payment_reference: 'SLIP-REF-12345' }, { token: A, headers: { 'idempotency-key': randomUUID() } })
@@ -206,10 +207,9 @@ describe('checkout and orders', () => {
       return {
         api: `POST /orders (bank_transfer, payment_reference) -> ${o.status}`, cloud: `customer_orders ${j(row)}`,
         pos: `Orders screen row payment_method=${local.payment_method} reference=${local.payment_reference} status=${local.payment_status}`, ms: o.ms + ms,
-        notes: 'v1 has no slip FILE upload endpoint (only the typed payment_reference), so file/slip-row checks are N/A; see SHOP-04b',
+        notes: 'slip image upload + POS verification: see SLIP-01/SLIP-02 (join-slip.integration.test.ts)',
       }
     })
-    ev.add({ id: 'SHOP-04b', action: 'Bank slip image upload', api: 'no endpoint in /api/app/v1 (only payment_reference text)', cloud: '-', pos: '-', reverse: 'n/a', result: 'SKIP', notes: 'Not implemented in v1.0; app sends the slip reference text only' })
   })
 
   it('SHOP-05 order list / detail / tracking in app; other customer gets 404', async () => {
@@ -381,6 +381,7 @@ describe('reverse: POS -> app', () => {
 describe('cancel', () => {
   it('SHOP-12 customer cancels a pending order -> cloud cancelled, POS sees it; cannot cancel again / after dispatch', async () => {
     await scenario('SHOP-12', 'Cancel order in app', async () => {
+      await sleep(1100) // same-second cursor note as SHOP-04
       const items = [{ product_id: seed.product_ids[1], quantity: 1 }]
       const o = await api.post('/orders', { items, branch_id: seed.branches.main, address: address('C'), payment_method: 'cod' }, { token: A, headers: { 'idempotency-key': randomUUID() } })
       expect(o.status, JSON.stringify(o.json)).toBe(201)

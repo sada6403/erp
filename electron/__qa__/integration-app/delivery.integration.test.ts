@@ -234,15 +234,4 @@ describe('agent deliveries', () => {
   })
 })
 
-describe('Smart Buy join requests', () => {
-  it('JOIN-01 member join request -> POS Join Requests -> approve/reject -> app', async () => {
-    // v1.0 has no join-request API: the app sheet is demo-mock only (JoinSheet SB_DEMO) and the POS has no Join Requests screen.
-    const probes = await Promise.all(['/smartbuy/join', '/smartbuy/join-requests', '/smartbuy/me/join-requests', '/join-requests'].map(p => api.post(p, { scheme_id: seed.scheme_id, nic: '901234567V' }, { token: customer })))
-    const posProbe = await fetch(`${BASE_URL}/api/app/v1/admin/join-requests`, { headers: { 'x-api-key': seed.pos_api_key } })
-    const tables = await db.query(`SELECT table_name AS t FROM information_schema.tables WHERE table_schema = ? AND table_name LIKE '%join%'`, [seed.db_schema])
-    expect(probes.every(p => p.status === 404)).toBe(true)
-    ev.add({ id: 'JOIN-01', action: 'Member submits Smart Buy join request; POS lists + approves; app sees status', api: `POST join endpoints -> ${probes.map(p => p.status).join('/')}; GET admin/join-requests -> ${posProbe.status}`,
-      cloud: `no join/request table in tenant schema (${j(tables)})`, pos: 'No Join Requests screen/handler exists in the POS (grep join_request: none)', reverse: 'n/a', result: 'SKIP',
-      notes: 'Not implemented in v1.0: the app JoinSheet submit is disabled in release builds and neither the API nor the POS has a join-request flow. Needs a product decision before building (HANDOFF/Step 6).' })
-  })
-})
+// Smart Buy join requests moved to join-slip.integration.test.ts (JOIN-01..04, built in Step 6).

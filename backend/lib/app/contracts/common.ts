@@ -31,6 +31,8 @@ export type AppErrorCode =
   | 'CODE_EXPIRED'
   | 'MODULE_DISABLED'
   | 'NOT_IMPLEMENTED'
+  | 'ALREADY_MEMBER'
+  | 'SCHEME_FULL'
   | 'INTERNAL'
 
 /** Every non-2xx response has exactly this body. */

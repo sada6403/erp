@@ -127,3 +127,16 @@ export interface TrackingResponse {
 export interface CancelOrderRequest {
   reason?: string
 }
+
+// ── Bank slip (POST /orders/{id}/slip is multipart: file `slip`, text `reference?`, `client_event_id`) ──
+export interface OrderSlipDto {
+  id: string
+  order_id: string
+  status: 'pending' | 'verified' | 'rejected'
+  reject_reason: string | null
+  reference: string | null
+  created_at: string
+}
+export interface OrderSlipsResponse {
+  items: OrderSlipDto[]
+}

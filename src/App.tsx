@@ -56,6 +56,7 @@ const CategoriesPage = adminPage('CategoriesPage')
 const StockCountPage = adminPage('StockCountPage')
 const OrdersPage = adminPage('OrdersPage')
 const AppAccessPage = adminPage('AppAccessPage')
+const AppRequestsPage = adminPage('AppRequestsPage')
 const OnlineStorePage = adminPage('OnlineStorePage')
 const StockLookupPage = adminPage('StockLookupPage')
 const QuotationsPage = adminPage('QuotationsPage')
@@ -341,6 +342,7 @@ export default function App() {
         <Route path="/admin/bills" element={<BillsPage />} />
         <Route path="/admin/orders" element={<OrdersPage />} />
         <Route path="/admin/app-access" element={<RequireSuperAdmin><AppAccessPage /></RequireSuperAdmin>} />
+        <Route path="/admin/app-requests" element={<RequireSuperAdmin><AppRequestsPage /></RequireSuperAdmin>} />
         <Route path="/admin/online-store" element={<RequireSuperAdmin><OnlineStorePage /></RequireSuperAdmin>} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
