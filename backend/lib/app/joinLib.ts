@@ -5,6 +5,7 @@ import { fail, only, optStr, reqStr, toIso } from './http'
 import { getModules } from './settings'
 import { maskPhone, normalizePhone } from './security'
 import { enqueueNotification } from './notify'
+import { deletePrivateImage } from './privateFiles'
 import type { JoinRequestDto } from './contracts/smartbuy'
 import type { AdminJoinRequestDto, AdminJoinDecisionResponse } from './contracts/admin'
 import type { AppRole } from './contracts/common'
@@ -36,6 +37,28 @@ function registrationError(s: Record<string, unknown>): string | null {
 }
 const capacityOf = (s: Record<string, unknown>) => Number(s.max_customers || s.member_count)
 
+/** NIC photos and NIC numbers are personal data: wiped this many days after approval/rejection (approved data lives in the POS customer). */
+export const JOIN_RETENTION_DAYS = 30
+const lastPurge = new Map<string, number>()
+
+/**
+ * Lazy retention (no scheduler needed): runs when the POS opens the list, and at most every 10 minutes when requests are submitted.
+ * Removes the NIC number and both photos; name, phone, scheme and decision stay so the request history is still readable.
+ */
+export async function purgeJoinRetention(company: AppCompany, throttle = false): Promise<number> {
+  if (throttle && Date.now() - (lastPurge.get(company.id) ?? 0) < 10 * 60_000) return 0
+  lastPurge.set(company.id, Date.now())
+  const { rows } = await company.tp.query<Record<string, unknown>>(
+    `SELECT id, nic_front_ref, nic_back_ref FROM smartbuy_join_requests
+      WHERE status <> 'pending' AND purged_at IS NULL AND decided_at IS NOT NULL AND decided_at < DATE_SUB(NOW(), INTERVAL ${JOIN_RETENTION_DAYS} DAY) LIMIT 200`)
+  for (const r of rows) {
+    await deletePrivateImage(r.nic_front_ref ? String(r.nic_front_ref) : null)
+    await deletePrivateImage(r.nic_back_ref ? String(r.nic_back_ref) : null)
+    await company.tp.query(`UPDATE smartbuy_join_requests SET nic_number = '', nic_front_ref = NULL, nic_back_ref = NULL, purged_at = NOW() WHERE id = ?`, [String(r.id)])
+  }
+  return rows.length
+}
+
 const SELECT_JOIN = `SELECT j.*, s.name AS scheme_name FROM smartbuy_join_requests j LEFT JOIN chit_schemes s ON s.id = j.scheme_id`
 
 /** Create a request. Returns { created:false } when the same client_event_id was already submitted (idempotent replay). */
@@ -43,6 +66,7 @@ export async function submitJoinRequest(
   company: AppCompany, user: AppUserCtx, fields: Record<string, string>, nicFrontRef: () => Promise<string>, nicBackRef: () => Promise<string>
 ): Promise<{ created: boolean; dto: JoinRequestDto }> {
   if (!(await getModules(company)).smartbuy) fail(403, 'MODULE_DISABLED', 'Smart Buy is not available.')
+  await purgeJoinRetention(company, true).catch(() => 0)
   only(fields, JOIN_FIELDS)
   const eventId = reqStr(fields.client_event_id, 'client_event_id', 8, 64)
   const prior = await company.tp.query<Record<string, unknown>>(`${SELECT_JOIN} WHERE j.submitted_by_user_id = ? AND j.client_event_id = ?`, [user.userId, eventId])
@@ -95,6 +119,7 @@ export async function submitJoinRequest(
 }
 
 export async function adminJoinList(company: AppCompany, status: string | null): Promise<AdminJoinRequestDto[]> {
+  await purgeJoinRetention(company).catch(() => 0)
   const where = status && ['pending', 'approved', 'rejected'].includes(status) ? `WHERE j.status = ?` : ''
   const { rows } = await company.tp.query<Record<string, unknown>>(
     `SELECT j.*, s.name AS scheme_name, a.code AS agent_code, a.name AS agent_name

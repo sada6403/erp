@@ -33,22 +33,38 @@ const actor = (c: Json) => String(c.name || c.email || '') || undefined
 const dataUrl = (img: { contentType: string; bytes: Buffer }) => `data:${img.contentType};base64,${img.bytes.toString('base64')}`
 
 /**
- * Cloud customers have no NIC column, so the approved member's NIC is written into the POS customer record here
- * (local only, once the customer row has been pulled). Idempotent: only fills an empty NIC.
+ * Cloud customers have no NIC column (privacy decision), and the cloud wipes the NIC 30 days after the decision.
+ * So at approval time the POS remembers {customer_id: nic} (persisted) and writes it into the local customer as soon as that
+ * row has synced down. Idempotent: only fills an empty NIC; the entry is dropped once applied.
  */
-function fillLocalNic(items: Json[]): void {
+const PENDING_KEY = 'pending_member_nic'
+function applyPendingNic(extra: Json[] = []): void {
+  const pending = { ...((store.get(PENDING_KEY) as Record<string, string> | undefined) || {}) }
+  for (const r of extra) if (r.status === 'approved' && r.customer_id && r.nic_number) pending[String(r.customer_id)] = String(r.nic_number)
   const db = getDb()
-  const upd = db.prepare(`UPDATE customers SET nic = ? WHERE id = ? AND (nic IS NULL OR nic = '')`)
-  for (const r of items) {
-    if (r.status === 'approved' && r.customer_id && r.nic_number) upd.run(String(r.nic_number), String(r.customer_id))
+  let changed = false
+  for (const [customerId, nic] of Object.entries(pending)) {
+    const row = db.prepare(`SELECT id FROM customers WHERE id = ?`).get(customerId)
+    if (!row) continue
+    db.prepare(`UPDATE customers SET nic = ? WHERE id = ? AND (nic IS NULL OR nic = '')`).run(nic, customerId)
+    delete pending[customerId]
+    changed = true
   }
+  if (changed || extra.length) store.set(PENDING_KEY, pending)
+}
+function rememberNic(customerId: string, nic: string): void {
+  const pending = { ...((store.get(PENDING_KEY) as Record<string, string> | undefined) || {}) }
+  pending[customerId] = nic
+  store.set(PENDING_KEY, pending)
+  // the customer row arrives with the next sync pull (30 s cycle); also applied whenever the screen is opened
+  for (const ms of [35_000, 70_000, 130_000]) setTimeout(() => { try { applyPendingNic() } catch { /* retried on next list */ } }, ms)
 }
 
 export function registerAppRequestHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'joinRequests:list', async (_e, filters: Json = {}) => {
     requireAdmin()
     const res = await getCloud().joinRequestsList(filters.status ? String(filters.status) : undefined)
-    fillLocalNic(res.items)
+    applyPendingNic(res.items)
     return { success: true, data: res.items }
   })
   safeHandle(ipcMain, 'joinRequests:photo', async (_e, id: string, side: string) => {
@@ -58,7 +74,12 @@ export function registerAppRequestHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'joinRequests:decide', async (_e, id: string, decision: string, reason?: string) => {
     const caller = requireAdmin()
     if (decision !== 'approve' && decision !== 'reject') throw new Error('Invalid decision')
+    // read the NIC while the request is still pending (it is wiped from the cloud 30 days after the decision)
+    const nic = decision === 'approve'
+      ? String(((await getCloud().joinRequestsList('pending')).items.find(r => r.id === id) || {}).nic_number || '')
+      : ''
     const res = await getCloud().joinRequestDecide(String(id), { decision, reason: reason ? String(reason).slice(0, 300) : undefined, decided_by: actor(caller) })
+    if (decision === 'approve' && nic && typeof res.customer_id === 'string') rememberNic(res.customer_id, nic)
     logAudit(getDb(), {
       userId: (caller.id as string) || null, branchId: (caller.branch_id as string) || null,
       action: decision === 'approve' ? 'APP_JOIN_APPROVED' : 'APP_JOIN_REJECTED', tableName: 'smartbuy_join_requests', recordId: String(id),

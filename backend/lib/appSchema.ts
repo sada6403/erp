@@ -269,6 +269,8 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE branches ADD COLUMN longitude DECIMAL(10,7) NULL`,
   // Google Play reviewer accounts (cloud-only table): their orders are tagged TEST in the order notes.
   `ALTER TABLE app_users ADD COLUMN is_review_account TINYINT(1) NOT NULL DEFAULT 0`,
+  // NIC retention: NIC number + photos are wiped 30 days after the decision (joinLib.purgeJoinRetention)
+  `ALTER TABLE smartbuy_join_requests ADD COLUMN purged_at DATETIME NULL`,
   `ALTER TABLE customer_orders ADD COLUMN channel VARCHAR(8) NOT NULL DEFAULT 'pos'`,
   `ALTER TABLE customer_orders ADD COLUMN app_user_id VARCHAR(191) NULL`,
   `ALTER TABLE customer_orders ADD COLUMN assigned_agent_id VARCHAR(191) NULL`,

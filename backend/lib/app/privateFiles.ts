@@ -1,7 +1,7 @@
 // Private image store for NIC photos and bank slips. NEVER served publicly: files live outside UPLOAD_DIR
 // (which /api/files serves) and are only streamed by admin routes that check the POS key.
 import { randomUUID } from 'crypto'
-import { mkdir, readFile, writeFile } from 'fs/promises'
+import { mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import path from 'path'
 import { NextRequest } from 'next/server'
 import sharp from 'sharp'
@@ -43,6 +43,12 @@ export async function savePrivateImage(file: unknown, field: string): Promise<st
 export async function readPrivateImage(ref: string | null): Promise<Buffer | null> {
   if (!ref || !REF_RE.test(ref)) return null
   try { return await readFile(path.join(dir(), ref)) } catch { return null }
+}
+
+/** Best effort delete (a missing file is fine). Only refs that look like ours are touched. */
+export async function deletePrivateImage(ref: string | null): Promise<void> {
+  if (!ref || !REF_RE.test(ref)) return
+  try { await unlink(path.join(dir(), ref)) } catch { /* already gone */ }
 }
 
 /** multipart/form-data -> text fields + file parts. Anything else is a 400. */

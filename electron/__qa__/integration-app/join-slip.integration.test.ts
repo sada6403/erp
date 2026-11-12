@@ -194,6 +194,44 @@ describe('Smart Buy join requests', () => {
   })
 })
 
+describe('NIC retention and privacy', () => {
+  it('JOIN-05 NIC number + photos are deleted 30 days after the decision; recent ones stay; cloud customers has no NIC column', async () => {
+    const mk = async () => {
+      const r = await api.postForm('/smartbuy/join-requests', joinForm().f, { token: agent })
+      expect(r.status, JSON.stringify(r.json)).toBe(201)
+      return r.json.id as string
+    }
+    const [oldApproved, oldRejected, recentRejected, stillPending] = [await mk(), await mk(), await mk(), await mk()]
+    expect((await admin.post(`/join-requests/${oldApproved}/decision`, { decision: 'approve' })).status).toBe(200)
+    expect((await admin.post(`/join-requests/${oldRejected}/decision`, { decision: 'reject', reason: 'blurry' })).status).toBe(200)
+    expect((await admin.post(`/join-requests/${recentRejected}/decision`, { decision: 'reject', reason: 'blurry' })).status).toBe(200)
+    const before = await db.one(`SELECT nic_front_ref, nic_number FROM smartbuy_join_requests WHERE id = ?`, [oldApproved])
+    expect(before.nic_front_ref).toBeTruthy()
+    expect((await admin.raw(`/join-requests/${oldApproved}/photo?side=front`)).status).toBe(200)
+    await db.exec(`UPDATE smartbuy_join_requests SET decided_at = DATE_SUB(NOW(), INTERVAL 31 DAY) WHERE id IN (?, ?)`, [oldApproved, oldRejected])
+    await db.exec(`UPDATE smartbuy_join_requests SET decided_at = DATE_SUB(NOW(), INTERVAL 5 DAY) WHERE id = ?`, [recentRejected])
+    await db.exec(`UPDATE smartbuy_join_requests SET created_at = DATE_SUB(NOW(), INTERVAL 90 DAY) WHERE id = ?`, [stillPending])
+
+    const list = await admin.get('/join-requests')
+    expect(list.status).toBe(200)
+    const by = (id: string) => list.json.items.find((x: any) => x.id === id)
+    expect(by(oldApproved)).toMatchObject({ nic_number: '', has_nic_front: false, has_nic_back: false, status: 'approved' })
+    expect(by(oldRejected)).toMatchObject({ nic_number: '', has_nic_front: false, has_nic_back: false, status: 'rejected' })
+    expect(by(recentRejected).nic_number).toMatch(/^9\d{8}V$/)
+    expect(by(recentRejected).has_nic_front).toBe(true)
+    expect(by(stillPending).nic_number).toMatch(/^9\d{8}V$/) // a pending request is never purged, however old
+    const gone = await db.one(`SELECT nic_number, nic_front_ref, nic_back_ref, purged_at, full_name, phone FROM smartbuy_join_requests WHERE id = ?`, [oldApproved])
+    expect(gone).toMatchObject({ nic_number: '', nic_front_ref: null, nic_back_ref: null })
+    expect(gone.purged_at).toBeTruthy()
+    expect(gone.full_name).toBeTruthy()
+    expect((await admin.raw(`/join-requests/${oldApproved}/photo?side=front`)).status).toBe(404)
+    expect((await admin.raw(`/join-requests/${recentRejected}/photo?side=front`)).status).toBe(200)
+    const nicCols = await db.query(`SELECT table_name AS t FROM information_schema.columns WHERE table_schema = ? AND table_name = 'customers' AND column_name IN ('nic', 'nic_number')`, [seed.db_schema])
+    expect(nicCols).toEqual([])
+    ev.add({ id: 'JOIN-05', action: 'NIC retention (30 days after decision) + no NIC in cloud customers', api: 'GET admin/join-requests purges expired rows; old photo -> 404; recent -> 200', cloud: `purged row ${j(gone)}; customers has no nic column`, pos: 'approved data lives in the POS customer record', reverse: 'n/a', result: 'PASS' })
+  })
+})
+
 describe('Bank transfer slips', () => {
   let orderId = '', slipId = '', event = ''
   const order = async (pm: 'bank_transfer' | 'cod') => {

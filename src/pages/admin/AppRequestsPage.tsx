@@ -63,7 +63,7 @@ export default function AppRequestsPage() {
         {['Person', 'Scheme', 'Submitted by', 'Phone', 'Status', 'Date', ''].map(h => <th className="table-header px-4 py-3 text-left" key={h}>{h}</th>)}
       </tr></thead><tbody>
         {joins.map(r => <tr className="table-row" key={r.id}>
-          <td className="table-cell"><p className="font-medium">{r.full_name}</p><p className="text-xs text-slate-500 font-mono">{r.nic_number}</p></td>
+          <td className="table-cell"><p className="font-medium">{r.full_name}</p><p className="text-xs text-slate-500 font-mono">{r.nic_number || '—'}</p></td>
           <td className="table-cell">{r.scheme_name}</td>
           <td className="table-cell">{r.source === 'agent' ? `${r.agent_name || 'Agent'}${r.agent_code ? ` (${r.agent_code})` : ''}` : 'Customer (self)'}</td>
           <td className="table-cell">{r.phone}</td>
@@ -146,13 +146,13 @@ function JoinModal({ row, onClose, onDone }: { row: Join; onClose: () => void; o
       <div><span className="text-slate-500">Scheme</span><p>{row.scheme_name}</p></div>
       <div><span className="text-slate-500">Submitted by</span><p>{row.source === 'agent' ? `${row.agent_name || 'Agent'} (${row.agent_code || '—'})` : 'Customer (self join)'}</p></div>
       <div><span className="text-slate-500">Phone</span><p>{row.phone}</p></div>
-      <div><span className="text-slate-500">NIC</span><p className="font-mono">{row.nic_number}</p></div>
+      <div><span className="text-slate-500">NIC</span><p className="font-mono">{row.nic_number || 'Removed after 30 days'}</p></div>
       <div className="col-span-2"><span className="text-slate-500">Address</span><p>{row.address || '—'}</p></div>
       {row.notes && <div className="col-span-2"><span className="text-slate-500">Notes</span><p>{row.notes}</p></div>}
       {row.status !== 'pending' && <div className="col-span-2"><span className="text-slate-500">Decision</span>
         <p><span className={STATUS_BADGE[row.status]}>{row.status}</span> by {row.decided_by || '—'} on {fmt(row.decided_at)}{row.reject_reason ? `: ${row.reject_reason}` : ''}</p></div>}
     </div>
-    <p className="text-xs text-slate-500 mb-2">Check the NIC photos match the number above before approving.</p>
+    {row.status === 'pending' ? <p className="text-xs text-slate-500 mb-2">Check the NIC photos match the number above before approving. NIC number and photos are deleted 30 days after the decision.</p> : null}
     <div className="grid grid-cols-2 gap-4">
       {row.has_nic_front && <Photo label="NIC front" state={front} />}
       {row.has_nic_back && <Photo label="NIC back" state={back} />}

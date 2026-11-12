@@ -1,15 +1,15 @@
 {
   "file": "join-slip",
-  "generated_at": "2026-11-12T14:09:38.660Z",
+  "generated_at": "2026-11-12T14:52:32.820Z",
   "rows": [
     {
       "id": "JOIN-01",
       "action": "Agent submits Smart Buy join (NIC photos) -> POS lists + approves -> customer + member -> POS SQLite",
       "api": "POST /smartbuy/join-requests -> 201 (replay 200); admin list/photo 200; decision 200 (again 409)",
-      "cloud": "smartbuy_join_requests {\"source\":\"agent\",\"agent_id\":\"09bf769f-5dc5-4f55-a33e-011b93499f62\",\"scheme_id\":\"ab3831d4-48ab-47c2-9cae-570487644d8b\",\"phone\":\"0756236489\",\"nic_number\":\"981530700V\",\"nic_front_ref\":\"ace9a3df-447c-4ef3-82e0-f0d8f94e51f8.webp\",\"nic_back_ref\":\"9f19acdd-3f6c-4dd3-a44b-e0f358270bb8.webp\",\"status\":\"pending\"}; chit_members+customers {\"id\":\"cbb44be2-0f53-4711-afc9-3634d2b9e0fb\",\"agent_id\":\"09bf769f-5dc5-4f55-a33e-011b93499f62\",\"join_order\":1,\"status\":\"active\",\"phone\":\"0756236489\",\"name\":\"Join Tester 5230\"}",
-      "pos": "Join Requests screen data via GET admin/join-requests; SQLite chit_members {\"agent_id\":\"09bf769f-5dc5-4f55-a33e-011b93499f62\",\"join_order\":1,\"phone\":\"0756236489\"}",
+      "cloud": "smartbuy_join_requests {\"source\":\"agent\",\"agent_id\":\"272d8ee9-70d9-4481-b232-8d8b81c1bae4\",\"scheme_id\":\"7359e73f-dc89-488d-ae1f-42829abcfd84\",\"phone\":\"0779599819\",\"nic_number\":\"994730116V\",\"nic_front_ref\":\"406f9eb8-1c27-4faf-9957-800b4da746d4.webp\",\"nic_back_ref\":\"d25055ef-06c5-4f8f-84e1-3c8ade04b8f1.webp\",\"status\":\"pending\"}; chit_members+customers {\"id\":\"180a9458-7660-4f7d-b278-d9ce98188bfe\",\"agent_id\":\"272d8ee9-70d9-4481-b232-8d8b81c1bae4\",\"join_order\":1,\"status\":\"active\",\"phone\":\"0779599819\",\"name\":\"Join Tester 1081\"}",
+      "pos": "Join Requests screen data via GET admin/join-requests; SQLite chit_members {\"agent_id\":\"272d8ee9-70d9-4481-b232-8d8b81c1bae4\",\"join_order\":1,\"phone\":\"0779599819\"}",
       "reverse": "POS decision -> app request status + notification",
-      "ms": 1750,
+      "ms": 6856,
       "result": "PASS"
     },
     {
@@ -34,19 +34,28 @@
       "id": "JOIN-04",
       "action": "Customer self join (shared flow)",
       "api": "POST 201; decision 200; GET /smartbuy/me/schemes lists the scheme",
-      "cloud": "request {\"source\":\"self\",\"agent_id\":null,\"customer_id\":\"f6e30ae6-d359-48e6-944b-55dac5b08c88\"}; member {\"customer_id\":\"f6e30ae6-d359-48e6-944b-55dac5b08c88\",\"agent_id\":null}",
+      "cloud": "request {\"source\":\"self\",\"agent_id\":null,\"customer_id\":\"96eb040d-2138-485d-b30f-80fac60d0aa2\"}; member {\"customer_id\":\"96eb040d-2138-485d-b30f-80fac60d0aa2\",\"agent_id\":null}",
       "pos": "n/a",
       "reverse": "approval -> member visible in the customer app",
+      "result": "PASS"
+    },
+    {
+      "id": "JOIN-05",
+      "action": "NIC retention (30 days after decision) + no NIC in cloud customers",
+      "api": "GET admin/join-requests purges expired rows; old photo -> 404; recent -> 200",
+      "cloud": "purged row {\"nic_number\":\"\",\"nic_front_ref\":null,\"nic_back_ref\":null,\"purged_at\":\"2026-11-12 14:52:25\",\"full_name\":\"Join Tester 1857\",\"phone\":\"0753528497\"}; customers has no nic column",
+      "pos": "approved data lives in the POS customer record",
+      "reverse": "n/a",
       "result": "PASS"
     },
     {
       "id": "SLIP-01",
       "action": "Bank slip upload -> POS reject -> re-upload -> verify -> order paid",
       "api": "POST slip 201 (replay 200, second while pending 409); reject 200; re-upload 201; verify 200 (again 409; upload after paid 409)",
-      "cloud": "order_payment_slips {\"file_ref\":\"2981d523-9ef0-4be7-b695-9fda0427e173.webp\",\"status\":\"pending\",\"reference\":\"REF-778\"}; customer_orders {\"payment_status\":\"paid\",\"paid_amount\":\"610.00\",\"total_amount\":\"610.00\"}",
+      "cloud": "order_payment_slips {\"file_ref\":\"11a17a8c-b2d6-4d71-bfdf-40082e9e7249.webp\",\"status\":\"pending\",\"reference\":\"REF-778\"}; customer_orders {\"payment_status\":\"paid\",\"paid_amount\":\"610.00\",\"total_amount\":\"610.00\"}",
       "pos": "payment-slips list + image 200 image/webp; SQLite payment_status paid",
       "reverse": "POS verification -> app order paid + notification",
-      "ms": 2361,
+      "ms": 1319,
       "result": "PASS"
     },
     {
