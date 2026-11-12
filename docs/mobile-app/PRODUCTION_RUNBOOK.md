@@ -140,3 +140,10 @@ Play review can take hours to days: submit by 19 Nov.
 
 ## One-line go decision
 Go to production when: staging verified, backup restored once, upload key = MATCH, reviewer text ready, Sabiharan agreed the freeze window, Moni said "go" in chat.
+
+## Backups on the VPS: retention rule (Moni, 2026-11-12)
+- Backups live in `/root/backup-<timestamp>/` (nginx, pm2 list, one `.sql.gz` per database, `SHA256SUMS`). The first full set (`backup-20261112-081656`) is ~0.4 MB; the server has ~60 GB free (38 % used).
+- **Keep the last 2 backups.** Take a new one before every change to production, restore-test one dump (STAGING_SETUP §2), and only then is the oldest-but-two eligible for removal.
+- **Never delete a backup without Moni's explicit approval**, even an old one. The agent lists candidates (`ls -d /root/backup-* | sort`, size with `du -sh`) and asks.
+- Check free space before every backup: `df -h /` must show > 10 GB free; if the sum of backups grows past 5 GB, tell Moni instead of deleting.
+- Copies made for staging (`/root/staging-copy/`) are separate and small; remove them with the staging rollback (`99-rollback.sh`).

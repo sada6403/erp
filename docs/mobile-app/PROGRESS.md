@@ -84,3 +84,19 @@ Local DB note: rows written before the UTC session switch are 5h30 ahead; for St
 - **Overlap safety:** `electron/__qa__/sync-overlap.integration.test.ts`. With `SYNC_PULL_OVERLAP_MINUTES` the cloud re-sends older copies of rows; the desktop pull skips every row that has a `pending`/`processing`/`failed` sync_queue item (generic, by table + record id), so an unsent local edit is never overwritten. The test covers every synced table whose schema a generic row can satisfy (more than 20) for all three queue states, and has a control proving normal rows still refresh. No code change was needed. A pushed edit (item gone) is safe by construction: the cloud already holds that value. A timestamp-based "local is newer" guard was deliberately NOT added: device and server clocks differ, and a device clock running ahead would block real cloud updates.
 - **The 4 `[FAIL]` log lines** (`manual-e2e-scenario.integration.test.ts`, step 14) were a stale expectation, not a bug: since the voucher rework (commit e05fcb7, Aug 2026) a draw winner receives a full POS voucher, so `recordRedemption` correctly refuses ("already received a full SmartBuy voucher") and no redemption commission row is written. The scenario now asserts that behaviour; zero `[FAIL]` lines.
 - **Email flows, local:** no Docker on this PC, so a small dev-only SMTP catcher (`scripts/dev/mail-catcher.cjs`; run `npm i --no-save smtp-server mailparser` in a scratch folder, then `node mail-catcher.cjs`, listens on 127.0.0.1:1025 and writes `mails.jsonl`) stands in for Mailpit. The TEST company's `branding_json.smtp` points at it (local DB only). On the phone: Verify email (wrong code -> "Wrong code.", right code -> verified) and forgot password by email code (new password works, old rejected) both PASS end to end. Found and fixed: the reset form kept the previous code/password, and the reset screen said "Welcome back! Please sign in".
+
+## 2026-11-12 NOTE FOR THE MAIN-BRANCH DEVELOPER: POS pull bug that can ship before our merge
+**Problem (affects real companies):** a new or second POS device pulls its data from the cloud. Real cloud rows can hold NULL in a
+column that is `NOT NULL DEFAULT ...` in the POS SQLite schema (the real "test" company: every `products.unit` is NULL, pushed by an
+earlier POS version). `SyncService.insertFiltered` then fails with `NOT NULL constraint failed: products.unit`, the row goes to
+`sync_pull_quarantine`, and the device ends up with **no products** (also stocks / stock movements that depend on them). Seen on
+the real "test" tenant: 89 products, 83 stocks, 82 stock movements all isolated.
+**Fix:** commit `e7e227e` on `feature/mobile-app-foundation` (file `electron/services/syncService.ts` only, +18 lines): when a cloud
+value is NULL/undefined and the local column is NOT NULL with a DEFAULT, skip the key so the local default applies.
+Standalone patch (applies to `main`'s syncService.ts if it has not diverged): `docs/mobile-app/patches/pos-sync-null-default-fix.patch`
+(`git apply --3way docs/mobile-app/patches/pos-sync-null-default-fix.patch`, or `git cherry-pick -x e7e227e` and drop the other files).
+No schema change, no cloud change, safe for existing devices (only affects rows that were failing before).
+**Test:** `electron/__qa__/integration-app/staging-test-company.integration.test.ts` ST-01 (needs a seed of such a tenant), or unit-test
+`insertFiltered` with a `products` row whose `unit` is null. One more data note: a `product_attributes` row of the real "test" company points
+at a deleted category (FK), so it stays isolated; harmless.
+We did not touch `main`.
