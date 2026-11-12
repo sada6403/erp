@@ -106,3 +106,10 @@ Done and pushed (backend + POS + tests): `POST/GET /smartbuy/join-requests`, `PO
 Mobile (code done, typecheck/lint/jest green, **not in an APK yet**): slip upload card on the order screen, agent "Add member" screen with NIC photos, `expo-image-picker` plugin. Needs one native rebuild (both ABIs).
 Phone checks on the installed staging APK: wishlist add/remove and order cancel PASS (server rows confirmed). Cosmetic fix made in code: a cancelled order no longer shows ETA/progress timeline.
 **Blocker:** the C: drive has ~0.4 GB free (leftover `%TEMP%\np-pos-*` test folders from earlier runs, about 6.7 GB; the sandbox refuses to delete them). The APK rebuild and the slip/join phone checks wait for that space.
+
+## Step 6 phone checks (2026-11-12, staging APK with expo-image-picker, armeabi-v7a + arm64-v8a)
+- Bank slip: order -> "Upload payment slip" -> camera photo -> "Slip received". POS reject ("Slip unclear") shows "Slip not accepted: Slip unclear" + "Upload a new slip"; re-upload then POS verify shows "Payment verified". Pass.
+- Join: agent Members -> Add member (screen is capture-protected) -> name/phone/NIC + 2 camera photos -> POS list shows both photos -> approve -> the agent's list shows the new member and the request as approved. Client validation (mobile/NIC) works. Pass.
+- Cancelled order: no ETA, OTP or timeline. Pass.
+- Known small issues: (1) an order screen already open does not refetch the slip status until reopened; (2) "Cancel order" is still shown on a paid bank-transfer order; (3) the photo-source dialog has no title/message text; (4) Add member is visible even when Smart Buy is disabled for the company (supermarket) and then says "No open schemes".
+- Test harness: `vitest.workspace.ts` integration project now runs `electron/__qa__/cleanupTemp.ts` and `globalCleanupTemp.ts`; temp folders (smartbuy-qa-*, np-pos-*, ...) created during a run are removed on success or failure. Folders from older runs (about 650 MB each) must be deleted by hand.
