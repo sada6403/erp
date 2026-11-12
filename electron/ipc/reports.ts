@@ -316,12 +316,12 @@ export function registerReportHandlers() {
       const where = scope.where
       const params = scope.params
       const groupExpr = filters.groupBy === 'yearly'
-        ? "strftime('%Y', i.created_at)"
+        ? "strftime('%Y', i.created_at, '+330 minutes')"
         : filters.groupBy === 'monthly'
-          ? "strftime('%Y-%m', i.created_at)"
+          ? "strftime('%Y-%m', i.created_at, '+330 minutes')"
           : filters.groupBy === 'weekly'
-            ? "strftime('%Y-W%W', i.created_at)"
-            : "date(i.created_at)"
+            ? "strftime('%Y-W%W', i.created_at, '+330 minutes')"
+            : "date(i.created_at,'+330 minutes')"
       const branchDateScope = pickScopedConditions(scope, c => c.includes('branch_id') || c.includes('created_at'))
       const expenseScope = pickScopedConditions(
         scope,
@@ -538,8 +538,8 @@ export function registerReportHandlers() {
       `, params)
 
       const stockMovementWhere = [
-        ...(filters.dateFrom ? ['date(sm.created_at) >= date(?)'] : []),
-        ...(filters.dateTo ? ['date(sm.created_at) <= date(?)'] : []),
+        ...(filters.dateFrom ? ["date(sm.created_at,'+330 minutes') >= date(?)"] : []),
+        ...(filters.dateTo ? ["date(sm.created_at,'+330 minutes') <= date(?)"] : []),
       ]
       const stockMovementParams = [
         ...(filters.dateFrom ? [filters.dateFrom] : []),
@@ -587,7 +587,7 @@ export function registerReportHandlers() {
           COALESCE(SUM(i.interest_amount), 0) as interest_total,
           COALESCE(SUM(i.paid_amount), 0) as paid_total,
           COALESCE(SUM(i.due_amount), 0) as balance_total,
-          COALESCE(SUM(CASE WHEN i.status='overdue' OR date(i.next_due_date) < date('now') THEN 1 ELSE 0 END), 0) as overdue_count
+          COALESCE(SUM(CASE WHEN i.status='overdue' OR date(i.next_due_date) < date('now','+330 minutes') THEN 1 ELSE 0 END), 0) as overdue_count
         FROM installments i
         ${branchDateScope.where}
       `, branchDateScope.params, {
@@ -601,7 +601,7 @@ export function registerReportHandlers() {
           ins.monthly_amount, ins.installment_count, ins.remaining_installments,
           (ins.installment_count - ins.remaining_installments) as paid_installment_count,
           ins.paid_amount, ins.due_amount, ins.next_due_date,
-          CASE WHEN ins.status='overdue' OR date(ins.next_due_date) < date('now') THEN 'overdue' ELSE ins.status END as payment_status,
+          CASE WHEN ins.status='overdue' OR date(ins.next_due_date) < date('now','+330 minutes') THEN 'overdue' ELSE ins.status END as payment_status,
           MAX(ip.paid_at) as last_payment_at,
           MAX(ip.receipt_number) as last_receipt_number
         FROM installments ins
@@ -625,8 +625,8 @@ export function registerReportHandlers() {
         LEFT JOIN users u ON u.id = ip.received_by
         ${filters.dateFrom || filters.dateTo
           ? `WHERE ${[
-              ...(filters.dateFrom ? ['date(ip.paid_at) >= date(?)'] : []),
-              ...(filters.dateTo ? ['date(ip.paid_at) <= date(?)'] : []),
+              ...(filters.dateFrom ? ["date(ip.paid_at,'+330 minutes') >= date(?)"] : []),
+              ...(filters.dateTo ? ["date(ip.paid_at,'+330 minutes') <= date(?)"] : []),
             ].join(' AND ')}`
           : ''}
         ORDER BY ip.paid_at DESC

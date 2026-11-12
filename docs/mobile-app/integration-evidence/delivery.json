@@ -1,0 +1,107 @@
+{
+  "file": "delivery",
+  "generated_at": "2026-11-11T15:19:13.161Z",
+  "rows": [
+    {
+      "id": "DEL-01",
+      "action": "Agent opens delivery list + detail",
+      "api": "GET /agent/deliveries -> 200; GET /agent/deliveries/:id -> 200 (2 items)",
+      "cloud": "customer_orders {\"id\":\"70c1378e-3eb3-4c20-aaba-f2103563b969\",\"order_number\":\"APP-SEED-MWC9J1KR\",\"status\":\"ready_for_delivery\",\"payment_method\":\"cod\",\"assigned_agent_id\":\"c4b5fede-883b-4ecc-824f-f91374d7ddb3\",\"branch_id\":\"8694bd66-a10d-4816-aa3d-38b2054b6f88\",\"total_amount\":\"1730.00\",\"created_at\":\"2026-11-11 15:17:24\",\"updated_at\":\"2026-11-11 15:17:24\"}",
+      "pos": "Orders screen (orders:list) shows APP-SEED-MWC9J1KR agent=Ruwan Agent",
+      "reverse": "n/a",
+      "ms": 8145,
+      "result": "PASS"
+    },
+    {
+      "id": "DEL-02",
+      "action": "Customer places COD order; unassigned agent cannot see it",
+      "api": "POST /orders -> 201; agent GET /agent/deliveries/:id -> 404",
+      "cloud": "customer_orders {\"id\":\"e1ce2ce9-bfbb-4ce5-b54a-9c437e1949cc\",\"order_number\":\"ONL-1001\",\"status\":\"pending\",\"payment_method\":\"cod\",\"payment_status\":\"unpaid\",\"assigned_agent_id\":null,\"branch_id\":\"8694bd66-a10d-4816-aa3d-38b2054b6f88\",\"customer_id\":\"8c0cea44-efc8-4d93-8189-ccb3e59cd4be\",\"total_amount\":\"1210.00\",\"paid_amount\":\"0.00\",\"created_at\":\"2026-11-11 15:18:25\"} (OTP shown only to the owner via GET /orders/:id)",
+      "pos": "Orders screen row ONL-1001 status=pending",
+      "reverse": "n/a",
+      "ms": 3492,
+      "result": "PASS"
+    },
+    {
+      "id": "DEL-03",
+      "action": "POS confirms + assigns agent + converts to invoice",
+      "api": "agent GET /agent/deliveries -> 200, order listed status=ready_for_delivery",
+      "cloud": "customer_orders {\"id\":\"e1ce2ce9-bfbb-4ce5-b54a-9c437e1949cc\",\"status\":\"ready_for_delivery\",\"assigned_agent_id\":\"c4b5fede-883b-4ecc-824f-f91374d7ddb3\",\"invoice_id\":\"b14009c0-64f5-424b-85c7-df589afe3418\",\"branch_id\":\"8694bd66-a10d-4816-aa3d-38b2054b6f88\",\"updated_at\":\"2026-11-11 15:18:30\"}; invoices {\"id\":\"b14009c0-64f5-424b-85c7-df589afe3418\",\"invoice_number\":\"MAIN-001-INV-2026-0001\",\"branch_id\":\"8694bd66-a10d-4816-aa3d-38b2054b6f88\",\"customer_id\":\"8c0cea44-efc8-4d93-8189-ccb3e59cd4be\",\"total_amount\":\"1210.00\",\"paid_amount\":\"0.00\",\"due_amount\":\"1210.00\",\"status\":\"completed\",\"source_order_id\":\"e1ce2ce9-bfbb-4ce5-b54a-9c437e1949cc\",\"created_at\":\"2026-11-11 15:18:29\"}",
+      "pos": "Orders screen: orders:updateStatus/assignAgent/convertToInvoice -> sync_queue pushed",
+      "reverse": "POS -> cloud -> app agent list",
+      "ms": 7334,
+      "result": "PASS"
+    },
+    {
+      "id": "DEL-04",
+      "action": "Agent: out for delivery",
+      "api": "POST /agent/deliveries/:id/status in_transit -> 200; tracking -> in_transit",
+      "cloud": "customer_orders {\"status\":\"in_transit\",\"dispatch_at\":\"2026-11-11 15:18:38\",\"updated_at\":\"2026-11-11 15:18:38\"}",
+      "pos": "Orders screen status=in_transit",
+      "reverse": "n/a",
+      "ms": 3132,
+      "result": "PASS"
+    },
+    {
+      "id": "DEL-05",
+      "action": "Delivery OTP + COD collection",
+      "api": "wrong OTP -> 400 OTP_INVALID; right -> 200; replay -> 200 same delivered_at",
+      "cloud": "customer_orders {\"status\":\"delivered\",\"payment_status\":\"paid\",\"total_amount\":\"1210.00\",\"paid_amount\":\"1210.00\",\"delivered_at\":\"2026-11-11 20:48:51\",\"updated_at\":\"2026-11-11 15:18:50\"}; invoices {\"total_amount\":\"1210.00\",\"paid_amount\":\"1210.00\",\"due_amount\":\"0.00\",\"status\":\"paid\",\"updated_at\":\"2026-11-11 20:48:51\"}; payments [{\"id\":\"1fb03f8d-073d-4c73-8555-5cd40089d956\",\"method\":\"cash\",\"amount\":\"1210.00\",\"reference\":\"COD ONL-1001\",\"paid_at\":\"2026-11-11 20:48:51\"}]; customers.outstanding 0.00 -> 0.00",
+      "pos": "see DEL-06",
+      "reverse": "n/a",
+      "ms": 421,
+      "result": "PASS"
+    },
+    {
+      "id": "DEL-06",
+      "action": "COD result visible in POS",
+      "api": "n/a (POS pull)",
+      "cloud": "see DEL-05",
+      "pos": "SQLite order {\"status\":\"delivered\",\"payment_status\":\"paid\",\"total_amount\":1210,\"paid_amount\":1210}; invoice {\"total_amount\":1210,\"paid_amount\":1210,\"due_amount\":0,\"status\":\"paid\"}; payments [{\"method\":\"cash\",\"amount\":1210}]; customer.outstanding 0 (cloud 0.00); Orders screen delivered=true",
+      "reverse": "n/a",
+      "ms": 2501,
+      "result": "PASS"
+    },
+    {
+      "id": "DEL-07",
+      "action": "Delivery bill with company details",
+      "api": "PUT /api/company/branding -> 200; GET /agent/deliveries/:id/bill -> 200 bill_no=MAIN-001-INV-2026-0001 company=Int Test (Pvt) Ltd tin=PV-998877 note=Int note date=2026-11-11T15:18:29.000Z",
+      "cloud": "invoices {\"invoice_number\":\"MAIN-001-INV-2026-0001\",\"created_at\":\"2026-11-11 15:18:29\"} (date = created_at UTC)",
+      "pos": "POS Settings company fields (branding) -> cloud",
+      "reverse": "POS company settings -> app bill",
+      "ms": 1583,
+      "result": "PASS"
+    },
+    {
+      "id": "DEL-08",
+      "action": "Agent commission/earnings after delivery",
+      "api": "GET /agent/commission -> 200 (0 items)",
+      "cloud": "commission_ledger rows for agent: [{\"id\":\"a6d80289-ba49-4a56-a04e-efe1114a136c\",\"source_table\":\"chit_contributions\",\"source_id\":\"25225c0f-7513-4480-bef0-e888cc57a3d3\",\"sales_agent_id\":null,\"registration_agent_id\":\"c4b5fede-883b-4ecc-824f-f91374d7ddb3\",\"base_amount\":\"5000.00\",\"total_commission\":\"100.00\",\"status\":\"pending_manager_approval\",\"created_at\":\"2026-11-11 15:17:23\"}]",
+      "pos": "Commissions screen reads commission_ledger (POS-computed; not created by the cloud COD path)",
+      "reverse": "n/a",
+      "ms": 5931,
+      "result": "PASS",
+      "notes": "No delivery commission row is created by the app/cloud path (commissions are computed by the POS engine); informational."
+    },
+    {
+      "id": "DEL-09",
+      "action": "Security: customer/agent route scoping",
+      "api": "customer on agent routes 403/403/403/403; wrong key 401; no token 401; unknown order 404",
+      "cloud": "no rows changed",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "ms": 414,
+      "result": "PASS"
+    },
+    {
+      "id": "JOIN-01",
+      "action": "Member submits Smart Buy join request; POS lists + approves; app sees status",
+      "api": "POST join endpoints -> 404/404/404/404; GET admin/join-requests -> 404",
+      "cloud": "no join/request table in tenant schema ([])",
+      "pos": "No Join Requests screen/handler exists in the POS (grep join_request: none)",
+      "reverse": "n/a",
+      "result": "SKIP",
+      "notes": "Not implemented in v1.0: the app JoinSheet submit is disabled in release builds and neither the API nor the POS has a join-request flow. Needs a product decision before building (HANDOFF/Step 6)."
+    }
+  ]
+}

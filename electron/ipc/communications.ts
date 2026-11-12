@@ -168,16 +168,16 @@ export function startReminderScheduler() {
         WHERE i.status = 'active' AND i.due_amount > i.paid_amount AND ${cond}
       `).all() as Record<string, unknown>[]
 
-      const overdue  = pick(`i.next_due_date < date('now')`)
-      const dueToday = pick(`i.next_due_date = date('now')`)
-      const due1Day  = pick(`i.next_due_date = date('now', '+1 day')`)   // 1-day reminder
-      const dueSoon  = pick(`i.next_due_date = date('now', '+3 days')`)  // 3-day reminder
+      const overdue  = pick(`i.next_due_date < date('now','+330 minutes')`)
+      const dueToday = pick(`i.next_due_date = date('now','+330 minutes')`)
+      const due1Day  = pick(`i.next_due_date = date('now', '+330 minutes', '+1 day')`)   // 1-day reminder
+      const dueSoon  = pick(`i.next_due_date = date('now', '+330 minutes', '+3 days')`)  // 3-day reminder
 
       // In-app notification for admins & managers — always, even without email/SMS.
       // Deduped to at most once per calendar day.
       const today = new Date().toISOString().slice(0, 10)
       const notedToday = (type: string, branchId: string | null) => Boolean(db.prepare(
-        `SELECT 1 FROM notifications WHERE type=? AND target_branch_id IS ? AND date(created_at)=? LIMIT 1`
+        `SELECT 1 FROM notifications WHERE type=? AND target_branch_id IS ? AND date(created_at,'+330 minutes')=? LIMIT 1`
       ).get(type, branchId, today))
       const targetFor = (branchId: string | null, permission: string) => branchId
         ? { branchId, requiredPermission: permission }
@@ -254,7 +254,7 @@ export function startReminderScheduler() {
               AND NOT EXISTS (
                 SELECT 1 FROM chit_contributions cc
                 WHERE cc.branch_id = b.id AND cc.status = 'approved'
-                  AND strftime('%Y-%m', cc.paid_at) = strftime('%Y-%m', 'now')
+                  AND strftime('%Y-%m', cc.paid_at, '+330 minutes') = strftime('%Y-%m', 'now', '+330 minutes')
               )
           `).all() as { id: string; name: string }[]
           if (quietBranches.length && !notedToday('branch_performance_alert', null)) {

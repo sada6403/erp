@@ -329,8 +329,8 @@ export function registerCommissionHandlers(ipcMain: IpcMain) {
     }
     if (filters.schemeId) { conditions.push('cl.scheme_id = ?'); params.push(filters.schemeId) }
     if (filters.status) { conditions.push('cl.status = ?'); params.push(filters.status) }
-    if (filters.dateFrom) { conditions.push('date(cl.created_at) >= date(?)'); params.push(filters.dateFrom) }
-    if (filters.dateTo) { conditions.push('date(cl.created_at) <= date(?)'); params.push(filters.dateTo) }
+    if (filters.dateFrom) { conditions.push("date(cl.created_at,'+330 minutes') >= date(?)"); params.push(filters.dateFrom) }
+    if (filters.dateTo) { conditions.push("date(cl.created_at,'+330 minutes') <= date(?)"); params.push(filters.dateTo) }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
     const rows = db.prepare(`
@@ -713,8 +713,8 @@ export function registerCommissionHandlers(ipcMain: IpcMain) {
 
     const dateConditions: string[] = []
     const dateParams: unknown[] = []
-    if (dateFrom) { dateConditions.push('date(cl.created_at) >= date(?)'); dateParams.push(dateFrom) }
-    if (dateTo) { dateConditions.push('date(cl.created_at) <= date(?)'); dateParams.push(dateTo) }
+    if (dateFrom) { dateConditions.push("date(cl.created_at,'+330 minutes') >= date(?)"); dateParams.push(dateFrom) }
+    if (dateTo) { dateConditions.push("date(cl.created_at,'+330 minutes') <= date(?)"); dateParams.push(dateTo) }
     const dateWhere = dateConditions.length ? ` AND ${dateConditions.join(' AND ')}` : ''
 
     const summary = db.prepare(`

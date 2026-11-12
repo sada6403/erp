@@ -13,9 +13,22 @@ Rule: **timestamps are UTC, business dates are the Asia/Colombo calendar day, di
 | `electron/services/purchaseBillHistory.ts` uploaded_from/to filter | `date(x,'localtime')` (PC zone) | `date(x,'+330 minutes')` |
 | `PurchaseOrdersPage.tsx` (2), `SupermarketOverview.tsx` default date | `getTimezoneOffset()` (PC zone) | `colomboToday()` |
 
-## Known, NOT changed here (goes to Step 4 with the report day-grouping fix)
-- Reads that compare `date(created_at)` / `strftime('%Y-%m', ...)` / `date('now')` (analytics, agents month, chits dashboards, installment overdue/reminder buckets, communications, batches expiry): they use the **UTC** day, so between 00:00 and 05:30 Colombo they see "yesterday". Needs per-report review.
-- `BranchTransferForm.tsx` `localDateTimeInputValue` feeds a `datetime-local` input (PC zone); fine on a Colombo PC.
+## Report day grouping: fixed in Step 4
+Stored timestamps stay UTC; every report/dashboard query now converts to the Colombo calendar day in SQL: `date(x.created_at,'+330 minutes')`, `strftime('%Y-%m', x.created_at, '+330 minutes')`, and `date('now','+330 minutes')` instead of `date('now')` (a sale at 19:00Z = 00:30 next day in Colombo now lands on the next day; 17:00Z stays on the same day).
+
+| Area | Files |
+|---|---|
+| Sales / revenue / profit / daily report, default date ranges (`colomboToday()`) | `ipc/analytics.ts`, `ipc/reports.ts` |
+| Invoice list filters, sales export | `ipc/invoices.ts`, `services/salesImportExport.ts` |
+| Agents, commissions, coupons, expenses filters | `ipc/agents.ts`, `ipc/commissions.ts`, `ipc/coupons.ts`, `ipc/admin.ts` |
+| Smart Buy dashboards (collected today/this month, 6-month trends, draw windows) | `ipc/chits.ts` |
+| Installment overdue/due-today buckets, reminders, batch expiry, discount validity, notifications | `ipc/admin.ts`, `ipc/communications.ts`, `ipc/notifications.ts`, `ipc/batches.ts`, `ipc/discounts.ts` |
+
+Test: `electron/__qa__/colombo-report-day.integration.test.ts` (19:00Z -> 11 Nov, 17:00Z -> 10 Nov, via `analytics:salesSummary` and `analytics:dailyReport`).
+
+## Still open (low impact)
+- `chits.ts` scheduling helpers that build date strings with `new Date().toISOString().slice(0,10)` (draw/cycle due dates, lines ~159, 294, 960, 3212, 3555) still use the UTC day between 00:00 and 05:30 Colombo.
+- `purchases.ts` `date(COALESCE(purchase_date, created_at))` fallback and `BranchTransferForm.tsx` `datetime-local` input (PC zone; fine on a Colombo PC).
 
 ## Cloud
 Every MySQL session runs UTC (`backend/lib/db.ts`). Rollout and cursor safety: `PRODUCTION_RUNBOOK.md` section 3a, test `backend/tests/sync-tz.test.mjs`.

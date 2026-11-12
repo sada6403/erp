@@ -48,7 +48,7 @@ export function registerBatchHandlers() {
       if (filters.product_id) { wheres.push('b.product_id = ?'); params.push(filters.product_id) }
       if (filters.branch_id)  { wheres.push('b.branch_id = ?');  params.push(filters.branch_id) }
       if (filters.expiring_days) {
-        wheres.push(`b.expiry_date IS NOT NULL AND b.expiry_date <= date('now', '+${Math.abs(filters.expiring_days)} days')`)
+        wheres.push(`b.expiry_date IS NOT NULL AND b.expiry_date <= date('now', '+330 minutes', '+${Math.abs(filters.expiring_days)} days')`)
       }
       const rows = db.prepare(`
         SELECT b.*, p.name as product_name, p.sku as product_sku, br.name as branch_name
@@ -151,7 +151,7 @@ export function registerBatchHandlers() {
         LEFT JOIN branches br ON br.id = b.branch_id
         WHERE b.expiry_date IS NOT NULL
           AND b.quantity > 0
-          AND b.expiry_date <= date('now', '+' || ? || ' days')
+          AND b.expiry_date <= date('now', '+330 minutes', '+' || ? || ' days')
         ORDER BY b.expiry_date ASC
       `).all(days)
       return { success: true, data: rows }
@@ -165,7 +165,7 @@ export function registerBatchHandlers() {
         COUNT(*) as batch_count,
         SUM(quantity) as total_qty,
         MIN(expiry_date) as earliest_expiry,
-        SUM(CASE WHEN expiry_date < date('now') THEN quantity ELSE 0 END) as expired_qty
+        SUM(CASE WHEN expiry_date < date('now','+330 minutes') THEN quantity ELSE 0 END) as expired_qty
       FROM product_batches
       WHERE product_id = ? AND quantity > 0
     `).get(productId)

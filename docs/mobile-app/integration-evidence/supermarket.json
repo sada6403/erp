@@ -1,0 +1,154 @@
+{
+  "file": "supermarket",
+  "generated_at": "2026-11-11T15:21:16.071Z",
+  "rows": [
+    {
+      "id": "SM-01",
+      "action": "Company switched to supermarket: modules",
+      "api": "GET /status -> 200 modules {\"smartbuy\":false,\"installments\":false}",
+      "cloud": "[pos_erp_saas] companies.business_type=supermarket",
+      "pos": "n/a (POS hides the same modules by business type)",
+      "reverse": "n/a",
+      "ms": 1395,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-02",
+      "action": "Catalog list (grocery mix)",
+      "api": "GET /catalog/products -> 200, 11 visible of 14; carrot 400/kg step 0.25; cheese 2592; milk 945 (was 1050); juice 440",
+      "cloud": "[pos_erp_app_test_mwc9lnqokvh_mwc9lnrl] products [{\"name\":\"Biscuit Pack\",\"selling_price\":\"250.00\",\"tax_rate\":\"18.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Carrot\",\"selling_price\":\"400.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"weight\",\"unit\":\"kg\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Cheese Block\",\"selling_price\":\"2400.00\",\"tax_rate\":\"8.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"weight\",\"unit\":\"kg\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Dhal 1kg\",\"selling_price\":\"300.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Fresh Bread\",\"selling_price\":\"90.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Fruit Juice 1L\",\"selling_price\":\"500.00\",\"tax_rate\":\"10.00\",\"discount_pct\":\"20.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Inactive Item\",\"selling_price\":\"100.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":0,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Item With Image\",\"selling_price\":\"75.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Item With Remote Image\",\"selling_price\":\"80.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Milk Powder 400g\",\"selling_price\":\"1050.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"10.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Not For Sale Item\",\"selling_price\":\"100.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":1,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Offline Only Item\",\"selling_price\":\"100.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":0,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Soft Drink\",\"selling_price\":\"200.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"},{\"name\":\"Sugar 1kg\",\"selling_price\":\"260.00\",\"tax_rate\":\"0.00\",\"discount_pct\":\"0.00\",\"sale_by\":\"normal\",\"unit\":\"pcs\",\"is_online\":1,\"not_for_sale\":0,\"is_active\":1,\"updated_at\":\"2026-11-11 15:19:59\"}]",
+      "pos": "n/a (read side)",
+      "reverse": "n/a",
+      "ms": 5188,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-03",
+      "action": "Variants, hidden item detail 404, category counts",
+      "api": "GET /catalog/products/:id -> 200 variants [[\"500 ml\",200,true,10],[\"1.5 L\",350,false,0]]; hidden -> 404; categories {\"Vegetables\":1,\"Dairy\":2,\"Dry Rations\":8}",
+      "cloud": "[pos_erp_app_test_mwc9lnqokvh_mwc9lnrl] product_variants [{\"variant_name\":\"1.5 L\",\"selling_price\":\"350.00\",\"is_active\":1},{\"variant_name\":\"500 ml\",\"selling_price\":\"0.00\",\"is_active\":1}]; product_variant_stocks [{\"variant_id\":\"8daf9ea5-9b12-4b7f-ac0f-bf34f53a7a69\",\"quantity\":\"10.00\"},{\"variant_id\":\"74c162e2-f195-452e-8102-04990377735f\",\"quantity\":\"0.00\"}]",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "ms": 4590,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-04",
+      "action": "Product images",
+      "api": "thumb http://localhost:3000/api/app/v1/media/img/sm-test-1794410399847.png?w=300 -> 200 image/webp; 800px 200; remote passthrough; missing file 404",
+      "cloud": "[pos_erp_app_test_mwc9lnqokvh_mwc9lnrl] products.image_url [{\"name\":\"Item With Remote Image\",\"image_url\":\"https://example.invalid/pic.jpg\"},{\"name\":\"Item With Image\",\"image_url\":\"/api/files/sm-test-1794410399847.png\"}]",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SM-05",
+      "action": "Quote with fractional weights + tax rounding + stock issues",
+      "api": "POST /checkout/quote -> 200; lines [[\"Carrot\",0.75,400,300],[\"Cheese Block\",0.25,2592,648],[\"Biscuit Pack\",3,295,885],[\"Fruit Juice 1L\",2,440,880],[\"Milk Powder 400g\",2,945,1890]]; subtotal 4603; issues sugar=OUT_OF_STOCK hidden=NOT_FOR_SALE over-qty=INSUFFICIENT_STOCK unmanaged-bread=null",
+      "cloud": "[pos_erp_app_test_mwc9lnqokvh_mwc9lnrl] stocks [{\"product_id\":\"60fe7fdf-a250-48df-962a-d0b054a19bfb\",\"quantity\":\"0.00\"},{\"product_id\":\"b9f58ac4-0b99-4909-bf35-ed943693614d\",\"quantity\":\"5.00\"}]",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "ms": 1155,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-06",
+      "action": "Batch-priced item: price rule + no cost leak",
+      "api": "GET product -> price 300; quote 6 kg unit 300; no cost/profit/batch/supplier keys in list, detail, quote",
+      "cloud": "[pos_erp_app_test_mwc9lnqokvh_mwc9lnrl] product_batches [{\"batch_number\":\"B-2026-10-01\",\"quantity\":\"5.00\",\"selling_price\":\"280.00\",\"cost_price\":\"190.00\"},{\"batch_number\":\"B-2026-10-20\",\"quantity\":\"10.00\",\"selling_price\":\"320.00\",\"cost_price\":\"190.00\"}]",
+      "pos": "POS counter (supermarket stock) would price 6 kg at FIFO average 286.67; the app locks 300 on the order and POS conversion honours the locked price (covered by app-order-invoice.integration)",
+      "reverse": "n/a",
+      "result": "PASS",
+      "notes": "Open item: app display price = products.selling_price, counter price = FIFO batch price; they differ while layers carry their own selling price."
+    },
+    {
+      "id": "SM-07",
+      "action": "Read-only guarantee after 28 app reads/quotes (guest + customer)",
+      "api": "28 calls, all < 500",
+      "cloud": "[pos_erp_app_test_mwc9lnqokvh_mwc9lnrl] row counts, MAX(updated_at), SUM(quantity/sold/price/cost) of products, stocks, product_batches, product_variants, product_variant_stocks, categories identical before and after: {\"products\":{\"n\":14,\"max_updated\":\"2026-11-11 15:19:59\"},\"stocks\":{\"n\":12,\"max_updated\":\"2026-11-11 15:19:59\"},\"product_batches\":{\"n\":2,\"max_updated\":\"2026-11-11 15:20:00\"},\"product_variants\":{\"n\":2,\"max_updated\":\"2026-11-11 15:19:59\"},\"product_variant_stocks\":{\"n\":2,\"max_updated\":\"2026-11-11 15:20:00\"},\"categories\":{\"n\":3,\"max_updated\":\"2026-11-11 15:19:59\"},\"sums\":{\"stocks\":{\"q\":\"260.00\",\"d\":\"0.00\"},\"batches\":{\"q\":\"15.00\",\"s\":\"0.000000\"},\"prices\":{\"s\":\"5905.00\",\"c\":\"1643.00\"}}}",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SM-08",
+      "action": "Order of 1.5 kg: reservation path only",
+      "api": "POST /orders -> 201; available 20 -> 18.5; cancel -> 200; available back to 20",
+      "cloud": "[pos_erp_app_test_mwc9lnqokvh_mwc9lnrl] stock_reservations [{\"product_id\":\"ce4c3c9f-110c-416e-b80f-306240c21bf5\",\"variant_id\":null,\"branch_id\":\"9fe31d02-45bd-4542-9fd8-5666ffe071b5\",\"quantity\":\"1.50\",\"status\":\"committed\",\"expires_at\":null,\"created_at\":\"2026-11-11 15:20:36\"}]; customer_order_items {\"quantity\":\"1.50\",\"unit_price\":\"400.00\",\"net_unit_price\":\"400.0000\",\"tax_rate\":\"0.00\",\"line_total\":\"600.00\"}; stocks/product_batches/products rows unchanged",
+      "pos": "n/a (stock is deducted when the POS invoices the order)",
+      "reverse": "n/a",
+      "ms": 1122,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-09",
+      "action": "POS pull of the supermarket catalog",
+      "api": "n/a",
+      "cloud": "[pos_erp_app_test_mwc9lnqokvh_mwc9lnrl] 14 synthetic products",
+      "pos": "Products screen rows in SQLite: {\"name\":\"Carrot\",\"selling_price\":400,\"sale_by\":\"weight\",\"unit\":\"kg\",\"tax_rate\":0,\"discount_pct\":0}; 14 products; sync 8764 ms",
+      "reverse": "n/a",
+      "ms": 8764,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-10",
+      "action": "POS price edit Carrot 400 -> 450",
+      "api": "GET /catalog/products carrot.price 450; watermark.catalog 2026-11-11T15:19:59.000Z -> 2026-11-11T15:20:49.000Z",
+      "cloud": "products {\"selling_price\":\"450.00\",\"updated_at\":\"2026-11-11 15:20:49\"}",
+      "pos": "Products > edit price (SQLite + sync queue)",
+      "reverse": "POS -> app",
+      "ms": 2474,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-11",
+      "action": "POS tax 18% -> 8% (biscuit), discount 10% -> 20% (milk)",
+      "api": "biscuit 270; milk 840 (was 1050); quote lines [810,840]",
+      "cloud": "products [{\"name\":\"Milk Powder 400g\",\"tax_rate\":\"0.00\",\"discount_pct\":\"20.00\",\"updated_at\":\"2026-11-11 15:20:53\"},{\"name\":\"Biscuit Pack\",\"tax_rate\":\"8.00\",\"discount_pct\":\"0.00\",\"updated_at\":\"2026-11-11 15:20:51\"}]",
+      "pos": "Products > edit tax/discount",
+      "reverse": "POS -> app",
+      "ms": 2747,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-12",
+      "action": "POS stock edit: Sugar 0 -> 12, Dhal 15 -> 0",
+      "api": "sugar in_stock=true qty=12; dhal in_stock=false",
+      "cloud": "stocks [{\"product_id\":\"60fe7fdf-a250-48df-962a-d0b054a19bfb\",\"quantity\":\"12.00\",\"updated_at\":\"2026-11-11 15:20:54\"},{\"product_id\":\"7a0adfff-9a11-4037-8467-08e2d530a643\",\"quantity\":\"0.00\",\"updated_at\":\"2026-11-11 15:20:56\"}]",
+      "pos": "Stock screen (SQLite stocks + sync queue)",
+      "reverse": "POS -> app",
+      "ms": 2715,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-13",
+      "action": "POS hides Juice (online off) then shows it; moves Cheese Dairy -> Dry Rations",
+      "api": "hidden: list gone, detail 404, delta removed_ids has it; shown again; cheese.category_id=d81d30cb-5278-4c2c-abc4-1d46c7e7ce4e; category counts {\"Vegetables\":1,\"Dairy\":1,\"Dry Rations\":9}",
+      "cloud": "products [{\"name\":\"Fruit Juice 1L\",\"is_online\":1,\"category_id\":\"d81d30cb-5278-4c2c-abc4-1d46c7e7ce4e\",\"updated_at\":\"2026-11-11 15:21:02\"},{\"name\":\"Cheese Block\",\"is_online\":1,\"category_id\":\"d81d30cb-5278-4c2c-abc4-1d46c7e7ce4e\",\"updated_at\":\"2026-11-11 15:21:07\"}]",
+      "pos": "Products > online store toggle / category",
+      "reverse": "POS -> app",
+      "ms": 10055,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-14",
+      "action": "POS sets a product image",
+      "api": "carrot.thumbnail_url http://localhost:3000/api/app/v1/media/img/sm-test-b-1794410469823.png?w=300 -> 200",
+      "cloud": "products.image_url {\"image_url\":\"/api/files/sm-test-b-1794410469823.png\"}",
+      "pos": "Products > image",
+      "reverse": "POS -> app",
+      "ms": 1552,
+      "result": "PASS"
+    },
+    {
+      "id": "SM-15",
+      "action": "New product made in POS (weight item + stock) then deactivated",
+      "api": "app shows POS Made Tomato 220/kg qty 8; after deactivate: gone",
+      "cloud": "products {\"name\":\"POS Made Tomato\",\"selling_price\":\"220.00\",\"sale_by\":\"weight\",\"is_active\":0}",
+      "pos": "Products > add (SQLite INSERT + queue)",
+      "reverse": "POS -> app (create + deactivate)",
+      "ms": 3908,
+      "result": "PASS"
+    }
+  ]
+}

@@ -374,7 +374,8 @@ export async function mapOrder(db: DbLike, o: Record<string, unknown>, origin: s
     address: o.customer_address ? String(o.customer_address) : null,
     notes: o.notes ? String(o.notes) : null,
     needs_call_confirmation: Number(o.needs_call_confirmation) === 1,
-    can_cancel: owner && CANCELLABLE.includes(status),
+    // once the POS has invoiced the order (stock deducted) only the branch can cancel it
+    can_cancel: owner && CANCELLABLE.includes(status) && !o.invoice_id,
     delivery_otp: owner && open && String(o.channel) === 'app' ? deliveryOtp(String(o.id)) : null,
     agent: await loadAgent(db, o.assigned_agent_id),
   }
@@ -465,10 +466,10 @@ export async function loadOwnOrder(company: AppCompany, user: AppUserCtx, id: st
 
 export async function cancelOrder(company: AppCompany, user: AppUserCtx, id: string): Promise<void> {
   const o = await loadOwnOrder(company, user, id)
-  if (!CANCELLABLE.includes(String(o.status) as OrderStatus)) fail(409, 'ORDER_NOT_CANCELLABLE', 'This order can no longer be cancelled.')
+  if (!CANCELLABLE.includes(String(o.status) as OrderStatus) || o.invoice_id) fail(409, 'ORDER_NOT_CANCELLABLE', 'This order can no longer be cancelled.')
   const placeholders = CANCELLABLE.map(() => '?').join(',')
   const r = await company.tp.query(
-    `UPDATE customer_orders SET status = 'cancelled' WHERE id = ? AND status IN (${placeholders})`, [id, ...CANCELLABLE])
+    `UPDATE customer_orders SET status = 'cancelled' WHERE id = ? AND invoice_id IS NULL AND status IN (${placeholders})`, [id, ...CANCELLABLE])
   if (Number((r.rows as unknown as { affectedRows?: number }).affectedRows) === 0) fail(409, 'ORDER_NOT_CANCELLABLE', 'This order can no longer be cancelled.')
   await onOrderStatusChanged(company.tp, id)
 }

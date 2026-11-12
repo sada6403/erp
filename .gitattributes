@@ -2,3 +2,5 @@
 .github/workflows/*.yml text eol=lf
 .github/workflows/*.yaml text eol=lf
 .githooks/* text eol=lf
+
+scripts/staging/*.sh text eol=lf

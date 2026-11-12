@@ -1,6 +1,7 @@
 // app_settings key/value (synced; edited from POS Online Store / Super Admin) + module flags.
 import type { AppCompany } from './context'
 import { resolveEntitlements } from '../entitlements'
+import { pool } from '../db'
 
 export const SETTING_DEFAULTS: Record<string, string> = {
   ordering_enabled: '1',
@@ -36,7 +37,13 @@ export async function setSetting(company: AppCompany, key: string, value: string
 export async function getModules(company: AppCompany): Promise<{ smartbuy: boolean; installments: boolean }> {
   try {
     const e = await resolveEntitlements({ companyId: company.id })
-    return { smartbuy: e.enabledModules.includes('smartbuy'), installments: e.enabledModules.includes('installments') }
+    // Supermarket / Food City companies do not sell on Smart Buy or installments (POS v2.8 business types).
+    const { rows } = await pool.query(`SELECT business_type FROM companies WHERE id = ? LIMIT 1`, [company.id])
+    const grocery = /^(supermarket|food[\s_-]?city)$/i.test(String((rows[0] as { business_type?: string } | undefined)?.business_type ?? ''))
+    return {
+      smartbuy: !grocery && e.enabledModules.includes('smartbuy'),
+      installments: !grocery && e.enabledModules.includes('installments'),
+    }
   } catch {
     return { smartbuy: true, installments: true }
   }

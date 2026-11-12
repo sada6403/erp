@@ -89,8 +89,8 @@ export function resolveApplicableDiscount(
     WHERE is_active = 1
       AND (branch_id = ? OR branch_id IS NULL)
       AND (scope = 'all' OR (scope = 'product' AND product_id = ?))
-      AND (valid_from IS NULL OR date(valid_from) <= date('now'))
-      AND (valid_until IS NULL OR date(valid_until) >= date('now'))
+      AND (valid_from IS NULL OR date(valid_from) <= date('now','+330 minutes'))
+      AND (valid_until IS NULL OR date(valid_until) >= date('now','+330 minutes'))
   `).all(branchId, productId) as DiscountRow[]
   if (!rows.length) return null
 
@@ -138,8 +138,8 @@ export function registerDiscountHandlers() {
       SELECT * FROM discounts
       WHERE is_active = 1
         AND (branch_id = ? OR branch_id IS NULL)
-        AND (valid_from IS NULL OR date(valid_from) <= date('now'))
-        AND (valid_until IS NULL OR date(valid_until) >= date('now'))
+        AND (valid_from IS NULL OR date(valid_from) <= date('now','+330 minutes'))
+        AND (valid_until IS NULL OR date(valid_until) >= date('now','+330 minutes'))
     `).all(scopeBranch)
     return { success: true, data: rows }
   })

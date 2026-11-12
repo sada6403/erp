@@ -4,6 +4,7 @@ import { ensureLegacyOpeningLayer } from '../services/batchInventory'
 import { getDb } from '../database'
 import { createCompanyStore } from '../services/companyWorkspace'
 import { safeHandle } from './ipcHandler'
+import { colomboToday } from '../lib/colomboDate'
 
 const store = createCompanyStore()
 
@@ -52,14 +53,14 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const superAdmin = isSuperAdmin(user)
-      const dateFrom = filters.date_from || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
-      const dateTo = filters.date_to || new Date().toISOString().slice(0, 10)
+      const dateFrom = filters.date_from || colomboToday(Date.now() - 30 * 86400000)
+      const dateTo = filters.date_to || colomboToday()
       const branchFilter = filters.branch_id as string | undefined
         || (!superAdmin ? user?.branch_id as string : undefined)
 
       const rows = branchFilter
         ? db.prepare(`
-            SELECT date(created_at) as date,
+            SELECT date(created_at,'+330 minutes') as date,
                    COUNT(*) as total_invoices,
                    ROUND(SUM(total_amount), 2) as total_revenue,
                    ROUND(SUM(discount_amount), 2) as total_discount,
@@ -67,12 +68,12 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
                    ROUND(SUM(delivery_fee), 2) as total_delivery_income
             FROM invoices
             WHERE branch_id = ? AND status = 'completed'
-              AND date(created_at) BETWEEN ? AND ?
-            GROUP BY date(created_at)
+              AND date(created_at,'+330 minutes') BETWEEN ? AND ?
+            GROUP BY date(created_at,'+330 minutes')
             ORDER BY date DESC
           `).all(branchFilter, dateFrom, dateTo)
         : db.prepare(`
-            SELECT date(created_at) as date,
+            SELECT date(created_at,'+330 minutes') as date,
                    COUNT(*) as total_invoices,
                    ROUND(SUM(total_amount), 2) as total_revenue,
                    ROUND(SUM(discount_amount), 2) as total_discount,
@@ -80,8 +81,8 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
                    ROUND(SUM(delivery_fee), 2) as total_delivery_income
             FROM invoices
             WHERE status = 'completed'
-              AND date(created_at) BETWEEN ? AND ?
-            GROUP BY date(created_at)
+              AND date(created_at,'+330 minutes') BETWEEN ? AND ?
+            GROUP BY date(created_at,'+330 minutes')
             ORDER BY date DESC
           `).all(dateFrom, dateTo)
 
@@ -100,13 +101,13 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
 
       const today = db.prepare(`
         SELECT ROUND(SUM(total_amount),2) as revenue, COUNT(*) as invoices
-        FROM invoices ${branchWhere} status='completed' AND date(created_at) = date('now')
+        FROM invoices ${branchWhere} status='completed' AND date(created_at,'+330 minutes') = date('now','+330 minutes')
       `).get(...args([]))
 
       const month = db.prepare(`
         SELECT ROUND(SUM(total_amount),2) as revenue, COUNT(*) as invoices
         FROM invoices ${branchWhere} status='completed'
-        AND strftime('%Y-%m', created_at) = strftime('%Y-%m', 'now')
+        AND strftime('%Y-%m', created_at, '+330 minutes') = strftime('%Y-%m', 'now', '+330 minutes')
       `).get(...args([]))
 
       const outstanding = branchFilter
@@ -123,14 +124,14 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const user = store.get('auth_user') as Record<string, unknown>
       const superAdmin = isSuperAdmin(user)
-      const dateFrom = (filters.date_from as string) || new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10)
-      const dateTo = (filters.date_to as string) || new Date().toISOString().slice(0, 10)
+      const dateFrom = (filters.date_from as string) || colomboToday(Date.now() - 30 * 86400000)
+      const dateTo = (filters.date_to as string) || colomboToday()
       const branchFilter = filters.branch_id as string | undefined
         || (!superAdmin ? user?.branch_id as string : undefined)
 
       const invoiceWhere = branchFilter
-        ? `WHERE i.branch_id = ? AND i.status = 'completed' AND date(i.created_at) BETWEEN ? AND ?`
-        : `WHERE i.status = 'completed' AND date(i.created_at) BETWEEN ? AND ?`
+        ? `WHERE i.branch_id = ? AND i.status = 'completed' AND date(i.created_at,'+330 minutes') BETWEEN ? AND ?`
+        : `WHERE i.status = 'completed' AND date(i.created_at,'+330 minutes') BETWEEN ? AND ?`
       const invoiceArgs = branchFilter ? [branchFilter, dateFrom, dateTo] : [dateFrom, dateTo]
 
       const sales = db.prepare(`
@@ -158,8 +159,8 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
       const netProfit = Number(sales.sales_total || 0) - Number(cogsRow.cogs || 0)
 
       const installmentWhere = branchFilter
-        ? `WHERE ins.branch_id = ? AND date(ins.created_at) BETWEEN ? AND ?`
-        : `WHERE date(ins.created_at) BETWEEN ? AND ?`
+        ? `WHERE ins.branch_id = ? AND date(ins.created_at,'+330 minutes') BETWEEN ? AND ?`
+        : `WHERE date(ins.created_at,'+330 minutes') BETWEEN ? AND ?`
       const installmentArgs = branchFilter ? [branchFilter, dateFrom, dateTo] : [dateFrom, dateTo]
 
       const installmentGiven = db.prepare(`
@@ -266,14 +267,14 @@ export function registerAnalyticsHandlers(ipcMain: IpcMain) {
       const summary = db.prepare(`
         SELECT COUNT(*) as invoices, ROUND(SUM(total_amount),2) as revenue,
                ROUND(SUM(discount_amount),2) as discounts, ROUND(SUM(tax_amount),2) as taxes
-        FROM invoices WHERE branch_id = ? AND status='completed' AND date(created_at) = ?
+        FROM invoices WHERE branch_id = ? AND status='completed' AND date(created_at,'+330 minutes') = ?
       `).get(branchId, date)
 
       const byMethod = db.prepare(`
         SELECT p.method, ROUND(SUM(p.amount),2) as total, COUNT(*) as count
         FROM payments p
         JOIN invoices i ON i.id = p.invoice_id
-        WHERE i.branch_id = ? AND i.status='completed' AND date(i.created_at) = ?
+        WHERE i.branch_id = ? AND i.status='completed' AND date(i.created_at,'+330 minutes') = ?
         GROUP BY p.method
       `).all(branchId, date)
 

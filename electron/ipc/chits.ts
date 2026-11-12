@@ -2859,8 +2859,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (filters.branchId) { conditions.push('cs.branch_id = ?'); params.push(filters.branchId) }
     if (filters.status) { conditions.push('cs.status = ?'); params.push(filters.status) }
     if (filters.agentId) { conditions.push('cs.agent_id = ?'); params.push(filters.agentId) }
-    if (filters.dateFrom) { conditions.push('date(cs.created_at) >= date(?)'); params.push(filters.dateFrom) }
-    if (filters.dateTo) { conditions.push('date(cs.created_at) <= date(?)'); params.push(filters.dateTo) }
+    if (filters.dateFrom) { conditions.push("date(cs.created_at,'+330 minutes') >= date(?)"); params.push(filters.dateFrom) }
+    if (filters.dateTo) { conditions.push("date(cs.created_at,'+330 minutes') <= date(?)"); params.push(filters.dateTo) }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
     const rows = db.prepare(`
@@ -3112,8 +3112,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (filters.agentId) { conditions.push('cc.collected_by_agent_id = ?'); params.push(filters.agentId) }
     conditions.push('cc.status = ?')
     params.push(filters.status || 'approved')
-    if (filters.dateFrom) { conditions.push('date(cc.paid_at) >= date(?)'); params.push(filters.dateFrom) }
-    if (filters.dateTo) { conditions.push('date(cc.paid_at) <= date(?)'); params.push(filters.dateTo) }
+    if (filters.dateFrom) { conditions.push("date(cc.paid_at,'+330 minutes') >= date(?)"); params.push(filters.dateFrom) }
+    if (filters.dateTo) { conditions.push("date(cc.paid_at,'+330 minutes') <= date(?)"); params.push(filters.dateTo) }
     const where = `WHERE ${conditions.join(' AND ')}`
 
     const rows = db.prepare(`
@@ -3386,7 +3386,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           WHERE cc.collected_by_agent_id = a.id AND cc.status = 'approved') as total_collected,
         (SELECT COALESCE(SUM(cc.amount), 0) FROM chit_contributions cc
           WHERE cc.collected_by_agent_id = a.id AND cc.status = 'approved'
-            AND strftime('%Y-%m', cc.paid_at) = strftime('%Y-%m', 'now')) as collected_this_month,
+            AND strftime('%Y-%m', cc.paid_at, '+330 minutes') = strftime('%Y-%m', 'now', '+330 minutes')) as collected_this_month,
         (SELECT COALESCE(SUM(
             CASE WHEN cl.registration_agent_id = a.id THEN cl.registration_commission ELSE 0 END +
             CASE WHEN cl.sales_agent_id = a.id THEN cl.sales_commission ELSE 0 END
@@ -3661,7 +3661,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     // deliberately re-send (e.g. the customer says they never got it).
     const lastToday = db.prepare(`
       SELECT id, sent_at FROM chit_payment_reminders
-      WHERE member_id=? AND cycle_no=? AND date(sent_at) = date('now')
+      WHERE member_id=? AND cycle_no=? AND date(sent_at,'+330 minutes') = date('now','+330 minutes')
       ORDER BY sent_at DESC LIMIT 1
     `).get(memberId, ctx.resolvedCycle) as { id: string; sent_at: string } | undefined
     if (lastToday && !force) {
@@ -4519,10 +4519,10 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} m.status = 'redeemed') as winner_count,
         (SELECT COALESCE(SUM(cc.amount), 0) FROM chit_contributions cc JOIN chit_schemes cs ON cs.id = cc.scheme_id
           ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'approved'
-          AND strftime('%Y-%m', cc.paid_at) = strftime('%Y-%m', 'now')) as collected_this_month,
+          AND strftime('%Y-%m', cc.paid_at, '+330 minutes') = strftime('%Y-%m', 'now', '+330 minutes')) as collected_this_month,
         (SELECT COALESCE(SUM(cc.amount), 0) FROM chit_contributions cc JOIN chit_schemes cs ON cs.id = cc.scheme_id
           ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'approved'
-          AND date(cc.paid_at) = date('now')) as collected_today,
+          AND date(cc.paid_at,'+330 minutes') = date('now','+330 minutes')) as collected_today,
         (SELECT COALESCE(SUM(cc.amount), 0) FROM chit_contributions cc JOIN chit_schemes cs ON cs.id = cc.scheme_id
           ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'pending_verification') as pending_payments,
         (SELECT COALESCE(SUM(cl.total_commission), 0) FROM commission_ledger cl JOIN chit_schemes cs ON cs.id = cl.scheme_id
@@ -4660,35 +4660,35 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
     // Monthly Collection + Commission Trend — last 6 calendar months.
     const monthlyCollectionTrend = db.prepare(`
-      SELECT strftime('%Y-%m', cc.paid_at) as month, COALESCE(SUM(cc.amount),0) as total
+      SELECT strftime('%Y-%m', cc.paid_at, '+330 minutes') as month, COALESCE(SUM(cc.amount),0) as total
       FROM chit_contributions cc JOIN chit_schemes cs ON cs.id = cc.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'approved' AND date(cc.paid_at) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'approved' AND date(cc.paid_at,'+330 minutes') >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
     const commissionTrend = db.prepare(`
-      SELECT strftime('%Y-%m', cl.created_at) as month, COALESCE(SUM(cl.total_commission),0) as total
+      SELECT strftime('%Y-%m', cl.created_at, '+330 minutes') as month, COALESCE(SUM(cl.total_commission),0) as total
       FROM commission_ledger cl JOIN chit_schemes cs ON cs.id = cl.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(cl.created_at) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(cl.created_at,'+330 minutes') >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
     // New Customers — first-created month for a customer who is also a chit
     // member in scope (no separate customer-acquisition table exists).
     const monthlyNewCustomers = db.prepare(`
-      SELECT strftime('%Y-%m', c.created_at) as month, COUNT(DISTINCT c.id) as total
+      SELECT strftime('%Y-%m', c.created_at, '+330 minutes') as month, COUNT(DISTINCT c.id) as total
       FROM customers c
       JOIN chit_members m ON m.customer_id = c.id
       JOIN chit_schemes cs ON cs.id = m.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(c.created_at) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(c.created_at,'+330 minutes') >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
     // Scheme Registrations — member enrollments per month.
     const monthlySchemeRegistrations = db.prepare(`
-      SELECT strftime('%Y-%m', m.created_at) as month, COUNT(*) as total
+      SELECT strftime('%Y-%m', m.created_at, '+330 minutes') as month, COUNT(*) as total
       FROM chit_members m JOIN chit_schemes cs ON cs.id = m.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(m.created_at) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(m.created_at,'+330 minutes') >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
@@ -4696,7 +4696,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const winnerTimeline = db.prepare(`
       SELECT strftime('%Y-%m', d.draw_date) as month, COALESCE(SUM(d.settled_count),0) as winners
       FROM chit_draws d JOIN chit_schemes cs ON cs.id = d.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(d.draw_date) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(d.draw_date) >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
@@ -4743,7 +4743,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const recentlyCompletedDraws = db.prepare(`
       SELECT d.cycle_no, cs.id as scheme_id, cs.name as scheme_name, cs.scheme_number
       FROM chit_draws d JOIN chit_schemes cs ON cs.id = d.scheme_id
-      ${schemeWhere ? schemeWhere + " AND" : "WHERE"} date(d.draw_date) >= date('now', '-3 days')
+      ${schemeWhere ? schemeWhere + " AND" : "WHERE"} date(d.draw_date) >= date('now', '+330 minutes', '-3 days')
       ORDER BY d.draw_date DESC LIMIT 10
     `).all(...schemeParams) as { cycle_no: number; scheme_id: string; scheme_name: string; scheme_number: string }[]
     for (const d of recentlyCompletedDraws) {

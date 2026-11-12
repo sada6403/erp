@@ -2017,14 +2017,14 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const db = getDb()
     db.prepare(`
       UPDATE installments SET status='overdue', updated_at=datetime('now')
-      WHERE status='active' AND next_due_date < date('now') AND due_amount > 0
+      WHERE status='active' AND next_due_date < date('now','+330 minutes') AND due_amount > 0
     `).run()
     let sql = `
       SELECT inst.*, c.name AS customer_name, c.phone AS customer_phone, b.name AS branch_name,
         i.invoice_number,
         inst.monthly_amount AS computed_monthly,
         (SELECT COUNT(*) FROM installment_schedule s WHERE s.installment_id=inst.id AND s.status='paid') AS payments_made,
-        CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) AS overdue_days
+        CAST(julianday(date('now','+330 minutes')) - julianday(inst.next_due_date) AS INTEGER) AS overdue_days
       FROM installments inst
       LEFT JOIN customers c ON c.id = inst.customer_id
       LEFT JOIN branches b ON b.id = inst.branch_id
@@ -2067,7 +2067,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const overdue = db.prepare(`
       SELECT COALESCE(SUM(total_due + penalty - paid_amount),0) AS amount
       FROM installment_schedule
-      WHERE installment_id=? AND status IN ('pending','partial','overdue') AND due_date < date('now')
+      WHERE installment_id=? AND status IN ('pending','partial','overdue') AND due_date < date('now','+330 minutes')
     `).get(id) as { amount: number }
     return { success: true, data: { ...inst, schedule, payments, computed_monthly: inst.monthly_amount, overdue_amount: overdue.amount } }
   })
@@ -2223,7 +2223,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         FROM installment_schedule s
         JOIN installments inst ON inst.id = s.installment_id
         WHERE s.status IN ('pending','partial')
-          AND date('now') > date(s.due_date, '+' || CAST(inst.grace_period_days AS TEXT) || ' days')
+          AND date('now','+330 minutes') > date(s.due_date, '+' || CAST(inst.grace_period_days AS TEXT) || ' days')
           AND s.penalty = 0
           AND inst.late_fee > 0
           AND inst.status IN ('active','overdue')
@@ -2269,12 +2269,12 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     `).get(...params) as { count: number }
     const agingBuckets = db.prepare(`
       SELECT
-        SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 1 AND 7 THEN 1 ELSE 0 END) AS days_1_7,
-        SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 8 AND 15 THEN 1 ELSE 0 END) AS days_8_15,
-        SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) > 15 THEN 1 ELSE 0 END) AS days_15_plus,
-        COALESCE(SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 1 AND 7 THEN inst.due_amount ELSE 0 END), 0) AS amt_1_7,
-        COALESCE(SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 8 AND 15 THEN inst.due_amount ELSE 0 END), 0) AS amt_8_15,
-        COALESCE(SUM(CASE WHEN CAST(julianday(date('now')) - julianday(inst.next_due_date) AS INTEGER) > 15 THEN inst.due_amount ELSE 0 END), 0) AS amt_15_plus
+        SUM(CASE WHEN CAST(julianday(date('now','+330 minutes')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 1 AND 7 THEN 1 ELSE 0 END) AS days_1_7,
+        SUM(CASE WHEN CAST(julianday(date('now','+330 minutes')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 8 AND 15 THEN 1 ELSE 0 END) AS days_8_15,
+        SUM(CASE WHEN CAST(julianday(date('now','+330 minutes')) - julianday(inst.next_due_date) AS INTEGER) > 15 THEN 1 ELSE 0 END) AS days_15_plus,
+        COALESCE(SUM(CASE WHEN CAST(julianday(date('now','+330 minutes')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 1 AND 7 THEN inst.due_amount ELSE 0 END), 0) AS amt_1_7,
+        COALESCE(SUM(CASE WHEN CAST(julianday(date('now','+330 minutes')) - julianday(inst.next_due_date) AS INTEGER) BETWEEN 8 AND 15 THEN inst.due_amount ELSE 0 END), 0) AS amt_8_15,
+        COALESCE(SUM(CASE WHEN CAST(julianday(date('now','+330 minutes')) - julianday(inst.next_due_date) AS INTEGER) > 15 THEN inst.due_amount ELSE 0 END), 0) AS amt_15_plus
       FROM installments inst
       WHERE inst.status = 'overdue'${branchWhere}
     `).get(...params) as {
@@ -2404,8 +2404,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const params: unknown[] = []
     if (filters.branch_id)   { sql += ' AND e.branch_id=?';   params.push(filters.branch_id) }
     if (filters.category_id) { sql += ' AND e.category_id=?'; params.push(filters.category_id) }
-    if (filters.from_date)   { sql += ' AND date(e.created_at)>=?'; params.push(filters.from_date) }
-    if (filters.to_date)     { sql += ' AND date(e.created_at)<=?'; params.push(filters.to_date) }
+    if (filters.from_date)   { sql += " AND date(e.created_at,'+330 minutes')>=?"; params.push(filters.from_date) }
+    if (filters.to_date)     { sql += " AND date(e.created_at,'+330 minutes')<=?"; params.push(filters.to_date) }
     sql += ' ORDER BY e.created_at DESC LIMIT 500'
     return { success: true, data: db.prepare(sql).all(...params) }
   })

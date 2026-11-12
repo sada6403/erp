@@ -141,8 +141,17 @@ export async function createPos(state: { data: Record<string, any>; directory: s
     /** One full sync cycle (push queue, pull everything). Returns ms. Throws when the cycle fails. */
     async sync(): Promise<number> {
       const t0 = Date.now()
-      const ok = await svc.runOnce()
-      if (!ok) throw new Error(`POS sync cycle failed: ${state.data.sync_cycle_error ?? 'unknown'}`)
+      // many back-to-back cycles can trip the cloud sync limiter; the service then backs off for Retry-After seconds
+      let ok = false
+      for (let attempt = 0; attempt < 6 && !ok; attempt++) {
+        // the service's own background drain timer may be mid-cycle: runOnce() refuses to overlap, so wait for it
+        for (let i = 0; i < 240 && (svc as any).running; i++) await new Promise(r => setTimeout(r, 500))
+        const wait = Number((svc as any).backoffUntil || 0) - Date.now()
+        if (wait > 0) await new Promise(r => setTimeout(r, Math.min(wait, 120_000) + 100))
+        else if (attempt > 0) await new Promise(r => setTimeout(r, 1500))
+        ok = await svc.runOnce()
+      }
+      if (!ok) throw new Error(`POS sync cycle failed: ${state.data.sync_cycle_error ?? 'unknown'} (running=${(svc as any).running}, pending=${(db.prepare("SELECT COUNT(*) n FROM sync_queue WHERE status!='synced'").get() as { n: number }).n})`)
       return Date.now() - t0
     },
     /** Syncs until `check()` is true (max `tries` cycles). Returns total ms. */

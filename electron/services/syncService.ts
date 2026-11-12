@@ -883,7 +883,19 @@ export class SyncService {
                   continue
                 }
               }
+              // The cloud has no customers.outstanding_due, so the POS balance never syncs. A cash payment created
+              // in the cloud by the mobile app (COD collected by the delivery agent) is new to this device:
+              // apply it to the local balance once, the way a counter payment would have.
+              const isNewAppCodPayment = table === 'payments' && /^COD /.test(String(row.reference ?? ''))
+                && !db.prepare('SELECT 1 FROM payments WHERE id=?').get(row.id)
               this.insertFiltered(db, table, row)
+              if (isNewAppCodPayment) {
+                const inv = db.prepare('SELECT customer_id FROM invoices WHERE id=?').get(row.invoice_id) as { customer_id: string | null } | undefined
+                if (inv?.customer_id && Number(row.amount) > 0) {
+                  db.prepare(`UPDATE customers SET outstanding_due = MAX(0, outstanding_due - ?), updated_at=datetime('now') WHERE id=?`)
+                    .run(Number(row.amount), inv.customer_id)
+                }
+              }
               if (table === 'stocks') {
                 const local = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS ?')
                   .get(row.product_id, row.branch_id, row.warehouse_id ?? null) as { id: string }

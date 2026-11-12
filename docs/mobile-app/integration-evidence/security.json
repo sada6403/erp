@@ -1,0 +1,135 @@
+{
+  "file": "security",
+  "generated_at": "2026-11-10T17:14:16.965Z",
+  "rows": [
+    {
+      "id": "SEC-01",
+      "action": "Guest calls every protected route",
+      "api": "15 routes -> all 401",
+      "cloud": "no rows read",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-02",
+      "action": "Wrong key, no key, POS key and the other tenant's app key with a valid token",
+      "api": "4 keys x 15 routes -> all 401",
+      "cloud": "no rows read",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-03",
+      "action": "Role gates (customer on /agent/*, agent on customer + smartbuy routes)",
+      "api": "12 calls -> all 403",
+      "cloud": "no rows read",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-04",
+      "action": "Another customer / agent tries to read, track, download, cancel a customer order",
+      "api": "POST /orders -> 201; other: 4 calls -> 404; agent: 4 calls -> 403; other list excludes it",
+      "cloud": "customer_orders {\"id\":\"01bfba08-4763-4c0f-a5d5-317362f2f3f1\",\"order_number\":\"ONL-1001\",\"app_user_id\":\"60ff9b38-77e3-4afc-9bb2-ac357785fc77\",\"customer_id\":\"8e23bdcf-23cf-4b50-aa67-2a39ab063892\",\"status\":\"pending\",\"total_amount\":\"730.00\",\"created_at\":\"2026-11-10 17:13:31\"} unchanged after the cancel attempt",
+      "pos": "n/a",
+      "reverse": 156,
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-05",
+      "action": "Other customer edits/deletes an address, reads wishlist and notifications, marks another user's notification read",
+      "api": "PUT/DELETE -> 404; wishlist + notifications lists exclude owner data",
+      "cloud": "address {\"id\":\"3269a494-9087-44f6-ab9f-ee4bda52c48f\"}; app_notifications {\"id\":\"ad45cf6b-04b0-4701-a783-34e036792afc\",\"user_id\":\"60ff9b38-77e3-4afc-9bb2-ac357785fc77\",\"read_at\":null} (read_at null)",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-06",
+      "action": "Other member / agent reads a Smart Buy statement, draws, wallet",
+      "api": "statement + draws: other -> 403/404, agent -> 403; lists exclude the scheme",
+      "cloud": "scheme a9e5d0c4-42e2-4b20-8352-3dc47d0efbba",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-07",
+      "action": "Agent touches an order that is not assigned to them; lists show only their own deliveries and members",
+      "api": "unassigned order: detail/bill/status/complete -> 404; list ids subset of assigned",
+      "cloud": "customer_orders.assigned_agent_id = 3603aec1-da8d-4a6b-bdb9-d24c66056134: 1 order(s); chit_members agent_id = 3603aec1-da8d-4a6b-bdb9-d24c66056134: 4",
+      "pos": "Deliveries screen shows the same assigned set",
+      "reverse": 121,
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-08",
+      "action": "Admin App Access with no key / app key / app token / wrong key / POS key",
+      "api": "401 x4, POS key 200; tenant A and B lists share no ids",
+      "cloud": "no rows changed",
+      "pos": "App Access screen uses the POS key only",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-09",
+      "action": "Public /company and /legal/privacy contents",
+      "api": "GET /company -> 200 with exactly 15 profile fields; no key/password/phone in body or page",
+      "cloud": "companies.branding_json is only read, never written",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-10",
+      "action": "Credential leakage in /me and /auth/login responses",
+      "api": "GET /me -> 200, POST /auth/login -> 200; no password/hash fields",
+      "cloud": "app_users.password_hash stays server-side",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "SEC-11",
+      "action": "Cross-tenant: A token+B key, B user on A order ids, catalogs, POS sync feed",
+      "api": "token/key mix -> 401; A order id inside B -> 404 (read, track, cancel); catalogs and /api/sync customers disjoint",
+      "cloud": "schemas pos_erp_app_test_mway3yxnl1y_mway3yyl vs pos_erp_app_test_mway5z1d7x8_mway5z2c: customer_orders 01bfba08-4763-4c0f-a5d5-317362f2f3f1 absent in B",
+      "pos": "n/a",
+      "reverse": "n/a",
+      "result": "PASS"
+    },
+    {
+      "id": "CO-01",
+      "action": "Edit legal name / support email / phone / address / TIN in POS company settings and save",
+      "api": "PUT /api/company/branding (via SyncService.pushBrandingToCloud) -> GET /company legal_name ok, /watermark areas.company 2026-11-10T17:11:27.000Z -> 2026-11-10T17:14:10.000Z, /legal/privacy shows it",
+      "cloud": "pos_erp_saas.companies.branding_json {\"company_legal_name\":\"Sec Legal mway3y8h (Pvt) Ltd\",\"support_email\":\"help-mway3y8h@sec.example\",\"support_phone\":\"0112223344\",\"company_tin\":\"PV-mway3y8h\"} updated_at 2026-11-10T17:14:10.000Z",
+      "pos": "Settings -> Company Information (local app_settings, store key company_branding_synced)",
+      "reverse": "POS -> app: visible on next /company fetch (app polls /watermark every 10 s)",
+      "ms": 647,
+      "result": "PASS"
+    },
+    {
+      "id": "CO-02",
+      "action": "Cloud branding edited elsewhere -> POS settings (SyncService.syncBranding)",
+      "api": "PUT /api/company/branding -> 200",
+      "cloud": "branding_json has the new legal name / support email / phone",
+      "pos": "POS app_settings: company_legal_name=Round mway3y8h Ltd, support_email=round-mway3y8h@sec.example, support_phone=0771234567",
+      "reverse": "cloud -> POS",
+      "ms": 637,
+      "result": "PASS"
+    },
+    {
+      "id": "CO-03",
+      "action": "POS: hide product from the online store + rename its category",
+      "api": "GET /catalog/products no longer lists it, removed_ids has it, detail 404; /catalog/categories shows the new name",
+      "cloud": "products {\"id\":\"13c08ab2-5f63-4778-8eef-e11024fa4c9b\",\"is_online\":0,\"updated_at\":\"2026-11-10 17:14:13\"}; categories.name = Renamed mway3y8h",
+      "pos": "Products screen (online flag) / Categories",
+      "reverse": "POS -> app",
+      "ms": 1621,
+      "result": "PASS"
+    }
+  ]
+}

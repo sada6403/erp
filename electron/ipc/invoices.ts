@@ -1088,8 +1088,8 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (filters.bill_type)  { sql += ' AND i.bill_type = ?';  params.push(filters.bill_type) }
       if (filters.status)     { sql += ' AND i.status = ?';     params.push(filters.status) }
       if (filters.customer_id){ sql += ' AND i.customer_id = ?';params.push(filters.customer_id) }
-      if (filters.date_from)  { sql += ' AND date(i.created_at) >= ?'; params.push(filters.date_from) }
-      if (filters.date_to)    { sql += ' AND date(i.created_at) <= ?'; params.push(filters.date_to) }
+      if (filters.date_from)  { sql += " AND date(i.created_at,'+330 minutes') >= ?"; params.push(filters.date_from) }
+      if (filters.date_to)    { sql += " AND date(i.created_at,'+330 minutes') <= ?"; params.push(filters.date_to) }
       if (filters.search) {
         sql += ' AND (i.invoice_number LIKE ? OR c.name LIKE ?)'
         const term = `%${filters.search}%`

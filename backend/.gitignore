@@ -5,3 +5,4 @@ uploads
 
 .seed-build
 .seed-output.json
+.seed-output-testcopy.json

@@ -1,0 +1,139 @@
+{
+  "file": "shop",
+  "generated_at": "2026-11-11T14:37:03.127Z",
+  "rows": [
+    {
+      "id": "SHOP-01",
+      "action": "Wishlist add + remove",
+      "api": "POST /me/wishlist -> 201; GET -> 200; DELETE -> 200; guest POST -> 401; user B DELETE leaves A's row",
+      "cloud": "wishlists {\"id\":\"1054ebec-4200-4e56-b3f0-f559d1aa4fb7\",\"user_id\":\"729d534c-0f63-4ab6-a0cc-0a20f684052b\",\"product_id\":\"5ccbb0fd-c9b5-4706-adf0-84b435d7393e\",\"created_at\":\"2026-11-11 14:35:46\"}",
+      "pos": "Not a POS-synced table (app-only); no POS screen",
+      "reverse": "n/a",
+      "ms": 1275,
+      "result": "PASS",
+      "notes": "Isolation: B list excludes A product, B delete is a no-op on A row"
+    },
+    {
+      "id": "SHOP-02",
+      "action": "Address create, update, default, delete",
+      "api": "POST x2 -> 201,201; PUT -> 200; DELETE -> 200; user B PUT/DELETE -> 404/404",
+      "cloud": "app_addresses {\"id\":\"70591402-0cba-4978-83bc-69a32b8cfdcd\",\"line1\":\"1 Updated Road\",\"is_default\":1,\"updated_at\":\"2026-11-11 14:35:53\"}",
+      "pos": "App-only table (no POS screen); shows on the order as the delivery address (see SHOP-03)",
+      "reverse": "n/a",
+      "ms": 1541,
+      "result": "PASS"
+    },
+    {
+      "id": "SHOP-03",
+      "action": "Cart -> quote -> place COD order",
+      "api": "POST /checkout/quote -> 200; POST /orders -> 201 (replay same key -> same id; no key -> 400)",
+      "cloud": "customer_orders {\"id\":\"c2154993-c891-4ab7-9fb1-f2c60ae5055c\",\"order_number\":\"ONL-1001\",\"branch_id\":\"29657233-73a3-43c7-adbf-229619cbf303\",\"app_user_id\":\"729d534c-0f63-4ab6-a0cc-0a20f684052b\",\"customer_id\":\"a2c6369a-c933-4040-9e46-5b647842e6f5\",\"channel\":\"app\",\"status\":\"pending\",\"payment_method\":\"cod\",\"payment_status\":\"unpaid\",\"total_amount\":\"1210.00\",\"paid_amount\":\"0.00\",\"delivery_fee\":\"250.00\",\"created_at\":\"2026-11-11 14:35:54\",\"updated_at\":\"2026-11-11 14:35:54\"}; customer_order_items [{\"product_id\":\"5ccbb0fd-c9b5-4706-adf0-84b435d7393e\",\"quantity\":\"2.00\",\"unit_price\":\"480.00\",\"line_total\":\"960.00\"}]",
+      "pos": "Orders screen (orders:list channel=app) shows ONL-1001 status=pending items=1; SQLite {\"id\":\"c2154993-c891-4ab7-9fb1-f2c60ae5055c\",\"branch_id\":\"29657233-73a3-43c7-adbf-229619cbf303\",\"status\":\"pending\",\"payment_method\":\"cod\",\"total_amount\":1210,\"channel\":\"app\"}",
+      "reverse": "n/a",
+      "ms": 2608,
+      "result": "PASS"
+    },
+    {
+      "id": "SHOP-04",
+      "action": "Bank transfer order + slip reference",
+      "api": "POST /orders (bank_transfer, payment_reference) -> 201",
+      "cloud": "customer_orders {\"id\":\"0bc4399d-0724-4cd3-a844-476c061f25b4\",\"order_number\":\"ONL-1002\",\"status\":\"pending\",\"payment_method\":\"bank_transfer\",\"payment_status\":\"unpaid\",\"payment_reference\":\"SLIP-REF-12345\",\"paid_amount\":\"0.00\",\"total_amount\":\"610.00\",\"created_at\":\"2026-11-11 14:35:57\"}",
+      "pos": "Orders screen row payment_method=bank_transfer reference=SLIP-REF-12345 status=unpaid",
+      "reverse": "n/a",
+      "ms": 1394,
+      "result": "PASS",
+      "notes": "v1 has no slip FILE upload endpoint (only the typed payment_reference), so file/slip-row checks are N/A; see SHOP-04b"
+    },
+    {
+      "id": "SHOP-04b",
+      "action": "Bank slip image upload",
+      "api": "no endpoint in /api/app/v1 (only payment_reference text)",
+      "cloud": "-",
+      "pos": "-",
+      "reverse": "n/a",
+      "result": "SKIP",
+      "notes": "Not implemented in v1.0; app sends the slip reference text only"
+    },
+    {
+      "id": "SHOP-05",
+      "action": "Order list, detail, tracking",
+      "api": "GET /orders -> 200; /orders/:id -> 200; /tracking -> 200; user B detail/tracking/cancel -> 404/404/404",
+      "cloud": "customer_orders c2154993-c891-4ab7-9fb1-f2c60ae5055c status unchanged after B's cancel attempt",
+      "pos": "n/a (app read paths)",
+      "reverse": "n/a",
+      "ms": 301,
+      "result": "PASS"
+    },
+    {
+      "id": "SHOP-06",
+      "action": "POS order status change reaches app",
+      "api": "GET /orders/:id -> status=confirmed stage=confirmed; watermark orders 2026-11-11T14:35:57.000Z -> 2026-11-11T14:36:13.000Z",
+      "cloud": "customer_orders {\"status\":\"confirmed\",\"approved_by\":\"u9999999-9999-4999-8999-999999999999\",\"updated_at\":\"2026-11-11 14:36:13\"}",
+      "pos": "orders:updateStatus(confirmed) on Orders screen -> sync_queue -> cloud",
+      "reverse": "POS status -> app detail/tracking + watermark",
+      "ms": 8102,
+      "result": "PASS"
+    },
+    {
+      "id": "SHOP-07",
+      "action": "POS assign agent reaches app",
+      "api": "GET /orders/:id agent=AG001; agent GET /agent/deliveries lists it",
+      "cloud": "customer_orders {\"assigned_agent_id\":\"5d62f0bc-8c88-4aa8-93d3-211037e93331\",\"updated_at\":\"2026-11-11 14:36:16\"} (assigned_agent_id = seed agent)",
+      "pos": "orders:assignAgent on Orders/Deliveries screen",
+      "reverse": "POS assignment -> customer sees agent; agent sees delivery",
+      "ms": 2153,
+      "result": "PASS"
+    },
+    {
+      "id": "SHOP-08",
+      "action": "POS convert order to invoice",
+      "api": "GET /orders/:id -> ready_for_delivery/packed; agent bill 200 bill_no=MAIN-001-INV-2026-0001",
+      "cloud": "invoices {\"id\":\"f6819768-bbb2-4be3-bb8d-465c318f5b65\",\"invoice_number\":\"MAIN-001-INV-2026-0001\",\"source_order_id\":\"c2154993-c891-4ab7-9fb1-f2c60ae5055c\",\"branch_id\":\"29657233-73a3-43c7-adbf-229619cbf303\",\"total_amount\":\"1210.00\",\"paid_amount\":\"0.00\",\"due_amount\":\"1210.00\",\"status\":\"completed\",\"created_at\":\"2026-11-11 14:36:24\"}; customer_orders {\"status\":\"ready_for_delivery\",\"invoice_id\":\"f6819768-bbb2-4be3-bb8d-465c318f5b65\"}",
+      "pos": "orders:convertToInvoice -> invoice MAIN-001-INV-2026-0001",
+      "reverse": "POS invoice -> app status + agent bill",
+      "ms": 6532,
+      "result": "PASS"
+    },
+    {
+      "id": "SHOP-09",
+      "action": "POS marks bank-transfer order paid",
+      "api": "GET /orders/:id payment_status=paid",
+      "cloud": "customer_orders {\"status\":\"confirmed\",\"payment_status\":\"paid\",\"paid_amount\":\"610.00\",\"total_amount\":\"610.00\"}",
+      "pos": "orders:updateStatus payment_status=paid",
+      "reverse": "POS payment verification -> app",
+      "ms": 5282,
+      "result": "PASS"
+    },
+    {
+      "id": "SHOP-10",
+      "action": "POS product edit (price, name) reaches app",
+      "api": "GET /catalog/products/:id price 1125 -> 1112.4; name updated; quote unit price 1112.4; watermark catalog 2026-11-11T14:36:27.000Z -> 2026-11-11T14:36:44.000Z",
+      "cloud": "products {\"name\":\"Coconut Oil 1L EDITED\",\"selling_price\":\"1236.00\",\"updated_at\":\"2026-11-11 14:36:44\"}",
+      "pos": "products:update (Products screen)",
+      "reverse": "POS price/name edit -> app catalog + checkout quote",
+      "ms": 5246,
+      "result": "PASS",
+      "notes": "app price 1112.4 vs POS 1236 (offers/tax may apply)"
+    },
+    {
+      "id": "SHOP-11",
+      "action": "POS stock edit reaches app",
+      "api": "GET product in_stock true -> true; quote issue=OUT_OF_STOCK; watermark catalog 2026-11-11T14:36:44.000Z -> 2026-11-11T14:36:50.000Z",
+      "cloud": "stocks [{\"product_id\":\"d3f04856-ee24-4468-8f3f-e5d418e1fed9\",\"branch_id\":\"29657233-73a3-43c7-adbf-229619cbf303\",\"quantity\":\"0.00\",\"updated_at\":\"2026-11-11 14:36:50\"},{\"product_id\":\"d3f04856-ee24-4468-8f3f-e5d418e1fed9\",\"branch_id\":\"9bce4d04-56c4-4a47-96d8-60366d5818ee\",\"quantity\":\"20.00\",\"updated_at\":\"2026-11-11 14:33:59\"}]",
+      "pos": "stocks:adjustCorrection (Inventory screen)",
+      "reverse": "POS stock edit -> app availability + quote",
+      "ms": 5242,
+      "result": "PASS"
+    },
+    {
+      "id": "SHOP-12",
+      "action": "Cancel order in app",
+      "api": "POST /orders/:id/cancel -> 200 (cancelled); second cancel -> 409; cancel after POS invoice -> 409",
+      "cloud": "customer_orders {\"status\":\"cancelled\",\"updated_at\":\"2026-11-11 14:36:58\"}",
+      "pos": "Orders screen status=cancelled filter lists ONL-1003",
+      "reverse": "n/a",
+      "ms": 4523,
+      "result": "PASS"
+    }
+  ]
+}

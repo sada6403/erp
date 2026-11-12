@@ -698,8 +698,8 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
       const conditions = [`UPPER(TRIM(i.agent_code)) = UPPER(TRIM(?))`, `i.status = 'completed'`]
       const params: unknown[] = [agent.code]
       if (branchId) { conditions.push('i.branch_id = ?'); params.push(branchId) }
-      if (filters.dateFrom) { conditions.push('date(i.created_at) >= date(?)'); params.push(filters.dateFrom) }
-      if (filters.dateTo) { conditions.push('date(i.created_at) <= date(?)'); params.push(filters.dateTo) }
+      if (filters.dateFrom) { conditions.push("date(i.created_at,'+330 minutes') >= date(?)"); params.push(filters.dateFrom) }
+      if (filters.dateTo) { conditions.push("date(i.created_at,'+330 minutes') <= date(?)"); params.push(filters.dateTo) }
       const where = `WHERE ${conditions.join(' AND ')}`
 
       const stats = db.prepare(`
@@ -710,7 +710,7 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
         ${where}
       `).get(...params) as { invoice_count: number; sales_total: number; commission_total: number }
 
-      const monthConditions = [`UPPER(TRIM(i.agent_code)) = UPPER(TRIM(?))`, `i.status = 'completed'`, `strftime('%Y-%m', i.created_at) = strftime('%Y-%m', 'now')`]
+      const monthConditions = [`UPPER(TRIM(i.agent_code)) = UPPER(TRIM(?))`, `i.status = 'completed'`, `strftime('%Y-%m', i.created_at, '+330 minutes') = strftime('%Y-%m', 'now', '+330 minutes')`]
       const monthParams: unknown[] = [agent.code]
       if (branchId) { monthConditions.push('i.branch_id = ?'); monthParams.push(branchId) }
       const monthSales = db.prepare(`
@@ -772,8 +772,8 @@ export function registerAgentHandlers(ipcMain: IpcMain) {
 
       const invoiceConditions = [`UPPER(TRIM(i.agent_code)) = UPPER(TRIM(a.code))`, `i.status = 'completed'`]
       const params: unknown[] = []
-      if (filters.dateFrom) { invoiceConditions.push('date(i.created_at) >= date(?)'); params.push(filters.dateFrom) }
-      if (filters.dateTo) { invoiceConditions.push('date(i.created_at) <= date(?)'); params.push(filters.dateTo) }
+      if (filters.dateFrom) { invoiceConditions.push("date(i.created_at,'+330 minutes') >= date(?)"); params.push(filters.dateFrom) }
+      if (filters.dateTo) { invoiceConditions.push("date(i.created_at,'+330 minutes') <= date(?)"); params.push(filters.dateTo) }
 
       const agentConditions: string[] = []
       const agentParams: unknown[] = []
