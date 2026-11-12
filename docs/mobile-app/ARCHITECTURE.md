@@ -488,3 +488,8 @@ Hosted page only (PayHere first), behind a provider-agnostic `PaymentProvider` i
 ### 18.8 POS desktop additions
 
 Hierarchy page (assignments), targets page, salary rules and slabs page, performance approvals (reusing the commission approval screens), Smart Buy join-request approval page. Patterns: `electron/ipc/regions.ts`, `src/pages/admin/RegionsPage.tsx`, `commissions:ledger:approve`.
+
+### 18.9 Join requests and bank slips (built 2026-11-12)
+App: `GET/POST /smartbuy/join-requests` (roles agent, customer; multipart `nic_front`, `nic_back` + text fields; idempotent `client_event_id`), `GET/POST /orders/{id}/slip` (customer; multipart `slip`, optional `reference`).
+POS key (`x-api-key`): `GET /admin/join-requests[?status]`, `GET /admin/join-requests/{id}/photo?side=front|back`, `POST /admin/join-requests/{id}/decision {decision: approve|reject, reason?}`; `GET /admin/payment-slips[?status]`, `GET /admin/payment-slips/{id}/image`, `POST /admin/payment-slips/{id}/decision {decision: verify|reject, reason?}`.
+Cloud-only tables: `smartbuy_join_requests`, `order_payment_slips`. Private image store: `PRIVATE_UPLOAD_DIR`. Details: DECISIONS 2026-11-12 Step 6.

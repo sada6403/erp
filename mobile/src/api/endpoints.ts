@@ -40,6 +40,8 @@ import type {
   CreateOrderRequest,
   CreateOrderResponse,
   OrderDto,
+  OrderSlipDto,
+  OrderSlipsResponse,
   OrdersListResponse,
   QuoteRequest,
   QuoteResponse,
@@ -54,6 +56,8 @@ import type {
 import type {
   DrawsResponse,
   MySchemesResponse,
+  JoinRequestDto,
+  JoinRequestsResponse,
   OpenSchemesResponse,
   StatementResponse,
   WalletResponse,
@@ -82,6 +86,10 @@ const c = (): AxiosInstance => getClient();
 const get = async <T>(url: string, params?: object): Promise<T> => (await c().get<T>(url, { params })).data;
 const post = async <T>(url: string, body?: unknown, headers?: Record<string, string>): Promise<T> =>
   (await c().post<T>(url, body, { headers })).data;
+
+/** multipart upload (NIC photos, bank slips): the RN adapter sets the boundary, uploads get a longer timeout. */
+const postForm = async <T>(url: string, form: FormData): Promise<T> =>
+  (await c().post<T>(url, form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60_000, transformRequest: (d: unknown) => d })).data;
 
 export const statusApi = {
   status: () => get<StatusResponse>('/status'),
@@ -136,6 +144,8 @@ export const orderApi = {
   get: (id: string) => get<OrderDto>(`/orders/${encodeURIComponent(id)}`),
   tracking: (id: string) => get<TrackingResponse>(`/orders/${encodeURIComponent(id)}/tracking`),
   cancel: (id: string, body: CancelOrderRequest = {}) => post<OrderDto>(`/orders/${encodeURIComponent(id)}/cancel`, body),
+  slips: (id: string) => get<OrderSlipsResponse>(`/orders/${encodeURIComponent(id)}/slip`),
+  uploadSlip: (id: string, form: FormData) => postForm<OrderSlipDto>(`/orders/${encodeURIComponent(id)}/slip`, form),
 };
 
 export const deviceApi = {
@@ -151,7 +161,7 @@ export const notificationApi = {
     (await c().put<NotificationSettingsDto>('/me/notification-settings', body)).data,
 };
 
-/** Smart Buy v1.0 is read-only. */
+/** Smart Buy v1.0: read-only for members; agents (and later customers) submit join requests the branch approves. */
 export const smartbuyApi = {
   openSchemes: () => get<OpenSchemesResponse>('/smartbuy/schemes/open'),
   mySchemes: () => get<MySchemesResponse>('/smartbuy/me/schemes'),
@@ -159,6 +169,8 @@ export const smartbuyApi = {
   draws: (schemeId: string) => get<DrawsResponse>(`/smartbuy/me/schemes/${encodeURIComponent(schemeId)}/draws`),
   wallet: () => get<WalletResponse>('/wallet'),
   walletTransactions: () => get<WalletTransactionsResponse>('/wallet/transactions'),
+  joinRequests: (cursor?: string) => get<JoinRequestsResponse>('/smartbuy/join-requests', { cursor }),
+  submitJoin: (form: FormData) => postForm<JoinRequestDto>('/smartbuy/join-requests', form),
 };
 
 export const agentApi = {

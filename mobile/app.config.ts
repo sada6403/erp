@@ -70,6 +70,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-video',
     'expo-sharing',
     [
+      'expo-image-picker',
+      {
+        cameraPermission: 'Allow the camera to photograph a payment slip or an NIC.',
+        photosPermission: 'Allow photo access to attach a payment slip or an NIC.',
+        microphonePermission: false,
+      },
+    ],
+    [
       'expo-splash-screen',
       { backgroundColor: '#FFFFFF', image: './assets/splash-icon.png', imageWidth: 200 },
     ],

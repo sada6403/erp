@@ -147,3 +147,9 @@ Go to production when: staging verified, backup restored once, upload key = MATC
 - **Never delete a backup without Moni's explicit approval**, even an old one. The agent lists candidates (`ls -d /root/backup-* | sort`, size with `du -sh`) and asks.
 - Check free space before every backup: `df -h /` must show > 10 GB free; if the sum of backups grows past 5 GB, tell Moni instead of deleting.
 - Copies made for staging (`/root/staging-copy/`) are separate and small; remove them with the staging rollback (`99-rollback.sh`).
+
+## New in Step 6: private uploads (join NIC photos, bank slips)
+- Set `PRIVATE_UPLOAD_DIR=/var/www/<app>-private` in the backend `.env` (directory `chmod 700`, owned by the app user) **before** deploying. Without it files go to `<cwd>/private-uploads`, which a redeploy that replaces the directory would wipe.
+- Include that directory in the backups (it holds NIC photos: personal data). Never serve it through nginx; never copy it to staging.
+- Staging already uses `/var/www/pos-staging-private`.
+- The two new cloud tables (`smartbuy_join_requests`, `order_payment_slips`) are created by `ensureTenantCompatibility` on first request; no manual SQL.

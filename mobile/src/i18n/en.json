@@ -581,7 +581,9 @@
     "NOT_IMPLEMENTED": "Coming in the next update.",
     "INTERNAL": "Server error. Please try again.",
     "NETWORK": "No connection. Check your internet.",
-    "UNKNOWN": "Something went wrong. Please try again."
+    "UNKNOWN": "Something went wrong. Please try again.",
+    "ALREADY_MEMBER": "This person is already a member of this scheme.",
+    "SCHEME_FULL": "This scheme is full."
   },
   "track": {
     "orderN": "Order #{{n}}",
@@ -591,5 +593,47 @@
     "otpInstructionNoAgent": "Provide this 4-digit code to the field agent only after verifying your items.",
     "continueShopping": "← Continue Shopping",
     "placed": "Order #{{n}} placed! Opening delivery tracking..."
+  },
+  "slip": {
+    "title": "Bank transfer payment",
+    "upload": "Upload payment slip",
+    "reupload": "Upload a new slip",
+    "camera": "Take photo",
+    "gallery": "Choose from gallery",
+    "reference": "Transfer reference (optional)",
+    "send": "Send slip",
+    "pending": "Slip received. We will verify your payment soon.",
+    "verified": "Payment verified",
+    "rejected": "Slip not accepted: {{reason}}",
+    "sent": "Slip uploaded",
+    "permission": "Allow photo access to upload your slip.",
+    "failed": "Could not upload the slip. Try again."
+  },
+  "joinReq": {
+    "title": "Add Smart Buy member",
+    "sub": "Register a customer for a scheme. The branch approves it after checking the NIC photos.",
+    "scheme": "Scheme",
+    "name": "Full name",
+    "phone": "Mobile number",
+    "nic": "NIC number",
+    "address": "Address (optional)",
+    "front": "NIC front photo",
+    "back": "NIC back photo",
+    "addPhoto": "Add photo",
+    "changePhoto": "Change photo",
+    "submit": "Send for approval",
+    "sent": "Request sent for approval",
+    "needFields": "Fill in the name, phone and NIC",
+    "needPhotos": "Add both NIC photos",
+    "badNic": "Enter a valid NIC number",
+    "badPhone": "Enter a valid mobile number (07XXXXXXXX)",
+    "noSchemes": "No open schemes right now",
+    "myRequests": "My requests",
+    "empty": "No requests yet",
+    "pending": "Waiting for approval",
+    "approved": "Approved",
+    "rejected": "Not approved: {{reason}}",
+    "add": "Add member",
+    "permission": "Allow camera or photo access to add the NIC photos."
   }
 }

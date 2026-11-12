@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { smartbuyApi } from '@/api/endpoints';
 import { qk } from '@/query/keys';
 import { selectHasRole, useSessionStore } from '@/store/sessionStore';
@@ -28,4 +28,17 @@ export function useWallet() {
 export function useWalletTransactions() {
   const enabled = useSessionStore(selectHasRole('smartbuy'));
   return useQuery({ queryKey: qk.wallet.transactions, queryFn: smartbuyApi.walletTransactions, enabled });
+}
+
+/** The agent's own join requests (status comes from the branch decision in the POS). */
+export function useJoinRequests() {
+  return useQuery({ queryKey: qk.smartbuy.joinRequests, queryFn: () => smartbuyApi.joinRequests(), refetchInterval: 30_000 });
+}
+
+export function useSubmitJoin() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (form: FormData) => smartbuyApi.submitJoin(form),
+    onSuccess: () => qc.invalidateQueries({ queryKey: qk.smartbuy.joinRequests }),
+  });
 }

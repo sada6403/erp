@@ -100,3 +100,9 @@ No schema change, no cloud change, safe for existing devices (only affects rows 
 `insertFiltered` with a `products` row whose `unit` is null. One more data note: a `product_attributes` row of the real "test" company points
 at a deleted category (FK), so it stays isolated; harmless.
 We did not touch `main`.
+
+## 2026-11-12 Step 6 started: join requests + bank slips
+Done and pushed (backend + POS + tests): `POST/GET /smartbuy/join-requests`, `POST/GET /orders/{id}/slip`, admin join-requests and payment-slips (list, image, decision), POS "App Requests" page, tests JOIN-01..04 and SLIP-01..02 (6/6 pass; JOIN-01 and SHOP-04b are no longer SKIP). Staging VPS updated (`PRIVATE_UPLOAD_DIR=/var/www/pos-staging-private`).
+Mobile (code done, typecheck/lint/jest green, **not in an APK yet**): slip upload card on the order screen, agent "Add member" screen with NIC photos, `expo-image-picker` plugin. Needs one native rebuild (both ABIs).
+Phone checks on the installed staging APK: wishlist add/remove and order cancel PASS (server rows confirmed). Cosmetic fix made in code: a cancelled order no longer shows ETA/progress timeline.
+**Blocker:** the C: drive has ~0.4 GB free (leftover `%TEMP%\np-pos-*` test folders from earlier runs, about 6.7 GB; the sandbox refuses to delete them). The APK rebuild and the slip/join phone checks wait for that space.

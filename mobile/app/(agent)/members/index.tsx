@@ -1,5 +1,6 @@
 import React from 'react';
 import { View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { radii, useTheme } from '@/theme';
 import { Text } from '@/components/Text';
@@ -21,6 +22,7 @@ const cleanName = (n: string) => n.replace(/\s*\(Member[^)]*\)\s*$/i, '');
 export default function MembersScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
+  const router = useRouter();
   const showToast = useUiStore((s) => s.showToast);
   const { data, isLoading, isError, refetch, isRefetching } = useAgentMembers();
   const record = useRecordCollection();
@@ -47,6 +49,7 @@ export default function MembersScreen() {
         <Text size={18} weight={800}>{t('members.title')}</Text>
         <Text size={12} color="textMuted" style={{ marginTop: 3, marginBottom: 2 }}>{t('members.sub')}</Text>
       </View>
+      <Button label={t('joinReq.add')} icon={'➕'} variant="primaryBlock" fullWidth onPress={() => router.push('/add-member')} />
       {isLoading ? (
         <SkeletonList rows={4} height={90} />
       ) : isError && !data ? (

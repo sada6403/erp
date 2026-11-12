@@ -15,6 +15,7 @@ import { useUiStore } from '@/store/uiStore';
 import { useCancelOrder, useOrder, useTracking } from './hooks';
 import { useServerActionGuard } from '@/features/common/hooks';
 import { stageTone } from './stageTone';
+import { SlipCard } from './SlipCard';
 
 /**
  * Order tracking (#view-customer-track): header card, secure delivery OTP box, 5-step timeline,
@@ -71,7 +72,7 @@ export function TrackingView({ id }: { id: string }) {
             </Text>
           </View>
         </View>
-        {o.estimated_delivery_date ? (
+        {o.estimated_delivery_date && o.stage !== 'cancelled' ? (
           <Text size={12} color="textMuted">
             {t('track.eta')}{' '}
             <Text size={12} weight={700} color="textMuted">
@@ -99,8 +100,8 @@ export function TrackingView({ id }: { id: string }) {
         </Gradient>
       ) : null}
 
-      {/* .timeline-stepper */}
-      {steps.length > 0 ? (
+      {/* .timeline-stepper (a cancelled order has no progress to show) */}
+      {steps.length > 0 && o.stage !== 'cancelled' ? (
         <Card radius={radii.card} padding={18} style={{ gap: 16 }}>
           {steps.map((s, i) => {
             const active = i === activeIdx;
@@ -230,6 +231,8 @@ export function TrackingView({ id }: { id: string }) {
           </Text>
         ) : null}
       </Card>
+
+      <SlipCard order={o} />
 
       {o.can_cancel ? <Button label={t('orders.cancel')} variant="logout" fullWidth loading={cancel.isPending} onPress={doCancel} /> : null}
       <Button label={t('track.continueShopping')} variant="secondaryBlock" fullWidth onPress={() => router.replace('/')} />
