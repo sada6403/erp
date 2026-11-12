@@ -5,10 +5,11 @@ import type { ProductListItemDto } from '@contracts/catalog';
 import { useTheme } from '@/theme';
 import { FlashDealsHeader, HeroBanner, ProductGrid, SearchSection, SmartBuyPromo } from '@/features/shop/ShopParts';
 import { useProducts } from '@/features/shop/hooks';
+import { activeDeals } from '@/features/shop/deals';
 import { useWatermark } from '@/features/common/hooks';
 import { qk } from '@/query/keys';
 
-/** Shop home: search + category pills, hero banner, flash deals (always-on countdown), Smart Buy promo. */
+/** Shop home: search + category pills, hero banner, flash deals (only with a real end date), Smart Buy promo. */
 export default function HomeScreen() {
   const theme = useTheme();
   const listRef = useRef<FlashListRef<ProductListItemDto>>(null);
@@ -16,6 +17,7 @@ export default function HomeScreen() {
   const [q, setQ] = useState('');
   const [cat, setCat] = useState<string | null>(null);
   const { items, isLoading, isError, refetch } = useProducts({ q, categoryId: cat });
+  const { endsAt } = activeDeals(items);
   useWatermark({ catalog: [qk.catalog.products], categories: [qk.catalog.categories], banners: [qk.catalog.banners], company: [qk.company] });
 
   const header = (
@@ -24,9 +26,9 @@ export default function HomeScreen() {
         <View style={{ backgroundColor: theme.colors.surface, marginHorizontal: -10 }}>
           <SearchSection value={q} onChange={setQ} selected={cat} onSelect={setCat} />
         </View>
-        <HeroBanner onExplore={() => listRef.current?.scrollToOffset({ offset: aboveDeals, animated: true })} />
+        <HeroBanner onExplore={endsAt ? () => listRef.current?.scrollToOffset({ offset: aboveDeals, animated: true }) : undefined} />
       </View>
-      <FlashDealsHeader />
+      {endsAt ? <FlashDealsHeader endsAt={endsAt} /> : null}
     </View>
   );
   return <ProductGrid listRef={listRef} items={items} loading={isLoading} error={isError} onRetry={refetch} header={header} footer={<SmartBuyPromo />} />;

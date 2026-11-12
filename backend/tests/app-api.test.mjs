@@ -479,3 +479,26 @@ test('deactivated agent (POS): agent routes, login and refresh denied at once; r
   assert.equal(back.status, 200)
   assert.equal((await call('GET', '/agent/dashboard', { token: back.json.tokens.access_token })).status, 200)
 })
+test('catalog: deal_ends_at only for a discounted product with an active dated POS discount', async () => {
+  const db = await mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
+  const pid = seed.product_ids[0]
+  const find = async () => (await call('GET', '/catalog/products?limit=200', { token: customer })).json.items.find(p => p.id === pid)
+  const [[orig]] = await db.query('SELECT discount_pct FROM products WHERE id = ?', [pid])
+  const did = `deal-${Date.now()}`.padEnd(36, '0').slice(0, 36)
+  try {
+    await db.query('UPDATE products SET discount_pct = 20 WHERE id = ?', [pid])
+    assert.equal((await find()).deal_ends_at ?? null, null, 'discounted but no dated discount: not a flash deal')
+    await db.query(`INSERT INTO discounts (id, name, type, value, scope, product_id, is_active, valid_until) VALUES (?, 'Flash', 'percentage', 20, 'product', ?, 1, DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY))`, [did, pid])
+    const live = await find()
+    assert.match(live.deal_ends_at, /Z$/)
+    assert.ok(Date.parse(live.deal_ends_at) > Date.now())
+    await db.query(`UPDATE discounts SET valid_until = DATE_SUB(UTC_TIMESTAMP(), INTERVAL 1 HOUR) WHERE id = ?`, [did])
+    assert.equal((await find()).deal_ends_at ?? null, null, 'expired discount: not a flash deal')
+    await db.query(`UPDATE discounts SET valid_until = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 1 DAY), is_active = 0 WHERE id = ?`, [did])
+    assert.equal((await find()).deal_ends_at ?? null, null, 'inactive discount: not a flash deal')
+  } finally {
+    await db.query('DELETE FROM discounts WHERE id = ?', [did])
+    await db.query('UPDATE products SET discount_pct = ? WHERE id = ?', [orig.discount_pct, pid])
+    await db.end()
+  }
+})

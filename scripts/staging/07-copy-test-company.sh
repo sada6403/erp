@@ -22,7 +22,10 @@ if [ "$HAVE_DB" = "0" ]; then
 echo "[copy] mysqldump $SRC_DB (read-only)"
 mysqldump -uroot --single-transaction --no-tablespaces --skip-add-drop-table "$SRC_DB" | gzip > /root/staging-copy/test-tenant.sql.gz
 echo "[copy] create $DST_DB and import"
-mysql -uroot -e "CREATE DATABASE \`$DST_DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+# same default collation as the source schema (production tenants use the server default, utf8mb4_0900_ai_ci);
+# a different one makes JOINs between the copied tables and the new app tables fail with ER_CANT_AGGREGATE_2COLLATIONS
+SRC_COLL=$(mysql -uroot -N -e "SELECT default_collation_name FROM information_schema.schemata WHERE schema_name='$SRC_DB'")
+mysql -uroot -e "CREATE DATABASE \`$DST_DB\` CHARACTER SET utf8mb4 COLLATE $SRC_COLL"
 "${STG[@]}" -e "SELECT 1" "$DST_DB" >/dev/null   # staging user must be able to use it (pattern grant)
 zcat /root/staging-copy/test-tenant.sql.gz | "${STG[@]}" "$DST_DB"
 else echo "[copy] $DST_DB already imported - resuming at master row"; fi

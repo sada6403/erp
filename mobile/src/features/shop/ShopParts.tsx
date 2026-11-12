@@ -8,7 +8,7 @@ import { Text, useBodyFont } from '@/components/Text';
 import { Button } from '@/components/Button';
 import { Gradient } from '@/components/Gradient';
 import { Pill, EmptyState, SkeletonList, ErrorState } from '@/components/ui';
-import { Countdown, flashDealsEnd } from '@/components/Extras';
+import { Countdown } from '@/components/Extras';
 import { ProductCard, emojiFor } from '@/components/ProductCard';
 import { useCartStore } from '@/store/cartStore';
 import { useUiStore } from '@/store/uiStore';
@@ -85,43 +85,41 @@ export function CategoryPills({ selected, onSelect }: { selected: string | null;
   );
 }
 
-/** Hero banner (.banner-slide): the server's first banner when there is one, else the brand banner copy. */
-export function HeroBanner({ onExplore }: { onExplore: () => void }) {
+/**
+ * Hero banner (.banner-slide). Content comes only from the company's banners (POS Online Store); with none, the section is
+ * hidden and the next one moves up. `onExplore` (scroll to deals) is offered only when real flash deals exist.
+ */
+export function HeroBanner({ onExplore }: { onExplore?: () => void }) {
   const theme = useTheme();
   const { t } = useTranslation();
   const { data } = useBanners();
   const b = data?.items?.[0];
+  if (!b) return null;
   return (
     <View style={{ paddingVertical: 12, paddingHorizontal: 16 }}>
       <View style={[{ borderRadius: radii.hero, backgroundColor: theme.colors.primary }, shadows.banner]}>
         <Gradient from={theme.colors.primary} to={theme.colors.primaryDark} style={{ borderRadius: radii.hero, padding: 20 }}>
-          <View style={{ alignSelf: 'flex-start', backgroundColor: theme.colors.accent, paddingHorizontal: 8, paddingVertical: 4, borderRadius: radii.sm, marginBottom: 8 }}>
-            <Text size={10} weight={800} color="accentText" letterSpacing={0.5}>
-              {t('home.bannerBadge')}
+          <Text size={19} weight={800} color="white" lineHeightRatio={1.25} style={{ marginBottom: b.subtitle ? 6 : 0 }}>
+            {b.title}
+          </Text>
+          {b.subtitle ? (
+            <Text size={12} color="glassText" lineHeightRatio={1.4} style={{ marginBottom: onExplore ? 14 : 0 }}>
+              {b.subtitle}
             </Text>
-          </View>
-          <Text size={19} weight={800} color="white" lineHeightRatio={1.25} style={{ marginBottom: 6 }}>
-            {b?.title ?? t('home.bannerTitle')}
-          </Text>
-          <Text size={12} color="glassText" lineHeightRatio={1.4} style={{ marginBottom: 14 }}>
-            {b?.subtitle ?? t('home.bannerBody')}
-          </Text>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Button label={t('home.exploreDeals')} variant="primarySm" onPress={onExplore} />
-            <View style={{ backgroundColor: theme.colors.glass, paddingVertical: 6, paddingHorizontal: 10, borderRadius: radii.md }}>
-              <Text size={11} weight={700} color="white">
-                ⚡ {t('home.fastDelivery')}
-              </Text>
+          ) : null}
+          {onExplore ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Button label={t('home.exploreDeals')} variant="primarySm" onPress={onExplore} />
             </View>
-          </View>
+          ) : null}
         </Gradient>
       </View>
     </View>
   );
 }
 
-/** .section-header of the flash deals block: ⚡ title + always-on countdown. */
-export function FlashDealsHeader() {
+/** .section-header of the flash deals block: ⚡ title + countdown to the real end date of the active deals. */
+export function FlashDealsHeader({ endsAt }: { endsAt: number }) {
   const { t } = useTranslation();
   return (
     <View style={{ paddingTop: 10, paddingHorizontal: 6 }}>
@@ -133,7 +131,7 @@ export function FlashDealsHeader() {
             {t('home.flashDeals')}
           </Text>
         </View>
-        <Countdown endsAt={flashDealsEnd()} />
+        <Countdown endsAt={endsAt} />
       </View>
     </View>
   );

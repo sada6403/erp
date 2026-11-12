@@ -5,6 +5,7 @@ import { createSyncStoragePersister } from '@tanstack/query-sync-storage-persist
 import { storage } from '@/lib/storage';
 import { useUiStore } from '@/store/uiStore';
 import { AppApiError } from '@/api/client';
+import { API_PREFIX, ENV } from '@/lib/env';
 import { shouldPersistQuery, USER_ROOTS } from './keys';
 
 export const DAY_MS = 24 * 3600_000;
@@ -48,6 +49,18 @@ let wired = false;
 export function wireConnectivity(): () => void {
   if (wired) return () => undefined;
   wired = true;
+
+  // Probe our own light /status endpoint, not Google's generate_204 (blocked or rewritten on some mobile networks).
+  // Any HTTP answer below 500 (401 without a key is fine) means the network works. NetInfo also re-checks on app
+  // foreground and on every network change; otherwise it polls at most once a minute, with a short timeout.
+  NetInfo.configure({
+    reachabilityUrl: `${ENV.apiBaseUrl}${API_PREFIX}/status`,
+    reachabilityMethod: 'HEAD',
+    reachabilityTest: async (response) => response.status < 500,
+    reachabilityLongTimeout: 60_000,
+    reachabilityShortTimeout: 60_000,
+    reachabilityRequestTimeout: 8_000,
+  });
 
   onlineManager.setEventListener((setOnline) => {
     return NetInfo.addEventListener((state) => {

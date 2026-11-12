@@ -47,6 +47,8 @@ export interface ProductListItemDto {
   price: number
   original_price: number | null
   discount_pct: number
+  /** End of the active dated POS discount (ISO UTC); set only for flash deals. Absent/null = not a flash deal. */
+  deal_ends_at?: string | null
   thumbnail_url: string | null
   in_stock: boolean
   available_qty: number | null

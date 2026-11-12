@@ -137,7 +137,7 @@ export function mapVariant(
 }
 
 export function mapProduct(
-  p: ProductRow, stock: StockInfo, variants: Record<string, unknown>[], origin: string
+  p: ProductRow, stock: StockInfo, variants: Record<string, unknown>[], origin: string, dealEnds?: Map<string, string>
 ): ProductListItemDto {
   const manage = managesStock(p)
   const weight = String(p.sale_by) === 'weight'
@@ -174,6 +174,8 @@ export function mapProduct(
     min_qty: weight ? 0.25 : 1,
     price, original_price: original,
     discount_pct: Number(p.discount_pct) || 0,
+    // a flash deal = a discounted product with an active, dated POS discount; the app counts down to this real end date
+    deal_ends_at: (Number(p.discount_pct) || 0) > 0 ? (dealEnds?.get(String(p.id)) ?? null) : null,
     thumbnail_url: imageVariantUrl(origin, p.image_url, 300),
     in_stock: inStock, available_qty: availableQty,
     has_variants: variants.length > 0,
@@ -183,9 +185,9 @@ export function mapProduct(
 }
 
 export function mapProductDetail(
-  p: ProductRow, stock: StockInfo, variants: Record<string, unknown>[], origin: string
+  p: ProductRow, stock: StockInfo, variants: Record<string, unknown>[], origin: string, dealEnds?: Map<string, string>
 ): ProductDetailDto {
-  const base = mapProduct(p, stock, variants, origin)
+  const base = mapProduct(p, stock, variants, origin, dealEnds)
   const extra = parseJson<unknown[]>(p.gallery, [])
   const urls: unknown[] = [p.image_url, ...(Array.isArray(extra) ? extra : [])].filter(Boolean)
   const gallery = urls
@@ -211,8 +213,22 @@ export async function loadVisibleProducts(company: AppCompany, ids: string[]): P
   return rows
 }
 
+/** Earliest end of each product's currently active, dated POS discount (ISO UTC). Products without one are absent. */
+export async function loadDealEnds(company: { tp: DbLike }, productIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+  if (!productIds.length) return out
+  try {
+    const { rows } = await company.tp.query<{ product_id: string; ends: Date | string }>(
+      `SELECT product_id, MIN(valid_until) AS ends FROM discounts
+        WHERE scope = 'product' AND is_active = 1 AND product_id IN (?) AND valid_until IS NOT NULL AND valid_until > NOW()
+          AND (valid_from IS NULL OR valid_from <= NOW()) GROUP BY product_id`, [productIds])
+    for (const r of rows) { const iso = toIso(r.ends); if (iso) out.set(String(r.product_id), iso) }
+  } catch { /* tenant without a discounts table: no deals */ }
+  return out
+}
+
 export async function listItems(company: AppCompany, rows: ProductRow[], origin: string, branchId?: string | null): Promise<ProductListItemDto[]> {
   const ids = rows.map(r => String(r.id))
-  const [stock, variants] = await Promise.all([loadStock(company, ids, branchId), loadVariants(company, ids)])
-  return rows.map(r => mapProduct(r, stock, variants.get(String(r.id)) ?? [], origin))
+  const [stock, variants, deals] = await Promise.all([loadStock(company, ids, branchId), loadVariants(company, ids), loadDealEnds(company, ids)])
+  return rows.map(r => mapProduct(r, stock, variants.get(String(r.id)) ?? [], origin, deals))
 }
