@@ -554,6 +554,7 @@ test('reviews: eligibility (not delivered 403, other user 404, duplicate 409, ra
     assert.equal(list.json.items.length, 2)
     const det = (await call('GET', `/catalog/products/${pid}`)).json
     assert.deepEqual([det.rating_avg, det.rating_count], [3.5, 2])
+    assert.equal(det.popularity, 3, 'units on non-cancelled orders in the last 90 days')
     const inList = (await call('GET', '/catalog/products?limit=200')).json.items.find(p => p.id === pid)
     assert.deepEqual([inList.rating_avg, inList.rating_count], [3.5, 2])
     // the POS hides the 2-star review: it leaves the list and the average

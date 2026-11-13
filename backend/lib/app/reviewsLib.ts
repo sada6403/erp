@@ -19,6 +19,20 @@ export async function loadRatings(company: { tp: Db }, productIds: string[]): Pr
   return out
 }
 
+/** Quantity ordered in the last 90 days (orders not cancelled/returned), one grouped query. */
+export async function loadPopularity(company: { tp: Db }, productIds: string[]): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  if (!productIds.length) return out
+  try {
+    const { rows } = await company.tp.query<{ product_id: string; q: string | number }>(
+      `SELECT i.product_id, SUM(i.quantity) AS q FROM customer_order_items i JOIN customer_orders o ON o.id = i.order_id
+        WHERE i.product_id IN (?) AND o.status NOT IN ('cancelled', 'returned') AND o.created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 90 DAY)
+        GROUP BY i.product_id`, [productIds])
+    for (const r of rows) out.set(String(r.product_id), Math.round(Number(r.q) * 100) / 100)
+  } catch { /* ignore */ }
+  return out
+}
+
 export const roundAvg = (n: number): number => Math.round(n * 10) / 10
 export const ratingOf = (m: Map<string, RatingInfo> | undefined, id: string): RatingInfo => m?.get(id) ?? { avg: null, count: 0 }
 

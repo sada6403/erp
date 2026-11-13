@@ -56,6 +56,8 @@ export interface ProductListItemDto {
   /** Average of visible, verified reviews (1-5, one decimal) or null when there are none */
   rating_avg?: number | null
   rating_count?: number
+  /** Units ordered in the last 90 days on non-cancelled orders (0 when none); for the "popular" sort */
+  popularity?: number
   /** Only true when the product has enable_emi = 1 */
   emi_available: boolean
   updated_at: string

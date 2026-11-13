@@ -1,7 +1,7 @@
 import { appRoute } from '@/lib/app/context'
 import { fail } from '@/lib/app/http'
 import { VISIBLE_SQL, loadDealEnds, loadStock, loadVariants, mapProductDetail } from '@/lib/app/catalogLib'
-import { loadDeliveryEta, loadRatings } from '@/lib/app/reviewsLib'
+import { loadDeliveryEta, loadPopularity, loadRatings } from '@/lib/app/reviewsLib'
 import type { ProductDetailDto } from '@/lib/app/contracts/catalog'
 
 export const runtime = 'nodejs'
@@ -15,6 +15,6 @@ export const GET = appRoute({ auth: 'none' }, async ({ req, company, params, ori
   const p = rows[0]
   if (!p) fail(404, 'NOT_FOUND', 'Product not found')
   const branch = req.nextUrl.searchParams.get('branch_id')
-  const [stock, variants, deals, ratings, eta] = await Promise.all([loadStock(company, [String(p.id)], branch), loadVariants(company, [String(p.id)]), loadDealEnds(company, [String(p.id)]), loadRatings(company, [String(p.id)]), loadDeliveryEta(company, branch)])
-  return { ...mapProductDetail(p, stock, variants.get(String(p.id)) ?? [], origin, deals, ratings), estimated_delivery: eta }
+  const [stock, variants, deals, ratings, eta, pop] = await Promise.all([loadStock(company, [String(p.id)], branch), loadVariants(company, [String(p.id)]), loadDealEnds(company, [String(p.id)]), loadRatings(company, [String(p.id)]), loadDeliveryEta(company, branch), loadPopularity(company, [String(p.id)])])
+  return { ...mapProductDetail(p, stock, variants.get(String(p.id)) ?? [], origin, deals, ratings, pop), estimated_delivery: eta }
 })
