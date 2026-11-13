@@ -12,7 +12,7 @@ interface Join {
   reject_reason: string | null; decided_by: string | null; decided_at: string | null; created_at: string
 }
 interface Slip {
-  id: string; order_id: string; order_number: string; customer_name: string | null; order_total: number; reference: string | null
+  id: string; order_id: string; order_number: string; customer_name: string | null; order_total: number; reference: string | null; order_reference?: string | null
   status: 'pending' | 'verified' | 'rejected'; reject_reason: string | null; reviewed_by: string | null; reviewed_at: string | null; created_at: string
 }
 
@@ -80,7 +80,7 @@ export default function AppRequestsPage() {
           <td className="table-cell font-mono">{r.order_number}</td>
           <td className="table-cell">{r.customer_name || '—'}</td>
           <td className="table-cell">{money(r.order_total)}</td>
-          <td className="table-cell">{r.reference || '—'}</td>
+          <td className="table-cell">{r.reference || r.order_reference || '—'}</td>
           <td className="table-cell"><span className={STATUS_BADGE[r.status]}>{r.status}</span></td>
           <td className="table-cell">{fmt(r.created_at)}</td>
           <td className="table-cell"><button className="btn-primary btn-sm" onClick={() => setOpenSlip(r)}>{r.status === 'pending' ? 'Verify' : 'View'}</button></td>
@@ -176,7 +176,7 @@ function SlipModal({ row, onClose, onDone }: { row: Slip; onClose: () => void; o
     <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mb-4">
       <div><span className="text-slate-500">Customer</span><p>{row.customer_name || '—'}</p></div>
       <div><span className="text-slate-500">Order total</span><p>{money(row.order_total)}</p></div>
-      <div className="col-span-2"><span className="text-slate-500">Customer's reference</span><p>{row.reference || '—'}</p></div>
+      <div className="col-span-2"><span className="text-slate-500">Customer's reference</span><p>{row.reference || row.order_reference || '—'}</p></div>
       {row.status !== 'pending' && <div className="col-span-2"><span className="text-slate-500">Decision</span>
         <p><span className={STATUS_BADGE[row.status]}>{row.status}</span> by {row.reviewed_by || '—'} on {fmt(row.reviewed_at)}{row.reject_reason ? `: ${row.reject_reason}` : ''}</p></div>}
     </div>

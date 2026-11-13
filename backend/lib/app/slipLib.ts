@@ -64,11 +64,12 @@ export async function submitSlip(
 export async function adminSlipList(company: AppCompany, status: string | null): Promise<AdminSlipDto[]> {
   const where = status && ['pending', 'verified', 'rejected'].includes(status) ? `WHERE p.status = ?` : ''
   const { rows } = await company.tp.query<Record<string, unknown>>(
-    `SELECT p.*, o.order_number, o.customer_name, o.total_amount FROM order_payment_slips p JOIN customer_orders o ON o.id = p.order_id
+    `SELECT p.*, o.order_number, o.customer_name, o.total_amount, o.payment_reference AS order_reference FROM order_payment_slips p JOIN customer_orders o ON o.id = p.order_id
       ${where} ORDER BY (p.status = 'pending') DESC, p.created_at DESC LIMIT 300`, where ? [status] : [])
   return rows.map(r => ({
     id: String(r.id), order_id: String(r.order_id), order_number: String(r.order_number), customer_name: r.customer_name ? String(r.customer_name) : null,
     order_total: round2(Number(r.total_amount) || 0), reference: r.reference ? String(r.reference) : null,
+    order_reference: r.order_reference ? String(r.order_reference) : null,
     status: String(r.status) as AdminSlipDto['status'], reject_reason: r.reject_reason ? String(r.reject_reason) : null,
     reviewed_by: r.reviewed_by ? String(r.reviewed_by) : null, reviewed_at: toIso(r.reviewed_at), created_at: toIso(r.created_at) ?? '',
   }))

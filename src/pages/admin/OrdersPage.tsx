@@ -58,7 +58,8 @@ export default function OrdersPage() {
       <td className="table-cell text-slate-400">{String(o.branch_name)}</td><td className="table-cell">{Number(o.item_count)}</td>
       <td className="table-cell font-semibold">Rs.{Number(o.total_amount).toLocaleString()}</td>
       <td className="table-cell"><span className={o.payment_status === 'paid' ? 'badge-green' : 'badge-yellow'}>{String(o.payment_status)}</span>
-        {o.payment_method ? <p className="text-xs text-slate-500 mt-1 capitalize">{String(o.payment_method).replace(/_/g, ' ')}</p> : null}</td>
+        {o.payment_method ? <p className="text-xs text-slate-500 mt-1 capitalize">{String(o.payment_method).replace(/_/g, ' ')}</p> : null}
+        {o.payment_reference ? <p className="text-xs text-slate-400 mt-1">Ref: {String(o.payment_reference)}</p> : null}</td>
       <td className="table-cell text-xs text-slate-400">{o.delivery_date ? new Date(String(o.delivery_date)).toLocaleDateString() : '—'}</td>
       <td className="table-cell text-xs text-slate-400">{o.assigned_agent_name ? String(o.assigned_agent_name) : '—'}</td>
       <td className="table-cell"><span className="badge-blue capitalize">{labels(String(o.status))}</span></td>

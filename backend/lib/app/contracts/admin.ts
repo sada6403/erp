@@ -107,6 +107,8 @@ export interface AdminSlipDto {
   customer_name: string | null
   order_total: number
   reference: string | null
+  /** Reference the customer typed at checkout (customer_orders.payment_reference) */
+  order_reference: string | null
   status: 'pending' | 'verified' | 'rejected'
   reject_reason: string | null
   reviewed_by: string | null
