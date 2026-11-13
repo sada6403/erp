@@ -47,8 +47,11 @@ export function CloseButton({ onPress, white }: { onPress: () => void; white?: b
 export function SheetSurface({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
   const theme = useTheme();
   const [y] = useState(() => new Animated.Value(40));
+  // A native-driven translateY leaves the touch area at the pre-animation position (taps land ~40 dp off).
+  // Once the slide-up finishes the transform is dropped, so the hit area is exactly where the sheet is drawn.
+  const [settled, setSettled] = useState(false);
   useEffect(() => {
-    Animated.timing(y, { toValue: 0, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start();
+    Animated.timing(y, { toValue: 0, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }).start(() => setSettled(true));
   }, [y]);
   return (
     <Animated.View
@@ -62,7 +65,7 @@ export function SheetSurface({ children, onClose }: { children: React.ReactNode;
           paddingHorizontal: 20,
           paddingBottom: 24,
           maxHeight: '90%',
-          transform: [{ translateY: y }],
+          transform: settled ? undefined : [{ translateY: y }],
         },
         shadows.sheet,
       ]}

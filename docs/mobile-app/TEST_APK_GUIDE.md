@@ -1,6 +1,10 @@
 # Natural Plantation (Test) app: tester guide
 
-Version 1.0.0-test.6 (13 Nov 2026). If you have an older test build installed, install this file over it (your login is kept or you log in again). This is a TEST app. It talks to a test server with test data, not to the real shop. Nothing you do here touches real stock, real money or real customers.
+Version 1.0.0-test.8 (13 Nov 2026). If you have an older test build installed, install this file over it (your login is kept or you log in again). This is a TEST app. It talks to a test server with test data, not to the real shop. Nothing you do here touches real stock, real money or real customers.
+
+**Changes in test.8:** home banner carousel (swipe, auto-slide 5 s, dots, tap opens product / category / flash deals / Smart Buy / https page), home sections order and on/off controlled from the POS (App Control), New arrivals and Featured rails, update sheet tap fix, real logo on the Android cold-start splash, skeleton instead of a "no results" flash on first open. The 3 banners shown on the test server are marked TEST.
+
+**Changes in test.7:** first build with the App Control banners (superseded by test.8).
 
 **Changes in test.6:** in-app updates (OTA banner once enabled, "New version available" sheet, force-update screen, APK download with SHA-256 check from our test server); bank reference now prefilled on the order page; Categories spinner no longer overlaps the subtitle; "Near me" in Join shows "Location found" or an error; bell has test id `header-bell`.
 

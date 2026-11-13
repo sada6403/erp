@@ -3,6 +3,7 @@ import i18n from '@/i18n';
 import { CAN_SELF_INSTALL, ENV } from '@/lib/env';
 import { compareVersions } from '@/lib/format';
 import { readJson, writeJson } from '@/lib/storage';
+import { perf } from '@/lib/perf';
 import { useServerStatus } from '@/features/common/hooks';
 import { downloadVerifyInstall, type ApkStage } from './apkUpdate';
 import { startPlayUpdate } from './playUpdate';
@@ -28,12 +29,14 @@ export function useAppUpdate() {
   const notes = useMemo(() => data?.release_notes?.[lang] || data?.release_notes?.en || '', [data, lang]);
 
   const dismiss = useCallback(() => {
+    perf(`update:dismiss ${String(new Error('dismiss').stack).split(String.fromCharCode(10)).slice(1, 4).join(' | ')}`);
     const d = { version: latest, at: Date.now() };
     writeJson(DISMISS_KEY, d);
     setDismissed(d);
   }, [latest]);
 
   const start = useCallback(async () => {
+    perf('update:start');
     setError(null);
     try {
       if (CAN_SELF_INSTALL) {
@@ -45,6 +48,7 @@ export function useAppUpdate() {
         await startPlayUpdate(required);
       }
     } catch (e) {
+      perf(`update:error ${(e as Error).message}`);
       setError((e as Error).message || 'UPDATE_FAILED');
     } finally {
       setStage(null);

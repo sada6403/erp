@@ -92,7 +92,8 @@ export function useProducts(filter: ProductFilter) {
     () => filterProducts(query.data?.items ?? [], { q, categoryId, childIds, inStockOnly, minPrice, maxPrice, sort }),
     [query.data, q, categoryId, childIds, inStockOnly, minPrice, maxPrice, sort],
   );
-  return { ...query, items };
+  // First frame before the fetch starts is still "loading" (skeleton), not an empty result; offline with no cache falls through to the empty/error state.
+  return { ...query, items, isLoading: query.isPending && query.fetchStatus !== 'paused' };
 }
 
 export function useCategories() {

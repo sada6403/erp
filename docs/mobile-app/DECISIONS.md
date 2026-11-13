@@ -192,3 +192,29 @@ The app does not disable autofill. For adb smoke/timing runs only: record `setti
 5. Home layout is one JSON `app_settings` row (`home_layout`) so it rides the existing sync; the API fills defaults, so an unsynced or empty POS just means the default layout.
 6. Flash deals stay driven by POS Discounts (no new price logic). Featured = new additive synced `products.is_featured`. Announcements are Phase 2 (v1.1): placeholder tab only.
 7. Deploy order: backend first (new columns/table via `ensureTenantCompatibility`), then the POS release. A new POS pushing the new banner columns to an old backend would lose them silently.
+
+## 2026-11-13 — Login speed: the "8 s grey screen" is not reproducible on test.6 (measurement)
+Method: test.6 (staging flavour, `[perf]` marks via logcat), `pm clear` (fresh install state) -> open -> Login -> time from tapping Sign in to the last first-screen API answer. Phone on Wi-Fi, then on mobile data (Mobitel LTE, Wi-Fi switched off). Seconds from tap:
+
+| Role | Wi-Fi: dashboard shown | Wi-Fi: all first data | LTE: dashboard shown | LTE: all first data |
+|---|---|---|---|---|
+| Customer | 0.61 | 0.81 | 0.69 | 1.05 |
+| Smart Buy member | 0.58 | 0.78 | 0.50 | 0.69 |
+| Field officer | 0.84 | 1.06 | 0.51 | 0.76 |
+| Branch manager | 0.74 | 1.04 | 0.56 | 0.76 |
+| Regional | 0.70 | 0.91 | 0.58 | 0.92 |
+| Zonal | 0.48 | 0.68 | 0.48 | 0.68 |
+| Manager | 0.70 | 0.94 | 0.53 | 0.75 |
+| AGM | 0.66 | 0.91 | 0.54 | 0.74 |
+| Director | 0.68 | 0.92 | 0.53 | 0.85 |
+
+Everything is under the 1.5 s target; the first-screen requests run in parallel (3 calls after login), nothing sequential. Manager dashboards (team/visits queries) answer in 0.2-0.7 s. The grey/blank first frame seen in the test.4 regression was the first cold-cache frame (`grid:items=0 loading=false`, i.e. "no results" before the first fetch started); test.8 treats that frame as loading (skeleton) via `useProducts().isLoading = isPending && fetchStatus !== 'paused'`. If an 8 s delay is seen again, record: account, Wi-Fi/LTE, fresh install or not, and `adb logcat -s ReactNativeJS:* | grep "[perf]"`.
+
+## 2026-11-13 — In-app updates: libraries, design, findings
+- Approved by the owner: `expo-in-app-updates` 0.13.0 (Play In-App Updates; IMMEDIATE when forced, FLEXIBLE otherwise). First-party Expo modules added for the staging APK self-update: `expo-file-system`, `expo-crypto`, `expo-intent-launcher`, and `expo-web-browser` (in-app browser for https banner links). All listed in AGENTS.md section 4.
+- Staging APK hosting: nginx location `/test-apk/` (alias `/var/www/pos-staging-apk/`, staging server block only; backup `/root/pos-staging.nginx.bak-*`). The App Versions "Fetch & hash" button downloads from that URL and stores the SHA-256; the app re-checks it before opening the installer.
+- Verified on the phone (test.6 -> installer): sheet with notes, force-update screen, download progress, SHA-256 check, Android "install unknown apps" one-time permission, then "install an update, your data will not be lost". **Play Protect then asks to send the APK to Google ("Scan app")**. That is an upload of our test app to an outside service, so automation does not accept it; the owner decides (tap "Scan app" once per new APK, or turn Play Protect scanning off on the test phone). `adb install` does not show this prompt.
+- Bug found and fixed (test.8): bottom sheets used a native-driven translateY, so the touch area stayed ~40 dp off the drawn position after the slide-up and a tap on "Update now" hit "Later" (the update was dismissed for 3 days). `SheetSurface` now drops the transform once the animation ends.
+- The hand-managed `C:
+pndroid` project had Expo's grey placeholder as `splashscreen_logo.png` (Android 12 cold-start splash showed a grey grid, not the logo). Regenerated from `assets/splash-icon.png` for test.8. EAS builds regenerate it from the same file via the `expo-splash-screen` plugin.
+- Launcher icon (adaptive, from `logo.jpg`): sharp and round, but the logo fills the whole mask so the red hands and the word "Plantation" touch the circle edge. A PNG with ~15% padding (safe zone) would look cleaner; owner to send one if wanted.

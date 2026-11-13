@@ -72,7 +72,7 @@ export function BannerCarousel() {
 
   if (count === 0) return null;
   return (
-    <View testID="home-banners" style={{ paddingTop: 12, paddingBottom: 8 }}>
+    <View testID="home-banners" style={{ paddingTop: 12, paddingBottom: 8, marginHorizontal: -10 }}>
       <FlatList
         ref={listRef}
         horizontal
