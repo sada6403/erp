@@ -223,6 +223,7 @@ export async function createCollection(company: AppCompany, user: AppUserCtx, ag
         userId: String(u.rows[0].id), type: 'system', channel: 'smartbuy', title: 'Payment received',
         body: `Rs ${amount.toFixed(2)} was received by your agent for ${String(m.scheme_name)}. It shows as pending until the branch verifies it. Receipt ${receipt}.`,
         dedupeKey: `collect:${eventId}:pending`,
+        email: { type: 'cash_receipt', entityId: eventId, data: { scheme: String(m.scheme_name), amount, receipt } },
       })
     }
   } catch (e) { console.error('[collections] member notification failed', e) }

@@ -247,6 +247,14 @@ closed or killed — like WhatsApp or Daraz.
 - Backend: `notification_jobs` queue table + worker (cron route every minute); retries; removes dead
   tokens (`DeviceNotRegistered`).
 
+### 8.1b Transactional email (added 2026-11-13)
+Every user-facing event that has a push/inbox entry can also send a branded email, through the same queue hooks (`enqueueNotification({ ..., email: { type, entityId } })`).
+- Types: welcome, verify_email, password_reset, order_placed / confirmed / dispatched / delivered / cancelled, slip_verified / rejected, join_received / approved / rejected, cash_receipt. Rendered in en / ta / si from `app_users.language`; company name, logo, address and contact come from the POS company profile (`loadCompanyProfile`, the same data as `GET /company`). Olive `#5A6B2E`, mobile-friendly HTML + plain-text part (`lib/app/emailTemplates.ts`, pure).
+- Queue + status log: table `email_jobs` (created by `ensureTenantCompatibility` via `appSchema.ts`). One row per `(event type, entity id)` (`dedupe_key`, unique), retries 1 / 5 / 15 / 60 min then `failed`. It stores the user id and a sha256 hash of the address, never the address; error texts are stripped of addresses. Statuses: `pending, sending, sent, suppressed, skipped (no address), failed`. Verification-code payloads are wiped once the job is final.
+- Transport: the company SMTP already used for codes (`sendCompanyEmail`). The cron worker (`/cron/notifications`) runs `runEmailWorker` first; codes are sent immediately.
+- Safety: `EMAIL_MODE=production` sends to everyone. Any other or missing value is restricted: only addresses in `EMAIL_ALLOWLIST` (comma separated) are sent, others are logged `suppressed`. `lib/email.ts` applies the same check to every outgoing mail. NODE_ENV is not used (staging also runs production builds).
+- Preview: `npm run email:preview` writes every template to `backend/email-previews/` (git-ignored). Tests: `npm run test:email`.
+
 ### 8.2 In-app updates (like the POS desktop auto-update)
 Two layers:
 

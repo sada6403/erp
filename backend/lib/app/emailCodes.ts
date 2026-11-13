@@ -1,7 +1,7 @@
 // 6-digit email codes (verify email / reset password) over the company SMTP.
 import { randomInt, randomUUID } from 'crypto'
 import type { AppCompany } from './context'
-import { sendCompanyEmail } from '../email'
+import { sendEmailNow } from './emailService'
 import { sha256 } from './security'
 import { fail } from './http'
 
@@ -11,20 +11,21 @@ export const CODE_MAX_ATTEMPTS = 5
 const hashCode = (userId: string, code: string, purpose: string) => sha256(`${purpose}:${userId}:${code}`)
 
 export async function issueEmailCode(
-  company: AppCompany, userId: string, email: string, purpose: 'verify' | 'reset', appName: string
+  company: AppCompany, userId: string, email: string, purpose: 'verify' | 'reset', _appName: string
 ): Promise<{ sent: boolean; smtpConfigured: boolean }> {
   const code = String(randomInt(0, 1000000)).padStart(6, '0')
+  const rowId = randomUUID()
   await company.tp.query(`UPDATE app_email_verifications SET used_at = NOW() WHERE user_id = ? AND purpose = ? AND used_at IS NULL`, [userId, purpose])
   await company.tp.query(
     `INSERT INTO app_email_verifications (id, user_id, email, purpose, code_hash, expires_at)
      VALUES (?, ?, ?, ?, ?, DATE_ADD(NOW(), INTERVAL ? SECOND))`,
-    [randomUUID(), userId, email, purpose, hashCode(userId, code, purpose), CODE_TTL_SECONDS])
-  const subject = purpose === 'verify' ? `${appName}: verify your email` : `${appName}: password reset code`
-  const text = `Your ${appName} code is ${code}. It is valid for 15 minutes. If you did not request it, ignore this email.`
-  const r = await sendCompanyEmail(company.id, { to: email, subject, text, html: `<p>${text}</p>` })
-  const smtpConfigured = r.ok || !/not configured/i.test(r.error ?? '')
-  if (!r.ok && process.env.NODE_ENV !== 'production') console.log(`[app-api dev] email code for ${email}: ${code} (${r.error})`)
-  return { sent: r.ok, smtpConfigured }
+    [rowId, userId, email, purpose, hashCode(userId, code, purpose), CODE_TTL_SECONDS])
+  // Branded en/ta/si email through the queue: allow-list in non-production, status log, no address stored.
+  const r = await sendEmailNow(company.dbSchema, company.tp, { userId, type: purpose === 'verify' ? 'verify_email' : 'password_reset', entityId: rowId, data: { code } })
+  // 'suppressed' (non-production, address not allow-listed) is reported as sent so app flows behave the same everywhere.
+  const sent = r.status === 'sent' || r.status === 'suppressed'
+  if (!sent && process.env.NODE_ENV !== 'production') console.log(`[app-api dev] email code for user ${userId}: ${code} (${r.status})`)
+  return { sent, smtpConfigured: r.smtpConfigured }
 }
 
 /** Verifies and consumes a code. Throws CODE_INVALID / CODE_EXPIRED. Returns the email it was sent to. */

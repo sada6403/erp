@@ -110,6 +110,7 @@ export async function decideSlip(
     title: decision === 'verify' ? 'Payment received' : 'Payment slip not accepted',
     body: decision === 'verify' ? `We received your payment for order ${orderNumber}.` : `Your slip for order ${orderNumber} was not accepted: ${reason}. Please upload a new one.`,
     url: `lankahome://orders/${orderId}`, dedupeKey: `slip:${id}:${decision}`,
+    email: { type: decision === 'verify' ? 'slip_verified' : 'slip_rejected', entityId: id, data: { order: orderNumber, reason: reason ?? '' } },
   }).catch(() => undefined)
   return { ok: true, status: decision === 'verify' ? 'verified' : 'rejected' }
 }

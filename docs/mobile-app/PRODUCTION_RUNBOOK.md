@@ -174,3 +174,9 @@ Go to production when: staging verified, backup restored once, upload key = MATC
 - Include that directory in the backups (it holds NIC photos: personal data). Never serve it through nginx; never copy it to staging.
 - Staging already uses `/var/www/pos-staging-private`.
 - The two new cloud tables (`smartbuy_join_requests`, `order_payment_slips`) are created by `ensureTenantCompatibility` on first request; no manual SQL.
+
+## 3d. Transactional email (new, before the section 3 deploy)
+- Table `email_jobs` is created on the first request/cron hit by `ensureTenantCompatibility` (additive). Nothing to run by hand.
+- **Set `EMAIL_MODE=production` in the production backend env** (name only here; add it with a script, never print the file). Without it the backend runs restricted and suppresses all mail, including the existing admin/onboarding emails. `EMAIL_ALLOWLIST` must be unset or is ignored in production.
+- Sender check: the company SMTP (Super Admin > company > email) must send from a domain with SPF/DKIM set up; send the Super Admin "email test" to your own address first.
+- After deploy: `SELECT status, COUNT(*) FROM email_jobs GROUP BY status` should show `sent`, not `suppressed` or `failed`. The table holds no addresses. Env names involved: `EMAIL_MODE`, `EMAIL_ALLOWLIST`, `PUBLIC_BASE_URL` (logo URL), `CRON_SECRET`.

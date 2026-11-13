@@ -7,3 +7,5 @@ uploads
 .seed-output.json
 .seed-output-testcopy.json
 private-uploads
+
+email-previews

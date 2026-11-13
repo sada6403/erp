@@ -14,6 +14,7 @@ import {
 import { getSettings, flag } from './settings'
 import { deliveryOtp, deliveryOtpHash, sha256 } from './security'
 import { enqueueNotification } from './notify'
+import type { EmailType } from './emailTemplates'
 
 export const CANCELLABLE: OrderStatus[] = ['pending', 'confirmed', 'processing', 'preparing', 'ready_for_delivery']
 const RELEASE_RESERVATION_ON: OrderStatus[] = ['dispatched', 'in_transit', 'delivered', 'cancelled', 'returned']
@@ -297,6 +298,7 @@ export async function createOrder(
       userId: user.userId, type: 'order_status', channel: 'orders', title: 'Order placed',
       body: `Your order ${orderNumber} has been received. We will confirm it shortly.`,
       url: `lankahome://orders/${orderId}`, dedupeKey: `order:${orderId}:pending`,
+      email: { type: 'order_placed', entityId: orderId },
     })
     const dto = await getOrderDto(conn, company, orderId, origin, true)
     await conn.query(
@@ -419,6 +421,11 @@ const STATUS_TEXT: Record<string, { title: string; body: (n: string) => string }
   returned: { title: 'Order returned', body: n => `Your order ${n} was marked as returned.` },
 }
 
+// Order statuses that also get an email (the rest stay push/inbox only).
+const EMAIL_FOR_STATUS: Record<string, string> = {
+  confirmed: 'order_confirmed', dispatched: 'order_dispatched', in_transit: 'order_dispatched', delivered: 'order_delivered', cancelled: 'order_cancelled',
+}
+
 /** Append history + notify + release reservations when an order's status moved (idempotent). */
 export async function onOrderStatusChanged(db: DbLike, orderId: string): Promise<void> {
   const { rows } = await db.query<Record<string, unknown>>(`SELECT * FROM customer_orders WHERE id = ?`, [orderId])
@@ -441,6 +448,7 @@ export async function onOrderStatusChanged(db: DbLike, orderId: string): Promise
     await enqueueNotification(db, {
       userId: String(o.app_user_id), type: 'order_status', channel: 'orders', title: text.title,
       body: text.body(String(o.order_number)), url: `lankahome://orders/${orderId}`, dedupeKey: `order:${orderId}:${status}`,
+      email: EMAIL_FOR_STATUS[status] ? { type: EMAIL_FOR_STATUS[status] as EmailType, entityId: orderId } : undefined,
     })
   }
 }

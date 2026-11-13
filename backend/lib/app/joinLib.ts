@@ -5,6 +5,7 @@ import { fail, only, optStr, reqStr, toIso } from './http'
 import { getModules } from './settings'
 import { maskPhone, normalizePhone } from './security'
 import { enqueueNotification } from './notify'
+import { queueEmail } from './emailService'
 import { deletePrivateImage } from './privateFiles'
 import type { JoinRequestDto } from './contracts/smartbuy'
 import type { AdminJoinRequestDto, AdminJoinDecisionResponse } from './contracts/admin'
@@ -115,6 +116,7 @@ export async function submitJoinRequest(
     throw e
   }
   const row = await company.tp.query<Record<string, unknown>>(`${SELECT_JOIN} WHERE j.id = ?`, [id])
+  if (source === 'self') await queueEmail(company.tp, { userId: user.userId, type: 'join_received', entityId: id, data: { scheme: String(row.rows[0]?.scheme_name ?? '') } })
   return { created: true, dto: joinDto(row.rows[0]) }
 }
 
@@ -220,11 +222,16 @@ export async function decideJoinRequest(
       }
     }
   }
+  // Email only the applicant (self-join). Agent-initiated requests have no applicant account to mail.
+  const jInfo = await company.tp.query<Record<string, unknown>>(
+    `SELECT j.source, s.name AS scheme_name FROM smartbuy_join_requests j LEFT JOIN chit_schemes s ON s.id = j.scheme_id WHERE j.id = ? LIMIT 1`, [id]).catch(() => ({ rows: [] as Record<string, unknown>[] }))
+  const emailIt = String(jInfo.rows[0]?.source) === 'self'
   await enqueueNotification(company.tp, {
     userId: submitter, type: 'account', channel: 'smartbuy',
     title: decision === 'approve' ? 'Smart Buy request approved' : 'Smart Buy request not approved',
     body: decision === 'approve' ? 'A Smart Buy join request you submitted was approved.' : `A Smart Buy join request was not approved: ${reason}`,
     dedupeKey: `join:${id}:${decision}`,
+    email: emailIt ? { type: decision === 'approve' ? 'join_approved' : 'join_rejected', entityId: id, data: { scheme: String(jInfo.rows[0]?.scheme_name ?? ''), reason: reason ?? '' } } : undefined,
   }).catch(() => undefined)
   return { ok: true, status: decision === 'approve' ? 'approved' : 'rejected', member_id: memberId, customer_id: customerId }
 }

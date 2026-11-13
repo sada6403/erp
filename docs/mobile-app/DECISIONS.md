@@ -141,3 +141,9 @@ The 30-day purge of NIC numbers and photos on join requests has no scheduler. It
 ## 2026-11-13 (evening) Working mode and secrets (Moni)
 - Continuous work, no schedule. A new test APK (test.3, test.4 ...) after every 2-3 finished items, with a changelog line in TEST_APK_GUIDE. Hard STOPs: production deploy and DB password rotation, merge to main, Play upload / eas submit, OTA publish, real WhatsApp, live payment keys, emails outside EMAIL_ALLOWLIST on staging.
 - Never print secret values (AGENTS.md rule 14). Production DB credentials were exposed in an agent session on 13 Nov; rotation is a production STOP item done with the main developer at deploy time.
+
+## 2026-11-13 Transactional email (Moni)
+1. Reuse the company SMTP and the notification queue (no new provider). Each user-facing event also enqueues an email when the user has an address; one email per (event type, entity id); language from `app_users.language`.
+2. Staging safety: `EMAIL_MODE=production` is the ONLY value that sends to everyone. Missing/unknown = restricted: send only to `EMAIL_ALLOWLIST`, log everything else as `suppressed`. NODE_ENV is deliberately not used. The same guard sits in `lib/email.ts`, so no other code path can mail a real customer from staging. Consequence: the production deploy MUST set `EMAIL_MODE=production`, otherwise no email (including existing admin/onboarding mail) is sent.
+3. No addresses in the status table or logs: user id + sha256 hash; SMTP error texts are scrubbed.
+4. Agent-initiated Smart Buy requests send no join emails (the submitter is the agent, the applicant has no account); self-join sends received / approved / rejected.

@@ -4,6 +4,8 @@ import { pool, tenantPool } from '../db'
 import { ensureTenantCompatibility } from '../auth'
 import type { NotificationChannel, NotificationType } from './contracts/notifications'
 import { parseJson, toIso } from './http'
+import { queueEmail, runEmailWorker } from './emailService'
+import type { EmailType } from './emailTemplates'
 
 type Q = { query: (sql: string, values?: unknown[]) => Promise<{ rows: unknown[] }> }
 
@@ -17,6 +19,8 @@ export type NotifyInput = {
   url?: string | null
   /** Same key => enqueued once */
   dedupeKey?: string
+  /** Also email the user (only if they have an address). One email per (type, entityId). */
+  email?: { type: EmailType; entityId: string; data?: Record<string, unknown> }
 }
 
 /** Never put passwords / OTPs / NIC / phone numbers in title or body. */
@@ -40,6 +44,7 @@ export async function enqueueNotification(db: Q, n: NotifyInput): Promise<void> 
     `INSERT INTO app_notifications (id, user_id, type, channel, title, body, data) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     [randomUUID(), n.userId, n.type, n.channel, n.title, n.body, data]
   )
+  if (n.email) await queueEmail(db, { userId: n.userId, ...n.email })
 }
 
 const EXPO_URL = 'https://exp.host/--/api/v2/push/send'
@@ -66,6 +71,8 @@ type JobRow = { id: string; user_id: string; type: string; channel: string; titl
 export async function runNotificationWorker(dbSchema: string): Promise<{ processed: number; sent: number; failed: number; dryRun: boolean }> {
   await ensureTenantCompatibility(dbSchema)
   const tp = tenantPool(dbSchema)
+  // Emails first, independent of the push dry-run flag; EMAIL_MODE / EMAIL_ALLOWLIST decide who may receive mail.
+  await runEmailWorker(dbSchema).catch(e => console.error('[email] worker failed', e instanceof Error ? e.message.replace(/\S+@\S+/g, '[email]') : 'error'))
   const dryRun = !pushEnabled()
   const { rows } = await tp.query<JobRow>(
     `SELECT id, user_id, type, channel, title, body, data, attempts FROM notification_jobs

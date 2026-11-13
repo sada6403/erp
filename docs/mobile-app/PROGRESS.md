@@ -162,3 +162,9 @@ Phone checks on the installed staging APK: wishlist add/remove and order cancel 
 ## 2026-11-13 (evening) Security note and new working mode
 - 13 Nov: production DATABASE_URL credentials were printed in an agent session. Rotation planned with the main developer during the production deploy (PRODUCTION_RUNBOOK 3c). Permanent rule added: AGENTS.md rule 14 and HANDOFF section 6 (never print secret values, names only).
 - test.2 test APK handed to testers. Working mode changed by Moni: continuous, no day-by-day schedule; new test APK after every 2-3 items; hard STOPs unchanged.
+
+## 2026-11-13 Quarantined incoming record on the test POS (product_attributes 17f708dd...)
+**Verdict: test-data-only orphan on staging, not a sync-ordering bug.** The POS SQLite `product_attributes.category_id` has a foreign key to `categories(id)`; the attribute "flavour" (supermarket) on the staging copy points to category `553d54a3-...`. On staging (schema `pos_erp_app_test_company_testcopy`) that category does not exist (the `categories` table has 0 rows; MySQL has no FK on `product_attributes`, so the orphan was never rejected there). Pulling categories first (it already is, before products and `product_attributes` in the pull order) cannot help because the parent is not in the cloud at all. The POS correctly quarantines the row instead of looping (9 attempts, "FOREIGN KEY constraint failed"). It has no attribute values either. Fix is data-only: delete that attribute row on staging or re-create the category; no code change.
+
+## 2026-11-13 Transactional email
+Built: `email_jobs` queue/status log, 14 email types x en/ta/si, hooks on order / slip / join / collection / register / email-code flows, allow-list guard (EMAIL_MODE, EMAIL_ALLOWLIST), preview script, 60 unit tests (`npm run test:email`). See ARCHITECTURE 8.1b and DECISIONS 2026-11-13. Staging EMAIL_ALLOWLIST holds the tester address only.

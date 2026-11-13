@@ -164,6 +164,27 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
        UNIQUE KEY uq_notif_jobs_dedupe (dedupe_key),
        INDEX idx_notif_jobs_status (status, next_attempt_at)
      )`,
+  // Transactional email queue + status log. One row per (event type, entity id). NO email addresses stored:
+  // user_id + sha256 hash only. payload holds ids / short text (verification codes are wiped once the job is final).
+  `CREATE TABLE IF NOT EXISTS email_jobs (
+       id VARCHAR(191) NOT NULL PRIMARY KEY,
+       user_id VARCHAR(191) NOT NULL,
+       event_type VARCHAR(32) NOT NULL,
+       entity_id VARCHAR(191) NOT NULL,
+       dedupe_key VARCHAR(191) NOT NULL,
+       lang VARCHAR(5) NOT NULL DEFAULT 'en',
+       payload TEXT NULL,
+       status VARCHAR(16) NOT NULL DEFAULT 'pending',
+       attempts INT NOT NULL DEFAULT 0,
+       next_attempt_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       to_hash CHAR(64) NULL,
+       last_error VARCHAR(400) NULL,
+       sent_at DATETIME NULL,
+       ${TS},
+       UNIQUE KEY uq_email_jobs_dedupe (dedupe_key),
+       INDEX idx_email_jobs_status (status, next_attempt_at),
+       INDEX idx_email_jobs_user (user_id)
+     )`,
   `CREATE TABLE IF NOT EXISTS app_request_receipts (
        id VARCHAR(191) NOT NULL PRIMARY KEY,
        user_id VARCHAR(191) NOT NULL,

@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto'
 import { NextResponse } from 'next/server'
 import { appRoute } from '@/lib/app/context'
 import { EMAIL_RE, fail, only, optStr, reqStr } from '@/lib/app/http'
+import { queueEmail } from '@/lib/app/emailService'
 import { assertPasswordPolicy, hashPassword, issueTokens, normalizePhone, toAuthUser } from '@/lib/app/security'
 import type { RegisterResponse } from '@/lib/app/contracts/auth'
 
@@ -32,6 +33,7 @@ export const POST = appRoute({ auth: 'none', limiter: 'auth' }, async ({ company
     throw e
   }
   const { rows } = await company.tp.query<Record<string, unknown>>(`SELECT * FROM app_users WHERE id = ?`, [id])
+  if (email) await queueEmail(company.tp, { userId: id, type: 'welcome', entityId: id })
   const tokens = await issueTokens(company, rows[0], { deviceId })
   const out: RegisterResponse = { tokens, user: toAuthUser(rows[0], null), must_change_password: false }
   return NextResponse.json(out, { status: 201 })
