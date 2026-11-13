@@ -96,6 +96,17 @@ export interface JoinRequestDto {
   reject_reason: string | null
   created_at: string
   decided_at: string | null
+  /** Branch the applicant chose (or the agent's branch); the member is enrolled there on approval */
+  branch_name: string | null
+  /** Agent who keeps the credit */
+  agent_name: string | null
+}
+/** GET /smartbuy/agents/lookup?code=: only the display name + branch, so the applicant can confirm the agent. */
+export interface AgentLookupResponse {
+  code: string
+  name: string
+  branch_id: string | null
+  branch_name: string | null
 }
 export interface JoinRequestsResponse {
   items: JoinRequestDto[]
@@ -109,6 +120,10 @@ export interface JoinRequestFields {
   nic_number: string
   address?: string
   notes?: string
+  /** Self join: the agent's code (required for customers; an agent submitter is the agent) */
+  agent_code?: string
+  /** Self join: nearest branch id (required for customers; agents default to their own branch) */
+  branch_id?: string
   /** Idempotency key; the same id returns the original request */
   client_event_id: string
 }

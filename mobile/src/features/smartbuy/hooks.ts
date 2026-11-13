@@ -35,6 +35,11 @@ export function useJoinRequests() {
   return useQuery({ queryKey: qk.smartbuy.joinRequests, queryFn: () => smartbuyApi.joinRequests(), refetchInterval: 30_000 });
 }
 
+/** Confirm an agent code: returns the agent's display name + branch only. Runs on demand (button), never on every keystroke. */
+export function useAgentLookup() {
+  return useMutation({ mutationFn: (code: string) => smartbuyApi.agentLookup(code.trim()) });
+}
+
 export function useSubmitJoin() {
   const qc = useQueryClient();
   return useMutation({

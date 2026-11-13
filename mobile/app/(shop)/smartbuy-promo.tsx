@@ -19,6 +19,7 @@ export default function SmartBuyPromoScreen() {
   return (
     <Screen>
       <ScreenHeading title={t('promo.title')} sub={t('promo.body')} />
+      {modules.smartbuy ? <Button label={t('joinReq.myRequestsTitle')} variant="link" onPress={() => router.push('/join-requests')} /> : null}
       {!modules.smartbuy ? (
         <EmptyState icon="💎" title={t('promo.unavailable')} />
       ) : isLoading ? (

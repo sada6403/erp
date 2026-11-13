@@ -574,15 +574,30 @@
     "submit": "Send join request",
     "devSubmitted": "Join request recorded (dev only)",
     "heading": "Join {{app}} Smart Buy",
-    "blurb": "Deposit weekly into a savings scheme and take part in the monthly draws.",
+    "blurb": "Save regularly in a scheme and take part in the draws. Your branch checks your details and approves your request.",
     "selectPlan": "Select Scheme Plan",
     "nicLabel": "National Identity Card (NIC) Number",
     "nicPlaceholder": "1990XXXXXXXX or XXXXXXXXXV",
-    "submitApproval": "Submit for Branch POS Approval",
+    "submitApproval": "Send for branch approval",
     "nicRequired": "Please enter your National Identity Card (NIC) number",
     "submitted": "✓ Join application submitted! Sent to Kandy POS branch for administrator verification.",
     "perWeek": "week",
-    "perMonth": "month"
+    "perMonth": "month",
+    "agentCode": "Agent code",
+    "agentCodeHint": "Ask your Smart Buy agent for their code",
+    "checkAgent": "Check agent",
+    "agentIs": "Agent: {{name}}",
+    "needAgentCode": "Enter your agent's code",
+    "confirmAgent": "Check the agent code first so we can show the agent's name",
+    "branch": "Your nearest branch",
+    "nearMe": "Show branches near me",
+    "locationDenied": "Location is off. Pick your branch from the list.",
+    "needBranch": "Choose your branch",
+    "nicPhotos": "NIC photos (front and back)",
+    "privacy": "Your NIC details are used only to verify your membership and are deleted 30 days after the decision.",
+    "sentTitle": "Request sent",
+    "sentBody": "Your branch will check your details. We will tell you here, by notification and by email once it is approved.",
+    "approvalNote": "You can follow the status under My Smart Buy requests."
   },
   "draws": {
     "title": "Monthly Draw Results & Proof",
@@ -822,6 +837,9 @@
     "approved": "Approved",
     "rejected": "Not approved: {{reason}}",
     "add": "Add member",
-    "permission": "Allow camera or photo access to add the NIC photos."
+    "permission": "Allow camera or photo access to add the NIC photos.",
+    "myRequestsTitle": "My Smart Buy requests",
+    "myRequestsSub": "Waiting, approved or not approved",
+    "approvedMsg": "Approved. Welcome to Smart Buy!"
   }
 }

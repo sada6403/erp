@@ -59,6 +59,7 @@ import type {
 import type {
   DrawsResponse,
   MySchemesResponse,
+  AgentLookupResponse,
   JoinRequestDto,
   JoinRequestsResponse,
   OpenSchemesResponse,
@@ -186,6 +187,7 @@ export const smartbuyApi = {
   wallet: () => get<WalletResponse>('/wallet'),
   walletTransactions: () => get<WalletTransactionsResponse>('/wallet/transactions'),
   joinRequests: (cursor?: string) => get<JoinRequestsResponse>('/smartbuy/join-requests', { cursor }),
+  agentLookup: (code: string) => get<AgentLookupResponse>('/smartbuy/agents/lookup', { code }),
   submitJoin: (form: FormData) => postForm<JoinRequestDto>('/smartbuy/join-requests', form),
 };
 

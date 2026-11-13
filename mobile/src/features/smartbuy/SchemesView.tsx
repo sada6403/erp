@@ -113,6 +113,7 @@ export function SchemesView() {
         />
       </View>
       <Button label={t('schemes.apply')} variant="secondaryBlock" onPress={() => router.push('/join')} />
+      <Button label={t('joinReq.myRequestsTitle')} variant="link" onPress={() => router.push('/join-requests')} />
       {items.length > 0 ? (
         <Button label={t('schemes.statement')} variant="link" onPress={() => router.push({ pathname: '/statement', params: { id: items[0].scheme_id } })} />
       ) : null}

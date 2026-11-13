@@ -6,7 +6,7 @@ import toast from 'react-hot-toast'
 
 type Tab = 'joins' | 'slips'
 interface Join {
-  id: string; source: 'agent' | 'self'; agent_code: string | null; agent_name: string | null; scheme_name: string
+  id: string; source: 'agent' | 'self'; agent_code: string | null; agent_name: string | null; branch_name?: string | null; scheme_name: string
   full_name: string; phone: string; nic_number: string; address: string | null; notes: string | null
   has_nic_front: boolean; has_nic_back: boolean; status: 'pending' | 'approved' | 'rejected'
   reject_reason: string | null; decided_by: string | null; decided_at: string | null; created_at: string
@@ -65,7 +65,7 @@ export default function AppRequestsPage() {
         {joins.map(r => <tr className="table-row" key={r.id}>
           <td className="table-cell"><p className="font-medium">{r.full_name}</p><p className="text-xs text-slate-500 font-mono">{r.nic_number || '—'}</p></td>
           <td className="table-cell">{r.scheme_name}</td>
-          <td className="table-cell">{r.source === 'agent' ? `${r.agent_name || 'Agent'}${r.agent_code ? ` (${r.agent_code})` : ''}` : 'Customer (self)'}</td>
+          <td className="table-cell">{`${r.agent_name || 'Agent'}${r.agent_code ? ` (${r.agent_code})` : ''}${r.source === 'self' ? ' · self join' : ''}`}{r.branch_name ? <p className="text-xs text-slate-500">{r.branch_name}</p> : null}</td>
           <td className="table-cell">{r.phone}</td>
           <td className="table-cell"><span className={STATUS_BADGE[r.status]}>{r.status}</span></td>
           <td className="table-cell">{fmt(r.created_at)}</td>
@@ -144,7 +144,8 @@ function JoinModal({ row, onClose, onDone }: { row: Join; onClose: () => void; o
     footer={<Decision pending={row.status === 'pending'} busy={busy} approveLabel="Approve and add member" onApprove={() => decide('approve')} onReject={r => decide('reject', r)} />}>
     <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mb-4">
       <div><span className="text-slate-500">Scheme</span><p>{row.scheme_name}</p></div>
-      <div><span className="text-slate-500">Submitted by</span><p>{row.source === 'agent' ? `${row.agent_name || 'Agent'} (${row.agent_code || '—'})` : 'Customer (self join)'}</p></div>
+      <div><span className="text-slate-500">{row.source === 'agent' ? 'Submitted by agent' : 'Customer self join, agent credited'}</span><p>{`${row.agent_name || 'Agent'} (${row.agent_code || '—'})`}</p></div>
+      <div><span className="text-slate-500">Enrolled branch</span><p>{row.branch_name || '—'}</p></div>
       <div><span className="text-slate-500">Phone</span><p>{row.phone}</p></div>
       <div><span className="text-slate-500">NIC</span><p className="font-mono">{row.nic_number || 'Removed after 30 days'}</p></div>
       <div className="col-span-2"><span className="text-slate-500">Address</span><p>{row.address || '—'}</p></div>

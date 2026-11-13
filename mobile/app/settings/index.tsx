@@ -215,6 +215,7 @@ export default function SettingsScreen() {
             {perm !== 'granted' ? <Button label={t('settings.enablePush')} variant="secondaryBlock" fullWidth style={{ marginTop: 8 }} onPress={() => router.push('/notification-permission')} /> : null}
             {row(t('settings.notificationSettings'), () => router.push('/settings/notification-settings'))}
             {row(t('notifications.inbox'), () => router.push('/notifications'))}
+            {role === 'customer' || role === 'smartbuy' ? row(t('joinReq.myRequestsTitle'), () => router.push('/join-requests')) : null}
           </Card>
         ) : null}
 

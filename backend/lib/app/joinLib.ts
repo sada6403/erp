@@ -7,11 +7,11 @@ import { maskPhone, normalizePhone } from './security'
 import { enqueueNotification } from './notify'
 import { queueEmail } from './emailService'
 import { deletePrivateImage } from './privateFiles'
-import type { JoinRequestDto } from './contracts/smartbuy'
+import type { AgentLookupResponse, JoinRequestDto } from './contracts/smartbuy'
 import type { AdminJoinRequestDto, AdminJoinDecisionResponse } from './contracts/admin'
 import type { AppRole } from './contracts/common'
 
-export const JOIN_FIELDS = ['scheme_id', 'full_name', 'phone', 'nic_number', 'address', 'notes', 'client_event_id']
+export const JOIN_FIELDS = ['scheme_id', 'full_name', 'phone', 'nic_number', 'address', 'notes', 'client_event_id', 'agent_code', 'branch_id']
 const NIC_RE = /^(\d{9}[VvXx]|\d{12})$/
 
 function isDup(e: unknown): boolean {
@@ -25,7 +25,20 @@ export function joinDto(r: Record<string, unknown>): JoinRequestDto {
     full_name: String(r.full_name), phone_masked: maskPhone(String(r.phone)), status,
     reject_reason: status === 'rejected' && r.reject_reason ? String(r.reject_reason) : null,
     created_at: toIso(r.created_at) ?? '', decided_at: toIso(r.decided_at),
+    branch_name: r.branch_name ? String(r.branch_name) : null, agent_name: r.agent_name ? String(r.agent_name) : null,
   }
+}
+
+/** Agent code -> display name + branch only (the applicant confirms who they are crediting). Inactive or unknown codes are 404. */
+export async function lookupAgentByCode(company: AppCompany, rawCode: string | null): Promise<AgentLookupResponse> {
+  const code = (rawCode ?? '').replace(/\s+/g, '').toUpperCase()
+  if (code.length < 2 || code.length > 64) fail(400, 'VALIDATION', 'Enter the agent code')
+  const { rows } = await company.tp.query<Record<string, unknown>>(
+    `SELECT a.id, a.code, a.name, a.branch_id, b.name AS branch_name FROM agents a LEFT JOIN branches b ON b.id = a.branch_id
+      WHERE UPPER(a.code) = ? AND a.status = 'active' LIMIT 1`, [code])
+  const a = rows[0]
+  if (!a) fail(404, 'NOT_FOUND', 'No agent found with this code')
+  return { code: String(a.code), name: String(a.name), branch_id: a.branch_id ? String(a.branch_id) : null, branch_name: a.branch_name ? String(a.branch_name) : null }
 }
 
 /** Same rule as the POS: enrollment is closed outside the scheme's registration window (Colombo day). */
@@ -60,7 +73,7 @@ export async function purgeJoinRetention(company: AppCompany, throttle = false):
   return rows.length
 }
 
-const SELECT_JOIN = `SELECT j.*, s.name AS scheme_name FROM smartbuy_join_requests j LEFT JOIN chit_schemes s ON s.id = j.scheme_id`
+const SELECT_JOIN = `SELECT j.*, s.name AS scheme_name, b.name AS branch_name, a.name AS agent_name FROM smartbuy_join_requests j LEFT JOIN chit_schemes s ON s.id = j.scheme_id LEFT JOIN branches b ON b.id = j.branch_id LEFT JOIN agents a ON a.id = j.agent_id`
 
 /** Create a request. Returns { created:false } when the same client_event_id was already submitted (idempotent replay). */
 export async function submitJoinRequest(
@@ -81,6 +94,24 @@ export async function submitJoinRequest(
   if (!NIC_RE.test(nic)) fail(400, 'VALIDATION', 'Enter a valid NIC number')
   const address = optStr(fields.address, 'address', 512)
   const notes = optStr(fields.notes, 'notes', 500)
+
+  // Who gets the credit: an agent submitter is the agent; a customer must type the agent's code (confirmed in the app via the lookup).
+  let agentId: string | null = user.agentId
+  let agentBranch: string | null = null
+  if (!agentId) {
+    if (!fields.agent_code?.trim()) fail(400, 'VALIDATION', 'Enter the agent code')
+    const found = await company.tp.query<Record<string, unknown>>(
+      `SELECT id, branch_id FROM agents WHERE UPPER(code) = ? AND status = 'active' LIMIT 1`, [fields.agent_code.replace(/\s+/g, '').toUpperCase()])
+    if (!found.rows[0]) fail(404, 'NOT_FOUND', 'No agent found with this code')
+    agentId = String(found.rows[0].id)
+    agentBranch = found.rows[0].branch_id ? String(found.rows[0].branch_id) : null
+  }
+  let branchId: string | null = optStr(fields.branch_id, 'branch_id', 191)
+  if (branchId) {
+    const b = await company.tp.query(`SELECT 1 FROM branches WHERE id = ? AND is_active = 1 LIMIT 1`, [branchId])
+    if (!b.rows[0]) fail(400, 'VALIDATION', 'Choose a valid branch')
+  } else if (!user.agentId) fail(400, 'VALIDATION', 'Choose your nearest branch')
+  else branchId = agentBranch
 
   const sch = await company.tp.query<Record<string, unknown>>(`SELECT id, status, member_count, max_customers, registration_start_date, registration_end_date FROM chit_schemes WHERE id = ? LIMIT 1`, [schemeId])
   const scheme = sch.rows[0]
@@ -106,9 +137,9 @@ export async function submitJoinRequest(
   const source = user.agentId ? 'agent' : 'self'
   try {
     await company.tp.query(
-      `INSERT INTO smartbuy_join_requests (id, source, submitted_by_user_id, agent_id, customer_id, scheme_id, full_name, phone, nic_number, address, notes, nic_front_ref, nic_back_ref, client_event_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, source, user.userId, user.agentId, source === 'self' ? user.customerId : null, schemeId, fullName, phone, nic, address, notes, front, back, eventId])
+      `INSERT INTO smartbuy_join_requests (id, source, submitted_by_user_id, agent_id, branch_id, customer_id, scheme_id, full_name, phone, nic_number, address, notes, nic_front_ref, nic_back_ref, client_event_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, source, user.userId, agentId, branchId, source === 'self' ? user.customerId : null, schemeId, fullName, phone, nic, address, notes, front, back, eventId])
   } catch (e) {
     if (!isDup(e)) throw e
     const again = await company.tp.query<Record<string, unknown>>(`${SELECT_JOIN} WHERE j.submitted_by_user_id = ? AND j.client_event_id = ?`, [user.userId, eventId])
@@ -124,12 +155,13 @@ export async function adminJoinList(company: AppCompany, status: string | null):
   await purgeJoinRetention(company).catch(() => 0)
   const where = status && ['pending', 'approved', 'rejected'].includes(status) ? `WHERE j.status = ?` : ''
   const { rows } = await company.tp.query<Record<string, unknown>>(
-    `SELECT j.*, s.name AS scheme_name, a.code AS agent_code, a.name AS agent_name
-       FROM smartbuy_join_requests j LEFT JOIN chit_schemes s ON s.id = j.scheme_id LEFT JOIN agents a ON a.id = j.agent_id
+    `SELECT j.*, s.name AS scheme_name, a.code AS agent_code, a.name AS agent_name, b.name AS branch_name
+       FROM smartbuy_join_requests j LEFT JOIN chit_schemes s ON s.id = j.scheme_id LEFT JOIN agents a ON a.id = j.agent_id LEFT JOIN branches b ON b.id = j.branch_id
        ${where} ORDER BY (j.status = 'pending') DESC, j.created_at DESC LIMIT 300`, where ? [status] : [])
   return rows.map(r => ({
     id: String(r.id), source: String(r.source) === 'agent' ? 'agent' as const : 'self' as const,
     agent_code: r.agent_code ? String(r.agent_code) : null, agent_name: r.agent_name ? String(r.agent_name) : null,
+    branch_id: r.branch_id ? String(r.branch_id) : null, branch_name: r.branch_name ? String(r.branch_name) : null,
     scheme_id: String(r.scheme_id), scheme_name: String(r.scheme_name ?? ''), full_name: String(r.full_name), phone: String(r.phone),
     nic_number: String(r.nic_number), address: r.address ? String(r.address) : null, notes: r.notes ? String(r.notes) : null,
     has_nic_front: !!r.nic_front_ref, has_nic_back: !!r.nic_back_ref, customer_id: r.customer_id ? String(r.customer_id) : null,
@@ -177,7 +209,7 @@ export async function decideJoinRequest(
         customerId = ex.rows[0] ? String(ex.rows[0].id) : null
       }
       const agentBranch = r.agent_id ? await conn.query<Record<string, unknown>>(`SELECT branch_id FROM agents WHERE id = ?`, [String(r.agent_id)]) : null
-      const branchId = (agentBranch?.rows[0]?.branch_id ? String(agentBranch.rows[0].branch_id) : null) ?? (scheme.branch_id ? String(scheme.branch_id) : null)
+      const branchId = (r.branch_id ? String(r.branch_id) : null) ?? (agentBranch?.rows[0]?.branch_id ? String(agentBranch.rows[0].branch_id) : null) ?? (scheme.branch_id ? String(scheme.branch_id) : null)
       if (!customerId) {
         customerId = randomUUID()
         await conn.query(

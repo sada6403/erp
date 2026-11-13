@@ -379,6 +379,8 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE app_users ADD COLUMN is_review_account TINYINT(1) NOT NULL DEFAULT 0`,
   // NIC retention: NIC number + photos are wiped 30 days after the decision (joinLib.purgeJoinRetention)
   `ALTER TABLE smartbuy_join_requests ADD COLUMN purged_at DATETIME NULL`,
+  // Customer self join: the branch the applicant picked (becomes chit_members.enrolled_branch_id on approval)
+  `ALTER TABLE smartbuy_join_requests ADD COLUMN branch_id VARCHAR(191) NULL`,
   `ALTER TABLE customer_orders ADD COLUMN channel VARCHAR(8) NOT NULL DEFAULT 'pos'`,
   `ALTER TABLE customer_orders ADD COLUMN app_user_id VARCHAR(191) NULL`,
   `ALTER TABLE customer_orders ADD COLUMN assigned_agent_id VARCHAR(191) NULL`,

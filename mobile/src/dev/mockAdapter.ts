@@ -278,6 +278,12 @@ on('POST', '/smartbuy/join-requests', ({ body }) => {
   return r;
 });
 
+on('GET', '/smartbuy/agents/lookup', ({ query }) => {
+  const code = String(query.code ?? '').toUpperCase();
+  if (code !== DEMO_AGENT.code.toUpperCase()) throw new HttpError(404, 'NOT_FOUND', 'No agent found with this code');
+  return { code: DEMO_AGENT.code, name: DEMO_AGENT.name, branch_id: 'b1', branch_name: null };
+});
+
 on('GET', '/agent/dashboard', () => {
   const x = DEMO_AGENT_STATS;
   return {

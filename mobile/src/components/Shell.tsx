@@ -185,14 +185,14 @@ interface NavItem {
 
 export const NAV_ITEMS: Record<NavRole, NavItem[]> = {
   customer: [
-    { key: 'shop', icon: '🌾', labelKey: 'nav.groceries', href: '/', match: ['/', '/product', '/catalog', '/flash-deals', '/smartbuy-promo'] },
+    { key: 'shop', icon: '🌾', labelKey: 'nav.groceries', href: '/', match: ['/', '/product', '/catalog', '/flash-deals', '/smartbuy-promo', '/join', '/join-requests'] },
     { key: 'categories', icon: '🏷️', labelKey: 'nav.categories', href: '/categories', match: ['/categories'] },
     { key: 'cart', icon: '🛒', labelKey: 'nav.cart', href: '/cart', match: ['/cart', '/checkout'] },
     { key: 'orders', icon: '📦', labelKey: 'nav.orders', href: '/orders', match: ['/orders', '/order-confirmed'] },
     { key: 'settings', icon: '⚙️', labelKey: 'nav.settings', href: '/settings', match: ['/settings'] },
   ],
   smartbuy: [
-    { key: 'schemes', icon: '💎', labelKey: 'nav.mySchemes', href: '/schemes', match: ['/schemes', '/statement', '/join'] },
+    { key: 'schemes', icon: '💎', labelKey: 'nav.mySchemes', href: '/schemes', match: ['/schemes', '/statement', '/join', '/join-requests'] },
     { key: 'draws', icon: '🏆', labelKey: 'nav.drawVideos', href: '/draws', match: ['/draws', '/draw-video'] },
     { key: 'wallet', icon: '💰', labelKey: 'nav.passbook', href: '/wallet', match: ['/wallet'] },
     { key: 'spend', icon: '🛒', labelKey: 'nav.spendShop', href: '/spend', match: ['/spend'] },

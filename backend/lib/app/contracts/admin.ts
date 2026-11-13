@@ -66,6 +66,8 @@ export interface AdminJoinRequestDto {
   source: 'agent' | 'self'
   agent_code: string | null
   agent_name: string | null
+  branch_id: string | null
+  branch_name: string | null
   scheme_id: string
   scheme_name: string
   full_name: string
