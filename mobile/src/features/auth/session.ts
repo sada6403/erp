@@ -36,8 +36,11 @@ export function initSession() {
 
 /** Store tokens + profile after login/register/change-password. */
 export async function applyAuth(res: Pick<LoginResponse, 'tokens' | 'user'>): Promise<AuthUser> {
-  await secureTokenStore.set({ accessToken: res.tokens.access_token, refreshToken: res.tokens.refresh_token });
+  // secureTokenStore.set fills its in-memory cache synchronously; the Keystore write (~0.4 s on mid-range phones)
+  // continues in the background so the first screen is not held back by it. A failed write only means a new sign-in after a restart.
+  const persisted = secureTokenStore.set({ accessToken: res.tokens.access_token, refreshToken: res.tokens.refresh_token });
   useSessionStore.getState().setUser(res.user);
+  persisted.catch(() => undefined);
   return res.user;
 }
 
