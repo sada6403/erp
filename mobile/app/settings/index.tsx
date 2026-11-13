@@ -97,7 +97,7 @@ export default function SettingsScreen() {
                 ) : null}
               </View>
             </View>
-            {roles.length > 1 ? (
+            {roles.length > 1 || isManager ? (
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
                 {(isManager ? roles.flatMap((r) => (r === 'agent' ? (['manager', 'agent'] as NavRole[]) : [r])) : roles).map((r) => (
                   <Button

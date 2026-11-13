@@ -131,3 +131,9 @@ The 30-day purge of NIC numbers and photos on join requests has no scheduler. It
 5. **Settlement:** one handover per agent in the POS; the cash received must equal the sum of the accepted receipts; the rest are rejected with a reason the agent sees. Remittance and approvals are recorded together so the agent's cash balance returns to zero.
 6. **Logout never drops cash records:** the app flushes the queue and refuses to log out while collections are unsent.
 7. **Counted only after approval:** pending rows do not count for the sales-force achievement, the member total or any commission input.
+
+## 2026-11-13 Management layout (v1.0 trimmed)
+1. The level comes from the server (`/staff/me/dashboard`), never from the login role. Anything above Field Officer gets the management layout; no hierarchy row (403) or Field Officer keeps the agent tabs.
+2. A manager who is also a field officer keeps one account and switches view (Me, or Settings). The choice is per login and resets at sign-in.
+3. Drill-down is one server call per person (`/staff/{id}/detail`) so scope is checked in one place: self or strict subtree, else 404.
+4. The dashboard does not draw a salary threshold marker: the threshold lives in salary rules (v1.1). Nothing is hard-coded.
