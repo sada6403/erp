@@ -6,7 +6,9 @@ import { readJson, writeJson } from '@/lib/storage';
 import { clearUserCache } from '@/query/queryClient';
 import { useSessionStore, defaultRoleFor } from '@/store/sessionStore';
 import { useCartStore } from '@/store/cartStore';
+import { useCollectionStore } from '@/store/collectionStore';
 import { useOutboxStore, uuid } from '@/store/outboxStore';
+import { flushOutbox } from '@/features/common/outbox';
 import i18n from '@/i18n';
 import { useUiStore } from '@/store/uiStore';
 import { getStoredPushToken, clearStoredPushToken } from '@/features/push/push';
@@ -51,7 +53,15 @@ export async function register(input: { name: string; phone: string; password: s
   return res;
 }
 
-export async function logout(): Promise<void> {
+/** Cash receipts taken offline that the server has not seen yet. They are money records: never dropped by a logout. */
+export const unsentCollections = (): number => useOutboxStore.getState().items.filter((i) => i.type === 'collection').length;
+
+/** Returns false (and signs nobody out) while collections are still waiting to reach the server. */
+export async function logout(): Promise<boolean> {
+  if (unsentCollections() > 0) {
+    await flushOutbox().catch(() => undefined);
+    if (unsentCollections() > 0) return false;
+  }
   const tokens = await secureTokenStore.get();
   const push = getStoredPushToken();
   try {
@@ -64,8 +74,10 @@ export async function logout(): Promise<void> {
   await secureTokenStore.clear();
   clearUserCache();
   useOutboxStore.getState().clear();
+  useCollectionStore.getState().clear();
   useCartStore.getState().setCoupon(null);
   useSessionStore.getState().clear();
+  return true;
 }
 
 /** Where to go after login: forced password change first, then the role's home. */

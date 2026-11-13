@@ -1,9 +1,10 @@
 import * as Notifications from 'expo-notifications';
 import i18n from '@/i18n';
-import { agentApi, staffApi, wishlistApi } from '@/api/endpoints';
+import { agentApi, collectionsApi, staffApi, wishlistApi } from '@/api/endpoints';
 import { toAppError } from '@/api/client';
 import { queryClient } from '@/query/queryClient';
 import { qk } from '@/query/keys';
+import { useCollectionStore } from '@/store/collectionStore';
 import { useOutboxStore, type OutboxItem } from '@/store/outboxStore';
 import { useUiStore } from '@/store/uiStore';
 
@@ -22,6 +23,19 @@ async function send(item: OutboxItem): Promise<void> {
     case 'visit':
       await staffApi.createVisit({ ...item.payload, client_event_id: item.id });
       return;
+    case 'collection': {
+      const body = { ...item.payload, client_event_id: item.id };
+      try {
+        await collectionsApi.create(body);
+      } catch (e) {
+        const err = toAppError(e);
+        // The server already holds this receipt number under another collection (e.g. after a reinstall): take the next free number, keep the same event id.
+        if (err.code !== 'CONFLICT' || !err.details?.receipt_number) throw e;
+        await collectionsApi.create({ ...body, receipt_number: useCollectionStore.getState().reissue(item.payload.receipt_number) });
+      }
+      useCollectionStore.getState().patch(item.id, { status: 'pending_verification' });
+      return;
+    }
     case 'wishlist_add':
       await wishlistApi.add({ product_id: item.payload.productId }, item.id);
       return;
@@ -48,6 +62,11 @@ export async function flushOutbox(): Promise<void> {
         if (item.attempts + 1 >= MAX_ATTEMPTS || err.status === 400 || err.status === 404 || err.status === 409) {
           useOutboxStore.getState().remove(item.id);
           if (item.type === 'delivery_complete') useUiStore.getState().showToast(err.message);
+          // The server refused a cash collection (e.g. the POS already recorded that payment): the agent must see it, never lose it silently.
+          if (item.type === 'collection') {
+            useCollectionStore.getState().patch(item.id, { status: 'rejected' });
+            useUiStore.getState().showToast(`${item.payload.receipt_number}: ${err.message}`);
+          }
         }
       }
     }

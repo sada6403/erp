@@ -1,10 +1,11 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import type { CreateCollectionRequest } from '@contracts/collections';
 import type { CreateVisitRequest } from '@contracts/staff';
 import { zustandStorage } from '@/lib/storage';
 
 /**
- * Outbox: ONLY agent delivery status/completion, field visits and wishlist toggles are queued offline.
+ * Outbox: ONLY agent delivery status/completion, field visits, Smart Buy cash collections and wishlist toggles are queued offline.
  * Orders, wallet payments, join requests and password changes are never queued (offline-cache skill).
  */
 export type OutboxItem =
@@ -12,7 +13,9 @@ export type OutboxItem =
   | { id: string; type: 'delivery_complete'; payload: { deliveryId: string; otp: string; note?: string }; attempts: number }
   | { id: string; type: 'wishlist_add' | 'wishlist_remove'; payload: { productId: string }; attempts: number }
   // a field visit: item.id is the client_event_id, so a replay after a dropped connection returns the stored visit
-  | { id: string; type: 'visit'; payload: Omit<CreateVisitRequest, 'client_event_id'>; attempts: number };
+  | { id: string; type: 'visit'; payload: Omit<CreateVisitRequest, 'client_event_id'>; attempts: number }
+  // cash taken from a Smart Buy member: item.id is the client_event_id (and the server's contribution id), so a replay never duplicates it
+  | { id: string; type: 'collection'; payload: Omit<CreateCollectionRequest, 'client_event_id'>; attempts: number };
 
 export type OutboxInput = OutboxItem extends infer T ? (T extends OutboxItem ? Omit<T, 'id' | 'attempts'> : never) : never;
 

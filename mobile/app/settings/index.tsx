@@ -250,7 +250,7 @@ export default function SettingsScreen() {
             {ENV.appEnv !== 'production' ? ` • ${ENV.appEnv}` : ''}
           </Text>
           {user ? (
-            <Button label={`🚪 ${t('settings.logoutFull')}`} variant="logout" fullWidth onPress={() => logout().then(() => router.replace('/'))} />
+            <Button label={`🚪 ${t('settings.logoutFull')}`} variant="logout" fullWidth onPress={() => logout().then((ok) => (ok ? router.replace('/') : useUiStore.getState().showToast(t('collect.logoutBlocked'))))} />
           ) : null}
         </Card>
       </Screen>

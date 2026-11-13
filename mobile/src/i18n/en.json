@@ -139,6 +139,38 @@
       "reportRow": "{{total}} visits • {{bought}} purchases • {{gps}} without GPS • {{done}}/{{due}} follow-ups done"
     }
   },
+  "collect": {
+    "tagPending": "Pending verification",
+    "tagPaid": "Paid",
+    "tagDue": "Due: cycle {{n}}",
+    "tagQueued": "Not sent yet",
+    "todayTitle": "Today's collections",
+    "receiptsN": "{{n}} receipts",
+    "cashInHand": "Cash in hand",
+    "waitingBranch": "Waiting for branch",
+    "unsent": "{{n}} receipt(s) saved on this phone, waiting to send",
+    "cycleDue": "Cycle {{n}} due",
+    "balance": "Balance",
+    "pendingVerify": "Pending verification",
+    "lateFee": "Late fee",
+    "arrears": "Arrears",
+    "lastPayment": "Last payment",
+    "none": "None yet",
+    "collect": "Collect cash",
+    "amount": "Amount (Rs)",
+    "upTo": "up to {{max}}",
+    "saveShow": "Save and show receipt",
+    "badAmount": "Enter a valid amount",
+    "tooMuch": "The most you can collect now is {{max}}",
+    "savedToast": "Receipt {{no}} saved",
+    "queuedToast": "Receipt {{no}} saved on the phone. It will be sent when you are online.",
+    "logoutBlocked": "Some cash receipts are not sent yet. Connect to the internet and try again.",
+    "status": {
+      "pending_verification": "Pending verification",
+      "approved": "Paid",
+      "rejected": "Rejected"
+    }
+  },
   "theme": {
     "olive": "Olive & Yellow (Default)",
     "purple": "Purple & Pink"

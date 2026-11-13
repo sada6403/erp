@@ -1,4 +1,5 @@
 import type { AgentBillDto } from '@/api/localTypes';
+import type { LocalReceipt } from '@/store/collectionStore';
 import { formatQty } from '@/lib/money';
 import { colomboParts } from '@/lib/format';
 
@@ -64,6 +65,37 @@ export function buildBillText(b: AgentBillDto & { tagline?: string | null }): st
   if (b.otp) out.push(center(`CUSTOMER OTP: ${b.otp}`));
   if (b.footer_note) out.push(...wrapName(b.footer_note, RECEIPT_WIDTH).map((l) => center(l)));
   out.push(...wrapName(`Thank you for choosing ${b.company_name}!`, RECEIPT_WIDTH).map((l) => center(l)), EQ);
+  return out.join('\n');
+}
+
+/** Exactly 32 columns (the bill's totalRow is wider than the paper). */
+const amountRow = (label: string, text: string) => `${label.padEnd(18)}:${text.padStart(13)}`;
+
+const STATUS_LINE: Record<LocalReceipt['status'], string> = {
+  queued: 'SAVED ON PHONE - NOT SENT YET',
+  pending_verification: 'PENDING VERIFICATION',
+  approved: 'PAID - VERIFIED',
+  rejected: 'NOT ACCEPTED - SEE AGENT',
+};
+
+/** Thermal receipt text for Smart Buy cash taken from a member (company, member, scheme, cycle, amount, balance, agent, Colombo time). Printed text is English. */
+export function buildCollectionText(r: LocalReceipt, company?: { tin?: string | null; phone?: string | null } | null): string {
+  const out: string[] = [EQ, center((r.company_name || 'RECEIPT').toUpperCase())];
+  const branch = [r.branch_name, company?.phone ? `Tel: ${company.phone}` : null].filter(Boolean).join(' • ');
+  if (branch) out.push(center(branch));
+  if (company?.tin) out.push(center(`Reg: ${company.tin}`));
+  out.push(EQ, center('SMART BUY PAYMENT RECEIPT'), DASH);
+  out.push(`Receipt No: ${r.receipt_number}`);
+  out.push(`Date      : ${stamp(r.collected_at)}`);
+  out.push(`Member    : ${r.customer_name}`);
+  out.push(...wrapName(r.scheme_name, 22).map((l, i) => `${i === 0 ? 'Scheme    : ' : '            '}${l}`));
+  if (r.cycle_no) out.push(`Cycle     : ${r.cycle_no}`);
+  out.push(`Agent     : ${r.agent_name} (${r.agent_code})`, DASH);
+  out.push(amountRow('Amount received', rs(r.amount)));
+  if (r.late_fee_applied > 0) out.push(amountRow('  incl. late fee', rs(r.late_fee_applied)));
+  out.push(amountRow('Balance this cycle', rs(r.balance_after)), EQ, center(STATUS_LINE[r.status]));
+  out.push(...wrapName('Payments are final once verified by the branch.', RECEIPT_WIDTH).map((l) => center(l)));
+  out.push(...wrapName(`Thank you for choosing ${r.company_name || 'us'}!`, RECEIPT_WIDTH).map((l) => center(l)), EQ);
   return out.join('\n');
 }
 

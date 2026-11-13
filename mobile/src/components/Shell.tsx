@@ -157,7 +157,7 @@ export function AppHeader() {
             <Text size={11} weight={800} color="primary" numberOfLines={1} style={{ maxWidth: 110 }}>
               {roleLabel(role, user?.agent_code, t)}
             </Text>
-            <Pressable accessibilityRole="button" accessibilityLabel={t('header.logout')} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={s.logout} onPress={() => logout().then(() => router.replace('/'))}>
+            <Pressable accessibilityRole="button" accessibilityLabel={t('header.logout')} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={s.logout} onPress={() => logout().then((ok) => (ok ? router.replace('/') : useUiStore.getState().showToast(t('collect.logoutBlocked'))))}>
               <Text size={10} weight={800} color="textMuted">
                 {t('header.logout')}
               </Text>

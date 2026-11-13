@@ -236,7 +236,9 @@ d('summary and receipt', () => {
     expect(r.json.summary.pending_total).toBe(r.json.summary.total) // nothing approved yet
     expect(r.json.summary.pending_remittance).toBe(r.json.summary.total)
     expect(r.json.summary.cash_in_hand).toBe(r.json.summary.total)
-    expect(r.json.last_receipt_seq).toBeGreaterThanOrEqual(seq - 1)
+    const stored = await db.one<any>(`SELECT MAX(receipt_seq) m FROM app_collections WHERE agent_id = ?`, [A.id])
+    expect(r.json.last_receipt_seq).toBe(Number(stored!.m))
+    expect(r.json.last_receipt_seq).toBeGreaterThan(0)
     // another agent sees none of these
     const other = await api.get('/agent/collections/today', { token: B.token })
     expect(other.json.items.map((i: any) => i.id)).not.toContain(M.c1)

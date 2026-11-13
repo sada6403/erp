@@ -56,6 +56,7 @@ export const qk = {
     team: (period: string) => ['agent', 'staff', 'team', period] as const,
     visitsToday: ['agent', 'visits', 'today'] as const,
     visitReport: (period: string) => ['agent', 'visits', 'report', period] as const,
+    collectionsToday: ['agent', 'collections', 'today'] as const,
   },
 };
 

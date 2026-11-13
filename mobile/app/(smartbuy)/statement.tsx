@@ -35,7 +35,7 @@ export default function StatementScreen() {
               </View>
               <View style={{ alignItems: 'flex-end' }}>
                 <Text size={13} weight={800}>{formatRs(r.amount)}</Text>
-                <Badge label={r.status} bg="successBg" fg="success" />
+                <Badge label={t(`collect.status.${r.status}`, { defaultValue: r.status })} bg={r.status === 'approved' ? 'successBg' : r.status === 'rejected' ? 'errorBg' : 'warningBg'} fg={r.status === 'approved' ? 'success' : r.status === 'rejected' ? 'error' : 'warning'} />
               </View>
             </View>
           ))}

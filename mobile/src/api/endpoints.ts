@@ -1,5 +1,6 @@
 import type { AxiosInstance } from 'axios';
 import type { OkResponse } from '@contracts/common';
+import type { CollectionsTodayResponse, CreateCollectionRequest, CreateCollectionResponse, ReceiptDto } from '@contracts/collections';
 import type { StatusResponse, WatermarkResponse } from '@contracts/status';
 import type { CompanyProfileResponse } from '@contracts/company';
 import type {
@@ -190,6 +191,13 @@ export const staffApi = {
   visitsToday: () => get<VisitsTodayResponse>('/visits/today'),
   createVisit: (body: CreateVisitRequest) => post<CreateVisitResponse>('/visits', body, { 'Idempotency-Key': body.client_event_id }),
   visitReport: (period?: string) => get<VisitReportResponse>('/visits/report', { period }),
+};
+
+/** Smart Buy cash collection. The server re-validates scope, the due and the receipt number; a replay with the same client_event_id returns the stored row. */
+export const collectionsApi = {
+  create: (body: CreateCollectionRequest) => post<CreateCollectionResponse>('/agent/collections', body, { 'Idempotency-Key': body.client_event_id }),
+  today: () => get<CollectionsTodayResponse>('/agent/collections/today'),
+  receipt: (id: string) => get<ReceiptDto>(`/agent/collections/${encodeURIComponent(id)}/receipt`),
 };
 
 export const agentApi = {
