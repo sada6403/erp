@@ -132,14 +132,20 @@ describe.skipIf(!RUN)('staging copy of the real "test" company', () => {
     const order = await db.one(`SELECT status, assigned_agent_id, invoice_id, total_amount FROM customer_orders WHERE id = ?`, [t.orderId])
     const counter = items.reduce((s, i) => s + Number(i.quantity) * Number(pos.get<{ selling_price: number }>('SELECT selling_price FROM products WHERE id=?', i.product_id)!.selling_price), 0)
     const after = await pick()
-    const dropped = items.every(i => Number(before[i.product_id]) - Number(after[i.product_id]) === Number(i.quantity))
+    // The order already reserved these goods, so converting it (POS stock drops) must NOT lower the app's available stock again,
+    // and the app must show exactly what is on the shelf in the POS (reservation released at conversion).
+    const shelf = (id: string) => Number(pos.get<{ quantity: number }>('SELECT quantity FROM stocks WHERE product_id = ? AND branch_id = ?', id, seed.branches.main)?.quantity ?? 0)
+    const unchanged = items.every(i => Number(before[i.product_id]) === Number(after[i.product_id]))
+    const shelfEqualsAvailable = items.every(i => Number(after[i.product_id]) === shelf(i.product_id))
+    const dropped = unchanged && shelfEqualsAvailable
     const ms = Date.now() - t0
     ev.add({ id: 'ST-03', action: 'POS confirm + assign agent + convert to invoice', api: `catalog stock ${j(before)} -> ${j(after)}`, cloud: `customer_orders ${j(order)}; invoices ${j(inv)}`,
       pos: `invoice total ${inv?.total_amount} vs counter price sum ${counter}`, reverse: 'POS -> cloud -> app catalog stock', ms,
       result: order?.status === 'ready_for_delivery' && order.assigned_agent_id === agentId && Number(inv?.total_amount) === counter && Number(inv?.total_amount) === Number(order.total_amount) && dropped ? 'PASS' : 'FAIL' })
     expect(order.status).toBe('ready_for_delivery')
     expect(Number(inv.total_amount)).toBe(counter)
-    expect(dropped, `stock ${j(before)} -> ${j(after)}`).toBe(true)
+    expect(unchanged, `available stock must not drop again at conversion: ${j(before)} -> ${j(after)}`).toBe(true)
+    expect(shelfEqualsAvailable, `shelf stock must equal available stock after conversion: ${j(after)}`).toBe(true)
   })
 
   it('ST-04 delivery: out for delivery, wrong OTP rejected, right OTP completes + COD settles; app and POS agree', async () => {

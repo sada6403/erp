@@ -425,13 +425,17 @@ export async function onOrderStatusChanged(db: DbLike, orderId: string): Promise
   const o = rows[0]
   if (!o || String(o.channel) !== 'app') return
   const status = String(o.status) as OrderStatus
+  // The POS deducted the stock when it converted the order to an invoice (invoice_id is set): the reservation has done
+  // its job. Keeping it would count the same goods twice (stocks already dropped) and understate available_qty.
+  // Runs before the idempotency check so a re-synced row also heals an old, still-active reservation.
+  const converted = !!o.invoice_id && !['cancelled', 'returned'].includes(status)
+  if (converted || RELEASE_RESERVATION_ON.includes(status)) {
+    await db.query(`UPDATE stock_reservations SET status = 'released' WHERE order_id = ? AND status IN ('active','committed')`, [orderId])
+  }
   const history = parseJson<Array<{ status: string; at: string }>>(o.status_history, [])
   if (history.length && history[history.length - 1].status === status) return
   history.push({ status, at: new Date().toISOString() })
   await db.query(`UPDATE customer_orders SET status_history = ? WHERE id = ?`, [JSON.stringify(history), orderId])
-  if (RELEASE_RESERVATION_ON.includes(status)) {
-    await db.query(`UPDATE stock_reservations SET status = 'released' WHERE order_id = ? AND status IN ('active','committed')`, [orderId])
-  }
   const text = STATUS_TEXT[status]
   if (text && o.app_user_id) {
     await enqueueNotification(db, {
