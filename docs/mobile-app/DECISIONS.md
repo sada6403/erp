@@ -218,3 +218,10 @@ Everything is under the 1.5 s target; the first-screen requests run in parallel 
 - The hand-managed `C:
 pndroid` project had Expo's grey placeholder as `splashscreen_logo.png` (Android 12 cold-start splash showed a grey grid, not the logo). Regenerated from `assets/splash-icon.png` for test.8. EAS builds regenerate it from the same file via the `expo-splash-screen` plugin.
 - Launcher icon (adaptive, from `logo.jpg`): sharp and round, but the logo fills the whole mask so the red hands and the word "Plantation" touch the circle edge. A PNG with ~15% padding (safe zone) would look cleaner; owner to send one if wanted.
+
+### Run notes 2026-11-13 (night run)
+- Autofill: original `com.google.android.gms/.autofill.service.AutofillService`; set to `null` for scripted runs, restored afterwards (verified).
+- test.8 login timing (Wi-Fi, evening network, login POST 0.4-1.1 s): nav 0.8-1.5 s, first data 1.1-1.7 s; the extra ~0.4 s over test.6 was the awaited Keystore write after login. test.9 persists tokens in the background (memory cache is set synchronously).
+- E2E App Control on the phone: banner created in the test POS UI -> visible in the app after refresh, first in the carousel -> tap opened the linked category -> set inactive in POS -> gone from the app; home order changed in POS (Smart Buy above Flash deals) -> the app followed; both restored.
+- Test data left on staging: orders ONL-1017 (bank-transfer with reference, for the prefill proof); 3 TEST banners; one inactive banner "POS TEST banner".
+- Stray folder `C:\contracts` (copy of type files made by mistake) needs manual deletion by the owner.
