@@ -127,13 +127,26 @@ export async function writeManagement(ctx:ManagementContext,resource:string,body
   if(resource==='create-user'){
    const name=text(body.name),email=text(body.email).toLowerCase(),password=text(body.password,256)
    if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)||password.length<12)throw new ManagementError('Use a valid email and password of at least 12 characters')
+   const existing=(await ctx.client.query<Row>('SELECT u.id,r.permissions FROM users u JOIN roles r ON r.id=u.role_id WHERE LOWER(u.email)=?',[email])).rows[0]
+   if(existing){
+    if(jsonValue<Record<string,boolean>>(existing.permissions).all)throw new ManagementError('Use a dedicated management account, not the Company Admin account')
+    const existingId=String(existing.id)
+    await ctx.client.query('UPDATE users SET name=?, password_hash=?, is_active=1 WHERE id=?',[name,await bcrypt.hash(password,12),existingId])
+    await ctx.client.query('UPDATE management_access SET session_version=session_version+1 WHERE user_id=?',[existingId])
+    await ctx.client.query('UPDATE management_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL',[existingId])
+    await audit(ctx,'USER_UPDATED',existingId,{name,email})
+    return {userId:existingId}
+   }
    const userId=randomUUID(),roleId='management-web-only'
    await ctx.client.query("INSERT IGNORE INTO roles (id,name,permissions,is_system) VALUES (?, 'Management Web Only', '{}',1)",[roleId])
    await ctx.client.query('INSERT INTO users (id,name,email,password_hash,role_id,is_active) VALUES (?,?,?,?,?,1)',[userId,name,email,await bcrypt.hash(password,12),roleId])
    await audit(ctx,'USER_CREATED',userId,{name,email});return {userId}
   }
   if(resource==='revoke'||resource==='reset-password'||resource==='update-user'){
-   const userId=id(body.userId);await employee(ctx,userId)
+   const userId=id(body.userId)
+   const targetUser=(await ctx.client.query<Row>('SELECT u.id,u.name,u.email,r.permissions FROM users u JOIN roles r ON r.id=u.role_id WHERE u.id=?',[userId])).rows[0]
+   if(!targetUser)throw new ManagementError('User not found',404)
+   if(jsonValue<Record<string,boolean>>(targetUser.permissions).all)throw new ManagementError('Use a dedicated management account, not the Company Admin account')
    if(resource==='update-user'||resource==='reset-password'){
     const updates:string[]=[],params:any[]=[]
     if(body.name){updates.push('name=?');params.push(text(body.name))}
