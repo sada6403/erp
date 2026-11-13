@@ -3,8 +3,8 @@ import { ENV } from '@/lib/env';
 
 /**
  * Play build: Google Play In-App Updates (IMMEDIATE when forced, FLEXIBLE otherwise).
- * The native wrapper (expo-in-app-updates) is added only after the owner approves it (AGENTS.md section 4);
- * until then, or if it is missing, we open the Play listing so a forced user is never stuck.
+ * Native wrapper: expo-in-app-updates (approved, AGENTS.md section 4);
+ * if it is missing from a build, we open the Play listing so a forced user is never stuck.
  */
 export async function startPlayUpdate(forced: boolean): Promise<void> {
   try {

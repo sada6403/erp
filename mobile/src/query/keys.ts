@@ -14,6 +14,7 @@ export const qk = {
     product: (id: string) => ['catalog', 'product', id] as const,
     reviews: (id: string) => ['catalog', 'reviews', id] as const,
     banners: ['catalog', 'banners'] as const,
+    homeLayout: ['catalog', 'home-layout'] as const,
     branches: ['catalog', 'branches'] as const,
   },
 

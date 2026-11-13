@@ -107,6 +107,8 @@ export function toProductDto(p: DemoProduct): ProductListItemDto & ProductExtras
   const left = /^(\d+) saplings left/.exec(p.stock);
   return {
     id,
+    featured: false,
+    created_at: null,
     slug: id,
     sku: `NP-${String(p.id).padStart(4, '0')}`,
     name: p.name,
@@ -190,7 +192,7 @@ export const DEMO_BANNER = {
 } as const;
 
 export function bannersDto(): (BannerDto & { badge: string; cta: string; pill: string })[] {
-  return [{ id: 'bn1', title: DEMO_BANNER.title, subtitle: DEMO_BANNER.body, image_url: null, link_url: null, sort_order: 1, badge: DEMO_BANNER.badge, cta: DEMO_BANNER.cta, pill: DEMO_BANNER.pill }];
+  return [{ id: 'bn1', title: DEMO_BANNER.title, subtitle: DEMO_BANNER.body, image_url: null, link: null, sort_order: 1, badge: DEMO_BANNER.badge, cta: DEMO_BANNER.cta, pill: DEMO_BANNER.pill }];
 }
 
 export const DEMO_BRANCHES: BranchDto[] = [

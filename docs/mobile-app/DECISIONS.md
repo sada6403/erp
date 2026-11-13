@@ -181,6 +181,9 @@ The 30-day purge of NIC numbers and photos on join requests has no scheduler. It
 6. The UI is the POS page Mobile App -> App Versions (`/admin/app-versions`, Super Admin only), next to Online Store and Reviews, because the POS already reaches the cloud admin routes through `CloudApi` (IPC `appVersions:list|save|hashApk`). The older `min_app_version` field in Online Store still works as the fallback, but App Versions is the place to set versions from now on.
 7. Release flow and who approves each step: `docs/mobile-app/RELEASING.md`.
 
+## 2026-11-13 — Automation autofill handling (owner decision)
+The app does not disable autofill. For adb smoke/timing runs only: record `settings get secure autofill_service`, set it to `null`, restore the original after the run. Original on the test phone: `com.google.android.gms/.autofill.service.AutofillService`. Run notes log this each time.
+
 ## 2026-11-13 App Control: banners v2, home layout, banner counters
 1. One POS group **App Control** replaces Mobile App's Online Store / App Access / Reviews / App Versions entries as tabs; old routes redirect. Store settings moved from Online Store (not duplicated).
 2. Banners get targeting columns on the existing synced `app_banners` (additive; `link_url` stays readable). Link types: product, category, flash, smartbuy, https url. Only https is accepted on save; non-https is dropped on read.

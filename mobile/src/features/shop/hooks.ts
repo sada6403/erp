@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ProductListItemDto } from '@contracts/catalog';
+import type { HomeSectionDto, ProductListItemDto } from '@contracts/catalog';
+import i18n from '@/i18n';
 import type { CreateOrderRequest, QuoteRequest } from '@contracts/orders';
 import type { AddressInput } from '@contracts/addresses';
 import { addressApi, catalogApi, orderApi, wishlistApi } from '@/api/endpoints';
@@ -99,7 +100,24 @@ export function useCategories() {
 }
 
 export function useBanners() {
-  return useQuery({ queryKey: qk.catalog.banners, queryFn: catalogApi.banners });
+  const lang = (i18n.language || 'en').slice(0, 2);
+  const loggedIn = useSessionStore(selectIsLoggedIn);
+  return useQuery({ queryKey: [...qk.catalog.banners, lang, loggedIn ? 'in' : 'guest'], queryFn: () => catalogApi.banners(lang) });
+}
+
+export const DEFAULT_HOME_SECTIONS: HomeSectionDto[] = [
+  { key: 'banners', enabled: true },
+  { key: 'categories', enabled: true },
+  { key: 'flash_deals', enabled: true },
+  { key: 'smartbuy_promo', enabled: true },
+  { key: 'new_arrivals', enabled: true },
+  { key: 'featured', enabled: true },
+];
+
+/** Home section order + on/off from the POS (App Control). Falls back to the default order offline or on error. */
+export function useHomeLayout(): HomeSectionDto[] {
+  const { data } = useQuery({ queryKey: qk.catalog.homeLayout, queryFn: catalogApi.homeLayout, staleTime: 60_000 });
+  return data?.sections?.length ? data.sections : DEFAULT_HOME_SECTIONS;
 }
 
 export function useBranches() {

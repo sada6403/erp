@@ -105,7 +105,8 @@ enough), EAS Build for APK/AAB.
 | Video | `expo-video` |
 | Block screenshots/recording | `expo-screen-capture` (`usePreventScreenCapture`) |
 | Push (system tray, app closed too) | `expo-notifications` + FCM (Expo Push API from the backend), Android channels, deep links |
-| App updates | `expo-updates` (OTA JS updates) + Play In-App Updates library (Play builds) / APK self-update (sideload flavour) |
+| App updates | `expo-updates` (OTA JS updates) + `expo-in-app-updates` 0.13.0 (Play In-App Updates API: IMMEDIATE when forced, FLEXIBLE otherwise; approved by owner 2026-11-13) / APK self-update (sideload flavour) |
+| APK self-update (staging/test flavour only) | `expo-file-system` (download the APK), `expo-crypto` (SHA-256 check against /status), `expo-intent-launcher` (open the Android installer). Expo first-party; owner informed 2026-11-13. |
 | Maps (store locator, delivery pin) | `react-native-maps` — only on the screens that need it |
 | Location | `expo-location` |
 | Camera / NIC photos / barcode | `expo-camera`, `expo-image-picker` |

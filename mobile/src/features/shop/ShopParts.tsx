@@ -163,36 +163,14 @@ export function SmartBuyPromo() {
   );
 }
 
-/** Two-column FlashList of products (cached snapshot, works offline). */
-export function ProductGrid({
-  items,
-  loading,
-  error,
-  onRetry,
-  header,
-  footer,
-  listRef,
-}: {
-  items: ProductListItemDto[];
-  loading?: boolean;
-  error?: boolean;
-  onRetry?: () => void;
-  header?: React.ReactElement | null;
-  footer?: React.ReactElement | null;
-  listRef?: React.Ref<FlashListRef<ProductListItemDto>>;
-}) {
+/** Add-to-cart / wishlist / open-product behaviour shared by the grid and the home rails. */
+export function useProductActions() {
   const { t } = useTranslation();
   const add = useCartStore((s) => s.add);
   const showToast = useUiStore((s) => s.showToast);
   const openProduct = useUiStore((s) => s.openProduct);
   const { ids, toggle, loggedIn } = useWishlist();
   const router = useRouter();
-  const theme = useTheme();
-  const shown = items.length;
-  useEffect(() => {
-    perf(`grid:items=${shown} loading=${!!loading}`);
-  }, [shown, loading]);
-
   const addToCart = useCallback(
     (p: ProductListItemDto) => {
       if (p.has_variants) {
@@ -217,6 +195,35 @@ export function ProductGrid({
     },
     [toggle, loggedIn, router, showToast, t],
   );
+  const open = useCallback((p: ProductListItemDto) => router.push(`/product/${p.id}` as never), [router]);
+  return { ids, addToCart, like, open };
+}
+
+/** Two-column FlashList of products (cached snapshot, works offline). */
+export function ProductGrid({
+  items,
+  loading,
+  error,
+  onRetry,
+  header,
+  footer,
+  listRef,
+}: {
+  items: ProductListItemDto[];
+  loading?: boolean;
+  error?: boolean;
+  onRetry?: () => void;
+  header?: React.ReactElement | null;
+  footer?: React.ReactElement | null;
+  listRef?: React.Ref<FlashListRef<ProductListItemDto>>;
+}) {
+  const { t } = useTranslation();
+  const { ids, addToCart, like, open } = useProductActions();
+  const theme = useTheme();
+  const shown = items.length;
+  useEffect(() => {
+    perf(`grid:items=${shown} loading=${!!loading}`);
+  }, [shown, loading]);
 
   return (
     <FlashList
@@ -238,7 +245,7 @@ export function ProductGrid({
         )
       }
       renderItem={({ item }) => (
-        <ProductCard product={item} liked={ids.has(item.id)} onOpen={() => router.push(`/product/${item.id}` as never)} onAdd={() => addToCart(item)} onToggleLike={() => like(item)} />
+        <ProductCard product={item} liked={ids.has(item.id)} onOpen={() => open(item)} onAdd={() => addToCart(item)} onToggleLike={() => like(item)} />
       )}
     />
   );

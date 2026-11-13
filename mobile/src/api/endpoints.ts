@@ -27,6 +27,9 @@ import type {
 } from '@contracts/auth';
 import type {
   BannersResponse,
+  BannerEventBody,
+  BannerEventResponse,
+  HomeLayoutResponse,
   BranchesResponse,
   CategoriesResponse,
   ReviewCreateBody,
@@ -131,7 +134,9 @@ export const catalogApi = {
   categories: (updated_since?: string) => get<CategoriesResponse>('/catalog/categories', { updated_since }),
   products: (q: ProductsQuery) => get<ProductsResponse>('/catalog/products', q),
   product: (id: string) => get<ProductDetailDto>(`/catalog/products/${encodeURIComponent(id)}`),
-  banners: () => get<BannersResponse>('/catalog/banners'),
+  banners: (lang?: string) => get<BannersResponse>('/catalog/banners', { lang }),
+  bannerEvents: (body: BannerEventBody) => post<BannerEventResponse>('/catalog/banners/events', body),
+  homeLayout: () => get<HomeLayoutResponse>('/catalog/home-layout'),
   search: (q: string) => get<SearchResponse>('/catalog/search', { q }),
   suggest: (q: string) => get<SuggestResponse>('/catalog/suggest', { q }),
   branchesNearby: (lat?: number, lng?: number) => get<BranchesResponse>('/branches/nearby', { lat, lng }),

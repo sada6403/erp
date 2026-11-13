@@ -28,6 +28,7 @@ describe('offline banner text', () => {
 });
 
 const prod = (id: string, name: string, cat = 'c1'): ProductListItemDto => ({
+  featured: false, created_at: null,
   id, slug: id, sku: id, name, category_id: cat, category_name: 'Veg', brand: null, short_description: null, unit: 'kg', sale_by: 'weight',
   qty_step: 0.25, min_qty: 0.25, price: 100, original_price: null, discount_pct: 0, thumbnail_url: null, in_stock: true, available_qty: 5,
   has_variants: false, emi_available: false, updated_at: 't',
