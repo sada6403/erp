@@ -164,3 +164,10 @@ The 30-day purge of NIC numbers and photos on join requests has no scheduler. It
 5. NIC number and photos stay only in `smartbuy_join_requests` (cloud customers has no NIC column) and are wiped 30 days after approve/reject (retention test JOIN-06 covers the 29 and 31 day boundary and that pending requests are never purged).
 6. "My Smart Buy requests" (`/join-requests`) lists Pending / Approved / Rejected + reason from the existing `GET /smartbuy/join-requests` (now also returns `branch_name`, `agent_name`); reachable from Smart Buy promo, My Schemes, the join screen and Settings. POS App Requests now shows agent and enrolled branch for self joins too.
 7. Tests: `backend/tests/join.test.mjs` (added to `npm test`). Like the rest of the app-api suite it needs the local dev server and MySQL.
+
+## 2026-11-13 Product reviews and delivery time
+1. One review per delivered order item (UNIQUE `order_item_id`), never editable by the customer; a duplicate returns 409 instead of replacing it, so a retried POST is safe.
+2. Moderation is hide/unhide from the POS only (`is_hidden`, `hidden_by`, `hidden_at`, `hidden_reason`), last write wins on sync; hidden reviews are excluded from the list, average and count. No fake reviews are ever seeded.
+3. Public author name is first name + last-name initial; verified_purchase is always true by construction.
+4. Delivery time is a per-branch setting (3 nullable columns on `branches`), edited in POS Online Store; nothing is hard-coded and empty means the app shows no line.
+5. `popularity` (90-day ordered quantity) is computed on read, not stored.

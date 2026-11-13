@@ -65,6 +65,7 @@ Therefore the merge **is** the backend deploy and possibly the desktop release.
   Cloud schema changes are additive only (new tables/columns) and need no rollback; old code ignores them.
 
 ## 3. Backend deploy (happens at the merge)
+- Added 2026-11-13 (additive, created on the first API hit per company): table `product_reviews` (synced, in `ALLOWED_TABLES`); columns `branches.delivery_eta_min_days`, `branches.delivery_eta_max_days`, `branches.delivery_eta_text`; new route `/api/app/v1/catalog/products/[id]/reviews`. Desktop SQLite gets the same table/columns on the next POS update. No seed or backfill.
 - Added 2026-11-13 (all additive, created on the first API hit per company): tables `staff_assignments`, `staff_targets`, `field_visits`, `app_collections`; column `invoices.agent_id`; routes under `/api/app/v1/staff`, `/visits`, `/agent/collections`, `/admin/staff`; the sync push now also runs the reservation release for converted app orders (`onOrderStatusChanged`) and the collection approve / reject notification (`onContributionStatusChanged`). The reservation fix changes behaviour for real companies: an app order stops reserving stock the moment the POS converts it to an invoice.
 - What changes: `/api/app/v1/*`, `ensureTenantCompatibility` additions (`app_*` tables, new columns on `products`,
   `branches`, `customer_orders`, `customer_order_items`, `invoices`), sync `RELATED_KEYS`, notification queue (push + WhatsApp stay dry-run).

@@ -155,6 +155,8 @@ Headers: `x-app-key` (company) + `Authorization: Bearer <jwt>` (except public ca
 Errors `{ error: { code, message } }`. Cursor pagination. Every request/response type is declared in
 `backend/lib/app/contracts/` and used by both the route and the app.
 
+**Reviews and delivery time (2026-11-13).** `GET /catalog/products/:id/reviews` (public; visible reviews newest first, cursor paging, `average`, `count`; with a customer token `can_review` names a delivered order item without a review) and `POST` (customer, `{order_item_id, rating 1-5, comment <= 500}`: 404 if the item is not the caller's or not this product, 403 until the order is `delivered`, 409 for a second review of the same item, 400 for a bad rating/comment). Table `product_reviews` (synced; UNIQUE `order_item_id`; the POS only edits `is_hidden`/`hidden_*`). Product list/detail carry `rating_avg`, `rating_count` (visible reviews only) and `popularity` (units on non-cancelled orders in the last 90 days), each from one grouped query per page. `estimated_delivery` on the product detail comes from `branches.delivery_eta_min_days/max_days/delivery_eta_text` (set in POS Online Store > Delivery time); `branch_id` absent = the first active branch (same one `/branches` lists first); unset = `null`.
+
 | Area | Method & path | Auth | Notes |
 |---|---|---|---|
 | Status | GET `/status` | public | `{ordering_enabled, maintenance_message, min_app_version, server_time}` |

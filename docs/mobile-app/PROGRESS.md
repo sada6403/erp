@@ -168,3 +168,6 @@ Phone checks on the installed staging APK: wishlist add/remove and order cancel 
 
 ## 2026-11-13 Transactional email
 Built: `email_jobs` queue/status log, 14 email types x en/ta/si, hooks on order / slip / join / collection / register / email-code flows, allow-list guard (EMAIL_MODE, EMAIL_ALLOWLIST), preview script, 60 unit tests (`npm run test:email`). See ARCHITECTURE 8.1b and DECISIONS 2026-11-13. Staging EMAIL_ALLOWLIST holds the tester address only.
+
+## 2026-11-13 Reviews, delivery time, popularity
+Built: `product_reviews` table (cloud + POS SQLite + sync lists), reviews GET/POST, `rating_avg`/`rating_count`/`popularity` on product list and detail, per-branch `estimated_delivery`, POS Reviews page (Mobile App group) and Delivery time section in Online Store. Backend `npm test` 90/90 (new test: reviews eligibility, hidden exclusion, delivery time, popularity), typecheck clean for backend and root. Not yet deployed to staging: git push was blocked (see report).
