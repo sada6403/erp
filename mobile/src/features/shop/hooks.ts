@@ -52,25 +52,45 @@ export function useProductSnapshot() {
   });
 }
 
+export type ProductSort = 'newest' | 'priceLow' | 'priceHigh' | 'popular';
+
 export interface ProductFilter {
   q?: string;
   categoryId?: string | null;
+  /** Extra category ids that also match (sub-categories of categoryId) */
+  childIds?: string[];
+  inStockOnly?: boolean;
+  minPrice?: number | null;
+  maxPrice?: number | null;
+  sort?: ProductSort;
 }
 
-/** Client-side search + category filter over the cached snapshot, so it works offline. */
+/** Client-side search, category, stock and price filter + sort over the cached snapshot, so it works offline. */
 export function filterProducts(items: ProductListItemDto[], f: ProductFilter): ProductListItemDto[] {
   const q = f.q?.trim().toLowerCase();
-  return items.filter((p) => {
-    if (f.categoryId && p.category_id !== f.categoryId) return false;
+  const cats = f.categoryId ? new Set([f.categoryId, ...(f.childIds ?? [])]) : null;
+  const out = items.filter((p) => {
+    if (cats && (!p.category_id || !cats.has(p.category_id))) return false;
+    if (f.inStockOnly && !p.in_stock) return false;
+    if (f.minPrice != null && p.price < f.minPrice) return false;
+    if (f.maxPrice != null && p.price > f.maxPrice) return false;
     if (!q) return true;
     return [p.name, p.category_name, p.sku, p.brand, p.short_description].some((v) => v?.toLowerCase().includes(q));
   });
+  if (f.sort === 'priceLow') out.sort((a, b) => a.price - b.price);
+  else if (f.sort === 'priceHigh') out.sort((a, b) => b.price - a.price);
+  else if (f.sort === 'popular') out.sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0) || a.name.localeCompare(b.name));
+  else if (f.sort === 'newest') out.sort((a, b) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0));
+  return out;
 }
 
 export function useProducts(filter: ProductFilter) {
   const query = useProductSnapshot();
-  const { q, categoryId } = filter;
-  const items = useMemo(() => filterProducts(query.data?.items ?? [], { q, categoryId }), [query.data, q, categoryId]);
+  const { q, categoryId, childIds, inStockOnly, minPrice, maxPrice, sort } = filter;
+  const items = useMemo(
+    () => filterProducts(query.data?.items ?? [], { q, categoryId, childIds, inStockOnly, minPrice, maxPrice, sort }),
+    [query.data, q, categoryId, childIds, inStockOnly, minPrice, maxPrice, sort],
+  );
   return { ...query, items };
 }
 
@@ -167,4 +187,32 @@ export function useCancelOrder() {
     mutationFn: ({ id, reason }: { id: string; reason?: string }) => orderApi.cancel(id, { reason }),
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.me.orders }),
   });
+}
+
+/** Reviews of one product + the signed-in customer's "can review" state. Hidden offline (the page just omits the section). */
+export function useReviews(productId: string) {
+  return useQuery({ queryKey: qk.catalog.reviews(productId), queryFn: () => catalogApi.reviews(productId), retry: 1 });
+}
+
+export function useSubmitReview(productId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { order_item_id: string; rating: number; comment?: string }) => catalogApi.addReview(productId, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.catalog.reviews(productId) });
+      qc.invalidateQueries({ queryKey: qk.catalog.product(productId) });
+      qc.invalidateQueries({ queryKey: qk.catalog.products });
+    },
+  });
+}
+
+/** Pure: same-category products from the cached list, never the product itself (works offline). */
+export function similarProducts(items: ProductListItemDto[], product: { id: string; category_id: string | null } | undefined, limit = 8): ProductListItemDto[] {
+  if (!product?.category_id) return [];
+  return items.filter((p) => p.id !== product.id && p.category_id === product.category_id && p.in_stock).slice(0, limit);
+}
+
+export function useSimilarProducts(product: { id: string; category_id: string | null } | undefined) {
+  const snapshot = useProductSnapshot();
+  return useMemo(() => similarProducts(snapshot.data?.items ?? [], product), [snapshot.data, product]);
 }

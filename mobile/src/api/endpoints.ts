@@ -28,6 +28,8 @@ import type {
   BannersResponse,
   BranchesResponse,
   CategoriesResponse,
+  ReviewCreateBody,
+  ReviewsResponse,
   ProductDetailDto,
   ProductsQuery,
   ProductsResponse,
@@ -131,6 +133,9 @@ export const catalogApi = {
   search: (q: string) => get<SearchResponse>('/catalog/search', { q }),
   suggest: (q: string) => get<SuggestResponse>('/catalog/suggest', { q }),
   branchesNearby: (lat?: number, lng?: number) => get<BranchesResponse>('/branches/nearby', { lat, lng }),
+  reviews: (id: string, cursor?: string) => get<ReviewsResponse>(`/catalog/products/${encodeURIComponent(id)}/reviews`, { cursor }),
+  addReview: (id: string, body: ReviewCreateBody, idempotencyKey?: string) =>
+    post<OkResponse>(`/catalog/products/${encodeURIComponent(id)}/reviews`, body, idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : undefined),
 };
 
 export const wishlistApi = {

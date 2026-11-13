@@ -233,7 +233,7 @@ export function ProductGrid({
         )
       }
       renderItem={({ item }) => (
-        <ProductCard product={item} liked={ids.has(item.id)} onOpen={() => openProduct(item.id)} onAdd={() => addToCart(item)} onToggleLike={() => like(item)} />
+        <ProductCard product={item} liked={ids.has(item.id)} onOpen={() => router.push(`/product/${item.id}` as never)} onAdd={() => addToCart(item)} onToggleLike={() => like(item)} />
       )}
     />
   );

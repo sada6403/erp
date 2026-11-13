@@ -251,8 +251,8 @@ export default function SettingsScreen() {
           <CardTitle icon="ℹ️" title={t('settings.aboutTitle', { app: company?.name || t('app.name'), version: Constants.expoConfig?.version ?? '1.0.0' })} />
           <Text size={11} color="textMuted" lineHeightRatio={1.4} style={{ marginBottom: 12 }}>
             {t('settings.aboutDesc', { tenant: branch ?? (company?.name || t('app.name')) })}
-            {ENV.appEnv !== 'production' ? ` • ${ENV.appEnv}` : ''}
           </Text>
+          {ENV.appEnv === 'staging' ? <Text size={12} weight={700} color="primary" style={{ marginBottom: 12 }}>🧪 {t('settings.testServer')}</Text> : null}
           {user ? (
             <Button label={`🚪 ${t('settings.logoutFull')}`} variant="logout" fullWidth onPress={() => logout().then((ok) => (ok ? router.replace('/') : useUiStore.getState().showToast(t('collect.logoutBlocked'))))} />
           ) : null}

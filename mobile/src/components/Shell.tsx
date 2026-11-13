@@ -19,16 +19,17 @@ const logo = require('../../assets/logo.jpg');
 
 const useHeaderStyles = makeStyles((t) => ({
   bar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingHorizontal: 16,
-    paddingBottom: 10,
+    paddingBottom: 8,
     backgroundColor: t.colors.surface,
     borderBottomWidth: 1,
     borderBottomColor: t.colors.divider,
   },
-  left: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 1 },
+  /** Row 1: logo + company name (own space, never shrunk) + bell (fixed width, right edge). */
+  top: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  /** Row 2: branch tag on the left, account controls on the right. Nothing here can touch the name. */
+  strip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 6, minHeight: 30 },
+  left: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
   avatar: {
     width: 42,
     height: 42,
@@ -115,26 +116,18 @@ export function AppHeader() {
   const branch = useSessionStore((x) => x.branchName);
   const unread = useUnreadCount();
   const company = useCompany();
-  const showPush = useUiStore((x) => x.showPush);
   return (
     <View style={[s.bar, { paddingTop: Math.max(8, insets.top) }]}>
-      <View style={s.left}>
+      <View style={s.top}>
         <View style={s.avatar}>
           <Image source={logo} style={{ width: '100%', height: '100%' }} contentFit="cover" accessibilityLabel={t('app.name')} />
         </View>
-        <View style={{ flexShrink: 1 }}>
-          <Text size={17} weight={800} color="primary" numberOfLines={1} lineHeightRatio={1.15}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text size={17} weight={800} color="primary" numberOfLines={1} lineHeightRatio={1.15} testID="header-company-name">
             {company?.name || t('app.name')}
           </Text>
-          {branch ? (
-            <Text size={11} weight={600} color="textMuted" numberOfLines={1}>
-              {branch}
-            </Text>
-          ) : null}
         </View>
-      </View>
-      <View style={s.right}>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('header.notifications')} hitSlop={4} onPress={() => (loggedIn ? router.push('/notifications') : router.push('/login'))}>
+        <Pressable accessibilityRole="button" accessibilityLabel={t('header.notifications')} hitSlop={4} onPress={() => (loggedIn ? router.push('/notifications') : router.push('/login'))} style={{ width: 40 }}>
           <View style={s.iconBtn}>
             <Text size={15}>🔔</Text>
             {unread > 0 ? (
@@ -146,13 +139,15 @@ export function AppHeader() {
             ) : null}
           </View>
         </Pressable>
-        {__DEV__ ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Simulate push" hitSlop={4} onPress={() => showPush('⚡ Fresh Suwandel Rice Harvest!', 'Direct from Matale estates: Organic 5kg bags are back in stock with 2-hour dispatch.')}>
-            <View style={s.iconBtn}>
-              <Text size={15}>⚡</Text>
-            </View>
-          </Pressable>
-        ) : null}
+      </View>
+      <View style={s.strip}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          {branch ? (
+            <Text size={11} weight={600} color="textMuted" numberOfLines={1}>
+              📍 {branch}
+            </Text>
+          ) : null}
+        </View>
         {loggedIn ? (
           <View style={s.userBadge}>
             <Text size={11} weight={800} color="primary" numberOfLines={1} style={{ maxWidth: 110 }}>

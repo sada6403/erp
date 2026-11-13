@@ -1,15 +1,9 @@
-import { useEffect } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useUiStore } from '@/store/uiStore';
+import React from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import { ProductPage } from '@/features/shop/ProductPage';
 
-/** Deep link /product/:id: the product detail is a bottom sheet (as in the demo), so open it over the shop home. */
-export default function ProductDeepLink() {
+/** Product detail page (also the target of the naturalplantation://product/<id> deep link). */
+export default function ProductScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const router = useRouter();
-  const openProduct = useUiStore((s) => s.openProduct);
-  useEffect(() => {
-    router.replace('/');
-    if (id) openProduct(id);
-  }, [id, router, openProduct]);
-  return null;
+  return <ProductPage id={String(id)} />;
 }

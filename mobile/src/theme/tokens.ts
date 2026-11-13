@@ -94,6 +94,8 @@ export const baseColors = {
   black30: 'rgba(0, 0, 0, 0.3)',
   black35: 'rgba(0, 0, 0, 0.35)',
   black40: 'rgba(0, 0, 0, 0.4)',
+  /** full-screen image viewer backdrop */
+  viewerBg: 'rgba(0, 0, 0, 0.96)',
 } as const;
 
 export const radii = {
