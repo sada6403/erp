@@ -250,6 +250,56 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
        INDEX idx_resv_order (order_id)
      )`,
 
+  // ── Sales force v1.0 (cloud-only; hierarchy comes only from staff_assignments) ──
+  `CREATE TABLE IF NOT EXISTS staff_assignments (
+       id VARCHAR(191) NOT NULL PRIMARY KEY,
+       staff_id VARCHAR(191) NOT NULL,
+       level_key VARCHAR(24) NOT NULL,
+       scope_type VARCHAR(12) NOT NULL DEFAULT 'company',
+       scope_id VARCHAR(191) NULL,
+       reports_to_staff_id VARCHAR(191) NULL,
+       active_from DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       active_to DATETIME NULL,
+       ${TS},
+       INDEX idx_staff_assign_staff (staff_id, active_to),
+       INDEX idx_staff_assign_boss (reports_to_staff_id, active_to)
+     )`,
+  `CREATE TABLE IF NOT EXISTS staff_targets (
+       id VARCHAR(191) NOT NULL PRIMARY KEY,
+       staff_id VARCHAR(191) NOT NULL,
+       period CHAR(7) NOT NULL,
+       amount DECIMAL(14,2) NOT NULL DEFAULT 0,
+       registrations_target INT NULL,
+       active_from DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+       deactivated_at DATETIME NULL,
+       set_by VARCHAR(191) NULL,
+       is_override TINYINT(1) NOT NULL DEFAULT 0,
+       ${TS},
+       INDEX idx_staff_targets (staff_id, period, deactivated_at)
+     )`,
+  `CREATE TABLE IF NOT EXISTS field_visits (
+       id VARCHAR(191) NOT NULL PRIMARY KEY,
+       staff_id VARCHAR(191) NOT NULL,
+       customer_id VARCHAR(191) NULL,
+       prospect_name VARCHAR(255) NULL,
+       prospect_phone VARCHAR(40) NULL,
+       lat DECIMAL(10,7) NULL,
+       lng DECIMAL(10,7) NULL,
+       gps_missing TINYINT(1) NOT NULL DEFAULT 0,
+       visited_at DATETIME NOT NULL,
+       outcome VARCHAR(20) NOT NULL,
+       reason VARCHAR(300) NULL,
+       follow_up_at DATETIME NULL,
+       notes VARCHAR(1000) NULL,
+       client_event_id VARCHAR(64) NOT NULL,
+       ${TS},
+       UNIQUE KEY uq_visit_event (staff_id, client_event_id),
+       INDEX idx_visit_staff (staff_id, visited_at),
+       INDEX idx_visit_followup (follow_up_at)
+     )`,
+  // credit for a sale goes to the officer on the invoice at the time of the sale (pushed by the POS; older rows fall back to agent_code)
+  `ALTER TABLE invoices ADD COLUMN agent_id CHAR(36) NULL`,
+
   // ── New columns on existing tables (all nullable / defaulted) ─────────
   // products: app fields + POS fields that existed only on the desktop (so the sync no longer drops them)
   `ALTER TABLE products ADD COLUMN is_online TINYINT(1) NOT NULL DEFAULT 1`,
