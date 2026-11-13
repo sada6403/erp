@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect } from 'react';
+import { perf } from '@/lib/perf';
 import { Image } from 'expo-image';
 import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
@@ -106,6 +107,7 @@ function roleLabel(role: NavRole, agentCode: string | null | undefined, t: (k: s
 
 /** App header: logo + title + branch tag, bell with unread badge, Login button or role chip + Logout. */
 export function AppHeader() {
+  useEffect(() => perf('header:mounted'), []);
   const s = useHeaderStyles();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
@@ -127,7 +129,7 @@ export function AppHeader() {
             {company?.name || t('app.name')}
           </Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel={t('header.notifications')} hitSlop={4} onPress={() => (loggedIn ? router.push('/notifications') : router.push('/login'))} style={{ width: 40 }}>
+        <Pressable accessibilityRole="button" testID="header-bell" accessibilityLabel={t('header.notifications')} hitSlop={4} onPress={() => (loggedIn ? router.push('/notifications') : router.push('/login'))} style={{ width: 40 }}>
           <View style={s.iconBtn}>
             <Text size={15}>🔔</Text>
             {unread > 0 ? (

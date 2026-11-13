@@ -71,8 +71,9 @@ export function JoinForm() {
       const p = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
       setCoords({ lat: p.coords.latitude, lng: p.coords.longitude });
       setBranchId(null);
+      showToast(t('join.nearMeOk'));
     } catch {
-      showToast(t('join.locationDenied'));
+      showToast(t('join.locationFailed'));
     }
   };
 

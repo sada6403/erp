@@ -376,6 +376,7 @@ export async function mapOrder(db: DbLike, o: Record<string, unknown>, origin: s
     items, subtotal, delivery_fee: Number(o.delivery_fee) || 0,
     address: o.customer_address ? String(o.customer_address) : null,
     notes: o.notes ? String(o.notes) : null,
+    payment_reference: o.payment_reference ? String(o.payment_reference) : null,
     needs_call_confirmation: Number(o.needs_call_confirmation) === 1,
     // once the POS has invoiced the order (stock deducted) only the branch can cancel it
     can_cancel: owner && CANCELLABLE.includes(status) && !o.invoice_id,

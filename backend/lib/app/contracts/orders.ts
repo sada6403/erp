@@ -96,6 +96,8 @@ export interface OrderDto extends OrderSummaryDto {
   delivery_fee: number
   address: string | null
   notes: string | null
+  /** Bank reference the customer typed at checkout (prefills the slip form). */
+  payment_reference?: string | null
   needs_call_confirmation: boolean
   can_cancel: boolean
   /** 4-digit code the customer tells the delivery agent. Only the owner sees it. */

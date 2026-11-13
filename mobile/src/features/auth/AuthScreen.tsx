@@ -18,6 +18,7 @@ import { authApi } from '@/api/endpoints';
 import { useSessionStore } from '@/store/sessionStore';
 import { useUiStore } from '@/store/uiStore';
 import { homeRouteFor, login, register } from './session';
+import { perf, perfNow } from '@/lib/perf';
 import { useCompany } from '@/features/common/hooks';
 import { loginSchema, registerSchema, resetSchema, type LoginForm, type RegisterForm } from './schemas';
 
@@ -96,9 +97,13 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
 
   const doLogin = async (identifier: string, password: string) => {
     setBusy(true);
+    const t0 = perfNow();
+    perf('login:submit');
     try {
       const res = await login(identifier, password);
+      perf('login:response+session stored', t0);
       finish(res.user, t('auth.welcome', { name: res.user.name }));
+      perf('login:navigated', t0);
     } catch (e) {
       showToast(errorMessage(e, t));
     } finally {

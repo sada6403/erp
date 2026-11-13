@@ -1,3 +1,4 @@
+import { ENV, UPDATE_CHANNEL } from '@/lib/env';
 import type { AxiosInstance } from 'axios';
 import type { OkResponse } from '@contracts/common';
 import type { CollectionsTodayResponse, CreateCollectionRequest, CreateCollectionResponse, ReceiptDto } from '@contracts/collections';
@@ -106,7 +107,7 @@ const postForm = async <T>(url: string, form: FormData): Promise<T> =>
   (await c().post<T>(url, form, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 60_000, transformRequest: (d: unknown) => d })).data;
 
 export const statusApi = {
-  status: () => get<StatusResponse>('/status'),
+  status: () => get<StatusResponse>('/status', { platform: 'android', channel: UPDATE_CHANNEL, version: ENV.appVersion }),
   watermark: () => get<WatermarkResponse>('/watermark'),
   company: () => get<CompanyProfileResponse>('/company'),
 };

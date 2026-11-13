@@ -1,6 +1,8 @@
 # Natural Plantation (Test) app: tester guide
 
-Version 1.0.0-test.5 (13 Nov 2026). If you have an older test build installed, install this file over it (your login is kept or you log in again). This is a TEST app. It talks to a test server with test data, not to the real shop. Nothing you do here touches real stock, real money or real customers.
+Version 1.0.0-test.6 (13 Nov 2026). If you have an older test build installed, install this file over it (your login is kept or you log in again). This is a TEST app. It talks to a test server with test data, not to the real shop. Nothing you do here touches real stock, real money or real customers.
+
+**Changes in test.6:** in-app updates (OTA banner once enabled, "New version available" sheet, force-update screen, APK download with SHA-256 check from our test server); bank reference now prefilled on the order page; Categories spinner no longer overlaps the subtitle; "Near me" in Join shows "Location found" or an error; bell has test id `header-bell`.
 
 **Changes in test.5:** button labels (for example Add to cart) no longer overflow in Tamil and Sinhala. Step-13 regression on the phone: 9 roles, themes, 3 languages, offline, orders, Join Smart Buy (camera NIC, screenshot blocked) and reviews all passed; test customer 0771110011 is a plain customer again. Known: the bank reference typed at checkout is not prefilled in the order page transfer box.
 **Changes in test.4:** "Join Smart Buy" is real: enter your details, the agent code (the app shows the agent name to confirm), pick a branch, photograph your NIC (screenshots are blocked on that screen); the branch approves or rejects in the POS and "My Smart Buy requests" shows Pending / Approved / Rejected with the reason. Note: test customer 0771110011 is now a Smart Buy member because the join flow was tested with it.

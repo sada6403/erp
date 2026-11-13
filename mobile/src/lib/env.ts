@@ -32,4 +32,9 @@ export const ENV = {
   appVersion: Constants.expoConfig?.version ?? '1.0.0',
 } as const;
 
+/** Release channel: test APKs (staging flavour) follow "test", Play builds "production". Also the OTA channel. */
+export const UPDATE_CHANNEL: 'test' | 'production' = ENV.appEnv === 'staging' ? 'test' : 'production';
+/** Only the staging/test flavour may install an APK itself (REQUEST_INSTALL_PACKAGES exists only there). */
+export const CAN_SELF_INSTALL = ENV.appEnv === 'staging';
+
 export const API_PREFIX = '/api/app/v1';

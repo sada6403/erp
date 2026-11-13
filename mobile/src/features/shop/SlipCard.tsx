@@ -24,7 +24,7 @@ export function SlipCard({ order }: { order: OrderDto }) {
   const st = useStyles();
   const qc = useQueryClient();
   const showToast = useUiStore((s) => s.showToast);
-  const [reference, setReference] = useState('');
+  const [reference, setReference] = useState(order.payment_reference ?? '');
   const eligible = order.payment_method === 'bank_transfer' && order.stage !== 'cancelled';
   const slips = useQuery({ queryKey: qk.me.slips(order.id), queryFn: () => orderApi.slips(order.id), enabled: eligible, refetchInterval: 30_000 });
   const upload = useMutation({

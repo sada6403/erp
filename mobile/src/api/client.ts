@@ -1,3 +1,4 @@
+import { perf, perfNow } from '@/lib/perf';
 import axios, {
   AxiosError,
   type AxiosAdapter,
@@ -102,6 +103,7 @@ export function createApiClient(opts: ApiClientOptions): AxiosInstance {
   }
 
   instance.interceptors.request.use(async (config: RetryConfig) => {
+    (config as RetryConfig & { _t0?: number })._t0 = perfNow();
     if (config._skipAuth) return config;
     if (!config.headers.has('Authorization')) {
       const t = await opts.tokens.get();
@@ -113,6 +115,7 @@ export function createApiClient(opts: ApiClientOptions): AxiosInstance {
   instance.interceptors.response.use(
     (res) => {
       opts.onReachability?.(true);
+      perf(`api ${res.config.method?.toUpperCase()} ${res.config.url} ${res.status}`, (res.config as RetryConfig & { _t0?: number })._t0);
       return res;
     },
     async (error: unknown) => {

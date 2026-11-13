@@ -18,6 +18,7 @@ import { openDeepLink, setupNotifications } from '@/features/push/push';
 import { applyOtaUpdate, checkForOtaUpdate } from '@/features/push/updates';
 import { useSessionStore } from '@/store/sessionStore';
 import { useUiStore } from '@/store/uiStore';
+import { UpdateAvailableSheet } from '@/features/updates/UpdateSheet';
 import { BuyLaterSheet, PushBanner, ToastHost, UpdateSnackbar } from '@/components/Overlays';
 import { ProductSheetHost } from '@/features/shop/ProductSheet';
 import { ForceUpdateScreen } from '@/features/common/ForceUpdateScreen';
@@ -99,6 +100,7 @@ function Bootstrap() {
       </Stack>
       <ProductSheetHost />
       <BuyLaterSheet />
+      <UpdateAvailableSheet />
       <PushBanner />
       <UpdateSnackbar onRestart={applyOtaUpdate} />
       <ToastHost />

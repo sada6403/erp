@@ -16,9 +16,9 @@
         "API_BASE_URL": "http://10.0.2.2:3000"
       }
     },
-    "preview": {
+    "test": {
       "distribution": "internal",
-      "channel": "preview",
+      "channel": "test",
       "android": {
         "buildType": "apk"
       },
@@ -39,7 +39,8 @@
         "API_BASE_URL": "__SET_AT_BUILD__",
         "APP_KEY": "__SET_AT_BUILD__"
       },
-      "credentialsSource": "remote"
+      "credentialsSource": "remote",
+      "prebuildCommand": "expo prebuild --platform android && node scripts/check-play-manifest.cjs"
     }
   },
   "submit": {

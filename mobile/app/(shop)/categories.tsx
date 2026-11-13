@@ -44,7 +44,7 @@ export default function CategoriesScreen() {
     <Screen gap={0} onRefresh={refetch} refreshing={isRefetching}>
       <ScreenHeading title={t('categories.title')} sub={t('categories.sub')} />
       {isLoading ? (
-        <SkeletonList rows={5} height={64} />
+        <View style={{ marginTop: 12 }}><SkeletonList rows={5} height={64} /></View>
       ) : depts.length === 0 ? (
         <EmptyState icon="🏷️" title={t('categories.empty')} />
       ) : (

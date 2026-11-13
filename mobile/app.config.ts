@@ -31,7 +31,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: 'Natural Plantation',
   slug: 'natural-plantation',
   scheme: 'naturalplantation',
-  version: APP_ENV === 'staging' ? '1.0.0-test.5' : '1.0.0',
+  version: APP_ENV === 'staging' ? '1.0.0-test.6' : '1.0.0',
   orientation: 'portrait',
   userInterfaceStyle: 'light',
   icon: './assets/icon.png',
@@ -45,6 +45,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       monochromeImage: './assets/android-icon-monochrome.png',
     },
     predictiveBackGestureEnabled: false,
+    // The test build installs its own APK updates (REQUEST_INSTALL_PACKAGES); the Play build must never carry it (Play policy, checked by scripts/check-play-manifest.mjs).
+    ...(APP_ENV === 'staging' ? { permissions: ['android.permission.REQUEST_INSTALL_PACKAGES'] } : { blockedPermissions: ['android.permission.REQUEST_INSTALL_PACKAGES'] }),
     ...(process.env.GOOGLE_SERVICES_FILE ? { googleServicesFile: process.env.GOOGLE_SERVICES_FILE } : {}),
     // naturalplantation://orders/ONL-1023 etc.
     intentFilters: [
@@ -59,6 +61,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   updates: {
     enabled: Boolean(EAS_UPDATE_URL),
     checkAutomatically: 'ON_LOAD',
+    // Channel: test APKs (staging) follow "test", Play builds follow "production". Local gradle builds have no EAS channel, so it is sent explicitly.
+    requestHeaders: { 'expo-channel-name': APP_ENV === 'staging' ? 'test' : 'production' },
     fallbackToCacheTimeout: 0,
     ...(EAS_UPDATE_URL ? { url: EAS_UPDATE_URL } : {}),
   },

@@ -1,4 +1,5 @@
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
+import { perf } from '@/lib/perf';
 import { Pressable, ScrollView, TextInput, View } from 'react-native';
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useTranslation } from 'react-i18next';
@@ -187,6 +188,10 @@ export function ProductGrid({
   const { ids, toggle, loggedIn } = useWishlist();
   const router = useRouter();
   const theme = useTheme();
+  const shown = items.length;
+  useEffect(() => {
+    perf(`grid:items=${shown} loading=${!!loading}`);
+  }, [shown, loading]);
 
   const addToCart = useCallback(
     (p: ProductListItemDto) => {

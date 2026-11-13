@@ -38,7 +38,16 @@
     "restart": "Restart",
     "requiredTitle": "Update required",
     "requiredBody": "Please install the latest version {{version}} to continue.",
-    "updateNow": "Update now"
+    "updateNow": "Update now",
+    "availableTitle": "New version available",
+    "availableBody": "Version {{version}} is ready to install.",
+    "whatsNew": "What's new",
+    "later": "Later",
+    "downloading": "Downloading... {{pct}}%",
+    "verifying": "Checking the download...",
+    "installing": "Opening the installer...",
+    "failed": "The update could not be installed. Check your connection and try again.",
+    "checksumFailed": "The download did not match the expected file and was discarded. Try again."
   },
   "soon": {
     "badge": "Coming in the next update",
@@ -597,7 +606,9 @@
     "privacy": "Your NIC details are used only to verify your membership and are deleted 30 days after the decision.",
     "sentTitle": "Request sent",
     "sentBody": "Your branch will check your details. We will tell you here, by notification and by email once it is approved.",
-    "approvalNote": "You can follow the status under My Smart Buy requests."
+    "approvalNote": "You can follow the status under My Smart Buy requests.",
+    "nearMeOk": "Location found. Branches sorted by distance.",
+    "locationFailed": "Could not get your location. Pick your branch from the list."
   },
   "draws": {
     "title": "Monthly Draw Results & Proof",

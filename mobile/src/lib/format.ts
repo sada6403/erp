@@ -84,13 +84,36 @@ export function splitCountdown(totalSeconds: number): { h: string; m: string; s:
   return { h: pad(Math.floor(t / 3600)), m: pad(Math.floor((t % 3600) / 60)), s: pad(t % 60) };
 }
 
-/** Compare dotted versions. Returns negative if a < b. */
+/**
+ * Compare versions like semver. Returns negative if a < b.
+ * "1.0.0-test.5" < "1.0.0-test.6" < "1.0.0-test.10" < "1.0.0" (a release is newer than its pre-releases).
+ */
 export function compareVersions(a: string, b: string): number {
-  const pa = a.split('.').map((n) => parseInt(n, 10) || 0);
-  const pb = b.split('.').map((n) => parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+  const split = (v: string): [number[], string[]] => {
+    const [core, pre] = v.trim().split(/-(.+)/);
+    return [core.split('.').map((n) => parseInt(n, 10) || 0), pre ? pre.split('.') : []];
+  };
+  const [ca, pa] = split(a);
+  const [cb, pb] = split(b);
+  for (let i = 0; i < Math.max(ca.length, cb.length); i++) {
+    const diff = (ca[i] ?? 0) - (cb[i] ?? 0);
     if (diff !== 0) return diff;
+  }
+  if (!pa.length && !pb.length) return 0;
+  if (!pa.length) return 1;
+  if (!pb.length) return -1;
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i];
+    const y = pb[i];
+    if (x === undefined) return -1;
+    if (y === undefined) return 1;
+    const nx = /^[0-9]+$/.test(x);
+    const ny = /^[0-9]+$/.test(y);
+    if (nx && ny) {
+      const d = parseInt(x, 10) - parseInt(y, 10);
+      if (d !== 0) return d;
+    } else if (nx !== ny) return nx ? -1 : 1;
+    else if (x !== y) return x < y ? -1 : 1;
   }
   return 0;
 }
