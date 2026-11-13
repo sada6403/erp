@@ -734,6 +734,8 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku, product_type: productType })
       if (Array.isArray(variants) && variants.length > 0) await enqueueProductVariantRows(id)
+      // the aggregate stock row of a variant product is written locally above; without this push other devices and the cloud never get it
+      if (Array.isArray(variants) && variants.length > 0) await syncStockRow(db, id, targetBranch)
       if (!isAdmin && edit_request_id) {
         await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
       }
@@ -871,6 +873,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
 
       await enqueuSync('products', id, 'UPDATE', { id, ...nextPayload })
       if (Array.isArray(variants)) await enqueueProductVariantRows(id)
+      if (Array.isArray(variants) && variants.length > 0) await syncStockRow(db, id, targetBranch)
       if (!isAdmin && edit_request_id) {
         await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
       }
@@ -1485,7 +1488,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             let stockMovement: Record<string, unknown> | null = null
             db.transaction(() => {
               if (existingStock) {
-                db.prepare('UPDATE stocks SET quantity=?, updated_at=datetime("now") WHERE id=?').run(stockQty, existingStock.id)
+                db.prepare('UPDATE stocks SET quantity=?, updated_at=datetime(\x27now\x27) WHERE id=?').run(stockQty, existingStock.id)
               } else {
                 db.prepare('INSERT INTO stocks (id, product_id, branch_id, warehouse_id, quantity) VALUES (?,?,?,?,?)')
                   .run(crypto.randomUUID(), productId, stockBranchId, null, stockQty)
@@ -1790,7 +1793,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
             const newCatId = crypto.randomUUID()
             const catTitle = titleCase(normalizedCategory)
             try {
-              db.prepare('INSERT INTO categories (id, name, sort_order, is_active, created_at, updated_at) VALUES (?, ?, 0, 1, datetime("now"), datetime("now"))')
+              db.prepare('INSERT INTO categories (id, name, sort_order, is_active, created_at, updated_at) VALUES (?, ?, 0, 1, datetime(\x27now\x27), datetime(\x27now\x27))')
                 .run(newCatId, catTitle)
               catMap.set(catTitle.toLowerCase(), newCatId)
               categoryId = newCatId
@@ -2084,7 +2087,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
         seen.add(nextSku)
         if (nextSku !== sku) {
-          db.prepare('UPDATE products SET sku=?, updated_at=datetime("now") WHERE id=?').run(nextSku, product.id)
+          db.prepare('UPDATE products SET sku=?, updated_at=datetime(\x27now\x27) WHERE id=?').run(nextSku, product.id)
           syncOps.push({ table: 'products', id: String(product.id), operation: 'UPDATE', data: { id: product.id, sku: nextSku } })
           productsUpdated++
         } else {

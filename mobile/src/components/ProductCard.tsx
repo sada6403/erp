@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { ProductListItemDto } from '@contracts/catalog';
 import { useTheme, radii } from '@/theme';
 import { formatPricePerUnit, formatRs } from '@/lib/money';
+import { fewLeftQty } from '@/lib/stock';
 import { Text } from './Text';
 import { Button } from './Button';
 
@@ -32,6 +33,7 @@ function ProductCardBase({ product: p, liked, onOpen, onAdd, onToggleLike }: Pro
   const theme = useTheme();
   const { t } = useTranslation();
   const weight = p.sale_by === 'weight';
+  const few = fewLeftQty(p.in_stock, p.available_qty);
   return (
     <View style={{ flex: 1, padding: 6 }}>
       <Pressable
@@ -82,6 +84,11 @@ function ProductCardBase({ product: p, liked, onOpen, onAdd, onToggleLike }: Pro
               </Text>
             ) : null}
           </View>
+          {few != null ? (
+            <Text size={10} weight={700} color="warning" style={{ marginTop: 2 }}>
+              {t('product.fewLeft', { n: few })}
+            </Text>
+          ) : null}
           {p.emi_available ? (
             <Text size={10} weight={600} color="textMuted" style={{ marginTop: 2 }}>
               {t('product.emi')}

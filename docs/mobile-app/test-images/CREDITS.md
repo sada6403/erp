@@ -1,0 +1,25 @@
+# Test image credits
+
+**TESTING ONLY.** These photos were loaded into the *staging copy* of the "test" company to exercise the mobile app catalog (cards, product pages, thumbnails, watermarks).
+They must **never** be used in the Play Store listing, screenshots, marketing material or any production catalog.
+
+Sources: Openverse (CC0 / public domain / CC BY only) and Wikimedia Commons (CC0 / public domain / CC BY only). Nothing was taken from Google Images.
+Each file was downloaded from the URL below, auto-oriented, resized to at most 1600 px (long edge) and re-saved as JPEG (quality 80). CC BY requires attribution: the author, license and link are listed here.
+
+| File | Test product (SKU) | Title | Author | License | Landing page | Direct file |
+|---|---|---|---|---|---|---|
+| dhal.jpg | DHAL (PRD-013) | Lentilles blondes, lentilles vertes | fred_v | CC BY 2.0 | https://www.flickr.com/photos/8514720@N04/50881647186 | https://live.staticflickr.com/65535/50881647186_eb7aceb73c_b.jpg |
+| eggs.jpg | EGG (PRD-076) | 6-Pack-Chicken-Eggs.jpg | Evan-Amos | Public domain | https://commons.wikimedia.org/wiki/File:6-Pack-Chicken-Eggs.jpg | https://thumb.wikimedia.org/wikipedia/commons/thumb/1/12/6-Pack-Chicken-Eggs.jpg/1920px-6-Pack-Chicken-Eggs.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail |
+| keeri-shamba.jpg | KEERI SHAMBA (PRD-007) | Free uncooked rice grain mat | unknown | CC0 | https://www.rawpixel.com/image/5922922/photo-image-public-domain-food-free | https://images.rawpixel.com/editor_1024/cHJpdmF0ZS9zdGF0aWMvaW1hZ2Uvd2Vic2l0ZS8yMDIyLTA0L2xyL3B4MTYwMzUyNy1pbWFnZS1rd3Z4cWI0ay5qcGc.jpg |
+| kuttha-rice.jpg | KUTHHA RICE (RIC-003) | Free rice image | unknown | CC0 | https://www.rawpixel.com/image/5905176/free-rice-image-public-domain-food-cc0-photo | https://images.rawpixel.com/editor_1024/czNmcy1wcml2YXRlL3Jhd3BpeGVsX2ltYWdlcy93ZWJzaXRlX2NvbnRlbnQvbHIvcHg4NTU1MDItaW1hZ2Uta3d2dXlhMHcuanBn.jpg |
+| oil.jpg | OIL (PRD-010) | Free olive oil bottle garlic | unknown | CC0 | https://www.rawpixel.com/image/5927777/photo-image-background-public-domain-black | https://images.rawpixel.com/editor_1024/czNmcy1wcml2YXRlL3Jhd3BpeGVsX2ltYWdlcy93ZWJzaXRlX2NvbnRlbnQvbHIvZmY1ODkwLWltYWdlLWt3dnlpdXMyLmpwZw.jpg |
+| pooni-rice.jpg | POONI RICE (RIC-004) | Rice Bowl | Kawin Harasai | CC0 | https://stocksnap.io/photo/rice-bowl-CCBWIQCNEJ | https://cdn.stocksnap.io/img-thumbs/960w/CCBWIQCNEJ.jpg |
+| salt.jpg | SALT (PRD-014) | Salt shaker on white background.jpg | Dubravko Sorić SoraZG on Flickr | CC BY 2.0 | https://commons.wikimedia.org/wiki/File:Salt_shaker_on_white_background.jpg | https://upload.wikimedia.org/wikipedia/commons/7/78/Salt_shaker_on_white_background.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled |
+| soap.jpg | SANTHOOR (PRD-077) | Real bars of soap | datsamkong | CC BY 2.0 | https://www.flickr.com/photos/199019123@N05/53581606297 | https://live.staticflickr.com/65535/53581606297_75ff024286_b.jpg |
+| tea-powder.jpg | TEA POWDER (PRD-026) | Darjeeling, India, Darjeeling tea, Black tea.jpg | Vyacheslav Argenberg | CC BY 4.0 | https://commons.wikimedia.org/wiki/File:Darjeeling,_India,_Darjeeling_tea,_Black_tea.jpg | https://thumb.wikimedia.org/wikipedia/commons/thumb/3/31/Darjeeling%2C_India%2C_Darjeeling_tea%2C_Black_tea.jpg/1920px-Darjeeling%2C_India%2C_Darjeeling_tea%2C_Black_tea.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail |
+| white-flour.jpg | WHITE  FLOUR (GRO-009) | Whole wheat grain flour being scooped.jpg | Margaret Hoogstrate | CC BY 3.0 | https://commons.wikimedia.org/wiki/File:Whole_wheat_grain_flour_being_scooped.jpg | https://thumb.wikimedia.org/wikipedia/commons/thumb/6/66/Whole_wheat_grain_flour_being_scooped.jpg/1920px-Whole_wheat_grain_flour_being_scooped.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail |
+| white-sugar.jpg | WHITE SUGAR (PRD-008) | Individually wrapped sugar cubes.jpg | Викидим | CC BY 4.0 | https://commons.wikimedia.org/wiki/File:Individually_wrapped_sugar_cubes.jpg | https://thumb.wikimedia.org/wikipedia/commons/thumb/1/10/Individually_wrapped_sugar_cubes.jpg/1920px-Individually_wrapped_sugar_cubes.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail |
+
+## Products deliberately without a good photo (fallback tests)
+- `PRD-016 KADALAI`, `PRD-018 AVAL`, `PRD-015 SALT POWDER`: no image at all (placeholder).
+- `PRD-080 WELVET`: image URL points to a file that does not exist (broken-image fallback).

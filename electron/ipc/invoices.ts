@@ -544,10 +544,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
               const vStock = db.prepare('SELECT id, quantity FROM product_variant_stocks WHERE variant_id = ? AND branch_id = ?')
                 .get(item.variant_id, branchId) as { id: string; quantity: number } | undefined
               if (vStock) {
-                db.prepare('UPDATE product_variant_stocks SET quantity = quantity - ?, updated_at = datetime("now") WHERE variant_id = ? AND branch_id = ?')
+                db.prepare('UPDATE product_variant_stocks SET quantity = quantity - ?, updated_at = datetime(\x27now\x27) WHERE variant_id = ? AND branch_id = ?')
                   .run(item.quantity, item.variant_id, branchId)
               } else {
-                db.prepare('INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at) VALUES (?, ?, ?, ?, ?, 0, datetime("now"))')
+                db.prepare('INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at) VALUES (?, ?, ?, ?, ?, 0, datetime(\x27now\x27))')
                   .run(crypto.randomUUID(), item.variant_id, item.product_id, branchId, -item.quantity)
               }
             }

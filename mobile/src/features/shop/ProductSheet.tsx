@@ -11,6 +11,7 @@ import { emojiFor } from '@/components/ProductCard';
 import { useUiStore, selectIsOffline } from '@/store/uiStore';
 import { useCartStore } from '@/store/cartStore';
 import { defaultQtyRules, formatPricePerUnit, formatRs, lineTotal, snapQty } from '@/lib/money';
+import { fewLeftQty } from '@/lib/stock';
 import { useProductDetail } from './hooks';
 
 /** Mounted once in the root layout: shows the product detail bottom sheet over whatever screen is open. */
@@ -49,6 +50,7 @@ function ProductSheetBody({ id, onClose }: { id: string; onClose: () => void }) 
   const unitPrice = variant?.price ?? p.price;
   const orig = variant?.original_price ?? p.original_price;
   const inStock = variant ? variant.in_stock : p.in_stock;
+  const few = fewLeftQty(inStock, variant ? variant.available_qty : p.available_qty);
   const image = variant?.image_url ?? detail.data?.gallery?.[0]?.medium ?? p.thumbnail_url;
   const desc = detail.data?.description ?? p.short_description;
 
@@ -90,9 +92,9 @@ function ProductSheetBody({ id, onClose }: { id: string; onClose: () => void }) 
           </Text>
         ) : null}
         <Badge
-          label={inStock ? t('product.inStock') : t('product.outOfStock')}
-          bg={inStock ? 'successBg' : 'errorBg'}
-          fg={inStock ? 'success' : 'error'}
+          label={!inStock ? t('product.outOfStock') : few != null ? t('product.fewLeft', { n: few }) : t('product.inStock')}
+          bg={!inStock ? 'errorBg' : few != null ? 'warningBg' : 'successBg'}
+          fg={!inStock ? 'error' : few != null ? 'warning' : 'success'}
           size={11}
           style={{ paddingHorizontal: 8, paddingVertical: 3 }}
         />

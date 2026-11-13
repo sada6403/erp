@@ -79,3 +79,61 @@ Generated 2026-11-12T10:48:30.222Z by `npm run test:integration-app` against a f
 | SM-13 | POS hides Juice (online off) then shows it; moves Cheese Dairy -> Dry Rations | hidden: list gone, detail 404, delta removed_ids has it; shown again; cheese.category_id=3020e56c-b1dd-4a24-bcc6-ef963e03f690; category counts {"Vegetables":1,"Dairy":1,"Dry Rations":9} | products [{"name":"Fruit Juice 1L","is_online":1,"category_id":"3020e56c-b1dd-4a24-bcc6-ef963e03f690","updated_at":"2026-11-12 10:38:05"},{"name":"Cheese Block","is_online":1,"category_id":"3020e56c-b1dd-4a24-bcc6-ef963e03f690","updated_at":"2026-11-12 10:38:07"}] | Products > online store toggle / category | POS -> app | 4125 | PASS |  |
 | SM-14 | POS sets a product image | carrot.thumbnail_url http://localhost:3000/api/app/v1/media/img/sm-test-b-1794479888677.png?w=300 -> 200 | products.image_url {"image_url":"/api/files/sm-test-b-1794479888677.png"} | Products > image | POS -> app | 1160 | PASS |  |
 | SM-15 | New product made in POS (weight item + stock) then deactivated | app shows POS Made Tomato 220/kg qty 8; after deactivate: gone | products {"name":"POS Made Tomato","selling_price":"220.00","sale_by":"weight","is_active":0} | Products > add (SQLite INSERT + queue) | POS -> app (create + deactivate) | 3033 | PASS |  |
+
+## Catalog test data in the staging copy of "test" (2026-11-13)
+
+Created through the real POS paths (image upload `/api/upload`, `products:*`, `stocks:*`, `discounts:*`, normal sync push) by `electron/__qa__/integration-app/staging-catalog-seed.integration.test.ts` against **staging only** (schema `pos_erp_app_test_company_testcopy`). No production writes. Photos are test-only (see `docs/mobile-app/test-images/CREDITS.md`).
+
+| What | Product (SKU) | Id | Setting |
+|---|---|---|---|
+| Photo | dhal (PRD-013) | `0957dd85-c7aa-43c4-94b0-02309bf08413` | `6e0bede0-28a5-4efe-98c5-8364c9c5877a.jpg` |
+| Photo | eggs (PRD-076) | `427a5767-37c9-47fc-8977-126cb9e738a4` | `1c0d529d-5179-475b-bbf9-0650aaf3072b.jpg` |
+| Photo | keeri-shamba (PRD-007) | `2bb08b95-2c1c-4067-8490-38027c3fcbb5` | `eb7dca98-e171-4d25-a080-8c556b949a42.jpg` |
+| Photo | kuttha-rice (RIC-003) | `da7c93fc-d272-4075-93f1-469baf28f5f4` | `25feb5d5-4e7b-4b2d-a076-12b317e10e38.jpg` |
+| Photo | oil (PRD-010) | `e7f266da-6f68-4797-b44e-f3dbd677725a` | `261e4e1f-dc7c-4ac9-8dbf-c0d9855044cf.jpg` |
+| Photo | pooni-rice (RIC-004) | `6bb1e3b9-b222-4e54-ade6-790e7942e3ff` | `f7f63559-a5c2-4e52-8146-79495e912caa.jpg` |
+| Photo | salt (PRD-014) | `211c7558-bdc9-4e19-b08a-ac2e1ec633df` | `e0439bf6-c1c6-4816-856d-841901e4d023.jpg` |
+| Photo | soap (PRD-077) | `9d99ca8c-b573-4bda-9bcd-1a5e9049aa3b` | `5086b695-b027-4d93-8942-a324a257eacd.jpg` |
+| Photo | tea-powder (PRD-026) | `977e9e3c-b372-4618-b04c-af806c3094c8` | `07234891-5888-497d-94d8-2157aa3303a5.jpg` |
+| Photo | white-flour (GRO-009) | `d0864400-d61c-4d59-8e89-7bcf668105b0` | `843e58f6-be17-455e-be30-404b9e0be65b.jpg` |
+| Photo | white-sugar (PRD-008) | `2539a3b4-24e4-49fb-9858-267918e7d067` | `fb26c793-813f-4f9f-be0b-975b006b06c3.jpg` |
+| No photo (placeholder) | PRD-016 | `1d3fdac7-e91d-4941-b460-78d3cdda568b` | image_url empty |
+| No photo (placeholder) | PRD-018 | `d4310d48-9e21-4b12-8f30-7c3c209da202` | image_url empty |
+| No photo (placeholder) | PRD-015 | `c74fa1c0-bf0f-41a5-9144-fe7bd55bc31f` | image_url empty |
+| Broken image URL | PRD-080 | `3bd489fa-5c44-4053-b86c-96fb65cde8f9` | https://staging-api.72-61-115-222.sslip.io/api/files/does-not-exist-broken-image.jpg |
+| Weight item | Rice Keeri Samba (Loose) (LOOSE-RICE-KS) | `0f81e698-e7a0-4343-b351-4eafd879c69a` | kg, sale_by=weight, Rs 285/kg, stock 25.5 kg; FIFO batches KS-OCT 10 kg @240 (2026-10-01), KS-NOV 15.5 kg @250 (2026-11-05) |
+| Weight item | Sugar (Loose) (LOOSE-SUGAR) | `661b54dc-ec14-47a6-9f99-d6033e0a2092` | kg, sale_by=weight, Rs 245/kg, stock 40.25 kg |
+| Variant product | Sunlight Soap (SOAP-SUN) | `0762e5bf-fbac-4703-9a97-fd8bd25f1c78` | 70g Rs 60 id `2343c2f4-d6d2-422e-b988-ecb3644edf1a` stock 40; 100g Rs 85 id `ef53930f-b13e-46fc-856d-f723f9152ea6` stock 25; 150g Rs 120 id `5adf13f4-b75e-4cca-9c90-e022991403f1` stock 3 |
+| 10% discount | PRD-020 | `8e2323c1-59b2-44f4-bdec-17a3b61f21c7` | discount `5d6be5f2-65dd-4e79-bf5c-caaddb648cc7` valid until 2026-11-19 19:44:36 UTC |
+| 10% discount | PRD-026 | `977e9e3c-b372-4618-b04c-af806c3094c8` | discount `99368b9a-c5c1-49ab-b08a-b083fe279d91` valid until 2026-11-19 19:44:36 UTC |
+| Tax 10% | PRD-057 MILO | `368aa809-c944-471a-a6f9-a15238561f6c` | counter price 850 -> app price 935 |
+| Not for sale | PRD-011 Kerosene Oil | `024d7a81-4e9b-4860-baa2-f818b606886d` | not_for_sale=1 (hidden in app) |
+| Out of stock | PRD-073 DIN MILK | `041deffc-c844-4739-9f99-501056e9ff64` | stock 0 |
+| Few left | PRD-081 LUX SHOP | `0ffd1e24-ea47-4418-825a-de3f157eb61e` | stock 4 |
+
+### Mixed order -> POS invoice (harness, staging)
+
+Order `249b1878-7262-4141-92bf-ede81f4b7db6` (COD): Rice Keeri Samba (Loose) 2.5 kg + Sunlight Soap 100g x2 + ANCHOR (400g) x1 (10% off). Total Rs 2007.5.
+POS convert -> invoice `MAIN-001-QA2-INV-2026-0001` total 2007.5 = order total. Lines: 1 x 1125 = 1125; 2 x 85 = 170; 2.5 x 285 = 712.5.
+Stock before -> after (POS): rice 25.5 -> 23 kg; soap 100g 25 -> 23; ANCHOR 6 -> 5.
+FIFO: the 2.5 kg came from batch **KS-OCT** (older, cost 240); batches after: KS-OCT 7.5 kg, KS-NOV 15.5 kg.
+
+### Bugs found and fixed while doing this
+
+1. `products:create/update` never pushed the aggregate `stocks` row of a **variant product**: other POS devices saw "have 0" and refused to convert app orders containing it. Fixed (`syncStockRow` after the variant rows).
+2. Selling a **variant** item at the POS ran `datetime("now")` (double quotes) which this SQLite build rejects ("no such column: now"). Fixed in `invoices.ts` (2), `products.ts` (4), `stocks.ts` (1).
+3. Mobile app had no "few left" badge. Added "Only N left" (5 or fewer) on product card and product page (en/ta/si).
+
+### Finding, not changed
+
+App `available_qty` keeps the order reservation until the order is dispatched, but the POS already deducts stock at invoice conversion, so between "ready for delivery" and "out for delivery" the app shows the quantity twice deducted (e.g. rice 20.5 kg instead of 23). `ST-03` asserts this behaviour. Decision needed: release the reservation at conversion (`ready_for_delivery`) instead of dispatch.
+
+
+## Phone catalog checks + phone order (staging APK, 2026-11-13)
+- Photos on cards, product page and cart lines: pass (TEA POWDER, KUTHHA/POONI RICE). Placeholders (emoji / colour block) for products without a photo: pass.
+- Weight items: "Rs 285 / kg", cart shows 0.25 kg step, line Rs 71.25 -> 0.5 kg = Rs 142.50: pass.
+- Variant picker (Sunlight Soap): 70g Rs 60 / 100g Rs 85 / 150g Rs 120 + "Only 3 left": pass.
+- Discount: TEA POWDER Rs 1,305 (was 1,450), "Save 10%", countdown matches the real end date: pass.
+- Search finds tea, sunlight, loose items: pass.
+- Not visually re-checked on the phone (UI automation drifted); verified through the app API earlier: MILO 935, Kerosene hidden, DIN MILK out of stock, WELVET broken URL.
+- Phone order ONL-1008 (Soap 150g x1, Rice 0.5 kg, TEA POWDER x1) = Rs 1,567.50. Converted in the POS harness (phase `phone`): invoice total 1,567.50; stock deducted 1 / 0.5 / 1; rice taken from the oldest batch KS-OCT (FIFO). Evidence: `integration-evidence/catalog-seed.json` -> `phone_order`.

@@ -1,0 +1,341 @@
+{
+  "photos": {
+    "pooni-rice": {
+      "product_id": "6bb1e3b9-b222-4e54-ade6-790e7942e3ff",
+      "sku": "RIC-004",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/f7f63559-a5c2-4e52-8146-79495e912caa.jpg"
+    },
+    "keeri-shamba": {
+      "product_id": "2bb08b95-2c1c-4067-8490-38027c3fcbb5",
+      "sku": "PRD-007",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/eb7dca98-e171-4d25-a080-8c556b949a42.jpg"
+    },
+    "oil": {
+      "product_id": "e7f266da-6f68-4797-b44e-f3dbd677725a",
+      "sku": "PRD-010",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/261e4e1f-dc7c-4ac9-8dbf-c0d9855044cf.jpg"
+    },
+    "dhal": {
+      "product_id": "0957dd85-c7aa-43c4-94b0-02309bf08413",
+      "sku": "PRD-013",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/6e0bede0-28a5-4efe-98c5-8364c9c5877a.jpg"
+    },
+    "kuttha-rice": {
+      "product_id": "da7c93fc-d272-4075-93f1-469baf28f5f4",
+      "sku": "RIC-003",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/25feb5d5-4e7b-4b2d-a076-12b317e10e38.jpg"
+    },
+    "white-sugar": {
+      "product_id": "2539a3b4-24e4-49fb-9858-267918e7d067",
+      "sku": "PRD-008",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/fb26c793-813f-4f9f-be0b-975b006b06c3.jpg"
+    },
+    "white-flour": {
+      "product_id": "d0864400-d61c-4d59-8e89-7bcf668105b0",
+      "sku": "GRO-009",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/843e58f6-be17-455e-be30-404b9e0be65b.jpg"
+    },
+    "salt": {
+      "product_id": "211c7558-bdc9-4e19-b08a-ac2e1ec633df",
+      "sku": "PRD-014",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/e0439bf6-c1c6-4816-856d-841901e4d023.jpg"
+    },
+    "tea-powder": {
+      "product_id": "977e9e3c-b372-4618-b04c-af806c3094c8",
+      "sku": "PRD-026",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/07234891-5888-497d-94d8-2157aa3303a5.jpg"
+    },
+    "soap": {
+      "product_id": "9d99ca8c-b573-4bda-9bcd-1a5e9049aa3b",
+      "sku": "PRD-077",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/5086b695-b027-4d93-8942-a324a257eacd.jpg"
+    },
+    "eggs": {
+      "product_id": "427a5767-37c9-47fc-8977-126cb9e738a4",
+      "sku": "PRD-076",
+      "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/1c0d529d-5179-475b-bbf9-0650aaf3072b.jpg"
+    }
+  },
+  "no_photo": [
+    {
+      "sku": "PRD-016",
+      "product_id": "1d3fdac7-e91d-4941-b460-78d3cdda568b"
+    },
+    {
+      "sku": "PRD-018",
+      "product_id": "d4310d48-9e21-4b12-8f30-7c3c209da202"
+    },
+    {
+      "sku": "PRD-015",
+      "product_id": "c74fa1c0-bf0f-41a5-9144-fe7bd55bc31f"
+    }
+  ],
+  "broken_image": {
+    "sku": "PRD-080",
+    "product_id": "3bd489fa-5c44-4053-b86c-96fb65cde8f9",
+    "image_url": "https://staging-api.72-61-115-222.sslip.io/api/files/does-not-exist-broken-image.jpg"
+  },
+  "weight_items": {
+    "rice": {
+      "id": "0f81e698-e7a0-4343-b351-4eafd879c69a",
+      "name": "Rice Keeri Samba (Loose)",
+      "price_per_kg": 285,
+      "stock_kg": 25.5,
+      "batches": [
+        {
+          "id": "41a31587-08ec-4a33-989b-b8f2fe5a8f16",
+          "no": "KS-OCT",
+          "kg": 10
+        },
+        {
+          "id": "5768b3c0-fb9d-4bc5-9d75-5460eddd25f3",
+          "no": "KS-NOV",
+          "kg": 15.5
+        }
+      ]
+    },
+    "sugar": {
+      "id": "661b54dc-ec14-47a6-9f99-d6033e0a2092",
+      "name": "Sugar (Loose)",
+      "price_per_kg": 245,
+      "stock_kg": 40.25
+    }
+  },
+  "discounts": [
+    {
+      "sku": "PRD-020",
+      "product_id": "8e2323c1-59b2-44f4-bdec-17a3b61f21c7",
+      "discount_id": "5d6be5f2-65dd-4e79-bf5c-caaddb648cc7",
+      "valid_until_utc": "2026-11-19 19:44:36"
+    },
+    {
+      "sku": "PRD-026",
+      "product_id": "977e9e3c-b372-4618-b04c-af806c3094c8",
+      "discount_id": "99368b9a-c5c1-49ab-b08a-b083fe279d91",
+      "valid_until_utc": "2026-11-19 19:44:36"
+    }
+  ],
+  "taxed": {
+    "sku": "PRD-057",
+    "product_id": "368aa809-c944-471a-a6f9-a15238561f6c",
+    "tax_rate": 10,
+    "counter_price": 850
+  },
+  "stock_states": {
+    "not_for_sale": {
+      "sku": "PRD-011",
+      "product_id": "024d7a81-4e9b-4860-baa2-f818b606886d"
+    },
+    "out_of_stock": {
+      "sku": "PRD-073",
+      "product_id": "041deffc-c844-4739-9f99-501056e9ff64"
+    },
+    "few_left": {
+      "sku": "PRD-081",
+      "product_id": "0ffd1e24-ea47-4418-825a-de3f157eb61e",
+      "qty": 4
+    }
+  },
+  "readback": {
+    "catalog_items": 91,
+    "photos_with_thumbnail": "11/11",
+    "sample_thumb": "https://staging-api.72-61-115-222.sslip.io/api/app/v1/media/img/f7f63559-a5c2-4e52-8146-79495e912caa.jpg?w=300"
+  },
+  "variant_product": {
+    "id": "0762e5bf-fbac-4703-9a97-fd8bd25f1c78",
+    "name": "Sunlight Soap",
+    "variants": [
+      {
+        "id": "2343c2f4-d6d2-422e-b988-ecb3644edf1a",
+        "name": "70g",
+        "price": 60
+      },
+      {
+        "id": "ef53930f-b13e-46fc-856d-f723f9152ea6",
+        "name": "100g",
+        "price": 85
+      },
+      {
+        "id": "5adf13f4-b75e-4cca-9c90-e022991403f1",
+        "name": "150g",
+        "price": 120
+      }
+    ],
+    "stock": {
+      "70g": 40,
+      "100g": 25,
+      "150g": 3
+    }
+  },
+  "order": {
+    "order_id": "249b1878-7262-4141-92bf-ede81f4b7db6",
+    "order_total": 2007.5,
+    "cloud_lines": 3,
+    "invoice_id": "8dcb47da-e1e2-434d-803c-b0f16c71fc45",
+    "invoice": {
+      "invoice_number": "MAIN-001-QA2-INV-2026-0001",
+      "subtotal": 2007.5,
+      "discount_amount": 0,
+      "tax_amount": 0,
+      "total_amount": 2007.5
+    },
+    "lines": [
+      {
+        "product_id": "8e2323c1-59b2-44f4-bdec-17a3b61f21c7",
+        "variant_id": null,
+        "quantity": 1,
+        "unit_price": 1125,
+        "discount_amount": 0,
+        "tax_amount": 0,
+        "line_total": 1125
+      },
+      {
+        "product_id": "0762e5bf-fbac-4703-9a97-fd8bd25f1c78",
+        "variant_id": "ef53930f-b13e-46fc-856d-f723f9152ea6",
+        "quantity": 2,
+        "unit_price": 85,
+        "discount_amount": 0,
+        "tax_amount": 0,
+        "line_total": 170
+      },
+      {
+        "product_id": "0f81e698-e7a0-4343-b351-4eafd879c69a",
+        "variant_id": null,
+        "quantity": 2.5,
+        "unit_price": 285,
+        "discount_amount": 0,
+        "tax_amount": 0,
+        "line_total": 712.5
+      }
+    ],
+    "stock_before": {
+      "rice": 25.5,
+      "anchor": 6,
+      "v100": 25
+    },
+    "stock_after": {
+      "rice": 23,
+      "anchor": 5,
+      "v100": 23
+    },
+    "fifo_allocations": [
+      {
+        "batch_number": "KS-OCT",
+        "quantity": 2.5,
+        "unit_cost": 240
+      }
+    ],
+    "batches_after": [
+      {
+        "batch_number": "KS-OCT",
+        "quantity": 7.5
+      },
+      {
+        "batch_number": "KS-NOV",
+        "quantity": 15.5
+      }
+    ],
+    "app_stock_after": {
+      "ANCHOR (400g)": 1,
+      "Rice Keeri Samba (Loose)": 13,
+      "Sunlight Soap": 58
+    }
+  },
+  "phone_order": {
+    "order_no": "ONL-1008",
+    "order_id": "4f2bd912-3343-4fb9-9567-9c840c1b7166",
+    "app_total": 1567.5,
+    "order_lines": [
+      {
+        "product_id": "0762e5bf-fbac-4703-9a97-fd8bd25f1c78",
+        "variant_id": "5adf13f4-b75e-4cca-9c90-e022991403f1",
+        "quantity": 1,
+        "unit_price": 120
+      },
+      {
+        "product_id": "0f81e698-e7a0-4343-b351-4eafd879c69a",
+        "variant_id": null,
+        "quantity": 0.5,
+        "unit_price": 285
+      },
+      {
+        "product_id": "977e9e3c-b372-4618-b04c-af806c3094c8",
+        "variant_id": null,
+        "quantity": 1,
+        "unit_price": 1305
+      }
+    ],
+    "invoice_id": "8ca1fa5e-c392-412d-b09f-4a63ff5f9704",
+    "invoice": {
+      "invoice_number": "MAIN-001-QA3-INV-2026-0001",
+      "subtotal": 1567.5,
+      "discount_amount": 0,
+      "tax_amount": 0,
+      "total_amount": 1567.5
+    },
+    "lines": [
+      {
+        "product_id": "0762e5bf-fbac-4703-9a97-fd8bd25f1c78",
+        "variant_id": "5adf13f4-b75e-4cca-9c90-e022991403f1",
+        "quantity": 1,
+        "unit_price": 120,
+        "discount_amount": 0,
+        "tax_amount": 0,
+        "line_total": 120
+      },
+      {
+        "product_id": "0f81e698-e7a0-4343-b351-4eafd879c69a",
+        "variant_id": null,
+        "quantity": 0.5,
+        "unit_price": 285,
+        "discount_amount": 0,
+        "tax_amount": 0,
+        "line_total": 142.5
+      },
+      {
+        "product_id": "977e9e3c-b372-4618-b04c-af806c3094c8",
+        "variant_id": null,
+        "quantity": 1,
+        "unit_price": 1305,
+        "discount_amount": 0,
+        "tax_amount": 0,
+        "line_total": 1305
+      }
+    ],
+    "stock_before": {
+      "5adf13f4-b75e-4cca-9c90-e022991403f1": 3,
+      "0f81e698-e7a0-4343-b351-4eafd879c69a": 23,
+      "977e9e3c-b372-4618-b04c-af806c3094c8": 13
+    },
+    "stock_after": {
+      "5adf13f4-b75e-4cca-9c90-e022991403f1": 2,
+      "0f81e698-e7a0-4343-b351-4eafd879c69a": 22.5,
+      "977e9e3c-b372-4618-b04c-af806c3094c8": 12
+    },
+    "deducted": {
+      "5adf13f4-b75e-4cca-9c90-e022991403f1": 1,
+      "0f81e698-e7a0-4343-b351-4eafd879c69a": 0.5,
+      "977e9e3c-b372-4618-b04c-af806c3094c8": 1
+    },
+    "fifo_allocations": [
+      {
+        "product_id": "0762e5bf-fbac-4703-9a97-fd8bd25f1c78",
+        "batch_number": "OPENING-0762e5bf",
+        "quantity": 1,
+        "unit_cost": 0
+      },
+      {
+        "product_id": "977e9e3c-b372-4618-b04c-af806c3094c8",
+        "batch_number": "OPENING-977e9e3c",
+        "quantity": 1,
+        "unit_cost": 0
+      },
+      {
+        "product_id": "0f81e698-e7a0-4343-b351-4eafd879c69a",
+        "batch_number": "KS-OCT",
+        "quantity": 0.5,
+        "unit_cost": 240
+      }
+    ]
+  }
+}
