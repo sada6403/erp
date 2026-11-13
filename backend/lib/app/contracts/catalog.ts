@@ -126,17 +126,54 @@ export interface ProductsResponse {
   server_time: string
 }
 
+export type BannerLinkType = 'product' | 'category' | 'flash' | 'smartbuy' | 'url'
+/** Stored link types in the POS (adds 'none'). */
+export type BannerLinkTypeStored = BannerLinkType | 'none'
+export type BannerAudience = 'all' | 'guests' | 'customers' | 'members'
+export type BannerLang = 'en' | 'ta' | 'si'
+
+export interface BannerLinkDto {
+  type: BannerLinkType
+  /** product id / category id / https url; null for 'flash' and 'smartbuy' */
+  target: string | null
+}
 export interface BannerDto {
   id: string
-  title: string
+  /** Optional: many banners are image-only */
+  title?: string | null
   subtitle: string | null
+  /** Sharp WebP phone-width variant; per-language image when set */
   image_url: string | null
-  /** Deep link such as lankahome://product/<id>, or null */
-  link_url: string | null
+  link: BannerLinkDto | null
   sort_order: number
 }
+/** GET /api/app/v1/catalog/banners?lang=en|ta|si  (auth optional: valid bearer => customer/member, else guest). Max 10 items. */
 export interface BannersResponse {
   items: BannerDto[]
+}
+/** POST /api/app/v1/catalog/banners/events (auth none, rate-limited, max 50 events). No personal data is stored. */
+export interface BannerEventBody {
+  events: Array<{ banner_id: string; type: 'impression' | 'tap' }>
+}
+export interface BannerEventResponse {
+  ok: true
+  accepted: number
+}
+
+export type HomeSectionKey = 'banners' | 'categories' | 'flash_deals' | 'smartbuy_promo' | 'new_arrivals' | 'featured'
+export interface HomeSectionDto {
+  key: HomeSectionKey
+  enabled: boolean
+}
+/** GET /api/app/v1/catalog/home-layout (auth none). Display order; default = all six enabled. */
+export interface HomeLayoutResponse {
+  sections: HomeSectionDto[]
+}
+
+/** GET /api/app/v1/admin/banner-stats?from=YYYY-MM-DD&to=YYYY-MM-DD (x-api-key admin route) */
+export interface BannerStatsResponse {
+  items: Array<{ banner_id: string; impressions: number; taps: number }>
+  days: Array<{ day: string; banner_id: string; impressions: number; taps: number }>
 }
 
 export interface SearchResponse {
