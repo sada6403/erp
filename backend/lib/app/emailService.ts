@@ -57,12 +57,12 @@ export async function emailDataFor(tp: QDb, job: Pick<EmailJob, 'event_type' | '
 let schemaReady = new Set<string>()
 
 /** Process due email jobs for one tenant. Safe to run concurrently with another worker (jobs are claimed first). */
-export async function runEmailWorker(dbSchema: string): Promise<{ processed: number; sent: number; suppressed: number; failed: number }> {
+export async function runEmailWorker(dbSchema: string): Promise<{ processed: number; sent: number; suppressed: number; failed: number; pending: number }> {
   if (!schemaReady.has(dbSchema)) { await ensureTenantCompatibility(dbSchema); schemaReady.add(dbSchema) }
   const tp: TP = tenantPool(dbSchema)
   const c = await pool.query(`SELECT id FROM companies WHERE db_schema = ? LIMIT 1`, [dbSchema])
   const companyId = (c.rows[0] as { id?: string } | undefined)?.id
-  const out = { processed: 0, sent: 0, suppressed: 0, failed: 0 }
+  const out = { processed: 0, sent: 0, suppressed: 0, failed: 0, pending: 0 }
   if (!companyId) return out
   const { rows } = await tp.query<EmailJob>(
     `SELECT id, user_id, event_type, entity_id, lang, payload, attempts FROM email_jobs
@@ -105,12 +105,39 @@ export async function runEmailWorker(dbSchema: string): Promise<{ processed: num
       await tp.query(`UPDATE email_jobs SET status='failed', attempts=?, to_hash=?, last_error=?${scrub} WHERE id=?`, [o.attempts, toHash, o.error, job.id])
     }
   }
+  const left = await tp.query(`SELECT COUNT(*) AS n FROM email_jobs WHERE status IN ('pending','sending')`)
+  out.pending = Number((left.rows[0] as { n?: number } | undefined)?.n) || 0
   return out
+}
+
+/** All active app companies (what the cron route does). Returns how many jobs are still waiting. */
+export async function runEmailWorkerAll(): Promise<number> {
+  const { rows } = await pool.query(`SELECT db_schema FROM companies WHERE app_key IS NOT NULL AND status IN ('active','trial')`)
+  let pending = 0
+  for (const r of rows as Array<{ db_schema: string }>) {
+    try { pending += (await runEmailWorker(r.db_schema)).pending } catch (e) { console.error('[email] worker failed', sanitizeError(e)) }
+  }
+  return pending
+}
+
+// No scheduler is needed for email: enqueueing arms a background drain (first pass ~3 s later, a second pass 30 s later to
+// catch rows committed after the first, then every minute while jobs are waiting for a retry). The cron route also drains.
+let drainTimer: ReturnType<typeof setTimeout> | null = null
+export function scheduleEmailDrain(delayMs = 3000, pass = 0): void {
+  if (drainTimer) return
+  drainTimer = setTimeout(async () => {
+    drainTimer = null
+    let pending = 0
+    try { pending = await runEmailWorkerAll() } catch (e) { console.error('[email] drain failed', sanitizeError(e)) }
+    if (pass === 0) scheduleEmailDrain(30000, 1)
+    else if (pending > 0) scheduleEmailDrain(60000, 1)
+  }, delayMs)
+  drainTimer.unref?.()
 }
 
 /** Fire-and-forget enqueue used by the notification hooks: an email problem must never break the user-facing flow. */
 export async function queueEmail(db: QDb, i: EnqueueInput): Promise<void> {
-  try { await enqueueEmail(db, i) } catch (e) { console.error('[email] enqueue failed', i.type, sanitizeError(e)) }
+  try { if ((await enqueueEmail(db, i)) === 'queued') scheduleEmailDrain() } catch (e) { console.error('[email] enqueue failed', i.type, sanitizeError(e)) }
 }
 
 /** Enqueue and deliver right away (verification / reset codes, welcome). Returns the final job status. */
