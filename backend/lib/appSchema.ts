@@ -126,6 +126,27 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
        INDEX idx_app_settings_updated (updated_at)
      )`,
 
+  // Product reviews (synced: created in the cloud by customers, hidden/unhidden by the POS).
+  `CREATE TABLE IF NOT EXISTS product_reviews (
+       id VARCHAR(191) NOT NULL PRIMARY KEY,
+       product_id VARCHAR(191) NOT NULL,
+       customer_id VARCHAR(191) NULL,
+       app_user_id VARCHAR(191) NULL,
+       order_item_id VARCHAR(191) NOT NULL,
+       author_name VARCHAR(100) NULL,
+       rating TINYINT NOT NULL,
+       comment VARCHAR(500) NULL,
+       is_hidden TINYINT(1) NOT NULL DEFAULT 0,
+       hidden_by VARCHAR(191) NULL,
+       hidden_at DATETIME NULL,
+       hidden_reason VARCHAR(255) NULL,
+       ${TS},
+       synced_at DATETIME NULL,
+       UNIQUE KEY uq_product_reviews_item (order_item_id),
+       INDEX idx_product_reviews_product (product_id, is_hidden),
+       INDEX idx_product_reviews_updated (updated_at)
+     )`,
+
   // ── Cloud-only app tables ─────────────────────────────────────────────
   `CREATE TABLE IF NOT EXISTS wishlists (
        id VARCHAR(191) NOT NULL PRIMARY KEY,
@@ -350,6 +371,10 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE categories ADD COLUMN image_url TEXT NULL`,
   `ALTER TABLE branches ADD COLUMN latitude DECIMAL(10,7) NULL`,
   `ALTER TABLE branches ADD COLUMN longitude DECIMAL(10,7) NULL`,
+  // Delivery time shown on product pages (set per branch in the POS Online Store page; all NULL = not shown)
+  `ALTER TABLE branches ADD COLUMN delivery_eta_min_days INT NULL`,
+  `ALTER TABLE branches ADD COLUMN delivery_eta_max_days INT NULL`,
+  `ALTER TABLE branches ADD COLUMN delivery_eta_text VARCHAR(120) NULL`,
   // Google Play reviewer accounts (cloud-only table): their orders are tagged TEST in the order notes.
   `ALTER TABLE app_users ADD COLUMN is_review_account TINYINT(1) NOT NULL DEFAULT 0`,
   // NIC retention: NIC number + photos are wiped 30 days after the decision (joinLib.purgeJoinRetention)

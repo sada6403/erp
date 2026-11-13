@@ -336,12 +336,18 @@ const api = {
     targets:     (staffId: string) => ipcRenderer.invoke('salesTeam:targets', staffId),
     setTarget:   (input: unknown) => ipcRenderer.invoke('salesTeam:setTarget', input),
   },
+  productReviews: {
+    list:      (filters?: unknown) => ipcRenderer.invoke('productReviews:list', filters),
+    setHidden: (id: string, hidden: boolean, reason?: string) => ipcRenderer.invoke('productReviews:setHidden', id, hidden, reason),
+  },
   onlineStore: {
     bannersList:   () => ipcRenderer.invoke('onlineStore:banners:list'),
     bannerSave:    (payload: unknown) => ipcRenderer.invoke('onlineStore:banners:save', payload),
     bannerDelete:  (id: string) => ipcRenderer.invoke('onlineStore:banners:delete', id),
     productsList:  (filters?: unknown) => ipcRenderer.invoke('onlineStore:products:list', filters),
     setOnline:     (ids: string[], online: boolean) => ipcRenderer.invoke('onlineStore:products:setOnline', ids, online),
+    deliveryList: () => ipcRenderer.invoke('onlineStore:delivery:list'),
+    deliverySave: (branchId: string, payload: unknown) => ipcRenderer.invoke('onlineStore:delivery:save', branchId, payload),
     settingsGet:   () => ipcRenderer.invoke('onlineStore:settings:get'),
     settingsSave:  (payload: unknown) => ipcRenderer.invoke('onlineStore:settings:save', payload),
   },

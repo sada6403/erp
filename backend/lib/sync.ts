@@ -62,6 +62,7 @@ export const ALLOWED_TABLES = new Set([
   'data_clear_events',
   // Mobile app (synced because POS admin screens read/write them).
   'app_password_reset_requests', 'app_banners', 'app_settings',
+  'product_reviews',
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {

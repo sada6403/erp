@@ -502,3 +502,81 @@ test('catalog: deal_ends_at only for a discounted product with an active dated P
     await db.end()
   }
 })
+
+// ── product reviews + delivery time ─────────────────────────────────────
+const dbConn = () => mysql.createConnection({ host: process.env.MYSQL_HOST, port: +process.env.MYSQL_PORT, user: process.env.MYSQL_USER, password: process.env.MYSQL_PASSWORD, database: seed.db_schema })
+test('reviews: eligibility (not delivered 403, other user 404, duplicate 409, rating range), hidden excluded, delivery time', async () => {
+  const db = await dbConn()
+  assert.ok(['127.0.0.1', 'localhost'].includes(process.env.MYSQL_HOST), 'tests only touch a local database')
+  const pid = seed.product_ids[1]
+  const tag = `rv${Date.now()}`
+  const [[u]] = await db.query(`SELECT id, customer_id FROM app_users WHERE phone = ?`, [seed.logins.customer_smartbuy.identifier])
+  const mkOrder = async (status, suffix) => {
+    const oid = `${tag}-o${suffix}`, iid = `${tag}-i${suffix}`
+    await db.query(`INSERT INTO customer_orders (id, order_number, branch_id, customer_id, customer_name, status, payment_status, total_amount, channel, app_user_id) VALUES (?,?,?,?,?,?,'unpaid',10,'app',?)`,
+      [oid, `T-${tag}-${suffix}`, seed.branches.main, u.customer_id, 'Anula Perera', status, u.id])
+    await db.query(`INSERT INTO customer_order_items (id, order_id, product_id, product_name, quantity, unit_price, line_total) VALUES (?,?,?,?,1,10,10)`, [iid, oid, pid, 'Test'])
+    return iid
+  }
+  try {
+    const delivered = await mkOrder('delivered', 'd'), pending = await mkOrder('pending', 'p'), second = await mkOrder('delivered', 'e')
+    const url = `/catalog/products/${pid}/reviews`
+    const empty = await call('GET', url)
+    assert.equal(empty.status, 200)
+    assert.deepEqual([empty.json.items.length, empty.json.average, empty.json.count], [0, null, 0])
+    assert.deepEqual(empty.json.can_review, { eligible: false, order_item_id: null })
+    assert.equal((await call('GET', url, { token: customer })).json.can_review.eligible, true)
+    assert.equal((await call('GET', url, { token: other })).json.can_review.eligible, false)
+    assert.equal((await call('GET', `/catalog/products/${pid}`)).json.rating_count, 0)
+
+    assert.equal((await call('POST', url, { body: { order_item_id: delivered, rating: 5 } })).status, 401)
+    assert.equal((await call('POST', url, { token: agent, body: { order_item_id: delivered, rating: 5 } })).status, 403)
+    assert.equal((await call('POST', url, { token: customer, body: { order_item_id: pending, rating: 5 } })).status, 403, 'not delivered')
+    assert.equal((await call('POST', url, { token: other, body: { order_item_id: delivered, rating: 5 } })).status, 404, "someone else's item")
+    assert.equal((await call('POST', `/catalog/products/${seed.product_ids[0]}/reviews`, { token: customer, body: { order_item_id: delivered, rating: 5 } })).status, 404, 'wrong product')
+    for (const bad of [0, 6, 3.5, '4', null]) assert.equal((await call('POST', url, { token: customer, body: { order_item_id: delivered, rating: bad } })).status, 400, `rating ${bad}`)
+    assert.equal((await call('POST', url, { token: customer, body: { order_item_id: delivered, rating: 5, comment: 'x'.repeat(501) } })).status, 400)
+    assert.equal((await call('POST', url, { token: customer, body: { order_item_id: delivered, rating: 5, extra: 1 } })).status, 400)
+
+    const ok = await call('POST', url, { token: customer, body: { order_item_id: delivered, rating: 5, comment: '  <b>Great</b> tea  ' } })
+    assert.equal(ok.status, 201, JSON.stringify(ok.json))
+    assert.equal(ok.json.verified_purchase, true)
+    assert.equal(ok.json.comment, 'Great tea')
+    assert.match(ok.json.author_name, /^Anula P\.$/)
+    const dup = await call('POST', url, { token: customer, body: { order_item_id: delivered, rating: 1 } })
+    assert.equal(dup.status, 409)
+    const two = await call('POST', url, { token: customer, body: { order_item_id: second, rating: 2 } })
+    assert.equal(two.status, 201)
+    const list = await call('GET', url, { token: customer })
+    assert.equal(list.json.count, 2)
+    assert.equal(list.json.average, 3.5)
+    assert.equal(list.json.can_review.eligible, false)
+    assert.equal(list.json.items.length, 2)
+    const det = (await call('GET', `/catalog/products/${pid}`)).json
+    assert.deepEqual([det.rating_avg, det.rating_count], [3.5, 2])
+    const inList = (await call('GET', '/catalog/products?limit=200')).json.items.find(p => p.id === pid)
+    assert.deepEqual([inList.rating_avg, inList.rating_count], [3.5, 2])
+    // the POS hides the 2-star review: it leaves the list and the average
+    await db.query(`UPDATE product_reviews SET is_hidden = 1 WHERE id = ?`, [two.json.id])
+    const after = (await call('GET', url)).json
+    assert.deepEqual([after.count, after.average, after.items.length], [1, 5, 1])
+    assert.equal((await call('GET', `/catalog/products/${pid}`)).json.rating_avg, 5)
+    const page = await call('GET', `${url}?limit=1`)
+    assert.equal(page.json.items.length, 1)
+    assert.equal(page.json.next_cursor, null)
+
+    // delivery time comes from the POS branch fields; main (first active) branch when no branch_id is sent
+    const [[main]] = await db.query(`SELECT id FROM branches WHERE is_active = 1 ORDER BY name LIMIT 1`)
+    await db.query(`UPDATE branches SET delivery_eta_min_days = NULL, delivery_eta_max_days = NULL, delivery_eta_text = NULL WHERE id = ?`, [main.id])
+    assert.equal((await call('GET', `/catalog/products/${pid}`)).json.estimated_delivery, null)
+    await db.query(`UPDATE branches SET delivery_eta_min_days = 2, delivery_eta_max_days = 4, delivery_eta_text = 'Colombo 1-2 days' WHERE id = ?`, [main.id])
+    assert.deepEqual((await call('GET', `/catalog/products/${pid}`)).json.estimated_delivery, { min_days: 2, max_days: 4, text: 'Colombo 1-2 days' })
+    assert.equal((await call('GET', `/catalog/products/${pid}?branch_id=${seed.branches.kandy === main.id ? seed.branches.main : seed.branches.kandy}`)).json.estimated_delivery, null)
+    await db.query(`UPDATE branches SET delivery_eta_min_days = NULL, delivery_eta_max_days = NULL, delivery_eta_text = NULL WHERE id = ?`, [main.id])
+  } finally {
+    await db.query(`DELETE FROM product_reviews WHERE order_item_id LIKE ?`, [`${tag}%`])
+    await db.query(`DELETE FROM customer_order_items WHERE id LIKE ?`, [`${tag}%`])
+    await db.query(`DELETE FROM customer_orders WHERE id LIKE ?`, [`${tag}%`])
+    await db.end()
+  }
+})

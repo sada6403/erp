@@ -88,6 +88,35 @@ export function registerOnlineStoreHandlers(ipcMain: IpcMain) {
     return { success: true }
   })
 
+  // Delivery time per branch (shown on the app's product page; all empty = not shown)
+  safeHandle(ipcMain, 'onlineStore:delivery:list', () => {
+    requireAdmin()
+    return { success: true, data: getDb().prepare(`SELECT id, name, delivery_eta_min_days, delivery_eta_max_days, delivery_eta_text FROM branches WHERE is_active = 1 ORDER BY name`).all() }
+  })
+
+  safeHandle(ipcMain, 'onlineStore:delivery:save', async (_e, branchId: string, p: Json) => {
+    const caller = requireAdmin()
+    const db = getDb()
+    if (!db.prepare('SELECT 1 FROM branches WHERE id=?').get(String(branchId))) throw new Error('Branch not found')
+    const day = (v: unknown, label: string): number | null => {
+      const raw = String(v ?? '').trim()
+      if (!raw) return null
+      const n = Number(raw)
+      if (!Number.isInteger(n) || n < 0 || n > 90) throw new Error(`${label} must be a whole number of days (0-90)`)
+      return n
+    }
+    let min = day(p.min_days, 'Minimum days')
+    let max = day(p.max_days, 'Maximum days')
+    if (min !== null && max === null) max = min
+    if (max !== null && min === null) min = max
+    if (min !== null && max !== null && min > max) throw new Error('Minimum days cannot be more than maximum days')
+    const text = str(p.text, 120)
+    db.prepare(`UPDATE branches SET delivery_eta_min_days=?, delivery_eta_max_days=?, delivery_eta_text=?, updated_at=datetime('now') WHERE id=?`).run(min, max, text, String(branchId))
+    await enqueuSync('branches', String(branchId), 'UPDATE', { id: String(branchId), delivery_eta_min_days: min, delivery_eta_max_days: max, delivery_eta_text: text })
+    logAudit(db, { userId: caller.id as string, branchId: (caller.branch_id as string) || null, action: 'APP_DELIVERY_TIME_SAVED', tableName: 'branches', recordId: String(branchId), newValues: { min, max, text } })
+    return { success: true }
+  })
+
   // Online products
   safeHandle(ipcMain, 'onlineStore:products:list', (_e, f: Json = {}) => {
     requireAdmin()

@@ -3,6 +3,7 @@ import path from 'path'
 import type { AppCompany } from './context'
 import type { ProductListItemDto, VariantDto, ProductDetailDto } from './contracts/catalog'
 import { parseJson, round2, toIso } from './http'
+import { loadRatings, ratingOf, type RatingInfo } from './reviewsLib'
 
 export const VISIBLE_SQL = `p.is_active = 1 AND p.not_for_sale = 0 AND p.is_online = 1`
 
@@ -137,7 +138,7 @@ export function mapVariant(
 }
 
 export function mapProduct(
-  p: ProductRow, stock: StockInfo, variants: Record<string, unknown>[], origin: string, dealEnds?: Map<string, string>
+  p: ProductRow, stock: StockInfo, variants: Record<string, unknown>[], origin: string, dealEnds?: Map<string, string>, ratings?: Map<string, RatingInfo>
 ): ProductListItemDto {
   const manage = managesStock(p)
   const weight = String(p.sale_by) === 'weight'
@@ -179,15 +180,17 @@ export function mapProduct(
     thumbnail_url: imageVariantUrl(origin, p.image_url, 300),
     in_stock: inStock, available_qty: availableQty,
     has_variants: variants.length > 0,
+    rating_avg: ratingOf(ratings, String(p.id)).avg,
+    rating_count: ratingOf(ratings, String(p.id)).count,
     emi_available: Number(p.enable_emi) === 1,
     updated_at: toIso(p.updated_at) as string,
   }
 }
 
 export function mapProductDetail(
-  p: ProductRow, stock: StockInfo, variants: Record<string, unknown>[], origin: string, dealEnds?: Map<string, string>
+  p: ProductRow, stock: StockInfo, variants: Record<string, unknown>[], origin: string, dealEnds?: Map<string, string>, ratings?: Map<string, RatingInfo>
 ): ProductDetailDto {
-  const base = mapProduct(p, stock, variants, origin, dealEnds)
+  const base = mapProduct(p, stock, variants, origin, dealEnds, ratings)
   const extra = parseJson<unknown[]>(p.gallery, [])
   const urls: unknown[] = [p.image_url, ...(Array.isArray(extra) ? extra : [])].filter(Boolean)
   const gallery = urls
@@ -229,6 +232,6 @@ export async function loadDealEnds(company: { tp: DbLike }, productIds: string[]
 
 export async function listItems(company: AppCompany, rows: ProductRow[], origin: string, branchId?: string | null): Promise<ProductListItemDto[]> {
   const ids = rows.map(r => String(r.id))
-  const [stock, variants, deals] = await Promise.all([loadStock(company, ids, branchId), loadVariants(company, ids), loadDealEnds(company, ids)])
-  return rows.map(r => mapProduct(r, stock, variants.get(String(r.id)) ?? [], origin, deals))
+  const [stock, variants, deals, ratings] = await Promise.all([loadStock(company, ids, branchId), loadVariants(company, ids), loadDealEnds(company, ids), loadRatings(company, ids)])
+  return rows.map(r => mapProduct(r, stock, variants.get(String(r.id)) ?? [], origin, deals, ratings))
 }

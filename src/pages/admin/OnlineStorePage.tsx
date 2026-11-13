@@ -69,6 +69,45 @@ function SettingsTab() {
         <input className="input mt-1" placeholder="https://" value={s.download_link} onChange={e => set('download_link', e.target.value)} /></div>
     </div>
     <button className="btn-primary" disabled={saving} onClick={save}>{saving ? 'Saving…' : 'Save settings'}</button>
+    <DeliveryTimeSection />
+  </div>
+}
+
+interface EtaBranch { id: string; name: string; min_days: string; max_days: string; text: string }
+
+function DeliveryTimeSection() {
+  const [rows, setRows] = useState<EtaBranch[]>([])
+  const [busy, setBusy] = useState('')
+  const load = useCallback(async () => {
+    try {
+      const r = await window.api.onlineStore.deliveryList()
+      if (r.success) setRows(r.data.map((b: any) => ({ id: b.id, name: b.name, min_days: b.delivery_eta_min_days ?? '', max_days: b.delivery_eta_max_days ?? '', text: b.delivery_eta_text ?? '' })))
+      else toast.error(r.error || 'Failed to load delivery times')
+    } catch (err) { toast.error('Failed to load delivery times: ' + String(err)) }
+  }, [])
+  useEffect(() => { void load() }, [load])
+  const edit = (id: string, k: 'min_days' | 'max_days' | 'text', v: string) => setRows(rows.map(r => r.id === id ? { ...r, [k]: v } : r))
+  const save = async (r: EtaBranch) => {
+    setBusy(r.id)
+    try {
+      const res = await window.api.onlineStore.deliverySave(r.id, { min_days: r.min_days, max_days: r.max_days, text: r.text })
+      if (res.success) { toast.success(`Delivery time saved for ${r.name}`); void load() } else toast.error(res.error)
+    } catch (err) { toast.error('Failed to save: ' + String(err)) } finally { setBusy('') }
+  }
+  return <div className="rounded-lg bg-surface-800 p-4 space-y-3">
+    <div><p className="font-medium">Delivery time</p>
+      <p className="text-xs text-slate-500">Shown on the product page in the app. Leave a branch empty to show nothing. The text, when set, is shown instead of the days.</p></div>
+    {rows.map(r => <div key={r.id} className="grid grid-cols-[1fr_5rem_5rem_1.5fr_auto] gap-2 items-end">
+      <p className="text-sm truncate" title={r.name}>{r.name}</p>
+      <div><label className="text-xs text-slate-400">Min days</label>
+        <input className="input mt-1" type="number" min={0} max={90} value={r.min_days} onChange={e => edit(r.id, 'min_days', e.target.value)} /></div>
+      <div><label className="text-xs text-slate-400">Max days</label>
+        <input className="input mt-1" type="number" min={0} max={90} value={r.max_days} onChange={e => edit(r.id, 'max_days', e.target.value)} /></div>
+      <div><label className="text-xs text-slate-400">Text (optional)</label>
+        <input className="input mt-1" maxLength={120} placeholder="e.g. Colombo 1-2 days" value={r.text} onChange={e => edit(r.id, 'text', e.target.value)} /></div>
+      <button className="btn-primary btn-sm" disabled={busy === r.id} onClick={() => save(r)}>{busy === r.id ? 'Saving…' : 'Save'}</button>
+    </div>)}
+    {!rows.length && <p className="text-xs text-slate-500">No active branches.</p>}
   </div>
 }
 

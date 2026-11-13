@@ -178,6 +178,9 @@ function runMigrations(): void {
     ['products', 'unit',               "TEXT"],
     ['branches', 'latitude',           "REAL"],
     ['branches', 'longitude',          "REAL"],
+    ['branches', 'delivery_eta_min_days', "INTEGER"],
+    ['branches', 'delivery_eta_max_days', "INTEGER"],
+    ['branches', 'delivery_eta_text',     "TEXT"],
     ['customer_orders', 'channel',                  "TEXT NOT NULL DEFAULT 'pos'"],
     ['customer_orders', 'app_user_id',              "TEXT"],
     ['customer_orders', 'assigned_agent_id',        "TEXT"],
@@ -2754,6 +2757,26 @@ function runMigrations(): void {
       updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
       synced_at   TEXT
     );
+    -- Customer reviews of delivered products. Created in the cloud (mobile app), pulled to the POS;
+    -- the POS only edits is_hidden / hidden_* (moderation) and syncs that back.
+    CREATE TABLE IF NOT EXISTS product_reviews (
+      id            TEXT PRIMARY KEY,
+      product_id    TEXT NOT NULL,
+      customer_id   TEXT,
+      app_user_id   TEXT,
+      order_item_id TEXT NOT NULL UNIQUE,
+      author_name   TEXT,
+      rating        INTEGER NOT NULL,
+      comment       TEXT,
+      is_hidden     INTEGER NOT NULL DEFAULT 0,
+      hidden_by     TEXT,
+      hidden_at     TEXT,
+      hidden_reason TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON product_reviews(product_id);
   `)
 
   seedProductAttributes(db)

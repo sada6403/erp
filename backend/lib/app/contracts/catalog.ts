@@ -53,6 +53,9 @@ export interface ProductListItemDto {
   in_stock: boolean
   available_qty: number | null
   has_variants: boolean
+  /** Average of visible, verified reviews (1-5, one decimal) or null when there are none */
+  rating_avg?: number | null
+  rating_count?: number
   /** Only true when the product has enable_emi = 1 */
   emi_available: boolean
   updated_at: string
@@ -64,6 +67,39 @@ export interface ProductDetailDto extends ProductListItemDto {
   variants: VariantDto[]
   /** Offline prices are labelled "Price may change"; final price comes from /checkout/quote */
   price_note: string | null
+  /** From the POS (branch delivery time). null/absent = the app hides the line. Never a hard-coded claim. */
+  estimated_delivery?: EstimatedDeliveryDto | null
+}
+
+export interface EstimatedDeliveryDto {
+  min_days: number
+  max_days: number
+  /** Optional free text set in the POS (e.g. "Colombo 1-2 days"); shown instead of the numbers when present */
+  text: string | null
+}
+
+export interface ReviewDto {
+  id: string
+  rating: number
+  comment: string | null
+  /** First name + initial only, never phone/email */
+  author_name: string
+  /** Always true: only customers with a DELIVERED order for the product can review */
+  verified_purchase: boolean
+  created_at: string
+}
+export interface ReviewsResponse {
+  items: ReviewDto[]
+  average: number | null
+  count: number
+  next_cursor: string | null
+  /** Only filled for a signed-in customer: a delivered order item that has no review yet */
+  can_review: { eligible: boolean; order_item_id: string | null }
+}
+export interface ReviewCreateBody {
+  order_item_id: string
+  rating: number
+  comment?: string
 }
 
 export interface ProductsQuery {
