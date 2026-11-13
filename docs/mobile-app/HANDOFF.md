@@ -88,6 +88,13 @@ Then confirm with `git ls-remote origin feature/mobile-app-foundation`. Never as
 - A library not listed in AGENTS.md §4.
 - Never handle passwords; never copy/commit keys.
 - **Never print secret values** (.env, pm2 env, DATABASE_URL, SMTP/email keys, API keys, tokens; VPS or local). Print key NAMES only or mask everything after `=`. See AGENTS.md rule 14.
+  Extended 2026-11-13: also crontab (`crontab -l`, `/etc/cron.d`), systemd units (`systemctl cat`, `/etc/systemd`), pm2 (`pm2 env`, `pm2 jlist`, `~/.pm2/dump.pm2`), shell history, `docker inspect` / compose files, process lists (`ps`, `/proc/*/environ`), VPS and local. Self-check: ANY command that reads a config/env/crontab/unit/dump file MUST pipe through `scripts/mask-secrets.mjs` (see "Masking helper" below).
+
+### Masking helper (use it every time)
+- One-off: `ssh -o BatchMode=yes nfvps 'crontab -l' | node scripts/mask-secrets.mjs` (same for `systemctl cat <unit>`, `pm2 jlist`, `cat /etc/cron.d/*`, `docker inspect <c>`, `ps aux`).
+- Bash function for your shell profile (VPS or local):
+  `msk() { node /path/to/repo/scripts/mask-secrets.mjs; }` then `crontab -l | msk`, `pm2 jlist | msk`, `history | msk`.
+- It prints `***MASKED***` for the value and keeps the key name. It over-masks on purpose; if output still looks sensitive, do not paste it anywhere. Unit test: `npx vitest run --project=unit electron/__qa__/mask-secrets.test.ts`.
 
 ## 7. Backlog after Stage 1 (in order)
 1. Upload-key MATCH check → `eas credentials` (Moni types passwords) → production AAB → Play Internal testing (versionCode 6).

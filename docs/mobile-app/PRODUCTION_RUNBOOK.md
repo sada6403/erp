@@ -100,6 +100,7 @@ Why: on 13 Nov the production DATABASE_URL credentials were printed in an agent 
 1. Create the new password for the production MySQL app user and update it in the production backend `.env` (and anywhere else that user is used) without printing it; check with key names only.
 2. Restart `pos-backend` in the same window; check `/api/health` and one POS sync.
 3. Rotate any other secret printed in the same session (list by name only, agree with the main developer).
+4. **Rotate the production backup-cron secret in the deploy window:** it lives in the root crontab calling port 4001 `/api/superadmin/cron/run-scheduled-backups` header `x-cron-secret` and was exposed in agent output on 13 Nov (twice). Change the production env var and the crontab line together; verify the next run in `/var/log/pos-scheduled-backups.log`. Read the crontab only through `ssh -o BatchMode=yes nfvps 'crontab -l' | node scripts/mask-secrets.mjs`. Never write the value in any doc.
 - **Rollback:** put the previous password back in `.env` and restart; keep the old one valid until the checks pass.
 
 ## 4. Real-company App Key and product re-push
@@ -190,3 +191,4 @@ Go to production when: staging verified, backup restored once, upload key = MATC
 - **Secrets to rotate at deploy time (exposed in agent output, 13 Nov):** production DB password (3c) and the staging VPS `CRON_SECRET` (and the production one if it is the same value).
 - **Smart Buy join:** NIC photos live only in the private store and `smartbuy_join_requests` (purged 30 days after the decision); they never go into the cloud `customers` table.
 - Test data on staging only (two "Live ... Test" join requests, a member in QA Join Scheme); nothing to clean in production.
+- **Rotate the production backup-cron secret in the deploy window:** it lives in the root crontab calling port 4001 `/api/superadmin/cron/run-scheduled-backups` header `x-cron-secret` and was exposed in agent output on 13 Nov (twice). Change the production env var and the crontab line together; verify the next run in `/var/log/pos-scheduled-backups.log`. Read the crontab only through `ssh -o BatchMode=yes nfvps 'crontab -l' | node scripts/mask-secrets.mjs`. Never write the value in any doc.
