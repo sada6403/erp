@@ -30,6 +30,7 @@ async function handle(req:NextRequest,params:Promise<{path:string[]}>) {
   if(req.method==='POST')return response({success:true,data:await writeManagement(ctx,resource,await req.json())})
   return response({success:false,error:'Method not allowed'},405)
  }catch(error){
+  console.error('[management error]', error)
   if(error instanceof ManagementError)return response({success:false,error:error.message},error.status)
   if(error instanceof SyntaxError)return response({success:false,error:'Invalid JSON'},400)
   const code=(error as {code?:string}).code
@@ -37,7 +38,7 @@ async function handle(req:NextRequest,params:Promise<{path:string[]}>) {
   if(code==='ER_DUP_ENTRY')return response({success:false,error:'This record already exists. Refresh before retrying.'},409)
   // Validation errors from the pure policy engine are safe; database/connection errors are not.
   if(error instanceof Error && !code && /^(Invalid |Commission |General managers |Below-minimum |Customer targets |Salary policy |Deductions )/.test(error.message))return response({success:false,error:error.message},400)
-  return response({success:false,error:'Management service unavailable. Contact the administrator.'},503)
+  return response({success:false,error:error instanceof Error ? error.message : 'Management service unavailable. Contact the administrator.'},503)
  }finally{ctx?.client.release()}
 }
 export async function GET(req:NextRequest,{params}:{params:Promise<{path:string[]}>}){return handle(req,params)}

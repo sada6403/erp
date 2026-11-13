@@ -58,6 +58,8 @@ async function runTenantCompatibility(dbSchema: string) {
     `ALTER TABLE invoices ADD COLUMN synced_at DATETIME NULL`,
     `ALTER TABLE invoices ADD COLUMN agent_code TEXT NULL`,
     `ALTER TABLE invoices ADD COLUMN agent_name TEXT NULL`,
+    `ALTER TABLE invoices ADD COLUMN agent_id CHAR(36) NULL`,
+    `ALTER TABLE invoices ADD INDEX idx_invoices_agent (agent_id)`,
     `ALTER TABLE invoices ADD COLUMN agent_commission_pct DECIMAL(6,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE invoices ADD COLUMN agent_commission_amount DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE invoice_items CHANGE qty quantity DECIMAL(12,2) NOT NULL DEFAULT 0`,

@@ -2,6 +2,7 @@ import { createHash,randomBytes,randomUUID } from 'crypto'
 import bcrypt from 'bcryptjs'
 import type { NextRequest } from 'next/server'
 import { pool,tenantPool,type QueryClient } from '../db'
+import { ensureTenantCompatibility } from '../auth'
 
 export const managementRoles = ['director','assistant_general_manager','general_manager','zonal_manager','regional_manager','branch_manager','field_officer'] as const
 export type ManagementRole = typeof managementRoles[number]
@@ -28,6 +29,7 @@ export async function audit(ctx:ManagementContext,action:string,id:string|null,d
 async function tenant(companyId:string) {
  const {rows}=await pool.query<{id:string;db_schema:string}>("SELECT id,db_schema FROM companies WHERE id=? AND status IN ('active','trial')",[companyId])
  if(!rows.length) throw new ManagementError('Account unavailable',401)
+ await ensureTenantCompatibility(rows[0].db_schema)
  const client=await tenantPool(rows[0].db_schema).connect()
  try {
   await client.query("SET time_zone='+00:00'")

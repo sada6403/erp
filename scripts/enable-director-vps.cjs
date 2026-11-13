@@ -40,6 +40,8 @@ const args=()=>[`--host=${cfg.host}`,`--port=${cfg.port}`,`--user=${cfg.user}`]
 async function migration(db){
  const sql=fs.readFileSync(root+'/backend/database/migrate-007-management.sql','utf8')
  for(const statement of sql.split(';').map(s=>s.trim()).filter(Boolean))await db.query(statement)
+ try{await db.query("ALTER TABLE invoices ADD COLUMN agent_id CHAR(36) NULL")}catch{}
+ try{await db.query("ALTER TABLE invoices ADD INDEX idx_invoices_agent (agent_id)")}catch{}
 }
 async function prepare(){
  stage='private backup preparation'

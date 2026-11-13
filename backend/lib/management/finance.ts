@@ -71,10 +71,11 @@ export async function finance(ctx:ManagementContext,q:URLSearchParams){
   WHERE a.role_code<>'director' AND (${scope('a.scope_id')} OR (?=1 AND a.scope_type='company'))`,[...ids,companyWide?1:0])).rows
  const performance=[]
  const creditedUser=await attributionExpression(ctx)
+ const joins=await attributionJoins(ctx)
  const targetRows=(await ctx.client.query<Row>("SELECT user_id,SUM(amount) target FROM management_targets WHERE period_start<=? AND period_end>=? AND status='active' GROUP BY user_id",[to,from])).rows
  const targetMap=new Map(targetRows.map(t=>[String(t.user_id),num(t.target)]))
  const credited=(await ctx.client.query<Row>(`SELECT ${creditedUser} employee_id,SUM((s.quantity-s.returned_quantity)*s.unit_selling_price) sales
-  FROM invoices i ${attributionJoins} JOIN sale_batch_allocations s ON s.invoice_id=i.id
+  FROM invoices i ${joins} JOIN sale_batch_allocations s ON s.invoice_id=i.id
   WHERE i.status NOT IN ('draft','held','cancelled') AND ${scope('i.branch_id')} AND ${date('i.created_at')}
   AND (NOT EXISTS(SELECT 1 FROM management_targets t WHERE t.user_id=${creditedUser} AND t.status='active' AND t.period_start<=? AND t.period_end>=?)
    OR EXISTS(SELECT 1 FROM management_targets t WHERE t.user_id=${creditedUser} AND t.status='active'

@@ -32,10 +32,11 @@ export async function employee(ctx:ManagementContext,userId:string){
 }
 export async function creditedSales(ctx:ManagementContext,userId:string,start:string,end:string){
  const creditedUser=await attributionExpression(ctx)
+ const joins=await attributionJoins(ctx)
  // Restates the original invoice month using its current non-cancelled net sold quantities.
  const {rows}=await ctx.client.query<Row>(`SELECT COALESCE(SUM((s.quantity-s.returned_quantity)*s.unit_selling_price),0) sales,
   COALESCE(SUM(CASE WHEN s.cost_known=0 THEN s.quantity-s.returned_quantity ELSE 0 END),0) unknown_cost
-  FROM invoices i ${attributionJoins} JOIN sale_batch_allocations s ON s.invoice_id=i.id
+  FROM invoices i ${joins} JOIN sale_batch_allocations s ON s.invoice_id=i.id
   WHERE ${creditedUser}=? AND i.status NOT IN ('draft','held','cancelled') AND i.created_at>=CONVERT_TZ(?,'+05:30','+00:00') AND i.created_at<CONVERT_TZ(DATE_ADD(?,INTERVAL 1 DAY),'+05:30','+00:00')`,[userId,start,end])
  return Number(rows[0].sales)
 }
