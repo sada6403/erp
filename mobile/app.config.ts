@@ -27,10 +27,11 @@ const USE_MOCKS = process.env.USE_MOCKS ? process.env.USE_MOCKS === '1' : APP_EN
 
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
-  name: 'Natural Plantation',
+  // Test builds are told apart on the phone and in Settings (the Play build keeps the plain name and 1.0.0).
+  name: APP_ENV === 'staging' ? 'Natural Plantation (Test)' : 'Natural Plantation',
   slug: 'natural-plantation',
   scheme: 'naturalplantation',
-  version: '1.0.0',
+  version: APP_ENV === 'staging' ? '1.0.0-test.1' : '1.0.0',
   orientation: 'portrait',
   userInterfaceStyle: 'light',
   icon: './assets/icon.png',

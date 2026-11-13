@@ -97,7 +97,7 @@ const useHeaderStyles = makeStyles((t) => ({
 }));
 
 function roleLabel(role: NavRole, agentCode: string | null | undefined, t: (k: string) => string): string {
-  if (role === 'manager') return `📊 ${t('role.manager')}${agentCode ? ` ${agentCode}` : ''}`;
+  if (role === 'manager') return `📊 ${t('role.manager')}`;
   if (role === 'agent') return `🛵 ${t('role.agent')}${agentCode ? ` ${agentCode}` : ''}`;
   if (role === 'smartbuy') return `💎 ${t('role.smartbuy')}`;
   return `🛒 ${t('role.customer')}`;
