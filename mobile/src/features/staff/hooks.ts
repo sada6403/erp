@@ -81,7 +81,7 @@ export function useLogVisit() {
     if (selectIsOffline(useUiStore.getState())) return queue();
     try {
       await staffApi.createVisit({ ...body, client_event_id: eventId });
-      void qc.invalidateQueries({ queryKey: qk.agent.visitsToday });
+      void qc.invalidateQueries({ queryKey: [...qk.agent.all, 'visits'] });
       return { result: 'sent', gps: !!pos };
     } catch (e) {
       if (toAppError(e).isUnreachable) return queue();
