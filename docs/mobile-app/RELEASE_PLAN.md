@@ -70,3 +70,11 @@ Decided by Moni on 2026-11-13 ("the v1.1 items ship as fast updates right after"
 **Housekeeping**
 - Native review of the Tamil and Sinhala wording (`sf.*`, `collect.*`, `fewLeft`).
 - Fix the one-day-early monthly due date in the POS (`cycleDueDate`), see PROGRESS 2026-11-13.
+**Added 2026-11-13 (from the test.3 work)**
+- Product share as an https link (universal / app links need a domain; v1.0 shares `naturalplantation://product/<id>`).
+- "Newest" sort uses `updated_at`; add `created_at` to the product list DTO for a true newest.
+- POS category image upload (today only a manual URL; the create form does not save `image_url`) and a category-assignment helper for the 775 uncategorised production products.
+- Pinch-zoom gallery uses built-in gestures (no gesture-handler); revisit if a gesture library is approved.
+- Order-by-order review prompts (push "How was your order?" after delivery) and photo reviews.
+- Email: per-user unsubscribe for marketing types (none are marketing in v1.0), delivery status webhooks from the email provider.
+- Native review of Tamil and Sinhala wording for the new `product.*`, `categories.*`, join and email strings.
