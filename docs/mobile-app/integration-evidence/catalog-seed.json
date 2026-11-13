@@ -337,5 +337,24 @@
         "unit_cost": 240
       }
     ]
+  },
+  "reservation": {
+    "order_id": "82ac2935-ea29-49c2-b04c-282782d01a1a",
+    "available_before": {
+      "0f81e698-e7a0-4343-b351-4eafd879c69a": 16.5,
+      "8e2323c1-59b2-44f4-bdec-17a3b61f21c7": 2
+    },
+    "available_reserved": {
+      "0f81e698-e7a0-4343-b351-4eafd879c69a": 15,
+      "8e2323c1-59b2-44f4-bdec-17a3b61f21c7": 1
+    },
+    "available_after_conversion": {
+      "8e2323c1-59b2-44f4-bdec-17a3b61f21c7": 1,
+      "0f81e698-e7a0-4343-b351-4eafd879c69a": 15
+    },
+    "shelf_after": {
+      "0f81e698-e7a0-4343-b351-4eafd879c69a": 19.5,
+      "8e2323c1-59b2-44f4-bdec-17a3b61f21c7": 3
+    }
   }
 }

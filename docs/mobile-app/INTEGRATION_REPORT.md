@@ -137,3 +137,7 @@ App `available_qty` keeps the order reservation until the order is dispatched, b
 - Search finds tea, sunlight, loose items: pass.
 - Not visually re-checked on the phone (UI automation drifted); verified through the app API earlier: MILO 935, Kerosene hidden, DIN MILK out of stock, WELVET broken URL.
 - Phone order ONL-1008 (Soap 150g x1, Rice 0.5 kg, TEA POWDER x1) = Rs 1,567.50. Converted in the POS harness (phase `phone`): invoice total 1,567.50; stock deducted 1 / 0.5 / 1; rice taken from the oldest batch KS-OCT (FIFO). Evidence: `integration-evidence/catalog-seed.json` -> `phone_order`.
+
+## Reservation double-count fixed (2026-11-13)
+Cloud `onOrderStatusChanged` now releases an app order's stock reservation as soon as the POS sets `invoice_id` (conversion), not only at dispatch (`backend/lib/app/ordersLib.ts`, commit 54b4a40). Staging updated (only `pos-staging`).
+Test RSV-01 (`staging-catalog-seed.integration.test.ts`, phase `reserve`): place -> available drops by the order qty; convert -> available unchanged; shelf-minus-available gap (stock reserved by OTHER open orders) identical before placing and after converting (rice 3.0 / 3.0, ANCHOR 1.0 / 1.0). Before the fix the gap grew by the order quantity. ST-03 now asserts the same (available stock does not drop again at conversion). Evidence: `integration-evidence/catalog-seed.json` -> `reservation`.

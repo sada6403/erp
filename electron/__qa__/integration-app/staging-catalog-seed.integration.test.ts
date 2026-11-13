@@ -74,7 +74,7 @@ beforeAll(async () => {
   seed = { ...raw, base_url: BASE_URL, branches: { main: raw.branch_id, kandy: raw.branch_id }, file: String(process.env.STAGING_SEED) } as Seed
   api = appApi(seed)
   pos = await createPos(state, seed)
-  state.data.app_settings = { ...state.data.app_settings, business_type: 'supermarket', counter_prefix: PHASE === 'phone' ? 'QA3' : 'QA2' }
+  state.data.app_settings = { ...state.data.app_settings, business_type: 'supermarket', counter_prefix: PHASE === 'phone' ? 'QA3' : PHASE === 'reserve' ? `R${Date.now() % 100000}` : 'QA2' }
   const [{ registerOrderHandlers }, { registerInvoiceHandlers }, { registerProductHandlers }, { registerStockHandlers }, { registerDiscountHandlers }] = await Promise.all([
     import('../../ipc/orders'), import('../../ipc/invoices'), import('../../ipc/products'), import('../../ipc/stocks'), import('../../ipc/discounts')])
   registerOrderHandlers(fakeIpcMain); registerInvoiceHandlers(fakeIpcMain); registerProductHandlers(fakeIpcMain); registerStockHandlers(fakeIpcMain)
@@ -278,5 +278,34 @@ describe.skipIf(PHASE !== 'phone')('phone order -> POS invoice -> FIFO stock', (
       deducted: Object.fromEntries(Object.keys(before).map(k => [k, Number((before[k] - after[k]).toFixed(3))])), fifo_allocations: alloc }
     expect(Number(inv.total_amount)).toBeCloseTo(Number(order.total_amount), 2)
     for (const i of items) expect(before[i.variant_id || i.product_id] - after[i.variant_id || i.product_id]).toBeCloseTo(Number(i.quantity), 5)
+  }, 300_000)
+})
+
+describe.skipIf(PHASE !== 'reserve')('reservation released at conversion', () => {
+  it('RSV-01 available stock = shelf stock after the POS converts an app order; no double count', async () => {
+    const rice = log.weight_items.rice, disc = log.discounts[0]
+    const shelf = (id: string) => Number(pos.get<{ quantity: number }>('SELECT quantity FROM stocks WHERE product_id = ? AND branch_id = ?', id, seed.branches.main)?.quantity ?? 0)
+    const avail = async () => Object.fromEntries(((await api.get('/catalog/products?limit=500', { token: customer })).json.items as any[]).filter(p => [rice.id, disc.product_id].includes(p.id)).map(p => [p.id, Number(p.available_qty)]))
+    const before = await avail()
+    const shelfBefore = { [rice.id]: shelf(rice.id), [disc.product_id]: shelf(disc.product_id) }
+    const placed = await api.post('/orders', { items: [{ product_id: rice.id, quantity: 1.5 }, { product_id: disc.product_id, quantity: 1 }], branch_id: seed.branches.main, payment_method: 'cod',
+      address: { recipient_name: 'Catalog Tester', phone: '0771110011', line1: '1 Temple Road', city: 'Kandy' } }, { token: customer, headers: { 'idempotency-key': crypto.randomUUID() } })
+    expect(placed.status, JSON.stringify(placed.json)).toBe(201)
+    const orderId = placed.json.id as string
+    const reserved = await avail()
+    await pos.syncUntil(() => !!pos.get('SELECT id FROM customer_orders WHERE id = ?', orderId))
+    expect((await ipc('orders:updateStatus', orderId, 'confirmed')).success).toBe(true)
+    const conv = await ipc('orders:convertToInvoice', orderId)
+    expect(conv.success, JSON.stringify(conv)).toBe(true)
+    await pos.sync()
+    const after = await avail()
+    log.reservation = { order_id: orderId, available_before: before, available_reserved: reserved, available_after_conversion: after, shelf_after: { [rice.id]: shelf(rice.id), [disc.product_id]: shelf(disc.product_id) } }
+    // Other open orders of this staging company still reserve stock, so compare the gap (shelf - available = reserved by OTHER orders):
+    // it must be identical before placing and after converting. A leftover reservation of the converted order would widen it.
+    const gap = (shelfAt: Record<string, number>, av: Record<string, number>, id: string) => Number((shelfAt[id] - av[id]).toFixed(3))
+    const shelfNow = { [rice.id]: shelf(rice.id), [disc.product_id]: shelf(disc.product_id) }
+    expect(before[rice.id] - reserved[rice.id]).toBeCloseTo(1.5, 5)          // placing reserves
+    expect(after[rice.id]).toBeCloseTo(reserved[rice.id], 5)                  // converting does not take the goods a second time
+    for (const id of [rice.id, disc.product_id]) expect(gap(shelfNow, after, id), `gap ${id}`).toBeCloseTo(gap(shelfBefore, before, id), 5)
   }, 300_000)
 })
