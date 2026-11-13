@@ -13,7 +13,8 @@
     "test:email": "node --experimental-strip-types --no-warnings --test tests/email.test.mjs",
     "email:preview": "node --experimental-strip-types --no-warnings scripts/email-preview.mjs",
     "email:smoke": "node --env-file=.env scripts/run-ts.cjs scripts/email-smoke.ts",
-    "seed:app": "node scripts/run-ts.cjs scripts/seed-app-test-company.ts"
+    "seed:app": "node scripts/run-ts.cjs scripts/seed-app-test-company.ts",
+    "seed:test-banners": "node --env-file=.env scripts/run-ts.cjs scripts/seed-test-banners.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",

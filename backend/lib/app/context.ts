@@ -148,6 +148,7 @@ export const appLimiters = {
   auth: rateLimit({ limit: 30, windowMs: 15 * 60 * 1000, keyPrefix: 'app-auth' }),
   general: rateLimit({ limit: 300, windowMs: 60 * 1000, keyPrefix: 'app' }),
   order: rateLimit({ limit: 20, windowMs: 10 * 60 * 1000, keyPrefix: 'app-order' }),
+  events: rateLimit({ limit: 60, windowMs: 60 * 1000, keyPrefix: 'app-events' }),
   otp: rateLimit({ limit: 15, windowMs: 10 * 60 * 1000, keyPrefix: 'app-otp' }),
 }
 

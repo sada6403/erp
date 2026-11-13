@@ -172,6 +172,7 @@ function runMigrations(): void {
     ['stock_movements', 'variant_id',     "TEXT"],
     // Mobile app (Natural Plantation): synced columns, additive
     ['products', 'is_online',          "INTEGER NOT NULL DEFAULT 1"],
+    ['products', 'is_featured',        "INTEGER NOT NULL DEFAULT 0"],
     ['products', 'slug',               "TEXT"],
     ['products', 'gallery',            "TEXT"],
     ['products', 'short_description',  "TEXT"],
@@ -2778,6 +2779,16 @@ function runMigrations(): void {
     );
     CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON product_reviews(product_id);
   `)
+
+  // App Control: banner targeting + per-language images (additive; mirrors backend/lib/appSchema.ts)
+  for (const [col, def] of [
+    ['link_type', "TEXT NOT NULL DEFAULT 'none'"], ['link_target', 'TEXT'], ['audience', "TEXT NOT NULL DEFAULT 'all'"],
+    ['image_en', 'TEXT'], ['image_ta', 'TEXT'], ['image_si', 'TEXT'],
+  ] as const) {
+    if (!hasColumn('app_banners', col)) db.exec(`ALTER TABLE app_banners ADD COLUMN ${col} ${def}`)
+  }
+  // Old banners only had link_url: an https link becomes link_type 'url' (non-https links stay unreadable by the app)
+  db.exec(`UPDATE app_banners SET link_type='url', link_target=link_url WHERE link_type='none' AND link_url LIKE 'https://%'`)
 
   seedProductAttributes(db)
 }

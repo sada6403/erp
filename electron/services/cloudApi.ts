@@ -250,6 +250,14 @@ export class CloudApi {
     return this.request('/api/app/v1/admin/app-access/status', { method: 'POST', body: JSON.stringify({ user_id: userId, status }) })
   }
 
+  // Banner impressions / taps (admin endpoint, x-api-key)
+  async bannerStats(from?: string, to?: string): Promise<{ items: Array<{ banner_id: string; impressions: number; taps: number }>; days: Array<Record<string, unknown>> }> {
+    const q = new URLSearchParams()
+    if (from) q.set('from', from)
+    if (to) q.set('to', to)
+    return this.request(`/api/app/v1/admin/banner-stats${q.toString() ? `?${q}` : ''}`)
+  }
+
   // App Versions (in-app update policy per platform/channel; admin endpoints, x-api-key)
   async appVersionsList(): Promise<{ items: Array<Record<string, unknown>>; allowed_hosts: string[] }> {
     return this.request('/api/app/v1/admin/app-versions')

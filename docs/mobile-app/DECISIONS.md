@@ -180,3 +180,12 @@ The 30-day purge of NIC numbers and photos on join requests has no scheduler. It
 5. Admin routes (x-api-key, same auth as `admin/app-access`): `GET/PUT /api/app/v1/admin/app-versions`, `POST /api/app/v1/admin/app-versions/hash-apk`. Every save and hash writes an `audit_logs` row (`APP_VERSION_SAVED`). Changing the test `update_url` clears the stored hash; "Fetch & hash" downloads the saved URL server-side (https, allow-listed host, redirects refused, 120 MB cap) and stores SHA-256 + size, or the admin may paste a hash.
 6. The UI is the POS page Mobile App -> App Versions (`/admin/app-versions`, Super Admin only), next to Online Store and Reviews, because the POS already reaches the cloud admin routes through `CloudApi` (IPC `appVersions:list|save|hashApk`). The older `min_app_version` field in Online Store still works as the fallback, but App Versions is the place to set versions from now on.
 7. Release flow and who approves each step: `docs/mobile-app/RELEASING.md`.
+
+## 2026-11-13 App Control: banners v2, home layout, banner counters
+1. One POS group **App Control** replaces Mobile App's Online Store / App Access / Reviews / App Versions entries as tabs; old routes redirect. Store settings moved from Online Store (not duplicated).
+2. Banners get targeting columns on the existing synced `app_banners` (additive; `link_url` stays readable). Link types: product, category, flash, smartbuy, https url. Only https is accepted on save; non-https is dropped on read.
+3. Banner window times are Asia/Colombo wall time, compared in the API with the Colombo clock (cloud DB is UTC). The audience classes are exclusive (guest / customer / member); members are not shown `customers` banners, so a "Join Smart Buy" banner can target `customers`.
+4. Impressions and taps are anonymous per-banner per-day counters in a cloud-only table (`app_banner_stats`), no personal data, so no consent prompt or Play data-safety entry is needed for them.
+5. Home layout is one JSON `app_settings` row (`home_layout`) so it rides the existing sync; the API fills defaults, so an unsynced or empty POS just means the default layout.
+6. Flash deals stay driven by POS Discounts (no new price logic). Featured = new additive synced `products.is_featured`. Announcements are Phase 2 (v1.1): placeholder tab only.
+7. Deploy order: backend first (new columns/table via `ensureTenantCompatibility`), then the POS release. A new POS pushing the new banner columns to an old backend would lose them silently.

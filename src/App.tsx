@@ -55,13 +55,10 @@ const SyncMonitorPage = adminPage('SyncMonitorPage')
 const CategoriesPage = adminPage('CategoriesPage')
 const StockCountPage = adminPage('StockCountPage')
 const OrdersPage = adminPage('OrdersPage')
-const AppAccessPage = adminPage('AppAccessPage')
 const AppRequestsPage = adminPage('AppRequestsPage')
 const SalesTeamPage = adminPage('SalesTeamPage')
 const AgentCashPage = adminPage('AgentCashPage')
-const OnlineStorePage = adminPage('OnlineStorePage')
-const ReviewsPage = adminPage('ReviewsPage')
-const AppVersionsPage = adminPage('AppVersionsPage')
+const AppControlPage = adminPage('AppControlPage')
 const StockLookupPage = adminPage('StockLookupPage')
 const QuotationsPage = adminPage('QuotationsPage')
 const BillsPage = adminPage('BillsPage')
@@ -345,12 +342,15 @@ export default function App() {
         <Route path="/admin/stock-lookup" element={<RequirePermission permission="inventory"><StockLookupPage /></RequirePermission>} />
         <Route path="/admin/bills" element={<BillsPage />} />
         <Route path="/admin/orders" element={<OrdersPage />} />
-        <Route path="/admin/app-access" element={<RequireSuperAdmin><AppAccessPage /></RequireSuperAdmin>} />
+        <Route path="/admin/app-control" element={<RequireSuperAdmin><AppControlPage /></RequireSuperAdmin>} />
+        <Route path="/admin/app-control/:tab" element={<RequireSuperAdmin><AppControlPage /></RequireSuperAdmin>} />
+        {/* old routes keep working */}
+        <Route path="/admin/app-access" element={<Navigate to="/admin/app-control/access" replace />} />
+        <Route path="/admin/online-store" element={<Navigate to="/admin/app-control/store" replace />} />
+        <Route path="/admin/reviews" element={<Navigate to="/admin/app-control/reviews" replace />} />
+        <Route path="/admin/app-versions" element={<Navigate to="/admin/app-control/versions" replace />} />
         <Route path="/admin/app-requests" element={<RequireSuperAdmin><AppRequestsPage /></RequireSuperAdmin>} />
         <Route path="/admin/sales-team" element={<RequireSuperAdmin><SalesTeamPage /></RequireSuperAdmin>} />
-        <Route path="/admin/online-store" element={<RequireSuperAdmin><OnlineStorePage /></RequireSuperAdmin>} />
-        <Route path="/admin/reviews" element={<RequireSuperAdmin><ReviewsPage /></RequireSuperAdmin>} />
-        <Route path="/admin/app-versions" element={<RequireSuperAdmin><AppVersionsPage /></RequireSuperAdmin>} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
         <Route path="/admin/purchase-orders" element={<RequireMainBranch><RequireModule module="purchase_orders"><PurchaseOrdersPage /></RequireModule></RequireMainBranch>} />

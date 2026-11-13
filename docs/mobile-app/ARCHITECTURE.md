@@ -503,3 +503,28 @@ Hierarchy page (assignments), targets page, salary rules and slabs page, perform
 App: `GET/POST /smartbuy/join-requests` (roles agent, customer; multipart `nic_front`, `nic_back` + text fields; idempotent `client_event_id`), `GET/POST /orders/{id}/slip` (customer; multipart `slip`, optional `reference`).
 POS key (`x-api-key`): `GET /admin/join-requests[?status]`, `GET /admin/join-requests/{id}/photo?side=front|back`, `POST /admin/join-requests/{id}/decision {decision: approve|reject, reason?}`; `GET /admin/payment-slips[?status]`, `GET /admin/payment-slips/{id}/image`, `POST /admin/payment-slips/{id}/decision {decision: verify|reject, reason?}`.
 Cloud-only tables: `smartbuy_join_requests`, `order_payment_slips`. Private image store: `PRIVATE_UPLOAD_DIR`. Details: DECISIONS 2026-11-12 Step 6.
+
+## 19. App Control (home banners and home layout)
+
+POS: sidebar group **App Control** (Super Admin only) -> `/admin/app-control/:tab`. Tabs: Banners, Home page, Products (featured toggle, flash deals read-only, show/hide in app), Store settings (ordering on/off, maintenance message, delivery fee, delivery time per branch: moved from Online Store), App Access, Reviews, App Versions, Announcements (placeholder, "Coming in v1.1"). Old routes `/admin/online-store`, `/admin/app-access`, `/admin/reviews`, `/admin/app-versions` redirect to the matching tab. App Requests and Sales Team stay in their own pages.
+
+**Data path** (same as Online Store): POS SQLite -> `sync_queue` -> cloud MySQL; `app_banners` and `app_settings` were already in `ALLOWED_TABLES` and the desktop pull list, so no sync code changed.
+
+| Item | Where | Synced |
+|---|---|---|
+| `app_banners` new columns `link_type` ('none','product','category','flash','smartbuy','url'), `link_target`, `audience` ('all','guests','customers','members'), `image_en/ta/si` | `appSchema.ts` (additive ALTERs), `electron/database.ts` (hasColumn guard; https `link_url` becomes `link_type='url'`) | Yes |
+| `app_banner_stats(banner_id, day DATE, impressions, taps)` | `appSchema.ts`, cloud only | No |
+| `app_settings` key `home_layout` (JSON `[{key,enabled}]`) | existing table | Yes |
+
+Contract: `backend/lib/app/contracts/catalog.ts` (`BannerDto`, `BannersResponse`, `BannerEventBody`, `HomeLayoutResponse`, `BannerStatsResponse`).
+
+Endpoints:
+- `GET /catalog/banners?lang=en|ta|si` (App Key; bearer optional). No/invalid token = guest. A valid token = customer, or **member** when the user's customer has a `chit_members` row with status other than `withdrawn`. The classes are exclusive: `guests` -> guest only; `customers` -> signed-in non-member; `members` -> member; `all` -> everyone. Active banners inside their window, `ORDER BY sort_order, created_at DESC`, max 10. Image = `image_<lang>` when set, else `image_url`, as the 800 px WebP variant (`imageVariantUrl`). Banners without an image are skipped. `title` is omitted when empty. `link` = `{type,target}` or null; `url` links must be https (anything else is dropped on read and rejected on save in the POS); an old row with only `link_url` reads as type `url` when https. `flash` / `smartbuy` have `target: null`.
+- `starts_at` / `ends_at` are **Asia/Colombo wall time** (`YYYY-MM-DD HH:MM:SS`, no zone). Cloud MySQL runs UTC, so the route compares them with `colomboNow()` (UTC + 5:30, no DST) bound as a parameter. The POS stores the same digits; ISO strings synced back keep the same digits.
+- `POST /catalog/banners/events` `{events:[{banner_id,type:'impression'|'tap'}]}` (App Key only, own limiter 60/min/IP, max 50, unknown fields rejected). Only ids of existing banners are counted, `INSERT .. ON DUPLICATE KEY UPDATE` per (banner, Colombo day). No user, device or IP is stored.
+- `GET /catalog/home-layout` (App Key): `{sections:[{key,enabled}]}` for the six keys `banners, categories, flash_deals, smartbuy_promo, new_arrivals, featured` in display order. Nothing stored (or bad JSON) = default order, all enabled; unknown keys dropped, missing keys appended enabled.
+- `GET /admin/banner-stats?from&to` (x-api-key like `admin/app-versions`, default last 30 Colombo days, max 366): totals per banner plus per-day rows. POS wrapper: `onlineStore:banners:stats` (`CloudApi.bannerStats`).
+
+Recommended banner artwork: 16:7, 1200 x 525 px (minimum 800 x 350; keep text and logos in the central 80%). The app card is screen width minus 32 dp (radius = hero radius). The POS crop preview uses this ratio.
+
+Flash deals are unchanged: a product with an active dated product discount (`discounts`, managed in POS Discounts, which already owns the price rules). Featured products: new additive synced column `products.is_featured` (POS Products tab toggle); `ProductListItemDto.featured` and `created_at` are exposed (new arrivals = newest `created_at`).
