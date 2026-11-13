@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { View } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { radii, useTheme } from '@/theme';
 import { Text } from '@/components/Text';
@@ -18,6 +19,7 @@ import { monthLabel, thisMonth } from '@/features/agent/month';
 export default function CommissionScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
+  const router = useRouter();
   const { data, isLoading, isError, refetch, isRefetching } = useCommission(thisMonth());
   const printer = usePrinter();
   const del = useDeliveries();
@@ -69,6 +71,7 @@ export default function CommissionScreen() {
           onPress={() => setShow(true)}
         />
       </View>
+      <Button label={`🖨️ ${t('nav.printBill')}`} variant="secondaryBlock" fullWidth onPress={() => router.navigate('/bill' as never)} />
       <ReceiptModal visible={show && !!bill.data} text={bill.data ? buildBillText(bill.data) : ''} onClose={() => setShow(false)} />
       {!MOCK_FEATURES ? <SoonNote /> : null}
     </Screen>

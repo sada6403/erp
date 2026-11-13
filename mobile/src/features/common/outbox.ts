@@ -1,6 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import i18n from '@/i18n';
-import { agentApi, wishlistApi } from '@/api/endpoints';
+import { agentApi, staffApi, wishlistApi } from '@/api/endpoints';
 import { toAppError } from '@/api/client';
 import { queryClient } from '@/query/queryClient';
 import { qk } from '@/query/keys';
@@ -18,6 +18,9 @@ async function send(item: OutboxItem): Promise<void> {
     case 'delivery_complete':
       // item.id is the event_id / Idempotency-Key, so replays are safe.
       await agentApi.deliveryComplete(item.payload.deliveryId, { otp: item.payload.otp, event_id: item.id, note: item.payload.note });
+      return;
+    case 'visit':
+      await staffApi.createVisit({ ...item.payload, client_event_id: item.id });
       return;
     case 'wishlist_add':
       await wishlistApi.add({ product_id: item.payload.productId }, item.id);

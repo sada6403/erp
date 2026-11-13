@@ -11,7 +11,7 @@ import { OfflineBanner } from './Overlays';
 const SCREENS: Record<NavRole, string[]> = {
   customer: ['index', 'cart', 'catalog', 'checkout', 'categories', 'flash-deals', 'orders/index', 'smartbuy-promo', 'order-confirmed', 'orders/[id]', 'product/[id]'],
   smartbuy: ['schemes', 'draws', 'draw-video/[id]', 'wallet', 'spend', 'statement'],
-  agent: ['deliveries/index', 'deliveries/[id]', 'members/index', 'add-member', 'commission', 'bill/index', 'bill/[id]'],
+  agent: ['deliveries/index', 'deliveries/[id]', 'members/index', 'add-member', 'commission', 'bill/index', 'bill/[id]', 'visits', 'team'],
 };
 
 /**

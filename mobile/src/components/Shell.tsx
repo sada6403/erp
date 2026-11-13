@@ -1,6 +1,6 @@
 import React from 'react';
 import { Image } from 'expo-image';
-import { Pressable, RefreshControl, ScrollView, View, type StyleProp, type ViewStyle } from 'react-native';
+import { Pressable, RefreshControl, ScrollView, View, useWindowDimensions, type StyleProp, type ViewStyle } from 'react-native';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,7 @@ import { selectIsLoggedIn, useSessionStore, type NavRole } from '@/store/session
 import { useUiStore } from '@/store/uiStore';
 import { useUnreadCount } from '@/features/notifications/hooks';
 import { useCompany } from '@/features/common/hooks';
+import { useIsStaff } from '@/features/staff/hooks';
 import { logout } from '@/features/auth/session';
 import { Text } from './Text';
 import { OfflineBanner } from './Overlays';
@@ -182,6 +183,8 @@ interface NavItem {
   href: string;
   /** path prefixes that keep this tab highlighted */
   match: string[];
+  /** shown only to accounts the server placed on the sales hierarchy */
+  staffOnly?: boolean;
 }
 
 export const NAV_ITEMS: Record<NavRole, NavItem[]> = {
@@ -201,9 +204,10 @@ export const NAV_ITEMS: Record<NavRole, NavItem[]> = {
   ],
   agent: [
     { key: 'deliveries', icon: '🛵', labelKey: 'nav.deliveries', href: '/deliveries', match: ['/deliveries'] },
-    { key: 'members', icon: '👥', labelKey: 'nav.members', href: '/members', match: ['/members'] },
-    { key: 'earnings', icon: '📊', labelKey: 'nav.earnings', href: '/commission', match: ['/commission'] },
-    { key: 'bill', icon: '🖨️', labelKey: 'nav.printBill', href: '/bill', match: ['/bill'] },
+    { key: 'members', icon: '👥', labelKey: 'nav.members', href: '/members', match: ['/members', '/add-member'] },
+    { key: 'visits', icon: '📍', labelKey: 'nav.visits', href: '/visits', match: ['/visits'] },
+    { key: 'team', icon: '🎯', labelKey: 'nav.team', href: '/team', match: ['/team'], staffOnly: true },
+    { key: 'earnings', icon: '📊', labelKey: 'nav.earnings', href: '/commission', match: ['/commission', '/bill'] },
     { key: 'settings', icon: '⚙️', labelKey: 'nav.settings', href: '/settings', match: ['/settings'] },
   ],
 };
@@ -220,6 +224,10 @@ export function RoleTabBar({ role }: { role: NavRole }) {
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const count = useCartStore((s) => cartLineCount(s.lines));
+  const isStaff = useIsStaff();
+  const { width } = useWindowDimensions();
+  const items = NAV_ITEMS[role].filter((i) => !i.staffOnly || isStaff);
+  const tabWidth = Math.min(62, Math.floor((width - 12) / items.length));
   return (
     <View
       accessibilityRole="tablist"
@@ -235,7 +243,7 @@ export function RoleTabBar({ role }: { role: NavRole }) {
         borderTopColor: theme.colors.divider,
       }}
     >
-      {NAV_ITEMS[role].map((item) => {
+      {items.map((item) => {
         const active = isNavActive(item, pathname);
         const label = t(item.labelKey);
         return (
@@ -246,7 +254,7 @@ export function RoleTabBar({ role }: { role: NavRole }) {
             accessibilityState={{ selected: active }}
             onPress={() => router.navigate(item.href as never)}
             style={{
-              width: 62,
+              width: tabWidth,
               minHeight: 48,
               borderRadius: radii.control,
               alignItems: 'center',

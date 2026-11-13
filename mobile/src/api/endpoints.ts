@@ -74,6 +74,15 @@ import type {
   DeliveryCompleteResponse,
   DeliveryStatusRequest,
 } from '@contracts/agent';
+import type {
+  CreateVisitRequest,
+  CreateVisitResponse,
+  SetTargetRequest,
+  StaffDashboardResponse,
+  StaffTeamResponse,
+  VisitReportResponse,
+  VisitsTodayResponse,
+} from '@contracts/staff';
 import type { AgentBillDto } from './localTypes';
 import { getClient } from './instance';
 
@@ -171,6 +180,16 @@ export const smartbuyApi = {
   walletTransactions: () => get<WalletTransactionsResponse>('/wallet/transactions'),
   joinRequests: (cursor?: string) => get<JoinRequestsResponse>('/smartbuy/join-requests', { cursor }),
   submitJoin: (form: FormData) => postForm<JoinRequestDto>('/smartbuy/join-requests', form),
+};
+
+/** Sales force v1.0. The server resolves the caller's scope; ids outside it answer 404. */
+export const staffApi = {
+  dashboard: (period?: string) => get<StaffDashboardResponse>('/staff/me/dashboard', { period }),
+  team: (period?: string) => get<StaffTeamResponse>('/staff/team', { period }),
+  setTarget: (staffId: string, body: SetTargetRequest) => post<{ ok: true; id: string }>(`/staff/${encodeURIComponent(staffId)}/targets`, body),
+  visitsToday: () => get<VisitsTodayResponse>('/visits/today'),
+  createVisit: (body: CreateVisitRequest) => post<CreateVisitResponse>('/visits', body, { 'Idempotency-Key': body.client_event_id }),
+  visitReport: (period?: string) => get<VisitReportResponse>('/visits/report', { period }),
 };
 
 export const agentApi = {

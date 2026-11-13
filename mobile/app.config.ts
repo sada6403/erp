@@ -78,6 +78,10 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
       },
     ],
     [
+      'expo-location',
+      { locationWhenInUsePermission: 'Allow location so a field visit records where it took place. It is only read while you save a visit.', isAndroidBackgroundLocationEnabled: false },
+    ],
+    [
       'expo-splash-screen',
       { backgroundColor: '#FFFFFF', image: './assets/splash-icon.png', imageWidth: 200 },
     ],
