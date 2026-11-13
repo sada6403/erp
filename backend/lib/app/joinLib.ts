@@ -73,7 +73,7 @@ export async function purgeJoinRetention(company: AppCompany, throttle = false):
   return rows.length
 }
 
-const SELECT_JOIN = `SELECT j.*, s.name AS scheme_name, b.name AS branch_name, a.name AS agent_name FROM smartbuy_join_requests j LEFT JOIN chit_schemes s ON s.id = j.scheme_id LEFT JOIN branches b ON b.id = j.branch_id LEFT JOIN agents a ON a.id = j.agent_id`
+export const SELECT_JOIN = `SELECT j.*, s.name AS scheme_name, b.name AS branch_name, a.name AS agent_name FROM smartbuy_join_requests j LEFT JOIN chit_schemes s ON s.id = j.scheme_id LEFT JOIN branches b ON b.id = j.branch_id LEFT JOIN agents a ON a.id = j.agent_id`
 
 /** Create a request. Returns { created:false } when the same client_event_id was already submitted (idempotent replay). */
 export async function submitJoinRequest(
