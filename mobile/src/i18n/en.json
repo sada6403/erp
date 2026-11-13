@@ -54,7 +54,8 @@
     "customer": "Customer",
     "smartbuy": "Smart Buy",
     "agent": "Agent",
-    "agentField": "Field agent"
+    "agentField": "Field agent",
+    "manager": "Management"
   },
   "nav": {
     "groceries": "Groceries",
@@ -145,7 +146,7 @@
     "tagDue": "Due: cycle {{n}}",
     "tagQueued": "Not sent yet",
     "todayTitle": "Today's collections",
-    "receiptsN": "{{n}} receipts",
+    "receiptsN": "Receipts: {{n}}",
     "cashInHand": "Cash in hand",
     "waitingBranch": "Waiting for branch",
     "unsent": "{{n}} receipt(s) saved on this phone, waiting to send",
@@ -169,6 +170,47 @@
       "pending_verification": "Pending verification",
       "approved": "Paid",
       "rejected": "Rejected"
+    }
+  },
+  "mgr": {
+    "nav": {
+      "dashboard": "Dashboard",
+      "team": "Team",
+      "me": "Me"
+    },
+    "dash": {
+      "title": "Dashboard",
+      "scope": "Your team only",
+      "teamThisMonth": "Team this month",
+      "officers": "Field officers",
+      "visits": "Visits this month",
+      "followUps": "Follow-ups done",
+      "direct": "Your direct reports"
+    },
+    "team": {
+      "title": "Team"
+    },
+    "person": {
+      "notFound": "This person is not in your team",
+      "thisMonth": "This month",
+      "sales": "Sales",
+      "collected": "Collected",
+      "salesTitle": "Sales",
+      "noSales": "No sales this month",
+      "walkIn": "Customer",
+      "wallet": "{{amount}} from Smart Buy wallet",
+      "collectionsTitle": "Smart Buy collections",
+      "noCollections": "No collections this month",
+      "visitsTitle": "Visits",
+      "noVisits": "No visits this month",
+      "customerVisit": "Customer visit"
+    },
+    "me": {
+      "title": "Me",
+      "scopeTitle": "What you can see",
+      "scopeBody": "You see the people who report to you, directly or through others, and nobody else. Targets can be set only for people below you.",
+      "fieldView": "Switch to field officer view",
+      "settings": "Settings and sign out"
     }
   },
   "theme": {

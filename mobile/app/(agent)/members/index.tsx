@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { radii, useTheme } from '@/theme';
 import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
-import { Card, EmptyState, ErrorState, Field, SectionHeader, SkeletonList } from '@/components/ui';
+import { Card, EmptyState, ErrorState, Field, SkeletonList } from '@/components/ui';
 import { Screen } from '@/components/Shell';
 import { formatRs } from '@/lib/money';
 import { formatDate, formatTime } from '@/lib/format';
@@ -126,7 +126,6 @@ export default function MembersScreen() {
         <EmptyState icon={'👥'} title={t('members.empty')} />
       ) : (
         <View style={{ gap: 10 }}>
-          <SectionHeader icon={'👥'} title={t('members.title')} />
           {items.map((m) => {
             const tg = tag(m);
             const c = m.collection;

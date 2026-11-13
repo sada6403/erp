@@ -28,6 +28,24 @@ export function useIsStaff(): boolean {
   return !!useStaffDashboard().data;
 }
 
+/** Management levels (everyone above a field officer) get the management layout; a field officer keeps the agent tabs. */
+export function isManagerLevel(level: StaffLevel | undefined): boolean {
+  return !!level && level !== 'field_officer';
+}
+export function useIsManager(): boolean {
+  return isManagerLevel(useStaffDashboard().data?.level);
+}
+
+/** One person inside my scope: own sales, collections and visits (the server answers 404 for anyone outside it). */
+export function useStaffDetail(staffId: string, period: string) {
+  return useQuery({
+    queryKey: qk.agent.staffDetail(staffId, period),
+    queryFn: () => staffApi.detail(staffId, period),
+    enabled: !!staffId,
+    retry: (count, err) => toAppError(err).status !== 404 && count < 1,
+  });
+}
+
 export function useTeam(period: string) {
   const enabled = useSessionStore(selectHasRole('agent'));
   return useQuery({ queryKey: qk.agent.team(period), queryFn: () => staffApi.team(period), enabled });

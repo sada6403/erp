@@ -230,3 +230,41 @@ d('field visits', () => {
     expect((await api.get(`/visits/report?staff_id=${S.F1.id}&period=${period}`, { token: S.D.token })).status).toBe(200)
   }, 300_000)
 })
+
+d('manager drill-down (per-person detail)', () => {
+  it('SF-DET-01 /staff/{id}/detail: own subtree 200, everyone else 404, at every level; no token / wrong key 401, customer and plain agent 403', async () => {
+    await Promise.all(names.map(async n => {
+      const inside = new Set([n, ...desc(n)])
+      for (const x of names) {
+        const r = await api.get(`/staff/${S[x].id}/detail?period=${period}`, { token: S[n].token })
+        expect(r.status, `${n} -> detail of ${x}`).toBe(inside.has(x) ? 200 : 404)
+        if (!inside.has(x)) expect(r.json.error.code).toBe('NOT_FOUND')
+      }
+    }))
+    const url = `/staff/${S.F1.id}/detail`
+    expect((await api.get(url, {})).status).toBe(401)
+    expect((await api.get(url, { token: S.D.token, key: 'wrong-key' })).status).toBe(401)
+    const customer = await api.login(JSON.parse(fs.readFileSync(String(process.env.STAGING_SEED), 'utf8')).logins.customer, seed.password)
+    expect((await api.get(url, { token: customer })).status).toBe(403)
+    expect((await api.get(url, { token: S.P.token })).status).toBe(403)
+  }, 300_000)
+
+  it('SF-DET-02 detail shows that person\'s own sales, collections and visits only (no peer rows), and no salary data', async () => {
+    const f1 = await api.get(`/staff/${S.F1.id}/detail?period=${period}`, { token: S.B1.token })
+    expect(f1.status).toBe(200)
+    expect(f1.json.staff_id).toBe(S.F1.id)
+    expect(f1.json.performance.staff_id).toBe(S.F1.id)
+    const numbers = f1.json.sales.map((x: any) => x.invoice_number)
+    expect(numbers.some((x: string) => x.startsWith(`SFT-${run}-`)), 'F1 sales listed').toBe(true)
+    expect(f1.json.sales.find((x: any) => x.invoice_number === `SFT-${run}-2`)?.wallet_part, 'wallet part shown').toBe(200)
+    expect(numbers).not.toContain(`SFT-${run}-5`) // F2's invoice
+    expect(f1.json.visits.length).toBeGreaterThanOrEqual(4)
+    expect(f1.json.visits.every((v: any) => v.staff_id === S.F1.id)).toBe(true)
+    expect(Array.isArray(f1.json.collections)).toBe(true)
+    // a manager's own detail is the whole team's figures with only their own rows
+    const b1 = await api.get(`/staff/${S.B1.id}/detail?period=${period}`, { token: S.B1.token })
+    expect(b1.json.sales).toEqual([])
+    expect(b1.json.performance.team_size).toBe(2)
+    expect(JSON.stringify([f1.json, b1.json])).not.toMatch(/salary|commission|basic/i)
+  }, 120_000)
+})

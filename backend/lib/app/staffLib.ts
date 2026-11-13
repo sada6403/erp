@@ -348,3 +348,37 @@ export async function adminUnassign(company: AppCompany, actor: string | null, s
   await company.tp.query(`UPDATE staff_assignments SET active_to = NOW() WHERE staff_id = ? AND active_to IS NULL`, [staffId])
   await writeAudit(company, actor, 'staff_assignment_closed', 'staff_assignments', String(prior.rows[0].id), prior.rows[0], null)
 }
+
+/** One person's own latest sales, Smart Buy collections and visits for the period (the caller has already checked `visible`). */
+export async function staffDetail(company: AppCompany, scope: StaffScope, id: string, period: string) {
+  const { from, to } = periodRange(period)
+  const [performance] = await performanceFor(company, scope.org, [id], period)
+  const names = await people(company, [id])
+  const code = names.get(id)?.code ?? null
+  const attr = `(i.agent_id = ? OR (i.agent_id IS NULL AND ? IS NOT NULL AND i.agent_code = ?))`
+  const sales = await company.tp.query<Row>(
+    `SELECT i.invoice_number, i.created_at, i.total_amount, c.name customer_name,
+            (SELECT COALESCE(SUM(p.amount),0) FROM payments p WHERE p.invoice_id = i.id AND p.method = 'smartbuy_wallet') wallet
+       FROM invoices i LEFT JOIN customers c ON c.id = i.customer_id
+      WHERE ${attr} AND i.status NOT IN ${NOT_A_SALE} AND i.created_at >= ? AND i.created_at < ? ORDER BY i.created_at DESC LIMIT 30`, [id, code, code, from, to])
+  const cols = await company.tp.query<Row>(
+    `SELECT k.id, k.paid_at, k.amount, k.status, cu.name member_name, a.receipt_number
+       FROM chit_contributions k LEFT JOIN chit_members m ON m.id = k.member_id LEFT JOIN customers cu ON cu.id = m.customer_id
+       LEFT JOIN app_collections a ON a.contribution_id = k.id
+      WHERE k.collected_by_agent_id = ? AND k.paid_at >= ? AND k.paid_at < ? ORDER BY k.paid_at DESC LIMIT 30`, [id, from, to])
+  const vis = await company.tp.query<Row>(
+    `SELECT id, staff_id, customer_id, prospect_name, prospect_phone, lat, lng, gps_missing, visited_at, outcome, reason, follow_up_at, notes, client_event_id
+       FROM field_visits WHERE staff_id = ? AND visited_at >= ? AND visited_at < ? ORDER BY visited_at DESC LIMIT 30`, [id, from, to])
+  const iso = (v: unknown) => (v ? new Date(v as string).toISOString() : null)
+  return {
+    staff_id: id, period, performance,
+    sales: sales.rows.map(r => ({ invoice_number: String(r.invoice_number), created_at: iso(r.created_at), total: round2(Number(r.total_amount) || 0), wallet_part: round2(Number(r.wallet) || 0), customer_name: r.customer_name ? String(r.customer_name) : null })),
+    collections: cols.rows.map(r => ({ id: String(r.id), paid_at: iso(r.paid_at), amount: round2(Number(r.amount) || 0), status: String(r.status), member_name: r.member_name ? String(r.member_name) : null, receipt_number: r.receipt_number ? String(r.receipt_number) : null })),
+    visits: vis.rows.map(r => ({
+      id: String(r.id), staff_id: String(r.staff_id), customer_id: r.customer_id ? String(r.customer_id) : null, prospect_name: r.prospect_name ? String(r.prospect_name) : null,
+      prospect_phone: r.prospect_phone ? String(r.prospect_phone) : null, lat: r.lat == null ? null : Number(r.lat), lng: r.lng == null ? null : Number(r.lng),
+      gps_missing: !!r.gps_missing, visited_at: iso(r.visited_at), outcome: String(r.outcome), reason: r.reason ? String(r.reason) : null,
+      follow_up_at: iso(r.follow_up_at), notes: r.notes ? String(r.notes) : null, client_event_id: String(r.client_event_id),
+    })),
+  }
+}

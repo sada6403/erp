@@ -12,7 +12,8 @@ import { LANGS } from '@/i18n';
 import { ENV } from '@/lib/env';
 import { formatPhone } from '@/lib/format';
 import { useThemeStore } from '@/store/themeStore';
-import { useSessionStore } from '@/store/sessionStore';
+import { useSessionStore, type NavRole } from '@/store/sessionStore';
+import { useIsManager } from '@/features/staff/hooks';
 import { logout } from '@/features/auth/session';
 import { getPermissionStatus } from '@/features/push/push';
 import { authApi } from '@/api/endpoints';
@@ -38,6 +39,8 @@ export default function SettingsScreen() {
   const branch = useSessionStore((s) => s.branchName);
   const company = useCompany();
   const setActiveRole = useSessionStore((s) => s.setActiveRole);
+  const setFieldView = useSessionStore((s) => s.setFieldView);
+  const isManager = useIsManager();
   const patchUser = useSessionStore((s) => s.patchUser);
   const { theme: themeKey, language, setTheme, setLanguage } = useThemeStore();
   const offline = useUiStore(selectIsOffline);
@@ -96,14 +99,15 @@ export default function SettingsScreen() {
             </View>
             {roles.length > 1 ? (
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                {roles.map((r) => (
+                {(isManager ? roles.flatMap((r) => (r === 'agent' ? (['manager', 'agent'] as NavRole[]) : [r])) : roles).map((r) => (
                   <Button
                     key={r}
                     label={t(`role.${r}`)}
                     variant={role === r ? 'primarySm' : 'secondarySm'}
                     onPress={() => {
+                      if (r === 'manager' || r === 'agent') setFieldView(r === 'agent');
                       setActiveRole(r);
-                      router.replace(r === 'agent' ? '/deliveries' : r === 'smartbuy' ? '/schemes' : '/');
+                      router.replace(r === 'manager' ? '/mgr-dashboard' : r === 'agent' ? '/deliveries' : r === 'smartbuy' ? '/schemes' : '/');
                     }}
                   />
                 ))}

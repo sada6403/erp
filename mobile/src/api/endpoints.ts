@@ -80,6 +80,7 @@ import type {
   CreateVisitResponse,
   SetTargetRequest,
   StaffDashboardResponse,
+  StaffDetailResponse,
   StaffTeamResponse,
   VisitReportResponse,
   VisitsTodayResponse,
@@ -191,6 +192,7 @@ export const staffApi = {
   visitsToday: () => get<VisitsTodayResponse>('/visits/today'),
   createVisit: (body: CreateVisitRequest) => post<CreateVisitResponse>('/visits', body, { 'Idempotency-Key': body.client_event_id }),
   visitReport: (period?: string) => get<VisitReportResponse>('/visits/report', { period }),
+  detail: (staffId: string, period?: string) => get<StaffDetailResponse>(`/staff/${encodeURIComponent(staffId)}/detail`, { period }),
 };
 
 /** Smart Buy cash collection. The server re-validates scope, the due and the receipt number; a replay with the same client_event_id returns the stored row. */

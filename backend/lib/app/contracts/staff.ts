@@ -100,3 +100,15 @@ export interface VisitReportResponse {
   period: string
   items: VisitReportRowDto[]
 }
+
+/** Drill-down for one person inside the caller's scope (own figures, latest rows first). */
+export interface StaffDetailSaleDto { invoice_number: string; created_at: string | null; total: number; wallet_part: number; customer_name: string | null }
+export interface StaffDetailCollectionDto { id: string; paid_at: string | null; amount: number; status: string; member_name: string | null; receipt_number: string | null }
+export interface StaffDetailResponse {
+  staff_id: string
+  period: string
+  performance: StaffPerformanceDto
+  sales: StaffDetailSaleDto[]
+  collections: StaffDetailCollectionDto[]
+  visits: VisitDto[]
+}

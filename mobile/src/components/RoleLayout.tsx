@@ -4,6 +4,7 @@ import { Redirect, Tabs, useFocusEffect } from 'expo-router';
 import { useTheme } from '@/theme';
 import { useSessionStore, type NavRole } from '@/store/sessionStore';
 import { useModules } from '@/features/common/hooks';
+import { isManagerLevel, useStaffDashboard } from '@/features/staff/hooks';
 import { AppHeader, RoleTabBar } from './Shell';
 import { OfflineBanner } from './Overlays';
 
@@ -11,6 +12,7 @@ import { OfflineBanner } from './Overlays';
 const SCREENS: Record<NavRole, string[]> = {
   customer: ['index', 'cart', 'catalog', 'checkout', 'categories', 'flash-deals', 'orders/index', 'smartbuy-promo', 'order-confirmed', 'orders/[id]', 'product/[id]'],
   smartbuy: ['schemes', 'draws', 'draw-video/[id]', 'wallet', 'spend', 'statement'],
+  manager: ['mgr-dashboard', 'mgr-team', 'mgr-person/[id]', 'mgr-me'],
   agent: ['deliveries/index', 'deliveries/[id]', 'members/index', 'add-member', 'commission', 'bill/index', 'bill/[id]', 'visits', 'team'],
 };
 
@@ -24,6 +26,8 @@ export function RoleLayout({ role }: { role: NavRole }) {
   const user = useSessionStore((s) => s.user);
   const setActiveRole = useSessionStore((s) => s.setActiveRole);
   const modules = useModules();
+  const fieldView = useSessionStore((s) => s.fieldView);
+  const dash = useStaffDashboard();
 
   useFocusEffect(
     useCallback(() => {
@@ -33,7 +37,13 @@ export function RoleLayout({ role }: { role: NavRole }) {
 
   if (role !== 'customer') {
     if (!user) return <Redirect href="/login" />;
-    if (!user.roles.includes(role)) return <Redirect href="/" />;
+    if (!user.roles.includes(role === 'manager' ? 'agent' : role)) return <Redirect href="/" />;
+    // The management layout is for management levels only (the server decides the level); a manager who chose the field tabs stays in them.
+    if (role === 'manager') {
+      if (dash.isLoading) return null;
+      if (!isManagerLevel(dash.data?.level)) return <Redirect href="/deliveries" />;
+    }
+    if (role === 'agent' && !fieldView && isManagerLevel(dash.data?.level)) return <Redirect href="/mgr-dashboard" />;
     if (role === 'smartbuy' && !modules.smartbuy) return <Redirect href="/" />;
   }
 

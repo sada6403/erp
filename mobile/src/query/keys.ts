@@ -54,6 +54,7 @@ export const qk = {
     // sales force (kept under the agent root: cached for offline reading, wiped on logout)
     staffDashboard: ['agent', 'staff', 'dashboard'] as const,
     team: (period: string) => ['agent', 'staff', 'team', period] as const,
+    staffDetail: (id: string, period: string) => ['agent', 'staff', 'detail', id, period] as const,
     visitsToday: ['agent', 'visits', 'today'] as const,
     visitReport: (period: string) => ['agent', 'visits', 'report', period] as const,
     collectionsToday: ['agent', 'collections', 'today'] as const,

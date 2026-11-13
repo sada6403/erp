@@ -97,6 +97,7 @@ const useHeaderStyles = makeStyles((t) => ({
 }));
 
 function roleLabel(role: NavRole, agentCode: string | null | undefined, t: (k: string) => string): string {
+  if (role === 'manager') return `📊 ${t('role.manager')}${agentCode ? ` ${agentCode}` : ''}`;
   if (role === 'agent') return `🛵 ${t('role.agent')}${agentCode ? ` ${agentCode}` : ''}`;
   if (role === 'smartbuy') return `💎 ${t('role.smartbuy')}`;
   return `🛒 ${t('role.customer')}`;
@@ -201,6 +202,11 @@ export const NAV_ITEMS: Record<NavRole, NavItem[]> = {
     { key: 'wallet', icon: '💰', labelKey: 'nav.passbook', href: '/wallet', match: ['/wallet'] },
     { key: 'spend', icon: '🛒', labelKey: 'nav.spendShop', href: '/spend', match: ['/spend'] },
     { key: 'settings', icon: '⚙️', labelKey: 'nav.settings', href: '/settings', match: ['/settings'] },
+  ],
+  manager: [
+    { key: 'dash', icon: '📊', labelKey: 'mgr.nav.dashboard', href: '/mgr-dashboard', match: ['/mgr-dashboard'] },
+    { key: 'team', icon: '👥', labelKey: 'mgr.nav.team', href: '/mgr-team', match: ['/mgr-team', '/mgr-person'] },
+    { key: 'me', icon: '🙋', labelKey: 'mgr.nav.me', href: '/mgr-me', match: ['/mgr-me', '/settings'] },
   ],
   agent: [
     { key: 'deliveries', icon: '🛵', labelKey: 'nav.deliveries', href: '/deliveries', match: ['/deliveries'] },
