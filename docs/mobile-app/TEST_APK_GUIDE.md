@@ -1,7 +1,8 @@
 # Natural Plantation (Test) app: tester guide
 
-Version 1.0.0-test.3 (13 Nov 2026). If you have test.1 or test.2 installed, install this file over it (your login is kept or you log in again). This is a TEST app. It talks to a test server with test data, not to the real shop. Nothing you do here touches real stock, real money or real customers.
+Version 1.0.0-test.4 (13 Nov 2026). If you have an older test build installed, install this file over it (your login is kept or you log in again). This is a TEST app. It talks to a test server with test data, not to the real shop. Nothing you do here touches real stock, real money or real customers.
 
+**Changes in test.4:** "Join Smart Buy" is real: enter your details, the agent code (the app shows the agent name to confirm), pick a branch, photograph your NIC (screenshots are blocked on that screen); the branch approves or rejects in the POS and "My Smart Buy requests" shows Pending / Approved / Rejected with the reason. Note: test customer 0771110011 is now a Smart Buy member because the join flow was tested with it.
 **Changes in test.3:** app is now named "Natural Plantation" with the real logo (launcher, splash, top bar); new top bar (logo + company name, bell, branch and role on a second line); tapping a product opens its own page (gallery with pinch-zoom, options, quantity, reviews, similar products), only the Add button on the card adds to the cart; Categories page shows POS categories with sub-categories and counts (empty ones hidden) and the product list has sort and price / in-stock filters; the bank-slip reference typed at checkout now shows in the POS.
 
 ## 1. Install
