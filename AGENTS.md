@@ -83,6 +83,8 @@ erp/
     `notifications-and-updates`.
 13. **Never break an installed app.** API changes are backward compatible; a breaking change needs
     `min_app_version` raised first. OTA (expo-updates) only for JS-only changes.
+14. **Never print secret values.** When looking for config (`.env`, pm2 env, `DATABASE_URL`, SMTP/email keys, API keys, tokens), on the VPS or locally, print key NAMES only (`grep -o '^[A-Z_]*='`) or mask everything after `=`. A connection string is a secret as a whole (it holds the password). Run scripts that read the secret themselves and print results only. (Added 2026-11-13 after production DATABASE_URL credentials were printed in an agent session.)
+
 
 ## 4. Tech stack
 

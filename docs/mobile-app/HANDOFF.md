@@ -87,6 +87,7 @@ Then confirm with `git ls-remote origin feature/mobile-app-foundation`. Never as
 - Wallet spending/sync changes (ARCHITECTURE §10), salary payroll going live.
 - A library not listed in AGENTS.md §4.
 - Never handle passwords; never copy/commit keys.
+- **Never print secret values** (.env, pm2 env, DATABASE_URL, SMTP/email keys, API keys, tokens; VPS or local). Print key NAMES only or mask everything after `=`. See AGENTS.md rule 14.
 
 ## 7. Backlog after Stage 1 (in order)
 1. Upload-key MATCH check → `eas credentials` (Moni types passwords) → production AAB → Play Internal testing (versionCode 6).

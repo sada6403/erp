@@ -137,3 +137,7 @@ The 30-day purge of NIC numbers and photos on join requests has no scheduler. It
 2. A manager who is also a field officer keeps one account and switches view (Me, or Settings). The choice is per login and resets at sign-in.
 3. Drill-down is one server call per person (`/staff/{id}/detail`) so scope is checked in one place: self or strict subtree, else 404.
 4. The dashboard does not draw a salary threshold marker: the threshold lives in salary rules (v1.1). Nothing is hard-coded.
+
+## 2026-11-13 (evening) Working mode and secrets (Moni)
+- Continuous work, no schedule. A new test APK (test.3, test.4 ...) after every 2-3 finished items, with a changelog line in TEST_APK_GUIDE. Hard STOPs: production deploy and DB password rotation, merge to main, Play upload / eas submit, OTA publish, real WhatsApp, live payment keys, emails outside EMAIL_ALLOWLIST on staging.
+- Never print secret values (AGENTS.md rule 14). Production DB credentials were exposed in an agent session on 13 Nov; rotation is a production STOP item done with the main developer at deploy time.

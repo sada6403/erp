@@ -94,6 +94,13 @@ Read-only result on production (no change made): company **Natural Plantation** 
 - **Check (right after deploy, with the real App Key):** `GET /api/app/v1/status` returns `modules.smartbuy: true` for Natural Plantation. If it is `false`, fix the business type or module in Super Admin (never in code) and re-check; do not ship the AAB until it is true.
 - Also noted: production `companies` has no `app_key` column yet. It is created by the section 3 deploy (additive), so step 4 cannot be done before the deploy.
 
+## 3c. Rotate the production database password (STOP item, with the main developer)
+Why: on 13 Nov the production DATABASE_URL credentials were printed in an agent session (no values are recorded in any doc). Do this in the deploy window with the main developer, not before.
+1. Create the new password for the production MySQL app user and update it in the production backend `.env` (and anywhere else that user is used) without printing it; check with key names only.
+2. Restart `pos-backend` in the same window; check `/api/health` and one POS sync.
+3. Rotate any other secret printed in the same session (list by name only, agree with the main developer).
+- **Rollback:** put the previous password back in `.env` and restart; keep the old one valid until the checks pass.
+
 ## 4. Real-company App Key and product re-push
 1. Super Admin portal -> company -> generate App Key (`npk_...`). The key goes into the production EAS profile (build env `APP_KEY`, read by `mobile/app.config.ts`) — it identifies the company only, it is not a secret like the sync key.
 2. Products created before the deploy lack the new columns; do the one-time re-push from the POS per branch PC (use the POS's existing full-sync / product re-push action; confirm the exact menu name on a branch PC before the day, it was not re-checked for this plan).
