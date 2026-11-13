@@ -68,6 +68,16 @@ Raise the minimum only after the matching build is available, and before any bre
   `REQUEST_INSTALL_PACKAGES` exists only in the staging/test flavour manifest, never in the Play build.
 - OTA (`expo-updates`): background download, "Update ready - Restart" snackbar, otherwise applied on next cold start.
 
+## (f) Play In-App Updates (Play build)
+
+The Play build uses `expo-in-app-updates` 0.13.0 (approved 2026-11-13). `useAppUpdate().start()` calls `checkAndStartUpdate(forced)`:
+**IMMEDIATE** (full-screen Play flow) when the installed version is below `min_app_version`, **FLEXIBLE** (background download, then restart prompt) otherwise.
+If the library or Play is unavailable the app opens the Play listing so a forced user is never stuck.
+
+- **Can only be fully tested from Play Internal testing.** Play offers an update only to an app installed from Play with a higher `versionCode` published in the same track. Sideloaded/staging builds never see it (they use the APK self-update path instead).
+- Test steps (owner, after the first Play upload): install build N from the Internal track, upload build N+1 to Internal, open N: the Play update flow appears. Raise `min_app_version` in POS > App Control > App Versions (production row) to test IMMEDIATE.
+- The Play build must never declare `REQUEST_INSTALL_PACKAGES`: `eas.json` production `prebuildCommand` runs `scripts/check-play-manifest.cjs`, which fails the build if it does.
+
 ## (e) Hard STOP list (ask the owner, never do)
 
 - Any `eas update --channel production` or production build.
