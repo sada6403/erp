@@ -181,3 +181,12 @@ Go to production when: staging verified, backup restored once, upload key = MATC
 - **Set `EMAIL_MODE=production` in the production backend env** (name only here; add it with a script, never print the file). Without it the backend runs restricted and suppresses all mail, including the existing admin/onboarding emails. `EMAIL_ALLOWLIST` must be unset or is ignored in production.
 - Sender check: the company SMTP (Super Admin > company > email) must send from a domain with SPF/DKIM set up; send the Super Admin "email test" to your own address first.
 - After deploy: `SELECT status, COUNT(*) FROM email_jobs GROUP BY status` should show `sent`, not `suppressed` or `failed`. The table holds no addresses. Env names involved: `EMAIL_MODE`, `EMAIL_ALLOWLIST`, `PUBLIC_BASE_URL` (logo URL), `CRON_SECRET`.
+
+## 3e. Added 2026-11-13: pre-deploy checklist for the test.3/test.4 work (do with the main developer)
+- **New cloud schema (additive, auto-created on the first API hit per company, nothing to run by hand):** `product_reviews`, `email_jobs`, `branches.delivery_eta_min_days/max_days/text`, `smartbuy_join_requests.branch_id`. Desktop SQLite gets `product_reviews` and the branch columns on the next POS update (needs the POS desktop release; deploy backend first, POS second).
+- **Categories:** production has 0 categories and about 775 uncategorised products. Create categories in the POS and assign products BEFORE launch, otherwise the app's Categories page is empty by design.
+- **Delivery time:** set min/max days per branch in POS Online Store > Ordering & delivery > Delivery time. Unset means the app shows no estimate.
+- **Email:** the production company needs SMTP set (company branding SMTP or platform SMTP) and `EMAIL_MODE=production` (see 3d). Staging has no SMTP, so real delivery of the 14 email types has not been proven yet; send one of each to a test address first.
+- **Secrets to rotate at deploy time (exposed in agent output, 13 Nov):** production DB password (3c) and the staging VPS `CRON_SECRET` (and the production one if it is the same value).
+- **Smart Buy join:** NIC photos live only in the private store and `smartbuy_join_requests` (purged 30 days after the decision); they never go into the cloud `customers` table.
+- Test data on staging only (two "Live ... Test" join requests, a member in QA Join Scheme); nothing to clean in production.
