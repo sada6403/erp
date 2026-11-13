@@ -32,7 +32,13 @@ About 277 files are new `mobile/` files, about 35 docs; the production-affecting
   `invoices.agent_id`; `app_users.is_review_account`; `smartbuy_join_requests` (`purged_at`, `branch_id`); `companies.app_key`.
   Verified against `backend/lib/appSchema.ts`; re-diff before the deploy in case later commits added more.
 - Desktop SQLite and sync lists: exact comparison in section 10 (all matches confirmed, notes for the main dev).
-- Uncommitted work by another agent at time of writing: cloud-only table `app_versions` (in-app update info, edited from a POS "App Versions" page). Re-diff `appSchema.ts` before the merge.
+- Added 2026-11-13 (App Control + in-app updates), all additive and created by `ensureTenantCompatibility` on the first request per company:
+  cloud-only `app_versions` (per platform/channel latest + min version, notes en/ta/si, APK url, SHA-256) and `app_banner_stats` (daily impressions/taps per banner, no personal data);
+  `app_banners` new columns `link_type, link_target, audience, image_en, image_ta, image_si`; `products.is_featured` (synced; POS pull list + ALLOWED_TABLES already cover `products`);
+  `app_settings` key `home_layout` (existing synced table). **Deploy the backend first, then release the POS** (the old POS ignores the new columns; the new POS writes them).
+  The mobile app reads banners as `link: {type,target}` (the old `link_url` field is gone from `/catalog/banners`): release the app build only after the backend. Re-diff `appSchema.ts` before the merge.
+- In-app updates on production: set the **production** row in POS > App Control > App Versions (latest, minimum, notes); the production row never serves an APK URL. The Play build uses `expo-in-app-updates`; its `prebuildCommand` fails the build if `REQUEST_INSTALL_PACKAGES` is in the manifest. **MAIN DEV TO CONFIRM** the Play Console app-signing and Internal-testing track exist before the first upload (owner uploads; STOP item).
+- Staging only (not for production): nginx location `/test-apk/` and the test-channel version row; production needs neither.
 
 ## 2. Merge strategy
 **Recommendation: merge commit (`--no-ff`), not squash.**
