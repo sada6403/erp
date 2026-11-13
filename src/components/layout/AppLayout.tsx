@@ -105,6 +105,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/smart-buy', label: 'Dashboard', perm: ['chits'] },
       { to: '/admin/smart-buy-award', label: 'Award Winners', perm: ['chits'] },
+      { to: '/admin/agent-cash', label: 'Agent Cash', perm: ['chits'] },
       // Was adminOnly:true, hiding this from every chits-only user even
       // though both the route (RequireSmartBuyAccess) and the backend
       // (chits:templates:list -> canManage = chits∨all) already allow a

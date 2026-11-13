@@ -200,6 +200,11 @@ const api = {
       verify:            (id: string, action: 'approve' | 'reject', notes?: string) => ipcRenderer.invoke('chits:contributions:verify', id, action, notes),
       pendingTransfers: (filters?: unknown) => ipcRenderer.invoke('chits:contributions:pendingTransfers', filters),
     },
+    // Cash the mobile-app agents collected, waiting for the branch to receive it and approve in bulk.
+    appCollections: {
+      pending: (filters?: { agent_id?: string }) => ipcRenderer.invoke('chits:appCollections:pending', filters),
+      settle:  (payload: { agent_id: string; approve_ids?: string[]; reject?: Array<{ id: string; reason: string }>; received_amount?: number; notes?: string }) => ipcRenderer.invoke('chits:appCollections:settle', payload),
+    },
     agents: {
       report: (filters?: unknown) => ipcRenderer.invoke('chits:agents:report', filters),
       detail: (agentId: string)   => ipcRenderer.invoke('chits:agents:detail', agentId),

@@ -297,6 +297,18 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
        INDEX idx_visit_staff (staff_id, visited_at),
        INDEX idx_visit_followup (follow_up_at)
      )`,
+  // Smart Buy cash collected in the app: cloud-only bookkeeping beside the chit_contributions row (id = the app's client event id).
+  // The unique key keeps receipt numbers unique per agent even when several offline receipts arrive late.
+  `CREATE TABLE IF NOT EXISTS app_collections (
+       contribution_id CHAR(36) NOT NULL PRIMARY KEY,
+       agent_id VARCHAR(191) NOT NULL,
+       member_id VARCHAR(191) NOT NULL,
+       receipt_number VARCHAR(64) NOT NULL,
+       receipt_seq INT NULL,
+       ${TS},
+       UNIQUE KEY uq_app_collection_receipt (agent_id, receipt_number),
+       INDEX idx_app_collection_agent (agent_id, receipt_seq)
+     )`,
   // credit for a sale goes to the officer on the invoice at the time of the sale (pushed by the POS; older rows fall back to agent_code)
   `ALTER TABLE invoices ADD COLUMN agent_id CHAR(36) NULL`,
 

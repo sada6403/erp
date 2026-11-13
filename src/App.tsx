@@ -58,6 +58,7 @@ const OrdersPage = adminPage('OrdersPage')
 const AppAccessPage = adminPage('AppAccessPage')
 const AppRequestsPage = adminPage('AppRequestsPage')
 const SalesTeamPage = adminPage('SalesTeamPage')
+const AgentCashPage = adminPage('AgentCashPage')
 const OnlineStorePage = adminPage('OnlineStorePage')
 const StockLookupPage = adminPage('StockLookupPage')
 const QuotationsPage = adminPage('QuotationsPage')
@@ -364,6 +365,7 @@ export default function App() {
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
         <Route path="/admin/deliveries" element={<RequireModule module="deliveries"><DeliveriesPage /></RequireModule>} />
         <Route path="/admin/installments" element={<RequirePermission permission="customers"><RequireModule module="installments"><InstallmentsPage /></RequireModule></RequirePermission>} />
+        <Route path="/admin/agent-cash" element={<RequireSmartBuyAccess><AgentCashPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/chits" element={<RequireSmartBuyAccess><ChitSchemesPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/chits/:id" element={<RequireSmartBuyAccess><ChitSchemeDetailPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/chit-customers" element={<RequireSmartBuyAccess><ChitCustomersPage /></RequireSmartBuyAccess>} />

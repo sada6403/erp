@@ -1,4 +1,5 @@
 import type { OrderItemDto, OrderStatus } from './orders'
+import type { MemberDueDto } from './collections'
 
 /** Optional, derived dashboard figures; every field may be absent. */
 export interface AgentDashboardExtrasDto {
@@ -50,6 +51,8 @@ export interface AgentMemberDto {
   contributions_paid: number
   status: string
   won_cycle_no: number | null
+  /** This cycle's due and arrears; absent for members who owe nothing (redeemed, withdrawn, cancelled scheme) */
+  collection?: MemberDueDto
 }
 export interface AgentMembersResponse {
   items: AgentMemberDto[]

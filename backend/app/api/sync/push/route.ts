@@ -6,6 +6,7 @@ import { syncLimiter } from '@/lib/rateLimit'
 import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
 import { TABLE_MODULE_MAP, ADMIN_LOCK_TABLES } from '@/lib/catalog'
 import { onOrderStatusChanged, onOrderAssigned } from '@/lib/app/ordersLib'
+import { onContributionStatusChanged } from '@/lib/app/collectionsLib'
 
 export const runtime = 'nodejs'
 
@@ -80,6 +81,14 @@ export async function POST(request: NextRequest) {
           await onOrderAssigned(conn, body.recordId as string)
         } catch (hookErr) {
           console.error('[sync/push] app order hook failed', hookErr)
+        }
+      }
+      // App cash collections: the branch's approve / reject (pushed by the POS) notifies the member and the agent. Best-effort.
+      if (body.table === 'chit_contributions' && body.operation !== 'DELETE' && body.operation !== 'delete') {
+        try {
+          await onContributionStatusChanged(conn, body.recordId as string)
+        } catch (hookErr) {
+          console.error('[sync/push] app collection hook failed', hookErr)
         }
       }
     } finally {
