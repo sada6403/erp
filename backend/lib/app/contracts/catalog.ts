@@ -60,6 +60,10 @@ export interface ProductListItemDto {
   popularity?: number
   /** Only true when the product has enable_emi = 1 */
   emi_available: boolean
+  /** Marked "Featured" in the POS App Control > Products tab (products.is_featured) */
+  featured: boolean
+  /** When the product was created (ISO UTC); new arrivals = newest first */
+  created_at: string | null
   updated_at: string
 }
 
@@ -142,7 +146,7 @@ export interface BannerDto {
   /** Optional: many banners are image-only */
   title?: string | null
   subtitle: string | null
-  /** Sharp WebP phone-width variant; per-language image when set */
+  /** Sharp WebP phone-width variant; per-language image when set. Artwork rule: 16:7 (1200 x 525 px), safe area = central 80% */
   image_url: string | null
   link: BannerLinkDto | null
   sort_order: number

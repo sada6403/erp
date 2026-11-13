@@ -184,6 +184,8 @@ export function mapProduct(
     rating_count: ratingOf(ratings, String(p.id)).count,
     popularity: popularity?.get(String(p.id)) ?? 0,
     emi_available: Number(p.enable_emi) === 1,
+    featured: Number(p.is_featured) === 1,
+    created_at: toIso(p.created_at),
     updated_at: toIso(p.updated_at) as string,
   }
 }

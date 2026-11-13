@@ -367,6 +367,7 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE products ADD COLUMN is_manage_stock TINYINT(1) NOT NULL DEFAULT 1`,
   `ALTER TABLE products ADD COLUMN sale_by VARCHAR(16) NOT NULL DEFAULT 'normal'`,
   `ALTER TABLE products ADD COLUMN product_type VARCHAR(16) NOT NULL DEFAULT 'single'`,
+  `ALTER TABLE products ADD COLUMN is_featured TINYINT(1) NOT NULL DEFAULT 0`,
   `ALTER TABLE products ADD INDEX idx_products_updated (updated_at)`,
   `ALTER TABLE categories ADD COLUMN image_url TEXT NULL`,
   `ALTER TABLE branches ADD COLUMN latitude DECIMAL(10,7) NULL`,
@@ -397,6 +398,22 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE smartbuy_join_requests ADD COLUMN purged_at DATETIME NULL`,
   // Customer self join: the branch the applicant picked (becomes chit_members.enrolled_branch_id on approval)
   `ALTER TABLE smartbuy_join_requests ADD COLUMN branch_id VARCHAR(191) NULL`,
+  // App Control: banner targeting + per-language images (link_url stays readable; an https link_url reads as link_type 'url')
+  `ALTER TABLE app_banners ADD COLUMN link_type VARCHAR(12) NOT NULL DEFAULT 'none'`,
+  `ALTER TABLE app_banners ADD COLUMN link_target VARCHAR(500) NULL`,
+  `ALTER TABLE app_banners ADD COLUMN audience VARCHAR(12) NOT NULL DEFAULT 'all'`,
+  `ALTER TABLE app_banners ADD COLUMN image_en TEXT NULL`,
+  `ALTER TABLE app_banners ADD COLUMN image_ta TEXT NULL`,
+  `ALTER TABLE app_banners ADD COLUMN image_si TEXT NULL`,
+  // Anonymous banner counters (cloud-only, NOT synced): one row per banner per Asia/Colombo day. No personal data.
+  `CREATE TABLE IF NOT EXISTS app_banner_stats (
+       banner_id VARCHAR(191) NOT NULL,
+       day DATE NOT NULL,
+       impressions INT NOT NULL DEFAULT 0,
+       taps INT NOT NULL DEFAULT 0,
+       PRIMARY KEY (banner_id, day),
+       INDEX idx_banner_stats_day (day)
+     )`,
   `ALTER TABLE customer_orders ADD COLUMN channel VARCHAR(8) NOT NULL DEFAULT 'pos'`,
   `ALTER TABLE customer_orders ADD COLUMN app_user_id VARCHAR(191) NULL`,
   `ALTER TABLE customer_orders ADD COLUMN assigned_agent_id VARCHAR(191) NULL`,
