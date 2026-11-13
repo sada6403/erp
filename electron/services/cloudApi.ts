@@ -275,6 +275,31 @@ export class CloudApi {
     return this.requestBinary(`/api/app/v1/admin/payment-slips/${encodeURIComponent(id)}/image`)
   }
 
+  // Sales force v1.0 (hierarchy, targets, performance). Cloud-only tables, managed through the admin endpoints.
+  async staffAssignments(): Promise<{ items: Array<Record<string, unknown>>; agents: Array<Record<string, unknown>>; levels: Array<Record<string, unknown>> }> {
+    return this.request('/api/app/v1/admin/staff/assignments')
+  }
+
+  async staffAssign(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('/api/app/v1/admin/staff/assignments', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) })
+  }
+
+  async staffUnassign(staffId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/app/v1/admin/staff/assignments?staff_id=${encodeURIComponent(staffId)}`, { method: 'DELETE', signal: AbortSignal.timeout(30_000) })
+  }
+
+  async staffOverview(period?: string): Promise<{ period: string; items: Array<Record<string, unknown>> }> {
+    return this.request(`/api/app/v1/admin/staff/overview${period ? `?period=${encodeURIComponent(period)}` : ''}`, { signal: AbortSignal.timeout(60_000) })
+  }
+
+  async staffTargets(staffId: string): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request(`/api/app/v1/admin/staff/targets?staff_id=${encodeURIComponent(staffId)}`)
+  }
+
+  async staffTargetSet(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('/api/app/v1/admin/staff/targets', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) })
+  }
+
   private async requestBinary(path: string): Promise<{ contentType: string; bytes: Buffer }> {
     const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
     const response = await fetchFn(`${this.baseUrl}${path}`, {

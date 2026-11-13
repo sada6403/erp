@@ -33,7 +33,7 @@ beforeAll(async () => {
   seed = { ...raw, base_url: BASE_URL, branches: { main: raw.branch_id, kandy: raw.branch_id }, file: String(process.env.STAGING_SEED) } as Seed
   api = appApi(seed); admin = posAdmin(seed); db = await cloudDb(seed)
   startedAt = (await db.one<{ n: string }>(`SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') n`))!.n
-  const hash = (await db.one<{ h: string }>(`SELECT password_hash h FROM app_users WHERE agent_id = ? LIMIT 1`, [raw.agent_id]))!.h
+  const hash = (await db.one<{ h: string }>(`SELECT password_hash h FROM app_users WHERE phone = ? AND deleted_at IS NULL LIMIT 1`, [raw.logins.customer]))!.h
   let i = 0
   const base = String(1000 + Math.floor(Math.random() * 8999))
   for (const n of [...names, 'P']) {

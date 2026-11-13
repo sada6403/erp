@@ -323,6 +323,14 @@ const api = {
     slipImage:   (id: string) => ipcRenderer.invoke('paymentSlips:image', id),
     slipDecide:  (id: string, decision: 'verify' | 'reject', reason?: string) => ipcRenderer.invoke('paymentSlips:decide', id, decision, reason),
   },
+  salesTeam: {
+    assignments: () => ipcRenderer.invoke('salesTeam:assignments'),
+    assign:      (input: unknown) => ipcRenderer.invoke('salesTeam:assign', input),
+    unassign:    (staffId: string) => ipcRenderer.invoke('salesTeam:unassign', staffId),
+    overview:    (period?: string) => ipcRenderer.invoke('salesTeam:overview', period),
+    targets:     (staffId: string) => ipcRenderer.invoke('salesTeam:targets', staffId),
+    setTarget:   (input: unknown) => ipcRenderer.invoke('salesTeam:setTarget', input),
+  },
   onlineStore: {
     bannersList:   () => ipcRenderer.invoke('onlineStore:banners:list'),
     bannerSave:    (payload: unknown) => ipcRenderer.invoke('onlineStore:banners:save', payload),

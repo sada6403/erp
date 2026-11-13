@@ -198,6 +198,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/app-access',   label: 'App Access',   adminOnly: true },
       { to: '/admin/app-requests', label: 'App Requests', adminOnly: true },
+      { to: '/admin/sales-team',   label: 'Sales Team',   adminOnly: true },
       { to: '/admin/online-store', label: 'Online Store', adminOnly: true },
     ]
   },
