@@ -1,6 +1,6 @@
 # Natural Plantation (Test) app: tester guide
 
-Version 1.0.0-test.1 (13 Nov 2026). This is a TEST app. It talks to a test server with test data, not to the real shop. Nothing you do here touches real stock, real money or real customers.
+Version 1.0.0-test.2 (13 Nov 2026). If you have test.1 installed, install this file over it (your login is kept or you log in again). This is a TEST app. It talks to a test server with test data, not to the real shop. Nothing you do here touches real stock, real money or real customers.
 
 ## 1. Install
 1. Copy `NaturalPlantation-TEST-2026-11-13.apk` to your Android phone (WhatsApp, USB cable or Google Drive).
@@ -34,7 +34,7 @@ The Branch Manager (0779990011) is also the delivery agent AG001. In **Me** you 
 - Settings: change the colour theme, the language (English, Tamil, Sinhala), open the notifications inbox.
 
 **Smart Buy member (0779998877)**
-- After login you see the shop. Open **Settings** and tap **Smart Buy** to switch to your schemes.
+- After login you land on **My Schemes** (Smart Buy home). Tap **Spend Shop** (or **Settings**, then **Customer**) to go to the shop. Tap **Smart Buy** in Settings to come back.
 - Open My Schemes and View statement. Payments show **Pending verification** first and **Paid** after the shop approves them. (The statement screen blocks screenshots on purpose.)
 - Draws and Passbook are read only in this test.
 
@@ -52,6 +52,13 @@ The Branch Manager (0779990011) is also the delivery agent AG001. In **Me** you 
 ## 4. Coming in the next update (shown as "Coming in the next update", this is normal)
 Bluetooth receipt printing, commission slip PDF, leaderboard and alerts for managers, card payment, managers' collection reports by day.
 
+## 4b. Known issues (test.2)
+- Bank transfer: the reference you type at checkout is not shown to the shop yet. Type it again in the **Bank transfer payment** box on the order page, then tap **Upload payment slip**.
+- Smart Buy totals (**Paid: Rs ...**) change only after the shop approves the cash in the POS. A new collection shows as **Pending verification** until then. This is correct.
+- The Smart Buy statement blocks screenshots on purpose. Describe what you see instead.
+- Smart Buy Wallet and card as payment methods, promo codes and some manager reports show "Coming in the next update". This is normal.
+- If a Smart Buy member lands on the shop instead of My Schemes, tell Moni: it means the test company settings were changed on the server (the app itself is fine).
+
 ## 5. Report a bug
 1. Take a screenshot (power + volume down).
 2. Send it to Moni on WhatsApp with 2 lines: which login you used, and what you pressed.
@@ -61,6 +68,8 @@ Bluetooth receipt printing, commission slip PDF, leaderboard and alerts for mana
 Orders and cash collections made in the test app appear in a POS that is pointed at the test server.
 1. On the POS PC open **Admin, Settings, Self-Hosted Cloud Sync**.
 2. API URL: `https://staging-api.72-61-115-222.sslip.io`. API key: the key for the test company (Moni has it; do not share it).
-3. Press **Sync now**. App orders appear under **App Requests / Online orders**. Convert an order to an invoice there.
-4. Cash collected by agents: **Smart Buy, Agent Cash**. Tick the receipts you received the cash for, enter the cash received (it must equal the ticked total), press **Settle**. The member statement then shows **Paid**.
-Use a POS with a separate test database, never the shop's real one.
+3. Press **Sync now** (the POS also syncs by itself every 30 seconds).
+4. App orders: **Sell, Orders** (channel **Mobile app**). Press **Mark confirmed**; the customer sees **Confirmed** in the app within a minute. Assign an agent there for delivery.
+5. Bank slips: **Mobile App, App Requests, Bank Slips**. Press **Verify**, check the slip picture, press **Verify payment**. The customer sees **Payment verified**.
+6. Cash collected by agents: **Smart Buy, Agent Cash**. Three clicks: **Accept all**, type the cash received (it must equal the accepted total), **Save decisions**. The member's statement shows **Paid** and the totals on My Schemes go up.
+Use a POS with a separate test database, never the shop's real one. Smart Buy join requests are also under **App Requests**.

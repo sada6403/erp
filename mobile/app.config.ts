@@ -31,7 +31,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   name: APP_ENV === 'staging' ? 'Natural Plantation (Test)' : 'Natural Plantation',
   slug: 'natural-plantation',
   scheme: 'naturalplantation',
-  version: APP_ENV === 'staging' ? '1.0.0-test.1' : '1.0.0',
+  version: APP_ENV === 'staging' ? '1.0.0-test.2' : '1.0.0',
   orientation: 'portrait',
   userInterfaceStyle: 'light',
   icon: './assets/icon.png',
