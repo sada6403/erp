@@ -115,3 +115,11 @@ Nothing here is built until the demo design is approved. Defaults 1-3 and 5-12 a
 
 ## NIC retention runs on activity, not a scheduler (Moni, 2026-11-12)
 The 30-day purge of NIC numbers and photos on join requests has no scheduler. It runs only when the POS opens App Requests or when a join request is submitted (throttled to every 10 minutes). If neither happens, expired NIC data stays until the next such activity. Accepted for now; add a cron/timer if the app is quiet for long periods.
+
+## 2026-11-13 Sales force v1.0: scope and design deviations (to fit the 21 Nov Play deadline)
+1. **v1.0 scope:** hierarchy, targets (history + roll-up), target vs achievement, field visits, POS Sales Team page, app Team + Visits screens. Salary rules, slabs, monthly job, approvals, card payment, reassign, activate/deactivate, leaderboard, alerts, statement and the server reminder push go to v1.1.
+2. **New tables are cloud-only** (not synced to the POS database): `staff_assignments`, `staff_targets`, `field_visits`. The POS manages them through `/api/app/v1/admin/staff/*` (company key), like App Requests. Reason: avoids the ALLOWED_TABLES / REQUIRED_SYNC_PARENTS / syncService / desktop-migration plumbing and a desktop release for the first version. Consequence: the POS desktop reads them from the cloud only (needs internet for that page); revisit when the salary engine needs them locally in v1.1.
+3. **No new `AppRole`.** A manager is an `agent` app user with an active `staff_assignments` row; the server decides scope on every request. Installed apps keep working.
+4. **Credit:** `invoices.agent_id` added to the cloud (nullable). The POS already sends `agent_id`; invoices without it are credited by `agent_code`.
+5. **Achievement** follows section 18.5 (net of returns, cancelled ignored, wallet-paid part excluded, contributions collected by the officer, registrations a separate count) with the calendar month in Colombo time. Salary / commission amounts are deliberately not computed or returned in v1.0.
+
