@@ -375,6 +375,22 @@ export const APP_SCHEMA_STATEMENTS: string[] = [
   `ALTER TABLE branches ADD COLUMN delivery_eta_min_days INT NULL`,
   `ALTER TABLE branches ADD COLUMN delivery_eta_max_days INT NULL`,
   `ALTER TABLE branches ADD COLUMN delivery_eta_text VARCHAR(120) NULL`,
+  // In-app updates (cloud-only, NOT synced to the POS): one row per platform + channel. Edited from POS "App Versions".
+  `CREATE TABLE IF NOT EXISTS app_versions (
+       id VARCHAR(40) NOT NULL PRIMARY KEY,
+       platform VARCHAR(16) NOT NULL,
+       channel VARCHAR(16) NOT NULL,
+       latest_version VARCHAR(40) NOT NULL,
+       min_version VARCHAR(40) NOT NULL,
+       critical TINYINT(1) NOT NULL DEFAULT 0,
+       release_notes TEXT NULL,
+       update_url VARCHAR(500) NULL,
+       apk_sha256 CHAR(64) NULL,
+       apk_size_bytes BIGINT NULL,
+       updated_by VARCHAR(191) NULL,
+       ${TS},
+       UNIQUE KEY uq_app_versions_pc (platform, channel)
+     )`,
   // Google Play reviewer accounts (cloud-only table): their orders are tagged TEST in the order notes.
   `ALTER TABLE app_users ADD COLUMN is_review_account TINYINT(1) NOT NULL DEFAULT 0`,
   // NIC retention: NIC number + photos are wiped 30 days after the decision (joinLib.purgeJoinRetention)

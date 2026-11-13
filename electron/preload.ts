@@ -340,6 +340,11 @@ const api = {
     list:      (filters?: unknown) => ipcRenderer.invoke('productReviews:list', filters),
     setHidden: (id: string, hidden: boolean, reason?: string) => ipcRenderer.invoke('productReviews:setHidden', id, hidden, reason),
   },
+  appVersions: {
+    list:    () => ipcRenderer.invoke('appVersions:list'),
+    save:    (payload: unknown) => ipcRenderer.invoke('appVersions:save', payload),
+    hashApk: (channel: 'test') => ipcRenderer.invoke('appVersions:hashApk', channel),
+  },
   onlineStore: {
     bannersList:   () => ipcRenderer.invoke('onlineStore:banners:list'),
     bannerSave:    (payload: unknown) => ipcRenderer.invoke('onlineStore:banners:save', payload),

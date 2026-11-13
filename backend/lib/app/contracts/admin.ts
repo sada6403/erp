@@ -124,3 +124,39 @@ export interface AdminSlipDecisionResponse {
   ok: true
   status: 'verified' | 'rejected'
 }
+
+// App Versions (POS admin, x-api-key)
+export interface AppVersionDto {
+  platform: 'android' | 'ios'
+  channel: 'test' | 'production'
+  latest_version: string
+  min_version: string
+  critical: boolean
+  release_notes: { en: string; ta: string; si: string }
+  update_url: string | null
+  apk_sha256: string | null
+  apk_size_bytes: number | null
+  updated_at: string | null
+  updated_by: string | null
+  /** false when no row was saved yet (values come from the legacy app_settings fallback) */
+  configured: boolean
+}
+export interface AppVersionsResponse {
+  items: AppVersionDto[]
+  /** Hosts an update_url may use (APP_UPDATE_HOSTS + PUBLIC_BASE_URL host) */
+  allowed_hosts: string[]
+}
+export interface AppVersionSaveRequest {
+  platform?: 'android' | 'ios'
+  channel: 'test' | 'production'
+  latest_version: string
+  min_version: string
+  critical?: boolean
+  release_notes?: { en?: string; ta?: string; si?: string }
+  /** Test channel only (https, allow-listed host). Changing it clears the stored hash unless apk_sha256 is sent too. */
+  update_url?: string | null
+  apk_sha256?: string | null
+  apk_size_bytes?: number | null
+  updated_by?: string
+}
+export interface AppVersionHashRequest { platform?: 'android' | 'ios'; channel: 'test'; updated_by?: string }

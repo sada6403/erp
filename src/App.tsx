@@ -61,6 +61,7 @@ const SalesTeamPage = adminPage('SalesTeamPage')
 const AgentCashPage = adminPage('AgentCashPage')
 const OnlineStorePage = adminPage('OnlineStorePage')
 const ReviewsPage = adminPage('ReviewsPage')
+const AppVersionsPage = adminPage('AppVersionsPage')
 const StockLookupPage = adminPage('StockLookupPage')
 const QuotationsPage = adminPage('QuotationsPage')
 const BillsPage = adminPage('BillsPage')
@@ -349,6 +350,7 @@ export default function App() {
         <Route path="/admin/sales-team" element={<RequireSuperAdmin><SalesTeamPage /></RequireSuperAdmin>} />
         <Route path="/admin/online-store" element={<RequireSuperAdmin><OnlineStorePage /></RequireSuperAdmin>} />
         <Route path="/admin/reviews" element={<RequireSuperAdmin><ReviewsPage /></RequireSuperAdmin>} />
+        <Route path="/admin/app-versions" element={<RequireSuperAdmin><AppVersionsPage /></RequireSuperAdmin>} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
         <Route path="/admin/purchase-orders" element={<RequireMainBranch><RequireModule module="purchase_orders"><PurchaseOrdersPage /></RequireModule></RequireMainBranch>} />

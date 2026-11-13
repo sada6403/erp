@@ -14,7 +14,7 @@ let code = 1
 try {
   const seed = run(['--env-file=.env', 'scripts/run-ts.cjs', 'scripts/seed-app-test-company.ts'])
   if (seed.status !== 0 || !fs.existsSync(out)) { console.error('Seeding the fresh test tenant failed.'); process.exit(1) }
-  const t = run(['--env-file=.env', '--experimental-strip-types', '--no-warnings', '--test', 'tests/app-api.test.mjs', 'tests/join.test.mjs', 'tests/sync-tz.test.mjs', 'tests/email.test.mjs'])
+  const t = run(['--env-file=.env', '--experimental-strip-types', '--no-warnings', '--test', 'tests/app-api.test.mjs', 'tests/join.test.mjs', 'tests/sync-tz.test.mjs', 'tests/email.test.mjs', 'tests/updates.test.mjs'])
   code = t.status ?? 1
 } finally {
   if (fs.existsSync(out)) run(['--env-file=.env', 'scripts/run-ts.cjs', 'scripts/seed-app-test-company.ts', '--cleanup'])

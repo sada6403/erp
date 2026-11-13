@@ -9,6 +9,7 @@
     "start": "node scripts/start.js",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test-run.cjs",
+    "test:updates": "node --env-file=.env --experimental-strip-types --no-warnings --test tests/updates.test.mjs",
     "test:email": "node --experimental-strip-types --no-warnings --test tests/email.test.mjs",
     "email:preview": "node --experimental-strip-types --no-warnings scripts/email-preview.mjs",
     "email:smoke": "node --env-file=.env scripts/run-ts.cjs scripts/email-smoke.ts",

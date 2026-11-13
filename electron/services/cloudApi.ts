@@ -250,6 +250,19 @@ export class CloudApi {
     return this.request('/api/app/v1/admin/app-access/status', { method: 'POST', body: JSON.stringify({ user_id: userId, status }) })
   }
 
+  // App Versions (in-app update policy per platform/channel; admin endpoints, x-api-key)
+  async appVersionsList(): Promise<{ items: Array<Record<string, unknown>>; allowed_hosts: string[] }> {
+    return this.request('/api/app/v1/admin/app-versions')
+  }
+
+  async appVersionSave(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('/api/app/v1/admin/app-versions', { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  async appVersionHashApk(input: { channel: 'test'; platform?: string; updated_by?: string }): Promise<Record<string, unknown>> {
+    return this.request('/api/app/v1/admin/app-versions/hash-apk', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(125_000) })
+  }
+
   // Smart Buy join requests + bank slips (admin endpoints; private images come back as bytes).
   async joinRequestsList(status?: string): Promise<{ items: Array<Record<string, unknown>> }> {
     return this.request(`/api/app/v1/admin/join-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`)
@@ -334,7 +347,10 @@ export class CloudApi {
     }
 
     if (!response.ok) {
-      const message = payload && typeof payload === 'object' && 'error' in payload
+      const errField = payload && typeof payload === 'object' ? (payload as { error?: unknown }).error : undefined
+      const message = errField && typeof errField === 'object' && typeof (errField as { message?: unknown }).message === 'string'
+        ? (errField as { message: string }).message
+        : payload && typeof payload === 'object' && 'error' in payload
         ? String((payload as { error: unknown }).error)
         : `Cloud API request failed with HTTP ${response.status}`
       if (response.status === 429) {
