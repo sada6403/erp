@@ -111,6 +111,7 @@ async function publish(){
  if(!fs.existsSync(path.join(stateDir,'prepared-v1.json')))throw new Error('Backup-first preparation is required')
  const dir=path.join(backupRoot,'publication-'+stamp());privateDir(dir)
  backupFile(nginxFile,path.join(dir,'updates.nginx'));backupFile(indexFile,path.join(dir,'index.html'))
+ for(const name of ['robots.txt','sitemap.xml']){const dest=path.join('/var/www/updates',name);if(fs.existsSync(dest)){backupFile(dest,path.join(dir,name))}}
  let config=fs.readFileSync(nginxFile,'utf8')
  const include='include /var/www/pos-backend/deploy/nginx/director-updates.locations.conf;'
  if(!config.includes(include)){
@@ -123,6 +124,7 @@ async function publish(){
   const local=await fetch('http://127.0.0.1:4001/director',{signal:AbortSignal.timeout(20000)})
   if(!local.ok)throw new Error('Director backend is not ready')
   fs.copyFileSync(root+'/deploy/updates/index.html',indexFile+'.director-next');fs.chmodSync(indexFile+'.director-next',0o644);fs.renameSync(indexFile+'.director-next',indexFile)
+  for(const name of ['robots.txt','sitemap.xml']){const src=path.join(root,'deploy/updates',name);const dest=path.join('/var/www/updates',name);if(fs.existsSync(src)){fs.copyFileSync(src,dest+'.director-next');fs.chmodSync(dest+'.director-next',0o644);fs.renameSync(dest+'.director-next',dest)}}
   const api=await fetch('https://updates.nfplantation.com/api/management/me',{signal:AbortSignal.timeout(20000)})
   const result=await api.json()
   if(api.status!==401||result.success!==false)throw new Error('Public Director API routing verification failed')
@@ -131,6 +133,7 @@ async function publish(){
  }catch(error){
   fs.copyFileSync(path.join(dir,'updates.nginx'),nginxFile)
   fs.copyFileSync(path.join(dir,'index.html'),indexFile)
+  for(const name of ['robots.txt','sitemap.xml']){const bak=path.join(dir,name);const dest=path.join('/var/www/updates',name);if(fs.existsSync(bak)){fs.copyFileSync(bak,dest)}}
   await command('nginx',['-t']).then(()=>command('systemctl',['reload','nginx'])).catch(()=>{})
   throw error
  }
