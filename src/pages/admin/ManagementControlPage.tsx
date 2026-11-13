@@ -35,7 +35,7 @@ export default function ManagementControlPage(){
  }
  const set=(key:string,value:unknown)=>setForm(f=>({...f,[key]:value}))
  const input=(key:string,type='text',required=true)=> <label className="label" key={key}>{label(key)}<input className="input" type={type} required={required} value={form[key]??''} min={type==='number'?0:undefined} step={type==='number'?'0.01':undefined} onChange={e=>set(key,e.target.value)}/></label>
- const select=(key:string,items:Row[],required=true)=><label className="label" key={key}>{label(key)}<select className="input" required={required} value={form[key]||''} onChange={e=>set(key,e.target.value)}><option value="">Select {label(key)}</option>{items.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+ const select=(key:string,items:Row[],required=true)=><label className="label" key={key}>{label(key)}<select className="input" required={required} value={form[key]||''} onChange={e=>set(key,e.target.value)}><option value="">Select {label(key)}</option>{items.map(item=><option key={item.id} value={item.id}>{item.name + (item.email ? ` — ${item.email}` : '') + (item.role_code ? ` (${label(item.role_code)})` : '')}</option>)}</select></label>
  const choices=(key:string,values:string[])=>select(key,values.map(id=>({id,name:label(id)})))
  const employeeOptions=(data.users||[]).filter(u=>u.role_code&&u.role_code!=='director')
  const formBox=(title:string,onSubmit:()=>void,children:React.ReactNode)=><form className="card p-5 space-y-4" onSubmit={e=>{e.preventDefault();onSubmit()}}><h2 className="text-lg font-semibold">{title}</h2><div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{children}</div><button className="btn-primary" disabled={busy}>{busy?'Saving…':'Save'}</button></form>
@@ -50,7 +50,7 @@ export default function ManagementControlPage(){
  {tab==='Users & Roles'&&<>
  {formBox('Create dedicated management account',()=>action('create-user',form),<>{input('name')}{input('email','email')}{input('password','password')}</>)}
  {formBox('Assign platform, role and reporting scope',()=>action('access',form),<>{select('userId',data.users||[])}{choices('role',roles)}{choices('status',['active','inactive','suspended'])}{choices('scopeType',['company','branch','region','zone'])}{form.scopeType&&form.scopeType!=='company'&&select('scopeId',data[form.scopeType==='branch'?'branches':form.scopeType==='region'?'regions':'zones']||[])}{select('managerUserId',employeeOptions,false)}</>)}
- {formBox('Reset password / revoke sessions',()=>action(form.password?'reset-password':'revoke',form),<>{select('userId',(data.users||[]).filter(u=>u.role_code))}{input('password','password',false)}</>)}
+ {formBox('Update account (Change Email / Reset Password / Revoke)',()=>action(form.password||form.email||form.name?'update-user':'revoke',form),<>{select('userId',(data.users||[]).filter(u=>u.role_code))}{input('name','text',false)}{input('email','email',false)}{input('password','password',false)}<p className="text-xs col-span-full" style={{color:'var(--text-3)'}}>Leave fields blank to keep current values. Enter a new email to change email, or enter 12+ characters to change password. Submitting without changes revokes active sessions.</p></>)}
  {formBox('Assign branch to region',()=>action('branch-region',form),<>{select('branchId',data.branches||[])}{select('regionId',data.regions||[])}</>)}
  <Records rows={data.users||[]} columns={['name','email','role_code','status','scope_type','scope_id']}/></>}
  {tab==='Targets'&&<>

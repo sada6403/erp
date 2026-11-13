@@ -132,15 +132,31 @@ export async function writeManagement(ctx:ManagementContext,resource:string,body
    await ctx.client.query('INSERT INTO users (id,name,email,password_hash,role_id,is_active) VALUES (?,?,?,?,?,1)',[userId,name,email,await bcrypt.hash(password,12),roleId])
    await audit(ctx,'USER_CREATED',userId,{name,email});return {userId}
   }
-  if(resource==='revoke'||resource==='reset-password'){
+  if(resource==='revoke'||resource==='reset-password'||resource==='update-user'){
    const userId=id(body.userId);await employee(ctx,userId)
-   if(resource==='reset-password'){
-    const password=text(body.password,256);if(password.length<12)throw new ManagementError('Password must have at least 12 characters')
-    await ctx.client.query('UPDATE users SET password_hash=? WHERE id=?',[await bcrypt.hash(password,12),userId])
+   if(resource==='update-user'||resource==='reset-password'){
+    const updates:string[]=[],params:any[]=[]
+    if(body.name){updates.push('name=?');params.push(text(body.name))}
+    if(body.email){
+     const email=text(body.email).toLowerCase()
+     if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))throw new ManagementError('Use a valid email address')
+     const dup=(await ctx.client.query<Row>('SELECT id FROM users WHERE email=? AND id!=?',[email,userId])).rows[0]
+     if(dup)throw new ManagementError('Email address is already in use by another account',409)
+     updates.push('email=?');params.push(email)
+    }
+    if(body.password){
+     const password=text(body.password,256)
+     if(password.length<12)throw new ManagementError('Password must have at least 12 characters')
+     updates.push('password_hash=?');params.push(await bcrypt.hash(password,12))
+    }
+    if(updates.length){
+     params.push(userId)
+     await ctx.client.query(`UPDATE users SET ${updates.join(', ')} WHERE id=?`,params)
+    }
    }
    await ctx.client.query('UPDATE management_access SET session_version=session_version+1 WHERE user_id=?',[userId])
    await ctx.client.query('UPDATE management_sessions SET revoked_at=NOW() WHERE user_id=? AND revoked_at IS NULL',[userId])
-   await audit(ctx,resource==='revoke'?'SESSIONS_REVOKED':'PASSWORD_RESET',userId);return {userId}
+   await audit(ctx,resource==='revoke'?'SESSIONS_REVOKED':resource==='update-user'?'USER_UPDATED':'PASSWORD_RESET',userId);return {userId}
   }
   if(resource==='policy'){
    const role=text(body.role),from=validDate(body.from),to=body.to?validDate(body.to):null

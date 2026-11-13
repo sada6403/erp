@@ -1033,6 +1033,68 @@ body {
   transition: left 0.75s var(--ease-in-out);
 }
 
+.login-recovery-box {
+  margin-top: var(--space-3);
+  text-align: center;
+}
+
+.forgot-link-btn {
+  background: none;
+  border: none;
+  color: #38BDF8;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color var(--duration-fast);
+}
+
+.forgot-link-btn:hover {
+  color: #93C5FD;
+}
+
+.recovery-popup {
+  margin-top: var(--space-3);
+  background: rgba(8, 15, 32, 0.95);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  text-align: left;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.recovery-popup-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #38BDF8;
+  font-weight: 700;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.recovery-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  padding-left: 8px;
+  border-left: 2px solid rgba(56, 189, 248, 0.4);
+  font-size: 11px;
+  color: #E2E8F0;
+}
+
+.recovery-tip {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
 .panel-footnote {
   margin-top: var(--space-5);
   font-size: 12px;
@@ -1934,6 +1996,26 @@ body {
             </svg>
           </button>
 
+          <!-- Recovery helper for forgotten credentials -->
+          <div class="login-recovery-box">
+            <button type="button" id="forgot-credentials-btn" class="forgot-link-btn" aria-expanded="false">
+              Forgot password or email?
+            </button>
+            <div id="forgot-credentials-info" class="recovery-popup" style="display: none;" role="region" aria-label="Credentials Recovery Guide">
+              <div class="recovery-popup-header">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                <span>Director Account Recovery</span>
+              </div>
+              <p>Director accounts are managed securely by your supermarket <strong>Company Admin</strong> in POS.</p>
+              <div class="recovery-steps">
+                <span>1. Open Desktop POS &rarr; <strong>Admin</strong> &rarr; <strong>Management Control</strong></span>
+                <span>2. Open <strong>Users &amp; Roles</strong></span>
+                <span>3. Select your Director name to change password or update email</span>
+              </div>
+              <p class="recovery-tip">If locked out, contact your POS Company Admin to reset your credentials instantly.</p>
+            </div>
+          </div>
+
           <p class="panel-footnote">
             Director accounts have read-only reporting access.<br>
             Managed by your Company Admin in POS.
@@ -1981,6 +2063,17 @@ body {
       eyeIcon.style.display = isPassword ? 'none' : 'block';
       eyeOffIcon.style.display = isPassword ? 'block' : 'none';
       passwordInput.focus();
+    });
+  }
+
+  // 1.1 Forgot Credentials Toggle
+  const forgotBtn = document.getElementById('forgot-credentials-btn');
+  const forgotInfo = document.getElementById('forgot-credentials-info');
+  if (forgotBtn && forgotInfo) {
+    forgotBtn.addEventListener('click', function() {
+      const isVisible = forgotInfo.style.display !== 'none';
+      forgotInfo.style.display = isVisible ? 'none' : 'block';
+      forgotBtn.setAttribute('aria-expanded', isVisible ? 'false' : 'true');
     });
   }
 
