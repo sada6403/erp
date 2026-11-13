@@ -127,13 +127,15 @@ export function Button({
       {loading ? (
         <ActivityIndicator color={theme.colors[spec.fg]} size="small" />
       ) : (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spec.gap ?? 4 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: spec.gap ?? 4, maxWidth: '100%' }}>
           {icon ? <Text size={spec.size}>{icon}</Text> : null}
           <Text
             weight={spec.weight}
             size={spec.size}
             color={spec.fg}
-            style={[spec.fg === 'textMuted' ? { textDecorationLine: 'none' } : null, labelStyle]}
+            style={[{ flexShrink: 1 }, spec.fg === 'textMuted' ? { textDecorationLine: 'none' } : null, labelStyle]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
           >
             {label}
           </Text>
