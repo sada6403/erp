@@ -101,6 +101,16 @@ No schema change, no cloud change, safe for existing devices (only affects rows 
 at a deleted category (FK), so it stays isolated; harmless.
 We did not touch `main`.
 
+## 2026-11-13 NOTE FOR THE MAIN-BRANCH DEVELOPER: two more POS bugs that exist on `main` (real companies affected)
+Both fixed in commit `79ff639` on `feature/mobile-app-foundation` (files `electron/ipc/products.ts`, `invoices.ts`, `stocks.ts` only).
+Standalone patch: `docs/mobile-app/patches/pos-variant-stock-and-datetime-fix.patch` (`git apply --3way ...`, or `git cherry-pick -x 79ff639` and drop the test/doc/mobile files).
+1. **Variant products never pushed their total stock row.** `products:create` / `products:update` enqueue the variant rows but not the aggregate
+   `stocks` row, so the cloud (and a second POS) shows stock 0 for every product that has variants; an order for it fails with "need 2, have 0".
+   Fix: call `syncStockRow(db, id, targetBranch)` after `enqueueProductVariantRows` when the product has variants. Existing products need one re-save to push.
+2. **`datetime("now")` with double quotes** (6 places on `main`: 3 in `products.ts`, 2 in `invoices.ts`, 1 in `stocks.ts`). better-sqlite3 rejects double-quoted
+   string literals (`no such column: "now"`), so the affected action (e.g. variant stock decrement on sale, stock-count items) throws. Fix: `datetime('now')`.
+No schema change, no cloud change. Test: `electron/__qa__/integration-app/staging-catalog-seed.integration.test.ts` (phases `data` and `phone`).
+
 ## 2026-11-12 Step 6 started: join requests + bank slips
 Done and pushed (backend + POS + tests): `POST/GET /smartbuy/join-requests`, `POST/GET /orders/{id}/slip`, admin join-requests and payment-slips (list, image, decision), POS "App Requests" page, tests JOIN-01..04 and SLIP-01..02 (6/6 pass; JOIN-01 and SHOP-04b are no longer SKIP). Staging VPS updated (`PRIVATE_UPLOAD_DIR=/var/www/pos-staging-private`).
 Mobile (code done, typecheck/lint/jest green, **not in an APK yet**): slip upload card on the order screen, agent "Add member" screen with NIC photos, `expo-image-picker` plugin. Needs one native rebuild (both ABIs).
