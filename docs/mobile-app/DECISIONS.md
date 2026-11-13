@@ -123,3 +123,11 @@ The 30-day purge of NIC numbers and photos on join requests has no scheduler. It
 4. **Credit:** `invoices.agent_id` added to the cloud (nullable). The POS already sends `agent_id`; invoices without it are credited by `agent_code`.
 5. **Achievement** follows section 18.5 (net of returns, cancelled ignored, wallet-paid part excluded, contributions collected by the officer, registrations a separate count) with the calendar month in Colombo time. Salary / commission amounts are deliberately not computed or returned in v1.0.
 
+## 2026-11-13 Smart Buy cash collection by agents: rules (v1.0)
+1. **The POS stays the authority.** The app creates a pending row only; member totals, credit and the late-fee split are decided by the POS at approval (`verifyContribution`). The due shown in the app is a display port (`collectionMath.ts`) with a parity test against the POS.
+2. **Due date semantics:** the port uses the intended calendar day. The POS helper is one day early on a Colombo desktop (timezone bug, noted for the main developer); the parity test runs the POS with TZ=UTC. Until the POS is fixed, a collection on the due day itself is shown as not late in the app, and the POS may move the fee at approval; the cash amount never changes.
+3. **Amount rules:** collectable = this cycle's balance (after usable credit) minus what is already pending, plus the late fee if no fee was charged for the cycle yet. Partial amounts are allowed (the POS allows instalments) up to that; more is refused. The row's `amount` includes the late fee (POS convention).
+4. **Receipt numbers** `AG001-000123`: a counter per agent on the phone, continued from the highest number the server has seen (`last_receipt_seq`), unique per (agent, number) on the server. If an offline receipt collides, the app takes the next free number and keeps the same event id.
+5. **Settlement:** one handover per agent in the POS; the cash received must equal the sum of the accepted receipts; the rest are rejected with a reason the agent sees. Remittance and approvals are recorded together so the agent's cash balance returns to zero.
+6. **Logout never drops cash records:** the app flushes the queue and refuses to log out while collections are unsent.
+7. **Counted only after approval:** pending rows do not count for the sales-force achievement, the member total or any commission input.

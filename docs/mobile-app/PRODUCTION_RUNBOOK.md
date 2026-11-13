@@ -65,6 +65,7 @@ Therefore the merge **is** the backend deploy and possibly the desktop release.
   Cloud schema changes are additive only (new tables/columns) and need no rollback; old code ignores them.
 
 ## 3. Backend deploy (happens at the merge)
+- Added 2026-11-13 (all additive, created on the first API hit per company): tables `staff_assignments`, `staff_targets`, `field_visits`, `app_collections`; column `invoices.agent_id`; routes under `/api/app/v1/staff`, `/visits`, `/agent/collections`, `/admin/staff`; the sync push now also runs the reservation release for converted app orders (`onOrderStatusChanged`) and the collection approve / reject notification (`onContributionStatusChanged`). The reservation fix changes behaviour for real companies: an app order stops reserving stock the moment the POS converts it to an invoice.
 - What changes: `/api/app/v1/*`, `ensureTenantCompatibility` additions (`app_*` tables, new columns on `products`,
   `branches`, `customer_orders`, `customer_order_items`, `invoices`), sync `RELATED_KEYS`, notification queue (push + WhatsApp stay dry-run).
 - **Check (right after deploy):**
@@ -107,7 +108,7 @@ Run it on the VPS in `/var/www/pos-backend/backend` (it needs production `.env`)
 - Put the exact "App access" text (with the password Moni chose) into Play Console; the password is not stored in git.
 
 ## 6. POS desktop release to branch PCs (before app launch)
-The convert-to-invoice, App Access, Online Store and assign-agent features live in the desktop app.
+The convert-to-invoice, App Access, Online Store and assign-agent features live in the desktop app. **Added 2026-11-13:** the Sales Team page (Mobile App menu) and the Smart Buy "Agent Cash" page (bulk approval of cash agents collected in the app; changes in `electron/ipc/chits.ts`, `preload.ts`, `App.tsx`, `AppLayout.tsx`, listed for the main developer in PROGRESS.md). Both read and write through the cloud, so the backend deploy (section 3) must come first. Release on 17 Nov together with the backend deploy, only after Moni's approval.
 1. Bump `package.json` version; merge as in step 2; the workflow builds the Windows installer and publishes it to `updates.nfplantation.com` (both update directories).
 2. Branch PCs auto-update on next start. Moni checks each branch PC shows the new version (check how the POS displays its version before the day).
 - **Check:** one branch PC places a counter sale, receives one test app order, converts it to an invoice (price locked, delivery fee in total, tax like a counter sale).

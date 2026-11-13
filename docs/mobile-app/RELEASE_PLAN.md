@@ -54,3 +54,19 @@ Not approved yet; see ARCHITECTURE.md section 18.
 - **v1.0 (21 Nov, if the demo is approved this week):** hierarchy + role dashboards (read-only), targets set in the POS, field visits with offline outbox and follow-up reminders (local notifications), agent-initiated Smart Buy join with POS approval.
 - **v1.1:** salary/commission payroll and approvals, card payments live (sandbox code may ship earlier behind a flag, never live keys), in-app target assignment, server-side reminder fallback (needs a scheduler).
 - Risk to v1.0: this adds POS desktop migrations (`branches.region_id`, `staff_assignments`, `staff_targets`) to the day-11 POS release; backend first, then desktop, only with Moni's approval.
+
+## v1.1: fast updates right after launch (target 25 to 28 Nov 2026)
+Decided by Moni on 2026-11-13 ("the v1.1 items ship as fast updates right after"). Everything moved out of v1.0 to protect 21 Nov:
+**Sales force**
+- Salary rules, commission slabs, the monthly performance job and the approval chain (reuse `commissionEngine.ts` and the existing approval states).
+- Card payment (PayHere hosted page; sandbox first, live keys only with Moni's approval).
+- Reassign customers between officers; activate / deactivate subordinates.
+- Leaderboard and alerts on the management dashboard; deliveries and join requests in the per-person drill-down; date filters beyond this month and last month.
+- Server reminder push for follow-ups (needs a scheduler: a stop-and-ask deploy item).
+- Syncing `staff_assignments`, `staff_targets` and `field_visits` to the POS database (they are cloud-only in v1.0; the POS page reads them from the cloud).
+**Smart Buy cash collection**
+- Managers see their team's collections by person and by day inside their scope.
+- Bluetooth thermal printing of receipts (PDF to WhatsApp ships in v1.0).
+**Housekeeping**
+- Native review of the Tamil and Sinhala wording (`sf.*`, `collect.*`, `fewLeft`).
+- Fix the one-day-early monthly due date in the POS (`cycleDueDate`), see PROGRESS 2026-11-13.
