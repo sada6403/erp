@@ -83,3 +83,4 @@ Decided by Moni on 2026-11-13 ("the v1.1 items ship as fast updates right after"
 ## Added 2026-11-13: App Control and Announcements
 - **v1.0:** banners v2 (link, audience, schedule in Colombo time, per-language images, view/tap counters) and home page layout (reorder / on-off). POS App Control group.
 - **v1.1 (Phase 2):** Announcements (in-app messages / inbox posts managed from the App Control "Announcements" tab, currently a "Coming in v1.1" placeholder). Also deferred: a true image crop tool in the banner form (today: 16:7 crop preview and a ratio warning).
+- **v1.1:** Delivery fees per area (decided by Moni 2026-11-14). v1.0 keeps the single flat fee plus free-over amount; per-area fees need a new fee table, POS editor and checkout lookup.

@@ -8,11 +8,9 @@ import { useTranslation } from 'react-i18next';
 import { makeStyles, radii, shadows, useTheme, BOTTOM_NAV_HEIGHT } from '@/theme';
 import { cartLineCount, useCartStore } from '@/store/cartStore';
 import { selectIsLoggedIn, useSessionStore, type NavRole } from '@/store/sessionStore';
-import { useUiStore } from '@/store/uiStore';
 import { useUnreadCount } from '@/features/notifications/hooks';
 import { useCompany } from '@/features/common/hooks';
 import { useIsStaff } from '@/features/staff/hooks';
-import { logout } from '@/features/auth/session';
 import { Text } from './Text';
 import { OfflineBanner } from './Overlays';
 
@@ -26,11 +24,7 @@ const useHeaderStyles = makeStyles((t) => ({
     borderBottomWidth: 1,
     borderBottomColor: t.colors.divider,
   },
-  /** Row 1: logo + company name (own space, never shrunk) + bell (fixed width, right edge). */
-  top: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  /** Row 2: branch tag on the left, account controls on the right. Nothing here can touch the name. */
-  strip: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 6, minHeight: 30 },
-  left: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1, minWidth: 0 },
+  top: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   avatar: {
     width: 42,
     height: 42,
@@ -64,72 +58,77 @@ const useHeaderStyles = makeStyles((t) => ({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  loginBtn: {
-    minHeight: 38,
+  account: {
+    width: 88,
+    height: 40,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
+    paddingHorizontal: 6,
     backgroundColor: t.colors.container,
     borderWidth: 1.5,
     borderColor: t.colors.primary,
     borderRadius: radii.pill,
   },
-  userBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: t.colors.surfaceSubtle,
-    borderWidth: 1.5,
-    borderColor: t.colors.surfaceBorder,
-    paddingVertical: 3,
-    paddingLeft: 10,
-    paddingRight: 6,
-    borderRadius: radii.pill,
-  },
-  logout: {
-    backgroundColor: t.colors.surface,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: t.colors.surfaceBorder,
-    paddingHorizontal: 8,
-    borderRadius: radii.input,
-  },
+  initial: { width: 26, height: 26, borderRadius: 13, backgroundColor: t.colors.primary, alignItems: 'center', justifyContent: 'center' },
 }));
 
-function roleLabel(role: NavRole, agentCode: string | null | undefined, t: (k: string) => string): string {
-  if (role === 'manager') return `📊 ${t('role.manager')}`;
-  if (role === 'agent') return `🛵 ${t('role.agent')}${agentCode ? ` ${agentCode}` : ''}`;
-  if (role === 'smartbuy') return `💎 ${t('role.smartbuy')}`;
-  return `🛒 ${t('role.customer')}`;
+export const HEADER_LOGO = 42;
+export const HEADER_ICON = 40;
+export const HEADER_ACCOUNT_W = 88;
+const HEADER_GAP = 8;
+const NAME_MAX = 17;
+const NAME_MIN = 12;
+
+/** Splits a name into at most two balanced lines at the space nearest the middle. One word stays on one line. */
+export function splitName(name: string): [string, string?] {
+  const n = name.trim().replace(/\s+/g, ' ');
+  const spaces: number[] = [];
+  for (let i = 0; i < n.length; i++) if (n[i] === ' ') spaces.push(i);
+  if (spaces.length === 0) return [n];
+  const mid = n.length / 2;
+  const at = spaces.reduce((best, i) => (Math.abs(i - mid) < Math.abs(best - mid) ? i : best), spaces[0]);
+  return [n.slice(0, at), n.slice(at + 1)];
 }
 
-/** App header: logo + title + branch tag, bell with unread badge, Login button or role chip + Logout. */
+/** Largest font (NAME_MIN..NAME_MAX) at which the longest line fits the width; never truncates with an ellipsis. */
+export function nameFontSize(lines: string[], width: number): number {
+  const longest = Math.max(1, ...lines.map((l) => l.length));
+  return Math.max(NAME_MIN, Math.min(NAME_MAX, Math.floor(width / (longest * 0.62))));
+}
+
+/** App header, one row: [logo] [name, 2 lines] ... [bell] [Login | account]. Fixed sizes so the name never moves. */
 export function AppHeader() {
   useEffect(() => perf('header:mounted'), []);
   const s = useHeaderStyles();
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { width } = useWindowDimensions();
   const user = useSessionStore((x) => x.user);
   const loggedIn = useSessionStore(selectIsLoggedIn);
-  const role = useSessionStore((x) => x.activeRole);
-  const branch = useSessionStore((x) => x.branchName);
   const unread = useUnreadCount();
   const company = useCompany();
+  const lines = splitName(company?.name || t('app.name')).filter(Boolean) as string[];
+  const nameW = width - 32 - HEADER_LOGO - HEADER_ICON - HEADER_ACCOUNT_W - HEADER_GAP * 3;
+  const fs = nameFontSize(lines, nameW);
+  const initial = (user?.name || user?.phone || '?').trim().charAt(0).toUpperCase();
+  const first = (user?.name || '').trim().split(/\s+/)[0];
   return (
     <View style={[s.bar, { paddingTop: Math.max(8, insets.top) }]}>
       <View style={s.top}>
         <View style={s.avatar}>
           <Image source={logo} style={{ width: '100%', height: '100%' }} contentFit="cover" accessibilityLabel={t('app.name')} />
         </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text size={17} weight={800} color="primary" numberOfLines={1} lineHeightRatio={1.15} testID="header-company-name">
-            {company?.name || t('app.name')}
-          </Text>
+        <View style={{ flex: 1, minWidth: 0 }} testID="header-company-name">
+          {lines.map((l, i) => (
+            <Text key={i} size={fs} weight={800} color="primary" numberOfLines={1} lineHeightRatio={1.15}>
+              {l}
+            </Text>
+          ))}
         </View>
-        <Pressable accessibilityRole="button" testID="header-bell" accessibilityLabel={t('header.notifications')} hitSlop={4} onPress={() => (loggedIn ? router.push('/notifications') : router.push('/login'))} style={{ width: 40 }}>
+        <Pressable accessibilityRole="button" testID="header-bell" accessibilityLabel={t('header.notifications')} hitSlop={4} onPress={() => (loggedIn ? router.push('/notifications') : router.push('/login'))} style={{ width: HEADER_ICON }}>
           <View style={s.iconBtn}>
             <Text size={15}>🔔</Text>
             {unread > 0 ? (
@@ -141,30 +140,20 @@ export function AppHeader() {
             ) : null}
           </View>
         </Pressable>
-      </View>
-      <View style={s.strip}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          {branch ? (
-            <Text size={11} weight={600} color="textMuted" numberOfLines={1}>
-              📍 {branch}
-            </Text>
-          ) : null}
-        </View>
         {loggedIn ? (
-          <View style={s.userBadge}>
-            <Text size={11} weight={800} color="primary" numberOfLines={1} style={{ maxWidth: 110 }}>
-              {roleLabel(role, user?.agent_code, t)}
-            </Text>
-            <Pressable accessibilityRole="button" accessibilityLabel={t('header.logout')} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }} style={s.logout} onPress={() => logout().then((ok) => (ok ? router.replace('/') : useUiStore.getState().showToast(t('collect.logoutBlocked'))))}>
-              <Text size={10} weight={800} color="textMuted">
-                {t('header.logout')}
+          <Pressable accessibilityRole="button" testID="header-account" accessibilityLabel={t('header.account')} style={s.account} onPress={() => router.push('/settings')}>
+            <View style={s.initial}>
+              <Text size={13} weight={800} color="white">
+                {initial}
               </Text>
-            </Pressable>
-          </View>
+            </View>
+            <Text size={11.5} weight={700} color="primary" numberOfLines={1} style={{ flex: 1 }}>
+              {first || t('header.account')}
+            </Text>
+          </Pressable>
         ) : (
-          <Pressable accessibilityRole="button" accessibilityLabel={t('header.login')} style={s.loginBtn} onPress={() => router.push('/login')}>
-            <Text size={11.5}>🔑</Text>
-            <Text size={11.5} weight={800} color="primary">
+          <Pressable accessibilityRole="button" testID="header-login" accessibilityLabel={t('header.login')} style={s.account} onPress={() => router.push('/login')}>
+            <Text size={12} weight={800} color="primary" numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75} align="center" style={{ flex: 1 }}>
               {t('header.login')}
             </Text>
           </Pressable>

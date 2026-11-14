@@ -57,7 +57,8 @@
   "header": {
     "login": "Login",
     "logout": "Logout",
-    "notifications": "Notifications"
+    "notifications": "Notifications",
+    "account": "Account"
   },
   "role": {
     "customer": "Customer",
