@@ -8,6 +8,7 @@ import { useServerStatus } from '@/features/common/hooks';
 import { downloadVerifyInstall, type ApkStage } from './apkUpdate';
 import { startPlayUpdate } from './playUpdate';
 import { shouldShowAvailable, type Dismissed } from './remind';
+import { useUpdateCheck } from './updateCheck';
 
 const DISMISS_KEY = 'np-update-dismissed';
 
@@ -20,11 +21,12 @@ export function useAppUpdate() {
   const [progress, setProgress] = useState(0);
   const [now] = useState(() => Date.now());
   const [error, setError] = useState<string | null>(null);
+  const forced = useUpdateCheck((x) => x.forced);
 
   const required = data ? (data.update_required ?? (data.min_app_version ? compareVersions(ENV.appVersion, data.min_app_version) < 0 : false)) : false;
   const available = data ? (data.update_available ?? (data.latest_version ? compareVersions(ENV.appVersion, data.latest_version) < 0 : false)) : false;
   const latest = data?.latest_version ?? '';
-  const kind: UpdateKind = required ? 'force' : available && shouldShowAvailable(latest, dismissed, now) ? 'available' : 'none';
+  const kind: UpdateKind = required ? 'force' : available && (forced || shouldShowAvailable(latest, dismissed, now)) ? 'available' : 'none';
   const lang = (i18n.language || 'en').slice(0, 2) as 'en' | 'ta' | 'si';
   const notes = useMemo(() => data?.release_notes?.[lang] || data?.release_notes?.en || '', [data, lang]);
 
@@ -33,6 +35,7 @@ export function useAppUpdate() {
     const d = { version: latest, at: Date.now() };
     writeJson(DISMISS_KEY, d);
     setDismissed(d);
+    useUpdateCheck.getState().setForced(false);
   }, [latest]);
 
   const start = useCallback(async () => {

@@ -19,6 +19,7 @@ import { getPermissionStatus } from '@/features/push/push';
 import { authApi } from '@/api/endpoints';
 import { useCompany } from '@/features/common/hooks';
 import { selectIsOffline, useUiStore } from '@/store/uiStore';
+import { useCheckForUpdates } from '@/features/updates/updateCheck';
 
 /** Card title row (.settings-card-title): emoji + title, 14/800, 4 dp below. */
 function CardTitle({ icon, title }: { icon: string; title: string }) {
@@ -34,6 +35,7 @@ export default function SettingsScreen() {
   const { t } = useTranslation();
   const theme = useTheme();
   const router = useRouter();
+  const { check, checking } = useCheckForUpdates();
   const user = useSessionStore((s) => s.user);
   const role = useSessionStore((s) => s.activeRole);
   const branch = useSessionStore((s) => s.branchName);
@@ -254,6 +256,7 @@ export default function SettingsScreen() {
             {t('settings.aboutDesc', { tenant: branch ?? (company?.name || t('app.name')) })}
           </Text>
           {ENV.appEnv === 'staging' ? <Text size={12} weight={700} color="primary" style={{ marginBottom: 12 }}>🧪 {t('settings.testServer')}</Text> : null}
+          <Button label={`🔄 ${checking ? t('update.checking') : t('update.check')}`} variant="secondaryBlock" fullWidth disabled={checking} onPress={check} style={{ marginBottom: 10 }} testID="check-updates" />
           {user ? (
             <Button label={`🚪 ${t('settings.logoutFull')}`} variant="logout" fullWidth onPress={() => logout().then((ok) => (ok ? router.replace('/') : useUiStore.getState().showToast(t('collect.logoutBlocked'))))} />
           ) : null}

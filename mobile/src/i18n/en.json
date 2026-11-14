@@ -47,7 +47,11 @@
     "verifying": "Checking the download...",
     "installing": "Opening the installer...",
     "failed": "The update could not be installed. Check your connection and try again.",
-    "checksumFailed": "The download did not match the expected file and was discarded. Try again."
+    "checksumFailed": "The download did not match the expected file and was discarded. Try again.",
+    "check": "Check for updates",
+    "checking": "Checking...",
+    "upToDate": "You're up to date",
+    "checkFailed": "Couldn't check for updates. Try again when you're online."
   },
   "soon": {
     "badge": "Coming in the next update",
