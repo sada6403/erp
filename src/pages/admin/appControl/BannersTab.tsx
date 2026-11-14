@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Plus, Trash2, GripVertical } from 'lucide-react'
+import { Plus, Trash2, GripVertical, ChevronUp, ChevronDown } from 'lucide-react'
 import Modal from '@/components/shared/Modal'
 import { resolveImageSrc } from '@/lib/imageUrl'
 import toast from 'react-hot-toast'
+import { moveItem } from '../../../../electron/services/bannerRules'
 
 // Recommended artwork: 16:7 (1200 x 525 px, minimum 800 x 350), keep text and logos in the central 80%. The app card is screen width minus 32 dp.
 const ASPECT = 16 / 7
@@ -74,33 +75,42 @@ export default function BannersTab() {
       if (r.success) void load(); else toast.error(r.error)
     } catch (err) { toast.error('Failed: ' + String(err)) }
   }
-  const drop = async (targetId: string) => {
-    if (!dragId || dragId === targetId) return
-    const ids = banners.map(b => b.id as string)
-    ids.splice(ids.indexOf(dragId), 1)
-    ids.splice(ids.indexOf(targetId), 0, dragId)
-    setBanners(ids.map(id => banners.find(b => b.id === id) as Banner))
-    setDragId(null)
+  const persistOrder = async (next: Banner[]) => {
+    setBanners(next)
     try {
-      const r = await window.api.onlineStore.bannersReorder(ids)
+      const r = await window.api.onlineStore.bannersReorder(next.map(b => b.id as string))
       if (!r.success) { toast.error(r.error); void load() }
     } catch (err) { toast.error('Failed to reorder: ' + String(err)); void load() }
+  }
+  const drop = async (targetId: string) => {
+    const from = banners.findIndex(b => b.id === dragId)
+    const to = banners.findIndex(b => b.id === targetId)
+    setDragId(null)
+    if (from < 0 || to < 0 || from === to) return
+    await persistOrder(moveItem(banners, from, to))
+  }
+  const step = async (i: number, dir: -1 | 1) => {
+    if (i + dir < 0 || i + dir >= banners.length) return
+    await persistOrder(moveItem(banners, i, i + dir))
   }
   const liveCount = banners.filter(b => statusOf(b).label === 'Live').length
 
   return <div className="p-6 space-y-4">
     <div className="flex items-center gap-3 flex-wrap">
       <button className="btn-primary btn-sm" onClick={() => setEditing({ ...EMPTY })}><Plus size={14} /> New banner</button>
-      <p className="text-xs text-slate-500">Recommended image: 16:7, 1200 x 525 px (minimum 800 x 350). Drag rows to change the order. The app shows at most 10 live banners.</p>
+      <p className="text-xs text-slate-500">Recommended image: 16:7, 1200 x 525 px (minimum 800 x 350). Drag rows or use the arrows to change the order (top shows first). The app shows at most 10 live banners.</p>
     </div>
     {liveCount > 10 && <p className="text-xs text-amber-400">{liveCount} banners are live; the app shows only the first 10.</p>}
     {statsNote && <p className="text-xs text-slate-500">{statsNote} (last 30 days of views and taps needs the cloud connection)</p>}
     <table className="w-full"><thead><tr>{['', 'Image', 'Banner', 'Status', 'Audience', 'Schedule (Colombo)', 'Views / taps', ''].map((h, i) => <th className="table-header px-3 py-3 text-left" key={i}>{h}</th>)}</tr></thead>
-      <tbody>{banners.map(b => {
+      <tbody>{banners.map((b, idx) => {
         const st = statusOf(b); const sx = stats[b.id as string]
         return <tr className={`table-row ${dragId === b.id ? 'opacity-50' : ''}`} key={b.id} draggable
           onDragStart={() => setDragId(b.id as string)} onDragOver={e => e.preventDefault()} onDrop={() => void drop(b.id as string)} onDragEnd={() => setDragId(null)}>
-          <td className="table-cell cursor-grab text-slate-500"><GripVertical size={16} /></td>
+          <td className="table-cell text-slate-500"><div className="flex items-center gap-1"><span className="cursor-grab"><GripVertical size={16} /></span>
+            <span className="text-xs w-4 text-center">{idx + 1}</span>
+            <div className="flex flex-col"><button className="btn-ghost p-0 disabled:opacity-30" title="Move up" disabled={idx === 0} onClick={() => void step(idx, -1)}><ChevronUp size={14} /></button>
+              <button className="btn-ghost p-0 disabled:opacity-30" title="Move down" disabled={idx === banners.length - 1} onClick={() => void step(idx, 1)}><ChevronDown size={14} /></button></div></div></td>
           <td className="table-cell">{b.image_url ? <img src={resolveImageSrc(b.image_url)} alt="" className="h-10 w-20 object-cover rounded" /> : '—'}</td>
           <td className="table-cell"><p className="font-medium">{b.title || <span className="text-slate-500">(image only)</span>}</p><p className="text-xs text-slate-500">{b.subtitle}</p>
             <p className="text-xs text-slate-500">{LINK_TYPES.find(l => l[0] === effectiveType(b))?.[1]}</p></td>

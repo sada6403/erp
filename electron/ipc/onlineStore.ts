@@ -7,7 +7,7 @@ import { logAudit } from '../services/auditLog'
 import { safeHandle } from './ipcHandler'
 import { CloudApi } from '../services/cloudApi'
 import { decryptSecret } from './settings'
-import { buildBannerRow, parseHomeLayout, validateHomeLayout } from '../services/bannerRules'
+import { buildBannerRow, renumberBanners, parseHomeLayout, validateHomeLayout } from '../services/bannerRules'
 
 const store = createCompanyStore()
 type Json = Record<string, unknown>
@@ -90,7 +90,7 @@ export function registerOnlineStoreHandlers(ipcMain: IpcMain) {
     const db = getDb()
     const upd = db.prepare(`UPDATE app_banners SET sort_order=?, updated_at=datetime('now') WHERE id=?`)
     const changed: Array<[string, number]> = []
-    db.transaction(() => { ids.forEach((id, i) => { if (upd.run((i + 1) * 10, String(id)).changes) changed.push([String(id), (i + 1) * 10]) }) })()
+    db.transaction(() => { for (const r of renumberBanners(ids)) if (upd.run(r.sort_order, r.id).changes) changed.push([r.id, r.sort_order]) })()
     for (const [id, sort_order] of changed) await enqueuSync('app_banners', id, 'UPDATE', { id, sort_order })
     logAudit(db, { userId: caller.id as string, branchId: (caller.branch_id as string) || null, action: 'APP_BANNER_SAVED', tableName: 'app_banners', newValues: { reordered: changed.length } })
     return { success: true }

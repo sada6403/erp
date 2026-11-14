@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildBannerRow, normalizeWallTime, parseHomeLayout, requireHttpsUrl, validateHomeLayout } from './bannerRules'
+import { moveItem, renumberBanners, buildBannerRow, normalizeWallTime, parseHomeLayout, requireHttpsUrl, validateHomeLayout } from './bannerRules'
 
 const exists = () => true
 
@@ -35,5 +35,20 @@ describe('banner rules', () => {
     expect(parseHomeLayout('').map(s => s.key)).toEqual(['banners', 'categories', 'flash_deals', 'smartbuy_promo', 'new_arrivals', 'featured'])
     expect(parseHomeLayout('[{"key":"featured","enabled":false}]')[0]).toEqual({ key: 'featured', enabled: false })
     expect(() => validateHomeLayout([{ key: 'banners', enabled: true }])).toThrow()
+  })
+})
+
+describe('banner reorder helpers', () => {
+  it('moves items and clamps', () => {
+    expect(moveItem(['a', 'b', 'c'], 0, 1)).toEqual(['b', 'a', 'c'])
+    expect(moveItem(['a', 'b', 'c'], 2, 0)).toEqual(['c', 'a', 'b'])
+    expect(moveItem(['a', 'b', 'c'], 0, -1)).toEqual(['a', 'b', 'c'])
+    expect(moveItem(['a', 'b', 'c'], 1, 9)).toEqual(['a', 'c', 'b'])
+    expect(moveItem(['a'], 5, 0)).toEqual(['a'])
+  })
+  it('renumbers contiguously, dropping duplicates and blanks', () => {
+    expect(renumberBanners(['x', 'y', 'x', '', null, 'z'])).toEqual([
+      { id: 'x', sort_order: 10 }, { id: 'y', sort_order: 20 }, { id: 'z', sort_order: 30 }])
+    expect(renumberBanners([])).toEqual([])
   })
 })

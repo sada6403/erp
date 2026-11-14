@@ -111,3 +111,26 @@ export function buildBannerRow(p: BannerInput, exists: (kind: 'product' | 'categ
     starts_at, ends_at, sort_order: Math.trunc(Number(p.sort_order) || 0), is_active: p.is_active === false || p.is_active === 0 || p.is_active === '0' ? 0 : 1,
   }
 }
+
+/** Move the item at `from` to position `to` (clamped). Returns a new array; unchanged when out of range. */
+export function moveItem<T>(list: readonly T[], from: number, to: number): T[] {
+  const out = list.slice()
+  if (from < 0 || from >= out.length) return out
+  const t = Math.max(0, Math.min(out.length - 1, to))
+  const [x] = out.splice(from, 1)
+  out.splice(t, 0, x)
+  return out
+}
+
+/** Contiguous sort_order (10, 20, 30 ...) for ids in display order. Duplicates and blanks are dropped (first wins). */
+export function renumberBanners(ids: readonly unknown[]): Array<{ id: string; sort_order: number }> {
+  const seen = new Set<string>()
+  const out: Array<{ id: string; sort_order: number }> = []
+  for (const raw of ids) {
+    const id = String(raw ?? '').trim()
+    if (!id || seen.has(id)) continue
+    seen.add(id)
+    out.push({ id, sort_order: (out.length + 1) * 10 })
+  }
+  return out
+}
