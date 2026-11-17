@@ -84,3 +84,13 @@ Decided by Moni on 2026-11-13 ("the v1.1 items ship as fast updates right after"
 - **v1.0:** banners v2 (link, audience, schedule in Colombo time, per-language images, view/tap counters) and home page layout (reorder / on-off). POS App Control group.
 - **v1.1 (Phase 2):** Announcements (in-app messages / inbox posts managed from the App Control "Announcements" tab, currently a "Coming in v1.1" placeholder). Also deferred: a true image crop tool in the banner form (today: 16:7 crop preview and a ratio warning).
 - **v1.1:** Delivery fees per area (decided by Moni 2026-11-14). v1.0 keeps the single flat fee plus free-over amount; per-area fees need a new fee table, POS editor and checkout lookup.
+
+## REVISED TIMELINE (Moni, 2026-11-17) - replaces the day-by-day table above
+| Date | What | Who / STOP |
+|---|---|---|
+| Wed 18 Nov | Full release regression on Moni's phone: every role, both themes, 3 languages, offline, POS loop, in-app update, emails once SMTP is in | Claude + Moni |
+| Thu 19 Nov | Production deploy (backend, then POS desktop) | **STOP: needs Moni's approval in chat** |
+| Fri 20 Nov | Production AAB, upload to Play Internal testing | **STOP: Moni runs / approves the build and the Play upload** |
+| Sat 21 Nov | Submit to Production | **STOP** |
+
+Threats to this timeline (2026-11-17): (1) the in-app APK update proof (test.8 to test.11) is still not confirmed on Moni's phone; (2) upload-key MATCH / NO MATCH is unchecked: a NO MATCH needs a Play upload-key reset, which takes days and would break 20 Nov; (3) `google-services.json` (FCM) and the Expo username are needed before the AAB; (4) SMTP + allow-list are needed for the 14 email types before 18 Nov; (5) the production merge/deploy needs the main developer's freeze window (RUNBOOK section 2) and the DB password rotation (3c). Items 1 to 4 are on Moni's side; item 5 needs both.

@@ -1,7 +1,7 @@
 # Production runbook — Natural Plantation app v1.0
 
 **PLAN ONLY. Nothing here has been run.** Every step that touches production needs Moni's explicit
-go-ahead in chat first (HANDOFF §6). Target: v1.0 live on Play by **21 Nov 2026** (submit by 19 Nov).
+go-ahead in chat first (HANDOFF §6). Target (revised 2026-11-17): regression **18 Nov**, production deploy **19 Nov** (STOP), production AAB to Internal testing **20 Nov** (STOP), submit **21 Nov** (STOP).
 Each step lists what to do, how to check it worked, and how to undo it.
 
 Owners: **Moni** = approvals, Play Console, passwords. **Claude** = scripts, builds, checks.
@@ -139,6 +139,14 @@ eas build --platform android --profile production      (credentialsSource: remot
 - **Check:** AAB size and the size Play reports (<= 25 MB download), `bundletool` install on the phone, cold start <= 2.5 s, login with a reviewer account, place a TEST order, see push dry-run logged.
 - **Rollback:** nothing is published yet; discard the build.
 
+### Step 7 preparation (2026-11-17), so the AAB is one command
+- `mobile/scripts/compare-upload-key.ps1 -PlaySha1 ... -PlaySha256 ...` prints MATCH / NO MATCH for the upload key (Moni types the keystore password; it is not shown or stored).
+- `mobile/scripts/build-production.ps1 -ApiBaseUrl https://<prod-api>` checks tsc + jest, App Key present, https, `google-services.json` package name, then runs `eas build --platform android --profile production`. HARD STOP: only after Moni says go.
+- `google-services.json` lives at `C:\secure
+f-keys\google-services.json` (git-ignored; the pre-commit hook blocks it). For EAS cloud builds upload it as a file env var: `eas env:create --name GOOGLE_SERVICES_FILE --type file --visibility secret --environment production`, which `app.config.ts` already reads.
+- EAS: `eas init` (needs the Expo username, Moni logs in) writes the project id; set `EAS_PROJECT_ID` for the build and add `owner` if the project sits under an organisation.
+- First Play build must be `versionCode 6`: `eas.json` uses `appVersionSource: remote` + `autoIncrement`, so run `eas build:version:set -p android --profile production` once and enter 6 before the first build.
+
 ## 8. Play Internal testing
 Upload the AAB to Internal testing, add Moni + boss + team emails (<= 100).
 - **Check:** install from the Play link on 2+ phones (different Android versions); each role logs in; deep links from pushes work; Data safety and declarations show no errors in the Console "Publishing overview".
@@ -146,7 +154,7 @@ Upload the AAB to Internal testing, add Moni + boss + team emails (<= 100).
 
 ## 9. Play Production
 Promote the same build to Production (staged rollout 20% -> 50% -> 100% over 2-3 days if time allows; full rollout if the date is tight).
-Play review can take hours to days: submit by 19 Nov.
+Play review can take hours to days: submit on 21 Nov (revised plan), so expect the live date after 21 Nov.
 - **Check:** Play Console "Releases overview" = In review/Available; crash rate and ANR in Android vitals stay under bad-behaviour thresholds.
 - **Rollback:** Play cannot revert a release; instead halt the rollout and push versionCode 7 containing the previous JS, or ship an OTA JS fix (step 10). The old Flutter build (code 4) cannot be re-promoted if code 6 is already higher; hence the staged rollout.
 

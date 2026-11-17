@@ -24,3 +24,7 @@ GoogleService-Info.plist
 .env.*
 !.env.example
 android/keystores/
+
+# local MySQL test account for the integration harness (never commit)
+backend/.int-mysql.env
+.int-mysql.env
