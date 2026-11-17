@@ -19,3 +19,11 @@ No password, key or fingerprint secret is stored in this repo. Only public certi
 ## If it is lost or leaked
 - Lost: Play Console, Test and release, App integrity, App signing, **Request upload key reset**. Generate a new upload key, export `upload_certificate.pem`, submit it. Play enables it after review. Users are unaffected.
 - Leaked: reset it the same way straight away, then remove the old key from EAS.
+
+## 2026-11-17 Upload-key reset (old keystore password lost)
+- OLD keystore `C:\secure\nf-keys\nf-release-key.jks` (alias `nf-farming`): password lost, file was accidentally shared in a chat. Retired. Do not touch or delete it until Play enables the new key.
+- NEW upload keystore: `C:\secure\nf-keys\nf-upload-NEW.jks`, alias `nf-upload` (PKCS12, RSA 2048, 10000 days). Passwords typed by Moni in a visible window; they are stored nowhere in the repo or by Claude (keep them in a password manager).
+- Certificate for Play ("Request upload key reset"): `C:\secure\nf-keys\upload_certificate.pem` (made by `mobile/scripts/new-upload-key.ps1`).
+- Production builds: `eas.json` production keeps `credentialsSource: "remote"`; after Play approves the reset, upload this keystore to EAS credentials (`eas credentials -p android`, Moni types the passwords) so EAS signs with the new upload key. Until the reset is approved no AAB is uploaded.
+- Rule: never attach a keystore, `google-services.json` or any key file to a chat.
+

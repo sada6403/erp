@@ -81,6 +81,7 @@ The agent shell sets `GIT_TERMINAL_PROMPT=0` and `GCM_INTERACTIVE=never`, so Git
 Then confirm with `git ls-remote origin feature/mobile-app-foundation`. Never ask for or handle the GitHub password or token.
 
 ## 6. Hard limits (only reasons to stop and ask Moni)
+- **Never attach keystores (.jks), google-services.json or any key file to a chat** (the old upload keystore was shared that way on 2026-11-17 and had to be replaced; see KEY_HANDLING.md).
 - Any change to production: `/var/www/pos-backend`, its process, production databases (dump only), existing
   nginx sites, `pos-deploy`, the deploy workflow, `main`.
 - Play Store upload, OTA publish, real WhatsApp messages, live payment keys.
