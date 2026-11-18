@@ -30,6 +30,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   // Same app name in every build (the .staging package lets the test app sit next to the Play app); Settings, About shows Test server.
   name: 'Natural Plantation',
   slug: 'natural-plantation',
+  owner: 'nfplantation', // Expo account that owns the EAS project (OTA + production builds)
   scheme: 'naturalplantation',
   version: APP_ENV === 'staging' ? '1.0.0-test.11' : '1.0.0',
   orientation: 'portrait',
