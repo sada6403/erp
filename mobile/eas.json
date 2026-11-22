@@ -34,12 +34,11 @@
       },
       "env": {
         "APP_ENV": "production",
-        "ANDROID_PACKAGE": "nfgroups.naturefarming.app",
-        "API_BASE_URL": "__SET_AT_BUILD__",
-        "APP_KEY": "__SET_AT_BUILD__"
+        "ANDROID_PACKAGE": "nfgroups.naturefarming.app"
       },
       "credentialsSource": "remote",
-      "prebuildCommand": "expo prebuild --platform android && node scripts/check-play-manifest.cjs"
+      "prebuildCommand": "expo prebuild --platform android && node scripts/check-play-manifest.cjs",
+      "environment": "production"
     }
   },
   "submit": {

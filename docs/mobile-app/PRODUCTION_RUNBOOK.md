@@ -141,7 +141,7 @@ eas build --platform android --profile production      (credentialsSource: remot
 
 ### Step 7 preparation (2026-11-17), so the AAB is one command
 - `mobile/scripts/compare-upload-key.ps1 -PlaySha1 ... -PlaySha256 ...` prints MATCH / NO MATCH for the upload key (Moni types the keystore password; it is not shown or stored).
-- `mobile/scripts/build-production.ps1 -ApiBaseUrl https://<prod-api>` checks tsc + jest, App Key present, https, `google-services.json` package name, then runs `eas build --platform android --profile production`. HARD STOP: only after Moni says go.
+- `mobile/scripts/build-production.ps1` (from `mobile\`) checks the EAS production variables exist (`API_BASE_URL`, `APP_KEY`, `GOOGLE_SERVICES_FILE`), runs tsc + jest, then `eas build --platform android --profile production`. HARD STOP: only after Moni says go. Values come from EAS env vars of the `production` environment (`eas.json` profile has `environment: production`; the placeholders were removed from its env block).
 - `google-services.json` lives at `C:\secure
 f-keys\google-services.json` (git-ignored; the pre-commit hook blocks it). For EAS cloud builds upload it as a file env var: `eas env:create --name GOOGLE_SERVICES_FILE --type file --visibility secret --environment production`, which `app.config.ts` already reads.
 - EAS: `eas init` (needs the Expo username, Moni logs in) writes the project id; set `EAS_PROJECT_ID` for the build and add `owner` if the project sits under an organisation.
