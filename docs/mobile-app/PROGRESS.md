@@ -193,3 +193,11 @@ Observations: (1) offline-saved visit is not listed in Today until it syncs (no 
 - **Update sheet (fixed):** a backdrop/X press while the APK is downloading or installing no longer snoozes the update for 3 days; leftover debug stack in `update:dismiss` removed.
 - Other: root typecheck error in the staging-only agent-collections test fixed (`seed.branches.main`). Not changed: the "Copy" name in the header is test-data (the account's name), the empty Passbook screenshot was a capture glitch.
 - Verification: mobile `tsc` clean and 92 tests pass; backend `tsc` clean (backend `npm test` needs the local dev server and fails identically without my change); root `tsc` clean; sync tests 31 pass.
+
+## 2026-11-23 Final staging regression on test.12: DONE
+Run on Moni's phone (realme RMX3231, installed over test.11 by adb, versionCode 12, same signing cert), driven by Claude over adb; Moni asked to mark the staging regression done.
+- **9 logins: PASS** (customer, Smart Buy member, Field Officer, Branch, Regional, Zonal, Manager, AGM, Director). login:navigated 664 to 1700 ms, no error text on any landing screen. Two first attempts failed because the test script typed the password into the username field (automation fault), the retry passed.
+- **Visit roll-up: PASS.** Director Team cards now show "2 visits - 0 purchases - 2 without GPS - 0/1 follow-ups done" for AGM, Manager, Zonal and Regional (was "0 visits"), matching the Dashboard's 2 visits.
+- **Offline "Waiting to upload" badge: PASS.** Visit saved in airplane mode appears in Today with the badge; after reconnecting it appears as a normal visit (No GPS) and the badge is gone.
+- Update-sheet snooze fix and the POS product_attributes fix are not testable on the phone (phone already on the latest version; the POS fix needs the new desktop build). Covered by unit/integration tests.
+- Earlier on 2026-11-22: roles, themes, languages, offline, in-app update proof (test.8 to test.11), emails (14), POS loop all PASS.
