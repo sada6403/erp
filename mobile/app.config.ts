@@ -13,7 +13,8 @@ const API_BASE_URL = process.env.API_BASE_URL ?? 'http://10.0.2.2:3000';
 const APP_KEY = process.env.APP_KEY ?? '';
 // eas.json carries "__SET_AT_BUILD__" placeholders for production. Real values are supplied at build time
 // (eas env / --environment variables) and never committed. A production build must not ship with a placeholder.
-if (APP_ENV === 'production') {
+// Only an ACTUAL build refuses placeholders (EAS_BUILD is set on EAS build workers and by eas build --local). Config evaluation by eas credentials / version / expo config must still work.
+if (APP_ENV === 'production' && process.env.EAS_BUILD) {
   const missing = Object.entries({ ANDROID_PACKAGE, API_BASE_URL, APP_KEY })
     .filter(([, v]) => !v || v.includes('__SET_AT_BUILD__'))
     .map(([k]) => k);
