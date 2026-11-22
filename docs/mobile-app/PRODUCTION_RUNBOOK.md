@@ -210,3 +210,10 @@ Go to production when: staging verified, backup restored once, upload key = MATC
 
 ## Required production setting: BACKUP_ENCRYPTION_KEY
 Company SMTP passwords are encrypted with `BACKUP_ENCRYPTION_KEY` (64 hex chars). Staging lacked it and SMTP could not be saved. Before enabling emails, confirm production `.env` has it (check by name only, never print) and that EMAIL_MODE=production only when go-live is approved.
+
+## Triage: an app order is not visible in the POS (Sell -> Orders)
+1. Cloud row: `SELECT order_number,channel,branch_id,status FROM <tenant>.customer_orders WHERE order_number=?` (expect channel `app`, branch = the customer's serving branch; every app order gets one, there is no branch-less order).
+2. The POS pull is NOT branch-filtered (`/api/sync/changes` returns every row by `updated_at`); only the POS Orders screen filters by the logged-in user's branch. A branch mismatch needs a POS user on another branch than the order.
+3. Prove the cloud serves it: call `/api/sync/changes?table=customer_orders&since=1970-01-01T00:00:00.000Z` with that company's POS sync key (never print it) and look for the order.
+4. If the cloud serves it, the POS is not pulling: check nginx access log for `/api/sync/` hits from that POS, then on the POS Admin -> Settings -> Cloud Sync: API URL and key must be the SAME company as the app (staging: company slug `test-1`), device not locked, "Sync now" status.
+5. A `sync_pull_quarantine` row (e.g. a product_attributes FK) is per-row and does not block other rows; only an order whose customer/parent is missing locally is quarantined until the parent is fetched.
