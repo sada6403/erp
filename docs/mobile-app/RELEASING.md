@@ -87,3 +87,6 @@ If the library or Play is unavailable the app opens the Play listing so a forced
 - Deploying to production, pushing to `main`, running anything against production data or the production VPS.
 - Putting secrets (sync `x-api-key`, EAS tokens, keystores, Firebase credentials) in the app, the repo or logs.
 - Adding `REQUEST_INSTALL_PACKAGES` outside the test flavour.
+
+## In-app APK update proof: PASS (2026-11-22, realme RMX3231)
+test.8 (versionCode 8) -> test.11 (versionCode 11) via the "New version available" sheet: sheet showed with what's-new text, "Checking the download..." then installer; Android "Installing..." then the Google Play Protect "App scan recommended" prompt (expected for a sideloaded APK; Scan app). After install: versionName 1.0.0-test.11, versionCode 11. Note: tapping the sheet while it is still "Checking the download..." can dismiss/snooze it for 3 days (Settings "Check for updates" or clearing app data brings it back).

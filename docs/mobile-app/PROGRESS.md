@@ -174,3 +174,12 @@ Built: `product_reviews` table (cloud + POS SQLite + sync lists), reviews GET/PO
 
 ## 2026-11-22 Staging email smoke test: DONE
 Company test-1 SMTP (Gmail) saved encrypted on staging via `backend/scripts/set-staging-smtp.ps1` (staging needed `BACKUP_ENCRYPTION_KEY`, now set; production must have it too, see PRODUCTION_RUNBOOK). All 14 types (en/ta/si) sent, 0 failed; a non-allow-listed dummy was suppressed; duplicate enqueue rejected. Moni checked Gmail (screenshots of join_received ta, order_confirmed ta, join_approved si: Tamil/Sinhala render correctly, sender "Natural Plantation"); marked done by Moni. Staging EMAIL_ALLOWLIST now holds one address only. Note: header/footer show the company name ("test") on staging, by design.
+
+## 2026-11-22 Release regression on the phone (test.11, staging)
+Driven over adb on the realme (uiautomator + screenshots, evidence in the local scratch folder, not committed).
+- Roles walked (all tabs load, no error/undefined/NaN text): customer 0771110011 (5 tabs), Smart Buy member 0779998877 (5), Field Officer 0779990031 (6), Branch Manager, Regional, Zonal, Manager, AGM, Director (Dashboard / Team / Me each).
+- Login to landing (login:navigated): 618 to 953 ms across the 9 logins, all well under 1 s.
+- Themes: Olive/Yellow and Purple/Pink both applied instantly (customer). Languages: English, Tamil, Sinhala render correctly (Settings, home, categories, tabs, offline banner).
+- Offline: customer relaunch offline shows cached catalog/orders with the Sinhala offline banner; field officer saved a visit offline (no GPS), it synced after reconnecting and shows in Today ("No GPS") and in the Branch Manager's Team card.
+- Phone side of the POS loop: COD order ONL-1022 placed, delivery OTP shown, row in staging customer_orders (pending). POS desktop side (see order, convert to invoice, status back to phone) still needs Moni at the test POS.
+Observations: (1) offline-saved visit is not listed in Today until it syncs (no "pending upload" hint); (2) management cards above the field officer show "0 visits" while the Dashboard shows 2 visits this month (roll-up counts look own-only); (3) first Update-now tap during "Checking the download..." snoozes the sheet; (4) Passbook screenshot for the Smart Buy login came out empty (capture glitch, texts were fine); (5) the customer account name shows "Copy" in the header pill (test data name).
