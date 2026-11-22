@@ -33,7 +33,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'nfplantation', // must equal the slug of EAS project 5dd24d2b
   owner: 'natural-plantation', // Expo account/organisation that owns EAS project 5dd24d2b (login user: nfplantation, member of natural-plantation)
   scheme: 'naturalplantation',
-  version: APP_ENV === 'staging' ? '1.0.0-test.11' : '1.0.0',
+  version: APP_ENV === 'staging' ? '1.0.0-test.12' : '1.0.0',
   orientation: 'portrait',
   userInterfaceStyle: 'light',
   icon: './assets/icon.png',
