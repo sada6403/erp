@@ -19,7 +19,7 @@ if (APP_ENV === 'production') {
     .map(([k]) => k);
   if (missing.length) throw new Error(`Production build needs real values for: ${missing.join(', ')} (set them at build time, see docs/mobile-app).`);
 }
-const EAS_PROJECT_ID = process.env.EAS_PROJECT_ID ?? '';
+const EAS_PROJECT_ID = process.env.EAS_PROJECT_ID ?? '5dd24d2b-7eeb-4aad-bc7b-8777cff45373';
 const EAS_UPDATE_URL =
   process.env.EAS_UPDATE_URL ?? (EAS_PROJECT_ID ? `https://u.expo.dev/${EAS_PROJECT_ID}` : '');
 // Mocks are honoured only in __DEV__ builds (see src/dev). Default: on for APP_ENV=development.
@@ -29,8 +29,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   // Same app name in every build (the .staging package lets the test app sit next to the Play app); Settings, About shows Test server.
   name: 'Natural Plantation',
-  slug: 'natural-plantation',
-  owner: 'nfplantation', // Expo account that owns the EAS project (OTA + production builds)
+  slug: 'nfplantation', // must equal the slug of EAS project 5dd24d2b
+  owner: 'natural-plantation', // Expo account/organisation that owns EAS project 5dd24d2b (login user: nfplantation, member of natural-plantation)
   scheme: 'naturalplantation',
   version: APP_ENV === 'staging' ? '1.0.0-test.11' : '1.0.0',
   orientation: 'portrait',

@@ -35,7 +35,7 @@
       },
       "env": {
         "APP_ENV": "production",
-        "ANDROID_PACKAGE": "__SET_AT_BUILD__",
+        "ANDROID_PACKAGE": "nfgroups.naturefarming.app",
         "API_BASE_URL": "__SET_AT_BUILD__",
         "APP_KEY": "__SET_AT_BUILD__"
       },
