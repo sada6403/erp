@@ -302,7 +302,7 @@ d('the POS decides: approve / reject round trip', () => {
     const before = (await api.get('/agent/collections/today', { token: A.token })).json.summary
     const remit = await fetch(`${BASE_URL}/api/sync/push`, {
       method: 'POST', headers: { 'x-api-key': seed.pos_api_key, 'content-type': 'application/json' },
-      body: JSON.stringify({ table: 'agent_remittances', operation: 'INSERT', recordId: uuid(), record: { id: uuid(), agent_id: A.id, branch_id: seed.branch_id, amount: 1000, method: 'cash', submitted_at: nowIso() }, eventId: uuid() }),
+      body: JSON.stringify({ table: 'agent_remittances', operation: 'INSERT', recordId: uuid(), record: { id: uuid(), agent_id: A.id, branch_id: seed.branches.main, amount: 1000, method: 'cash', submitted_at: nowIso() }, eventId: uuid() }),
     })
     expect(remit.status, await remit.clone().text()).toBe(200)
     const after = (await api.get('/agent/collections/today', { token: A.token })).json.summary

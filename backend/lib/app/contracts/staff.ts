@@ -95,6 +95,12 @@ export interface VisitReportRowDto {
   gps_missing: number
   follow_ups_due: number
   follow_ups_done: number
+  /** Own figures plus everyone below (equals the own figures for a field officer). */
+  team_total: number
+  team_purchased: number
+  team_gps_missing: number
+  team_follow_ups_due: number
+  team_follow_ups_done: number
 }
 export interface VisitReportResponse {
   period: string

@@ -257,6 +257,31 @@ describe('Sync recovery and durable outbox', () => {
     expect(state.data.sync_table_cursors_v2.categories).toBe('2026-09-27T00:00:00.000Z')
   })
 
+  it('keeps a row whose optional parent was deleted in the cloud and clears the dangling reference', async () => {
+    const attributeId = 'attr-orphan-category'
+    const cloud = {
+      changes: vi.fn().mockResolvedValue([{ id: attributeId, name: 'flavour', slug: 'flavour', business_type: 'supermarket',
+        category_id: 'category-gone-in-cloud', updated_at: date }]),
+      related: vi.fn().mockResolvedValue([]),
+    }
+    await service.pullTables(cloud, ['product_attributes'])
+    expect(cloud.related).toHaveBeenCalledWith('categories', 'id', ['category-gone-in-cloud'])
+    expect(db.prepare('SELECT category_id FROM product_attributes WHERE id=?').get(attributeId).category_id).toBeNull()
+    expect(db.prepare("SELECT COUNT(*) n FROM sync_pull_quarantine WHERE record_id=? AND status='pending'").get(attributeId).n).toBe(0)
+  })
+
+  it('still isolates the row when the parent lookup itself fails', async () => {
+    const attributeId = 'attr-lookup-fails'
+    const cloud = {
+      changes: vi.fn().mockResolvedValue([{ id: attributeId, name: 'size', slug: 'size', business_type: 'supermarket',
+        category_id: 'category-unknown', updated_at: date }]),
+      related: vi.fn().mockRejectedValue(new Error('network down')),
+    }
+    await service.pullTables(cloud, ['product_attributes'])
+    expect(db.prepare('SELECT id FROM product_attributes WHERE id=?').get(attributeId)).toBeUndefined()
+    expect(db.prepare("SELECT COUNT(*) n FROM sync_pull_quarantine WHERE record_id=? AND status='pending'").get(attributeId).n).toBe(1)
+  })
+
   it('protects failed local uploads without blocking the table checkpoint', async () => {
     db.prepare("INSERT INTO customers(id,name) VALUES ('local-edit','Local')").run()
     await enqueue('customers', 'local-edit', 'UPDATE', { name: 'Local' })

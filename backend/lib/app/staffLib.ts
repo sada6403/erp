@@ -280,22 +280,34 @@ export async function visitReport(company: AppCompany, scope: StaffScope, period
   const ids = only ? [only] : [scope.staffId, ...scope.subtree]
   const { from, to } = periodRange(period)
   const names = await people(company, ids)
-  const items = []
-  for (const id of ids) {
+  const figures = async (members: string[]) => {
+    const marks = members.map(() => '?').join(',')
     const r = await company.tp.query<Row>(
       `SELECT COUNT(*) total, SUM(outcome='purchased') purchased, SUM(outcome='not_interested') not_interested, SUM(outcome='come_back') come_back,
               SUM(outcome='not_at_home') not_at_home, SUM(outcome='already_member') already_member, SUM(gps_missing=1) gps_missing
-         FROM field_visits WHERE staff_id = ? AND visited_at >= ? AND visited_at < ?`, [id, from, to])
+         FROM field_visits WHERE staff_id IN (${marks}) AND visited_at >= ? AND visited_at < ?`, [...members, from, to])
     const due = await company.tp.query<Row>(
       `SELECT COUNT(*) due, SUM(EXISTS (SELECT 1 FROM field_visits n WHERE n.staff_id = v.staff_id AND n.visited_at > v.visited_at
               AND ((v.customer_id IS NOT NULL AND n.customer_id = v.customer_id) OR (v.customer_id IS NULL AND n.prospect_name = v.prospect_name)))) done
-         FROM field_visits v WHERE v.staff_id = ? AND v.follow_up_at IS NOT NULL AND v.follow_up_at >= ? AND v.follow_up_at < ? AND v.follow_up_at < NOW()`, [id, from, to])
+         FROM field_visits v WHERE v.staff_id IN (${marks}) AND v.follow_up_at IS NOT NULL AND v.follow_up_at >= ? AND v.follow_up_at < ? AND v.follow_up_at < NOW()`, [...members, from, to])
     const n = (k: string) => Number(r.rows[0]?.[k] ?? 0) || 0
-    items.push({
-      staff_id: id, name: names.get(id)?.name ?? 'Unknown', code: names.get(id)?.code ?? null, level: scope.org.byStaff.get(id)?.level ?? 'field_officer',
+    return {
       total: n('total'), purchased: n('purchased'), not_interested: n('not_interested'), come_back: n('come_back'), not_at_home: n('not_at_home'),
       already_member: n('already_member'), gps_missing: n('gps_missing'),
       follow_ups_due: Number(due.rows[0]?.due ?? 0) || 0, follow_ups_done: Number(due.rows[0]?.done ?? 0) || 0,
+    }
+  }
+  const items = []
+  for (const id of ids) {
+    const own = await figures([id])
+    // A manager's card is their team's (like achievement); `own` figures stay on the row so the dashboard total does not double count.
+    const below = descendantsOf(scope.org, id)
+    const team = below.length ? await figures([id, ...below]) : own
+    items.push({
+      staff_id: id, name: names.get(id)?.name ?? 'Unknown', code: names.get(id)?.code ?? null, level: scope.org.byStaff.get(id)?.level ?? 'field_officer',
+      ...own,
+      team_total: team.total, team_purchased: team.purchased, team_gps_missing: team.gps_missing,
+      team_follow_ups_due: team.follow_ups_due, team_follow_ups_done: team.follow_ups_done,
     })
   }
   return { period, items }

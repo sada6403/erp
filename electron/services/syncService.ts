@@ -918,6 +918,14 @@ export class SyncService {
                     this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
                     continue
                   }
+                  // The cloud itself has no such parent (it was deleted there and the cloud has no FK to cascade).
+                  // For an optional ON DELETE SET NULL reference, keep the row and clear the dangling reference,
+                  // exactly what the local cascade would have done, instead of isolating the row forever.
+                  if (await this.clearOrphanedOptionalReferences(cloud, db, table, row)) {
+                    this.insertFiltered(db, table, row)
+                    this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
+                    continue
+                  }
                 } catch {
                   // An older backend may not support exact parent lookup yet.
                   // Preserve the original row error and normal retry behavior
@@ -1227,6 +1235,34 @@ export class SyncService {
     if (!local) return
     db.prepare('INSERT OR REPLACE INTO sync_stock_baselines (record_id,quantity,damaged_qty) VALUES (?,?,?)')
       .run(local.id, Number(row.quantity), Number(row.damaged_qty ?? 0))
+  }
+
+  /** Clears optional (ON DELETE SET NULL) references whose parent does not exist locally AND is confirmed absent in the cloud. Mutates `row`; returns true if anything was cleared. */
+  private async clearOrphanedOptionalReferences(
+    cloud: CloudApi,
+    db: ReturnType<typeof getDb>,
+    table: string,
+    row: Record<string, unknown>
+  ): Promise<boolean> {
+    if (typeof (cloud as { related?: unknown }).related !== 'function') return false
+    const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${this.quoteLocalIdentifier(table)})`).all() as Array<{
+      table: string; from: string; to: string; on_delete: string
+    }>
+    let cleared = false
+    for (const foreignKey of foreignKeys) {
+      if (foreignKey.to !== 'id' || String(foreignKey.on_delete).toUpperCase() !== 'SET NULL') continue
+      const value = row[foreignKey.from]
+      if (value === null || value === undefined || value === '') continue
+      const parentId = String(value)
+      const parentTableSql = this.quoteLocalIdentifier(foreignKey.table)
+      if (db.prepare(`SELECT 1 FROM ${parentTableSql} WHERE id=? LIMIT 1`).get(parentId)) continue
+      // A thrown lookup (old backend, network) propagates and leaves the row isolated for the normal retry.
+      const parentRows = await cloud.related(foreignKey.table, 'id', [parentId])
+      if (parentRows.some(candidate => String(candidate.id) === parentId)) continue
+      row[foreignKey.from] = null
+      cleared = true
+    }
+    return cleared
   }
 
   private async repairMissingParents(

@@ -47,7 +47,7 @@ export default function ManagerTeam() {
                     {m.team_size > 0 ? <Badge label={t('sf.team.members', { n: m.team_size })} bg="surfaceSubtle" fg="textMuted" /> : null}
                   </View>
                   <PerformanceBar p={m} />
-                  {vr ? <Text size={11} color="textMuted" style={{ marginTop: 6 }}>{t('sf.visits.reportRow', { total: vr.total, bought: vr.purchased, gps: vr.gps_missing, done: vr.follow_ups_done, due: vr.follow_ups_due })}</Text> : null}
+                  {vr ? <Text size={11} color="textMuted" style={{ marginTop: 6 }}>{t('sf.visits.reportRow', { total: vr.team_total, bought: vr.team_purchased, gps: vr.team_gps_missing, done: vr.team_follow_ups_done, due: vr.team_follow_ups_due })}</Text> : null}
                 </Card>
               </Pressable>
             );

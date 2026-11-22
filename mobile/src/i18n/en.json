@@ -142,6 +142,7 @@
       "saved": "Visit saved",
       "savedNoGps": "Visit saved without location",
       "queued": "Saved offline. It will upload when you are online.",
+      "pending": "Waiting to upload",
       "gpsMissing": "No GPS",
       "followOn": "Follow up on",
       "followUps": "Follow-ups due",

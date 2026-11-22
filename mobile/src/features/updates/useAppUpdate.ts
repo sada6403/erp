@@ -31,12 +31,14 @@ export function useAppUpdate() {
   const notes = useMemo(() => data?.release_notes?.[lang] || data?.release_notes?.en || '', [data, lang]);
 
   const dismiss = useCallback(() => {
-    perf(`update:dismiss ${String(new Error('dismiss').stack).split(String.fromCharCode(10)).slice(1, 4).join(' | ')}`);
+    // A stray tap/backdrop press while the APK is downloading or installing must not snooze the update for days.
+    if (stage) return;
+    perf('update:dismiss');
     const d = { version: latest, at: Date.now() };
     writeJson(DISMISS_KEY, d);
     setDismissed(d);
     useUpdateCheck.getState().setForced(false);
-  }, [latest]);
+  }, [latest, stage]);
 
   const start = useCallback(async () => {
     perf('update:start');

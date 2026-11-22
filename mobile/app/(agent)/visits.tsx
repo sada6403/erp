@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import type { VisitDto, VisitOutcome } from '@contracts/staff';
@@ -32,6 +32,12 @@ export default function VisitsScreen() {
   const [days, setDays] = useState<number | null>(null);
   const [notes, setNotes] = useState('');
   const [busy, setBusy] = useState(false);
+  /** Visits saved offline that the server list does not show yet (cleared once the same name appears in today's list). */
+  const [queued, setQueued] = useState<{ name: string; outcome: VisitOutcome; at: string }[]>([]);
+  const waiting = useMemo(() => {
+    const seen = new Set((today.data?.visits ?? []).map((v) => (v.prospect_name ?? '').trim().toLowerCase()));
+    return queued.filter((q) => !seen.has(q.name.trim().toLowerCase()));
+  }, [queued, today.data]);
 
   const reset = () => { setWho(''); setPhone(''); setOutcome('purchased'); setReason(''); setDays(null); setNotes(''); };
 
@@ -47,6 +53,7 @@ export default function VisitsScreen() {
         ...(outcome === 'come_back' && days != null ? { follow_up_at: new Date(Date.now() + days * DAY).toISOString() } : {}),
         ...(notes.trim() ? { notes: notes.trim() } : {}),
       });
+      if (out.result === 'queued') setQueued((q) => [...q, { name: who.trim(), outcome, at: new Date().toISOString() }]);
       showToast(out.result === 'queued' ? t('sf.visits.queued') : out.gps ? t('sf.visits.saved') : t('sf.visits.savedNoGps'));
       reset();
       setOpen(false);
@@ -113,7 +120,20 @@ export default function VisitsScreen() {
             </View>
           ) : null}
           <SectionHeader icon={'📍'} title={t('sf.visits.today')} />
-          {(today.data?.visits.length ?? 0) === 0 ? <EmptyState icon={'📍'} title={t('sf.visits.none')} /> : (
+          {waiting.length > 0 ? (
+            <View style={{ gap: 8 }}>
+              {waiting.map((q) => (
+                <Card key={`${q.name}-${q.at}`} radius={14} padding={12}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                    <Text size={13} weight={700} style={{ flex: 1 }}>{q.name}</Text>
+                    <Badge label={t('sf.visits.pending')} bg="warningBg" fg="warning" />
+                  </View>
+                  <Text size={11} color="textMuted">{`${t(`sf.outcome.${q.outcome}`)} • ${formatTime(q.at)}`}</Text>
+                </Card>
+              ))}
+            </View>
+          ) : null}
+          {(today.data?.visits.length ?? 0) === 0 && waiting.length === 0 ? <EmptyState icon={'📍'} title={t('sf.visits.none')} /> : (
             <View style={{ gap: 8 }}>{today.data?.visits.map((v) => row(v))}</View>
           )}
         </>
