@@ -112,4 +112,4 @@ Then confirm with `git ls-remote origin feature/mobile-app-foundation`. Never as
 - Delete the keystore message from WhatsApp after it's stored in EAS
 
 ## 9. Dates
-- v1.0 on Play target: **21 Nov 2026** (submit by 19 Nov). Build 1 to Internal testing slipped from 11 Nov; do it as soon as staging + key + Firebase are ready.
+- v1.0 on Play target (revised 2026-11-23): deploy 24 Nov, Internal testing 25 Nov, submit **26 Nov 2026** (was 21 Nov / submit by 19 Nov). Build 1 to Internal testing slipped from 11 Nov; do it as soon as staging + key + Firebase are ready.

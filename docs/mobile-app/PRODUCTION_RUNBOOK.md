@@ -1,7 +1,7 @@
 # Production runbook — Natural Plantation app v1.0
 
 **PLAN ONLY. Nothing here has been run.** Every step that touches production needs Moni's explicit
-go-ahead in chat first (HANDOFF §6). Target (revised 2026-11-17): regression **18 Nov**, production deploy **19 Nov** (STOP), production AAB to Internal testing **20 Nov** (STOP), submit **21 Nov** (STOP).
+go-ahead in chat first (HANDOFF §6). Target (revised 2026-11-23): test.12 + final phone regression **23 Nov**, production deploy (backend + POS desktop) **24 Nov** (STOP), production AAB to Internal testing **25 Nov** (STOP), submit to Production **26 Nov** (STOP).
 Each step lists what to do, how to check it worked, and how to undo it.
 
 Owners: **Moni** = approvals, Play Console, passwords. **Claude** = scripts, builds, checks.
@@ -35,7 +35,7 @@ hit, and the app needs them before any app order can reach a POS.
 - Firebase project exists, `google-services.json` for package `nfgroups.naturefarming.app` is in place.
 - Play Console: trader status declaration done; Data safety, financial-features declaration, privacy and
   account-deletion URLs filled in from `docs/play/`; "App access" text from `docs/play/APP_ACCESS.md` pasted.
-- Production access: if Play requires a closed test (>= 12 testers for 14 days) the 21 Nov date is not reachable; tell Moni immediately.
+- Production access: if Play requires a closed test (>= 12 testers for 14 days) the 26 Nov date is not reachable; tell Moni immediately.
 - All branches green: `npm test` in `backend/`, `npm run typecheck`, mobile `npm test` + `npx tsc --noEmit` + `npx eslint .`.
 - Branch is rebased on the current `origin/main` and the CI run on the branch has no conflicts in
   `electron/ipc/invoices.ts`, `orders.ts`, `electron/preload.ts`, `electron/database.ts`.
@@ -154,7 +154,7 @@ Upload the AAB to Internal testing, add Moni + boss + team emails (<= 100).
 
 ## 9. Play Production
 Promote the same build to Production (staged rollout 20% -> 50% -> 100% over 2-3 days if time allows; full rollout if the date is tight).
-Play review can take hours to days: submit on 21 Nov (revised plan), so expect the live date after 21 Nov.
+Play review can take hours to days: submit on 26 Nov (revised plan), so expect the live date after 26 Nov.
 - **Check:** Play Console "Releases overview" = In review/Available; crash rate and ANR in Android vitals stay under bad-behaviour thresholds.
 - **Rollback:** Play cannot revert a release; instead halt the rollout and push versionCode 7 containing the previous JS, or ship an OTA JS fix (step 10). The old Flutter build (code 4) cannot be re-promoted if code 6 is already higher; hence the staged rollout.
 

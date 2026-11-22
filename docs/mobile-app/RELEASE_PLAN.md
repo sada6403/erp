@@ -85,7 +85,7 @@ Decided by Moni on 2026-11-13 ("the v1.1 items ship as fast updates right after"
 - **v1.1 (Phase 2):** Announcements (in-app messages / inbox posts managed from the App Control "Announcements" tab, currently a "Coming in v1.1" placeholder). Also deferred: a true image crop tool in the banner form (today: 16:7 crop preview and a ratio warning).
 - **v1.1:** Delivery fees per area (decided by Moni 2026-11-14). v1.0 keeps the single flat fee plus free-over amount; per-area fees need a new fee table, POS editor and checkout lookup.
 
-## REVISED TIMELINE (Moni, 2026-11-17) - replaces the day-by-day table above
+## REVISED TIMELINE (Moni, 2026-11-17) - superseded by the 2026-11-23 timeline below
 | Date | What | Who / STOP |
 |---|---|---|
 | Wed 18 Nov | Full release regression on Moni's phone: every role, both themes, 3 languages, offline, POS loop, in-app update, emails once SMTP is in | Claude + Moni |
@@ -94,3 +94,14 @@ Decided by Moni on 2026-11-13 ("the v1.1 items ship as fast updates right after"
 | Sat 21 Nov | Submit to Production | **STOP** |
 
 Threats to this timeline (2026-11-17): (1) the in-app APK update proof (test.8 to test.11) is still not confirmed on Moni's phone; (2) upload-key MATCH / NO MATCH is unchecked: a NO MATCH needs a Play upload-key reset, which takes days and would break 20 Nov; (3) `google-services.json` (FCM) and the Expo username are needed before the AAB; (4) SMTP + allow-list are needed for the 14 email types before 18 Nov; (5) the production merge/deploy needs the main developer's freeze window (RUNBOOK section 2) and the DB password rotation (3c). Items 1 to 4 are on Moni's side; item 5 needs both.
+
+
+## REVISED TIMELINE (Moni, 2026-11-23) - current, replaces both tables above
+| Date | What | Who / STOP |
+|---|---|---|
+| Mon 23 Nov | test.12 (visit roll-up, offline "Waiting to upload", update-sheet snooze fix, POS product_attributes FK fix) on Moni's phone; short regression of those 4 fixes + 9-login smoke; final phone regression | Claude + Moni |
+| Tue 24 Nov | Production deploy (backend, then POS desktop) | **STOP: needs Moni's explicit go in chat** |
+| Wed 25 Nov | Production AAB (`build-production.ps1`), upload to Play Internal testing | **STOP: Moni's go for the build and the Play upload** |
+| Thu 26 Nov | Submit to Play Production | **STOP** |
+
+Status on 2026-11-23: done = in-app APK update proof (test.8 to test.11), 14 emails on staging, POS loop on staging, step 8 integration tests, upload-key reset (SHA1 match), EAS link + FCM, branch pushed. Threats: (1) the 24 Nov production deploy still needs the main developer's freeze window (RUNBOOK section 2), the timezone precheck, the backup + restore test and the DB password / backup-secret rotation; (2) the new POS desktop build (with the product_attributes FK fix) must go out to BOTH update directories; (3) production `.env` must have `BACKUP_ENCRYPTION_KEY` and the real-company SMTP entered before emails are switched on; (4) if Play requires a closed test (12 testers for 14 days) the 26 Nov submit is not reachable, tell Moni immediately; (5) Play review time after 26 Nov is outside our control.
