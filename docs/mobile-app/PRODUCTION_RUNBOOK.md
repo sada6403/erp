@@ -207,3 +207,6 @@ Go to production when: staging verified, backup restored once, upload key = MATC
 - **Order: deploy the backend first, then release the POS desktop.** The new POS pushes the new banner columns; an old backend would ignore them.
 - Nothing seeds banners in production. The 3 TEST banners (`scripts/seed-test-banners.ts`) refuse any company whose name does not contain "test"; confirm none exist in the real company before the Play build.
 - Check after deploy: `curl -H "x-app-key: <key>" .../api/app/v1/catalog/home-layout` returns the six sections; `catalog/banners` returns `{items:[]}` for a company with no banners.
+
+## Required production setting: BACKUP_ENCRYPTION_KEY
+Company SMTP passwords are encrypted with `BACKUP_ENCRYPTION_KEY` (64 hex chars). Staging lacked it and SMTP could not be saved. Before enabling emails, confirm production `.env` has it (check by name only, never print) and that EMAIL_MODE=production only when go-live is approved.

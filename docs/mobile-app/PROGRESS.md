@@ -171,3 +171,6 @@ Built: `email_jobs` queue/status log, 14 email types x en/ta/si, hooks on order 
 
 ## 2026-11-13 Reviews, delivery time, popularity
 Built: `product_reviews` table (cloud + POS SQLite + sync lists), reviews GET/POST, `rating_avg`/`rating_count`/`popularity` on product list and detail, per-branch `estimated_delivery`, POS Reviews page (Mobile App group) and Delivery time section in Online Store. Backend `npm test` 90/90 (new test: reviews eligibility, hidden exclusion, delivery time, popularity), typecheck clean for backend and root. Not yet deployed to staging: git push was blocked (see report).
+
+## 2026-11-22 Staging email smoke test: DONE
+Company test-1 SMTP (Gmail) saved encrypted on staging via `backend/scripts/set-staging-smtp.ps1` (staging needed `BACKUP_ENCRYPTION_KEY`, now set; production must have it too, see PRODUCTION_RUNBOOK). All 14 types (en/ta/si) sent, 0 failed; a non-allow-listed dummy was suppressed; duplicate enqueue rejected. Moni checked Gmail (screenshots of join_received ta, order_confirmed ta, join_approved si: Tamil/Sinhala render correctly, sender "Natural Plantation"); marked done by Moni. Staging EMAIL_ALLOWLIST now holds one address only. Note: header/footer show the company name ("test") on staging, by design.
