@@ -38,7 +38,8 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   icon: './assets/icon.png',
   android: {
     package: ANDROID_PACKAGE,
-    versionCode: 1,
+    // Play used versionCodes 1-5 (old Flutter app). First new build = 6; bump by hand for every Play upload (eas.json appVersionSource is local).
+    versionCode: APP_ENV === 'production' ? 6 : 1,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',
       foregroundImage: './assets/android-icon-foreground.png',

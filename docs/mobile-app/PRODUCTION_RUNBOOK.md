@@ -145,7 +145,7 @@ eas build --platform android --profile production      (credentialsSource: remot
 - `google-services.json` lives at `C:\secure
 f-keys\google-services.json` (git-ignored; the pre-commit hook blocks it). For EAS cloud builds upload it as a file env var: `eas env:create --name GOOGLE_SERVICES_FILE --type file --visibility secret --environment production`, which `app.config.ts` already reads.
 - EAS: `eas init` (needs the Expo username, Moni logs in) writes the project id; set `EAS_PROJECT_ID` for the build and add `owner` if the project sits under an organisation.
-- First Play build must be `versionCode 6`: `eas.json` uses `appVersionSource: remote` + `autoIncrement`, so run `eas build:version:set -p android --profile production` once and enter 6 before the first build.
+- versionCode is managed in `mobile/app.config.ts` (`APP_ENV === production ? 6 : 1`; `eas.json` uses `appVersionSource: local`, no autoIncrement). First Play build = 6; raise it by hand for every later Play upload. Play used 1-5.
 
 ## 8. Play Internal testing
 Upload the AAB to Internal testing, add Moni + boss + team emails (<= 100).
