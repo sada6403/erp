@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.9.6 - 2026-11-23 - Mobile app orders, Smart Buy app features & sync fixes
+
+- App orders: convert a mobile-app order to a POS invoice with locked prices, delivery fee and extracted tax; the order's stock reservation is released at conversion (no double count); Cash on Delivery settles the invoice paid amount.
+- Product sync: product attributes/variants (`product_attributes`) and variant stock aggregates now sync to the cloud and app correctly; the POS pull keeps rows whose optional parent was deleted and accepts NULL for defaulted NOT NULL columns.
+- New admin pages: App Access, Online Store, App Control (banners, featured products, app versions per channel), Product Reviews moderation, Sales Team (hierarchy, monthly targets), Agent Cash approval/remittance, Smart Buy join requests and bank-slip review.
+- Business dates are shown in Asia/Colombo (UTC storage); sync pull overlap handles non-UTC machines.
+- Company profile from POS settings now drives app, receipts and the Play legal pages.
+- Upgrade note: desktop 2.9.6 works with the deployed backend (c9a2ed0). Older desktops keep syncing but do not push the new app-order/product fields.
+
 ## 2.9.5 - 2026-11-10 - POS Management Control, Terminal Isolation & Draft PO Workflow Fix
 
 - Added the Company-Admin-only Management Control menu (`/admin/management`) with secure HTTPS Electron IPC integration for managing Director/management accounts, branch/region/zone scopes, sales targets, salary & commission policies, payroll drafts/approvals, and live session revocation without exposing tokens or Cloud API keys to the renderer.
