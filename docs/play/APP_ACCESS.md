@@ -31,7 +31,7 @@ All accounts are test accounts; any order placed with them is tagged TEST and is
    Try: Deliveries, Members, Earnings.
 
 4) Branch Manager (sales team dashboard)
-   ID: <ADD AFTER THE STAFF ROLE IS DEPLOYED>
+   ID: 0700000104
    Password: <PASSWORD>
    Try: Team dashboard, Targets, Field visits.
 
@@ -44,4 +44,4 @@ If a login ever shows "Incorrect ID or password", please contact <SUPPORT EMAIL>
 - [ ] Backend and VPS reachable (open the status URL from a phone on mobile data).
 - [ ] Reviewer orders show `[TEST ORDER - Play review]` in the POS notes.
 - [ ] The contact email in the box is monitored.
-- [ ] Item 4 (Branch Manager) filled in or deleted from the text before pasting.
+- [ ] Branch Manager (0700000104) logs in and sees the Team dashboard with the Field Officer under it.
