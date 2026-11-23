@@ -40,8 +40,12 @@ export async function getModules(company: AppCompany): Promise<{ smartbuy: boole
     // Supermarket / Food City companies do not sell on Smart Buy or installments (POS v2.8 business types).
     const { rows } = await pool.query(`SELECT business_type FROM companies WHERE id = ? LIMIT 1`, [company.id])
     const grocery = /^(supermarket|food[\s_-]?city)$/i.test(String((rows[0] as { business_type?: string } | undefined)?.business_type ?? ''))
+    // A supermarket can still run Smart Buy when the super admin set an EXPLICIT per-company override (company_module_overrides, is_enabled=1).
+    // Plain company_modules / package rows do not count: tenant seeding writes those for every company.
+    const ov = await pool.query(`SELECT is_enabled FROM company_module_overrides WHERE company_id = ? AND module_key = 'smartbuy' LIMIT 1`, [company.id]).catch(() => ({ rows: [] as Array<{ is_enabled: number }> }))
+    const smartbuyOverride = Number((ov.rows[0] as { is_enabled?: number } | undefined)?.is_enabled ?? 0) === 1
     return {
-      smartbuy: !grocery && e.enabledModules.includes('smartbuy'),
+      smartbuy: (!grocery || smartbuyOverride) && e.enabledModules.includes('smartbuy'),
       installments: !grocery && e.enabledModules.includes('installments'),
     }
   } catch {
