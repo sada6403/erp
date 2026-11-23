@@ -1,7 +1,7 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 /**
- * Natural Plantation app config.
+ * TK Fresh Choice app config.
  * Per build profile (eas.json) these come from env: ANDROID_PACKAGE, API_BASE_URL, APP_KEY, APP_ENV.
  * None of them are secrets: the App Key only identifies the company (AGENTS.md rule 1).
  * Never put the POS sync api_key here.
@@ -29,11 +29,11 @@ const USE_MOCKS = process.env.USE_MOCKS ? process.env.USE_MOCKS === '1' : APP_EN
 export default ({ config }: ConfigContext): ExpoConfig => ({
   ...config,
   // Same app name in every build (the .staging package lets the test app sit next to the Play app); Settings, About shows Test server.
-  name: 'Natural Plantation',
+  name: 'TK Fresh Choice',
   slug: 'nfplantation', // must equal the slug of EAS project 5dd24d2b
   owner: 'natural-plantation', // Expo account/organisation that owns EAS project 5dd24d2b (login user: nfplantation, member of natural-plantation)
   scheme: 'naturalplantation',
-  version: APP_ENV === 'staging' ? '1.0.0-test.12' : '1.0.0',
+  version: APP_ENV === 'staging' ? '1.0.0-test.13' : '1.0.0',
   orientation: 'portrait',
   userInterfaceStyle: 'light',
   icon: './assets/icon.png',

@@ -1,5 +1,5 @@
 {
-  "app": {"name":"Natural Plantation"},
+  "app": {"name":"TK Fresh Choice"},
   "common": {"back":"ආපසු","call":"ඇමතුම","cancel":"අවලංගු","close":"වසන්න","retry":"නැවත උත්සාහ කරන්න","loading":"පූරණය වෙමින්","error":"යම් දෙයක් වැරදුණා","whatsapp":"WhatsApp"},
   "offline": {"bannerNoCache":"සබැඳියක් නැත - සුරකින ලද දත්ත නැත","title":"ඔබ නොබැඳි ය","keepBrowsing":"දිගටම බලන්න","notifyMe":"සබැඳි වූ විට දන්වන්න","banner":"අන්තර්ජාලය නැත — සුරකින ලද භාණ්ඩ පෙන්වයි ({{age}})","backOnlineGo":"ඔබ නැවත ඔන්ලයින් ඇත. දැන් ඇණවුම තැබිය හැක.","backOnlineNotify":"ඔබ නැවත ඔන්ලයින් ඇත. දැන් ඇණවුම තැබිය හැක.","desc":"ඇණවුම් කිරීමට අන්තර්ජාල සම්බන්ධතාවක් අවශ්‍යයි. ඔබ නැවත ඔන්ලයින් ආ විගස අපි දන්වමු. ඔබේ කූඩය ආරක්ෂිතයි.","notifyRegistered":"ඔබ නැවත ඔන්ලයින් ආ විට අපි දන්වමු.","screenBody":"අන්තර්ජාල සම්බන්ධතාවක් නැත"},
   "age": {"now":"දැන් පමණයි","minutes_one":"මිනිත්තු {{count}} කට පෙර","minutes_other":"මිනිත්තු {{count}} කට පෙර","hours_one":"පැය {{count}} කට පෙර","hours_other":"පැය {{count}} කට පෙර","days_one":"දින {{count}} කට පෙර","days_other":"දින {{count}} කට පෙර"},

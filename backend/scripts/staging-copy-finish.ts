@@ -14,9 +14,9 @@ if (!/^pos_stg/.test(String(process.env.MYSQL_DATABASE || ''))) { console.error(
 
 type Row = Record<string, unknown>
 async function main() {
-  const { rows } = await pool.query(`SELECT id, db_schema, api_key, app_key FROM companies WHERE slug = 'test-1' LIMIT 1`)
+  const { rows } = await pool.query(`SELECT id, db_schema, api_key, app_key FROM companies WHERE slug = ? LIMIT 1`, [process.env.STG_SLUG || 'test-1'])
   const c = rows[0] as Row | undefined
-  if (!c || !String(c.db_schema).startsWith('pos_erp_app_test_company_')) throw new Error('staging copy of "test" not found')
+  if (!c || !String(c.db_schema).startsWith('pos_erp_app_test_company_')) throw new Error('staging copy not found')
   const schema = String(c.db_schema)
   await ensureTenantCompatibility(schema)
   const tp = tenantPool(schema)
@@ -37,7 +37,7 @@ async function main() {
   const { rows: pc } = await tp.query<Row>(`SELECT COUNT(*) AS n FROM products`)
   const out = { company_id: c.id, db_schema: schema, pos_api_key: c.api_key, app_key: c.app_key, password: 'Test@1234', branch_id: branchId,
     products: Number(pc[0].n), logins: { customer: '0771110011', agent: 'AG001' } }
-  await writeFile(path.join(process.cwd(), '.seed-output-testcopy.json'), JSON.stringify(out, null, 2))
+  await writeFile(path.join(process.cwd(), process.env.STG_OUT || '.seed-output-testcopy.json'), JSON.stringify(out, null, 2))
   console.log(`Staging copy ready: ${out.products} products in ${schema}`)
   process.exit(0)
 }

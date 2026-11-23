@@ -25,18 +25,37 @@ const inner = Math.round(SIZE * (1 - PAD * 2));
   console.log('source', path.basename(SRC), info.width + 'x' + info.height, 'background', bgHex, 'padding', PAD);
 
   const logo = await sharp(SRC).removeAlpha().resize(inner, inner, { fit: 'contain', background: { r: bg[0], g: bg[1], b: bg[2] } }).png().toBuffer();
+  // Launcher icon mark: an optional simplified crop of the logo (e.g. only the "TK" + leaf, no cart/text).
+  // scripts/launcher-mark.json = { "crop": [left, top, width, height], "clear": [[x, y, w, h], ...] } in SOURCE pixels. Absent = full logo.
+  let mark = logo;
+  const markCfg = path.join(__dirname, 'launcher-mark.json');
+  if (fs.existsSync(markCfg) && !process.env.NO_MARK) {
+    const cfg = JSON.parse(fs.readFileSync(markCfg, 'utf8'));
+    const [cl, ct, cw, ch] = cfg.crop;
+    const fill = { r: bg[0], g: bg[1], b: bg[2] };
+    let base = await sharp(SRC).removeAlpha().png().toBuffer();
+    const overlays = [];
+    for (const [x, y, w, h] of cfg.clear || []) overlays.push({ input: await sharp({ create: { width: w, height: h, channels: 3, background: fill } }).png().toBuffer(), left: x, top: y });
+    for (const poly of cfg.clearPolys || []) {
+      const svg = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${info.width}" height="${info.height}"><polygon points="${poly.map((p) => p.join(",")).join(" ")}" fill="rgb(${bg.join(",")})"/></svg>`);
+      overlays.push({ input: svg, left: 0, top: 0 });
+    }
+    if (overlays.length) base = await sharp(base).composite(overlays).png().toBuffer();
+    mark = await sharp(base).extract({ left: cl, top: ct, width: cw, height: ch }).resize(inner, inner, { fit: 'contain', background: fill }).png().toBuffer();
+    console.log('launcher mark: cropped', cfg.crop.join('x'));
+  }
   const canvas = (extra) => sharp({ create: { width: SIZE, height: SIZE, channels: 4, background: extra } });
   const place = (buf, bgc) => canvas(bgc).composite([{ input: buf, gravity: 'centre' }]).png();
   const out = (n) => path.join(root, 'assets', n);
   const clear = { r: 0, g: 0, b: 0, alpha: 0 };
   const solid = { r: bg[0], g: bg[1], b: bg[2], alpha: 1 };
 
-  await place(logo, solid).toFile(out('icon.png')); // store / legacy icon (opaque)
-  await place(logo, clear).toFile(out('android-icon-foreground.png')); // adaptive foreground (transparent canvas)
+  await place(mark, solid).toFile(out('icon.png')); // store / legacy icon (opaque)
+  await place(mark, clear).toFile(out('android-icon-foreground.png')); // adaptive foreground (transparent canvas)
   await canvas(solid).png().toFile(out('android-icon-background.png')); // adaptive background: logo's own colour
   await place(logo, clear).toFile(out('splash-icon.png')); // splash image, same safe-zone padding
   // Themed (monochrome) icon: dark parts of the logo become the opaque shape.
-  const mono = await sharp(logo).greyscale().negate().raw().toBuffer({ resolveWithObject: true });
+  const mono = await sharp(mark).greyscale().negate().raw().toBuffer({ resolveWithObject: true });
   const rgba = Buffer.alloc(inner * inner * 4);
   for (let i = 0; i < inner * inner; i++) { rgba[i * 4 + 3] = mono.data[i]; }
   const monoLogo = await sharp(rgba, { raw: { width: inner, height: inner, channels: 4 } }).png().toBuffer();
