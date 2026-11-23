@@ -2,6 +2,14 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 
 export function middleware(request: NextRequest) {
+  // Management uses same-origin browser cookies or explicit native bearer tokens.
+  // Do not inherit the legacy sync API's wildcard CORS policy.
+  if (request.nextUrl.pathname.startsWith('/api/management/')) {
+    const response = request.method === 'OPTIONS' ? new NextResponse(null, { status: 204 }) : NextResponse.next()
+    response.headers.set('Cache-Control', 'no-store')
+    response.headers.set('X-Content-Type-Options', 'nosniff')
+    return response
+  }
   // 1. Handle preflight OPTIONS requests for CORS
   if (request.method === 'OPTIONS') {
     return new NextResponse(null, {

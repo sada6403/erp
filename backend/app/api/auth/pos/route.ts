@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
 
   const u = rows[0] as Record<string, unknown>
   const roleName = String(u.role_name || '').trim().toLowerCase()
+  if (u.role_id === 'management-web-only' || roleName === 'management web only') return NextResponse.json({ error: 'Use the assigned management platform' }, { status: 403 })
   const branchId = u.branch_id ? String(u.branch_id) : null
 
   if (roleName === 'company admin' || roleName === 'owner' || roleName === 'super admin' || roleName === 'branch manager') {

@@ -59,7 +59,9 @@ export function createStockPurchase(db: Database.Database, input: StockPurchaseI
       }
     }
     saveBills?.(input.id)
-    requireSavedPurchaseBill(db,input.id)
+    // Orders are drafts: the supplier invoice may only arrive with delivery.
+    // Direct entries receive inventory immediately and must have a bill.
+    if (input.purchaseType === 'direct') requireSavedPurchaseBill(db,input.id)
     return purchase
   })()
 }

@@ -36,15 +36,19 @@ git fetch origin main
 git reset --hard origin/main
 
 echo "[deploy] installing backend dependencies"
+if [[ -f "$APP_DIR/scripts/enable-director-vps.cjs" && ! -f /var/lib/pos-director/installed-v1 ]]; then
+  cd "$APP_DIR"
+  node scripts/enable-director-vps.cjs prepare
+fi
 cd "$BACKEND_DIR"
 npm ci
 
 echo "[deploy] building backend"
-npm run build
+POS_DISABLE_AUTO_MIGRATIONS=1 npm run build
 
 echo "[deploy] restarting backend on port 4001"
 pm2 delete pos-backend >/dev/null 2>&1 || true
-PORT=4001 pm2 start "npm start" --name pos-backend --cwd "$BACKEND_DIR"
+PORT=4001 POS_DISABLE_AUTO_MIGRATIONS=1 MANAGEMENT_PUBLIC_ORIGIN=https://updates.nfplantation.com pm2 start "npm start" --name pos-backend --cwd "$BACKEND_DIR"
 
 if [ -d "$SUPERADMIN_DIR" ]; then
   echo "[deploy] installing superadmin dependencies"
@@ -77,4 +81,8 @@ echo "[deploy] local health check"
 curl -is http://127.0.0.1:3000/api/health || true
 curl -is http://127.0.0.1:4001/api/health || true
 
+if [[ -f "$APP_DIR/scripts/enable-director-vps.cjs" ]]; then
+  cd "$APP_DIR"
+  node scripts/enable-director-vps.cjs publish
+fi
 echo "[deploy] done"

@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<title>Enterprise POS ERP</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+}
+
+body{
+font-family:'Inter',sans-serif;
+min-height:100vh;
+display:flex;
+align-items:center;
+justify-content:center;
+padding:30px;
+
+background:
+radial-gradient(circle at top,
+#2563eb 0%,
+#1e3a8a 35%,
+#0f172a 100%);
+
+color:white;
+}
+
+.container{
+width:100%;
+max-width:850px;
+}
+
+.card{
+background:rgba(15,23,42,.75);
+backdrop-filter:blur(30px);
+border:1px solid rgba(255,255,255,.08);
+border-radius:30px;
+padding:60px;
+text-align:center;
+box-shadow:0 25px 80px rgba(0,0,0,.4);
+}
+
+.logo img{
+width:72px;
+height:72px;
+object-fit:cover;
+border-radius:18px;
+margin-bottom:25px;
+box-shadow:0 10px 30px rgba(0,0,0,.35);
+}
+
+.badge{
+display:inline-block;
+padding:10px 18px;
+border-radius:999px;
+background:rgba(59,130,246,.15);
+border:1px solid rgba(96,165,250,.35);
+color:#93c5fd;
+font-size:14px;
+font-weight:600;
+margin-bottom:25px;
+}
+
+h1{
+font-size:64px;
+font-weight:800;
+letter-spacing:-2px;
+margin-bottom:15px;
+}
+
+.subtitle{
+font-size:22px;
+color:#cbd5e1;
+margin-bottom:30px;
+}
+
+.version{
+font-size:28px;
+font-weight:700;
+color:#93c5fd;
+margin-bottom:35px;
+}
+
+.download-btn{
+display:inline-block;
+text-decoration:none;
+padding:18px 40px;
+border-radius:18px;
+
+background:
+linear-gradient(
+135deg,
+#3b82f6,
+#60a5fa
+);
+
+color:white;
+font-size:18px;
+font-weight:700;
+transition:.3s;
+cursor:pointer;
+}
+
+.download-btn:hover{
+transform:translateY(-4px);
+box-shadow:0 15px 35px rgba(59,130,246,.45);
+}
+
+.platform{
+margin-top:15px;
+color:#94a3b8;
+}
+
+.features{
+margin-top:50px;
+display:grid;
+grid-template-columns:1fr 1fr;
+gap:18px;
+}
+
+.feature{
+background:rgba(255,255,255,.04);
+border:1px solid rgba(255,255,255,.08);
+padding:24px;
+border-radius:20px;
+text-align:left;
+}
+
+.feature h3{
+margin-bottom:8px;
+font-size:18px;
+}
+
+.feature p{
+color:#cbd5e1;
+line-height:1.5;
+}
+
+.trust{
+margin-top:40px;
+display:flex;
+justify-content:center;
+gap:12px;
+flex-wrap:wrap;
+}
+
+.trust span{
+background:rgba(255,255,255,.05);
+padding:12px 16px;
+border-radius:999px;
+font-size:14px;
+color:#cbd5e1;
+}
+
+.footer{
+margin-top:40px;
+color:#94a3b8;
+font-size:14px;
+}
+
+.footer strong{
+color:white;
+}
+
+@media(max-width:768px){
+
+.card{
+padding:35px 20px;
+}
+
+h1{
+font-size:42px;
+}
+
+.subtitle{
+font-size:18px;
+}
+
+.version{
+font-size:22px;
+}
+
+.features{
+grid-template-columns:1fr;
+}
+
+.download-btn{
+width:100%;
+}
+
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<div class="card">
+
+<div class="logo">
+<img src="logo.png" alt="Logo">
+</div>
+
+<div class="badge">
+Official Release
+</div>
+
+<h1>Enterprise POS ERP</h1>
+
+<div class="subtitle">
+Smart Business Management Software
+</div>
+
+<div class="version">
+Version <span id="version">Loading...</span>
+</div>
+
+<a
+id="downloadBtn"
+class="download-btn"
+href="#"
+>
+Download Now
+</a>
+
+<div class="platform">
+Windows Desktop Application
+</div>
+
+<div class="features">
+
+<div class="feature">
+<h3>Inventory Management</h3>
+<p>Track stock and products efficiently.</p>
+</div>
+
+<div class="feature">
+<h3>POS Billing</h3>
+<p>Fast and reliable billing operations.</p>
+</div>
+
+<div class="feature">
+<h3>Customer Management</h3>
+<p>Manage customer records with ease.</p>
+</div>
+
+<div class="feature">
+<h3>Reports & Analytics</h3>
+<p>Powerful business insights and reporting.</p>
+</div>
+
+</div>
+
+<div class="trust">
+<span>Trusted by Businesses</span>
+<span>Enterprise Grade</span>
+<span>Secure Updates</span>
+</div>
+
+<div class="footer">
+<strong>NF Plantation Pvt Ltd</strong>
+<br>
+Official Software Download Portal
+</div>
+
+</div>
+
+</div>
+
+<script>
+
+async function loadUpdateInfo() {
+
+try {
+
+const response = await fetch('/latest.yml?_=' + Date.now(), { cache: 'no-store' });
+const text = await response.text();
+
+const versionMatch =
+text.match(/version:\s*(.+)/);
+
+const pathMatch =
+text.match(/path:\s*(.+)/);
+
+if(versionMatch){
+
+document.getElementById('version')
+.innerText =
+versionMatch[1].trim();
+
+}
+
+if(pathMatch){
+
+let installer =
+pathMatch[1]
+.trim()
+.replace(/['"]/g,'');
+
+installer =
+encodeURI(installer);
+
+const btn =
+document.getElementById('downloadBtn');
+
+btn.href = '/' + installer;
+
+}
+
+}
+catch(error){
+
+document.getElementById('version')
+.innerText = 'Latest';
+
+console.error(error);
+
+}
+
+}
+
+loadUpdateInfo();
+
+</script>
+
+</body>
+</html>

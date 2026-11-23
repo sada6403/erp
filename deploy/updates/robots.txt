@@ -1,0 +1,17 @@
+# Robots.txt for updates.nfplantation.com
+# Enterprise POS ERP — Official Software Portal | NF Plantation (Pvt) Ltd
+
+User-agent: *
+Allow: /
+Allow: /index.html
+Allow: /latest.yml
+Allow: /*.exe
+Allow: /logo.png
+Allow: /sitemap.xml
+Disallow: /director
+Disallow: /director/
+Disallow: /api/
+Disallow: /_next/
+
+Sitemap: https://updates.nfplantation.com/sitemap.xml
+
