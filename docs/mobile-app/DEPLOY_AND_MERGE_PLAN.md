@@ -37,7 +37,7 @@ About 277 files are new `mobile/` files, about 35 docs; the production-affecting
   `app_banners` new columns `link_type, link_target, audience, image_en, image_ta, image_si`; `products.is_featured` (synced; POS pull list + ALLOWED_TABLES already cover `products`);
   `app_settings` key `home_layout` (existing synced table). **Deploy the backend first, then release the POS** (the old POS ignores the new columns; the new POS writes them).
   The mobile app reads banners as `link: {type,target}` (the old `link_url` field is gone from `/catalog/banners`): release the app build only after the backend. Re-diff `appSchema.ts` before the merge.
-- In-app updates on production: set the **production** row in POS > App Control > App Versions (latest, minimum, notes); the production row never serves an APK URL. The Play build uses `expo-in-app-updates`; its `prebuildCommand` fails the build if `REQUEST_INSTALL_PACKAGES` is in the manifest. **MAIN DEV TO CONFIRM** the Play Console app-signing and Internal-testing track exist before the first upload (owner uploads; STOP item).
+- In-app updates on production: set the **production** row in POS > App Control > App Versions (latest, minimum, notes); the production row never serves an APK URL. The Play build uses `expo-in-app-updates`; its `eas-build-on-success` hook (check-play-manifest) fails the build if `REQUEST_INSTALL_PACKAGES` is in the manifest. **MAIN DEV TO CONFIRM** the Play Console app-signing and Internal-testing track exist before the first upload (owner uploads; STOP item).
 - Staging only (not for production): nginx location `/test-apk/` and the test-channel version row; production needs neither.
 
 ## 2. Merge strategy

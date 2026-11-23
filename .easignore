@@ -1,0 +1,42 @@
+# EAS upload filter. The Expo project lives in mobile/ (monorepo: the archive root is the git root). When this file exists
+# EAS ignores .gitignore, so the secret/build-output rules from .gitignore are repeated below.
+# Allow-list: ship only mobile/ and the type-only API contracts that mobile imports as @contracts/*.
+/*
+!/mobile
+!/backend
+/backend/*
+!/backend/lib
+/backend/lib/*
+!/backend/lib/app
+/backend/lib/app/*
+!/backend/lib/app/contracts
+
+# inside mobile/
+mobile/node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+mobile/android/
+mobile/ios/
+mobile/screenshots/
+mobile/coverage/
+mobile/__tests__/
+mobile/*.apk
+mobile/*.aab
+mobile/npm-debug.*
+mobile/expo-env.d.ts
+
+# secrets and signing material: never uploaded (credentials stay remote on EAS; google-services.json comes from the secret env file)
+.env
+.env.*
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+key.properties
+credentials.json
+google-services.json
+GoogleService-Info.plist

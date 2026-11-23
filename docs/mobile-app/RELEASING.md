@@ -77,7 +77,7 @@ If the library or Play is unavailable the app opens the Play listing so a forced
 - **Can only be fully tested from Play Internal testing.** Play offers an update only to an app installed from Play with a higher `versionCode` published in the same track. Sideloaded/staging builds never see it (they use the APK self-update path instead).
 - Test steps (owner, after the first Play upload): install build N from the Internal track, upload build N+1 to Internal, open N: the Play update flow appears. Raise `min_app_version` in POS > App Control > App Versions (production row) to test IMMEDIATE.
 - The placeholder guard in `app.config.ts` only throws when `EAS_BUILD` is set (a real build); `expo config`, `eas credentials` and other CLI evaluations pass with placeholders.
-- The Play build must never declare `REQUEST_INSTALL_PACKAGES`: `eas.json` production `prebuildCommand` runs `scripts/check-play-manifest.cjs`, which fails the build if it does.
+- The Play build must never declare `REQUEST_INSTALL_PACKAGES`: `package.json` `eas-build-on-success` runs `scripts/check-play-manifest.cjs` (production only, after Gradle), which fails the build if it does.
 
 ## (e) Hard STOP list (ask the owner, never do)
 

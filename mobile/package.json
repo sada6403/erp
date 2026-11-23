@@ -68,7 +68,8 @@
     "test": "jest",
     "doctor": "expo-doctor",
     "export:android": "expo export --platform android",
-    "check:play-manifest": "node scripts/check-play-manifest.cjs"
+    "check:play-manifest": "node scripts/check-play-manifest.cjs",
+    "eas-build-on-success": "node scripts/check-play-manifest.cjs --production-only"
   },
   "private": true,
   "jest": {

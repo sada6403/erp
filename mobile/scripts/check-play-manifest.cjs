@@ -6,7 +6,8 @@
  *
  *   node scripts/check-play-manifest.cjs                      # checks android/app/src/main + any merged release manifests
  *   node scripts/check-play-manifest.cjs path/to/AndroidManifest.xml ...
- * Wired as the production EAS prebuildCommand (eas.json) and as `npm run check:play-manifest`.
+ * Wired as the `eas-build-on-success` npm hook (package.json; runs after Gradle on the merged release manifest, production only) and as `npm run check:play-manifest`.
+ * NOT a prebuildCommand: EAS passes prebuildCommand to `expo prebuild` as arguments, so a `&&` chain breaks it ("Invalid project root .../&&").
  */
 const fs = require('fs');
 const path = require('path');
@@ -36,7 +37,10 @@ function findManifests(root) {
   return out;
 }
 
-function main(argv) {
+function main(args) {
+  // --production-only: used by the EAS `eas-build-on-success` hook, which runs for every profile; the staging flavour legitimately has the permission.
+  if (args.includes('--production-only') && process.env.APP_ENV !== 'production') { console.log('check-play-manifest: not a production build, skipped'); return 0; }
+  const argv = args.filter((a) => !a.startsWith('--'));
   const files = argv.length ? argv : findManifests(process.cwd());
   if (!files.length) {
     console.error('check-play-manifest: no AndroidManifest.xml found (run expo prebuild first)');

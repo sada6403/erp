@@ -37,7 +37,7 @@
         "ANDROID_PACKAGE": "nfgroups.naturefarming.app"
       },
       "credentialsSource": "remote",
-      "prebuildCommand": "expo prebuild --platform android && node scripts/check-play-manifest.cjs",
+      "prebuildCommand": "expo prebuild --platform android",
       "environment": "production"
     }
   },
