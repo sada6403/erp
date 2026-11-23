@@ -12,13 +12,23 @@
 const fs = require('fs');
 const path = require('path');
 
-const PERMISSION = 'android.permission.REQUEST_INSTALL_PACKAGES';
+// Play build must declare none of these (installer self-update is staging only; photos use the system Photo Picker, no storage/media permission).
+const FORBIDDEN = [
+  'android.permission.REQUEST_INSTALL_PACKAGES',
+  'android.permission.READ_MEDIA_IMAGES',
+  'android.permission.READ_MEDIA_VIDEO',
+  'android.permission.READ_EXTERNAL_STORAGE',
+  'android.permission.WRITE_EXTERNAL_STORAGE',
+];
+const PERMISSION = FORBIDDEN[0];
 
-/** True when the manifest declares the permission (a tools:node="remove" declaration does not count: it deletes it from the merge). */
-function declaresInstallPermission(xml) {
+/** The forbidden permissions the manifest declares (a tools:node="remove" declaration does not count: it deletes it from the merge). */
+function declaredForbidden(xml) {
   const tags = xml.match(/<uses-permission(?:-sdk-23)?\b[^>]*>/g) || [];
-  return tags.some((t) => t.includes(PERMISSION) && !/tools:node\s*=\s*["']remove["']/.test(t));
+  return FORBIDDEN.filter((p) => tags.some((t) => t.includes(`"${p}"`) && !/tools:node\s*=\s*["']remove["']/.test(t)));
 }
+/** Back-compat: true when REQUEST_INSTALL_PACKAGES is declared. */
+function declaresInstallPermission(xml) { return declaredForbidden(xml).includes(PERMISSION); }
 
 function findManifests(root) {
   const out = [];
@@ -48,13 +58,14 @@ function main(args) {
   }
   let bad = 0;
   for (const f of files) {
-    if (declaresInstallPermission(fs.readFileSync(f, 'utf8'))) {
-      console.error(`FAIL ${f}: declares ${PERMISSION} (Play policy: only the staging/test build may)`);
+    const found = declaredForbidden(fs.readFileSync(f, 'utf8'));
+    if (found.length) {
+      console.error(`FAIL ${f}: declares ${found.join(', ')} (Play build must not)`);
       bad++;
     } else console.log(`ok   ${f}`);
   }
   return bad ? 1 : 0;
 }
 
-module.exports = { declaresInstallPermission, PERMISSION };
+module.exports = { declaresInstallPermission, declaredForbidden, FORBIDDEN, PERMISSION };
 if (require.main === module) process.exit(main(process.argv.slice(2)));

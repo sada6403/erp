@@ -2,7 +2,7 @@ import { compareVersions } from '../src/lib/format';
 import { assertInstallable, isSha256, sha256Matches, toHex } from '../src/features/updates/apkVerify';
 import { REMIND_AFTER_MS, shouldShowAvailable } from '../src/features/updates/remind';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { declaresInstallPermission } = require('../scripts/check-play-manifest.cjs') as { declaresInstallPermission: (xml: string) => boolean };
+const { declaresInstallPermission, declaredForbidden } = require('../scripts/check-play-manifest.cjs') as { declaresInstallPermission: (xml: string) => boolean; declaredForbidden: (xml: string) => string[] };
 
 describe('version compare (semver with test pre-releases)', () => {
   it('orders test builds numerically and puts the release last', () => {
@@ -47,5 +47,12 @@ describe('Play manifest guard', () => {
     expect(declaresInstallPermission('<manifest><uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/></manifest>')).toBe(true);
     expect(declaresInstallPermission('<manifest><uses-permission android:name="android.permission.INTERNET"/></manifest>')).toBe(false);
     expect(declaresInstallPermission('<manifest><uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" tools:node="remove"/></manifest>')).toBe(false);
+  });
+  it('Play manifest check flags media/storage permissions too, but not a tools:node="remove" declaration', () => {
+    const p = (n: string, extra = '') => `<uses-permission android:name="android.permission.${n}"${extra}/>`;
+    expect(declaredForbidden(`<manifest>${p('READ_MEDIA_IMAGES')}${p('READ_MEDIA_VIDEO')}${p('READ_EXTERNAL_STORAGE', ' android:maxSdkVersion="32"')}${p('WRITE_EXTERNAL_STORAGE')}</manifest>`)).toEqual([
+      'android.permission.READ_MEDIA_IMAGES', 'android.permission.READ_MEDIA_VIDEO', 'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE',
+    ]);
+    expect(declaredForbidden(`<manifest>${p('READ_MEDIA_IMAGES', ' tools:node="remove"')}${p('CAMERA')}${p('INTERNET')}</manifest>`)).toEqual([]);
   });
 });

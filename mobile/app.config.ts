@@ -6,6 +6,15 @@ import type { ConfigContext, ExpoConfig } from 'expo/config';
  * None of them are secrets: the App Key only identifies the company (AGENTS.md rule 1).
  * Never put the POS sync api_key here.
  */
+// Play build: never declare these. Photos come from the system Photo Picker (expo-image-picker launchImageLibraryAsync), which needs no
+// storage/media permission, and the Play build must not self-install APKs. scripts/check-play-manifest.cjs (eas-build-on-success) fails the build if any reappears.
+const PLAY_BLOCKED_PERMISSIONS = [
+  'android.permission.REQUEST_INSTALL_PACKAGES',
+  'android.permission.READ_MEDIA_IMAGES',
+  'android.permission.READ_MEDIA_VIDEO',
+  'android.permission.READ_EXTERNAL_STORAGE',
+  'android.permission.WRITE_EXTERNAL_STORAGE',
+];
 const APP_ENV = process.env.APP_ENV ?? 'development';
 // Dev default only. The real Play package comes from ANDROID_PACKAGE (Moni supplies it).
 const ANDROID_PACKAGE = process.env.ANDROID_PACKAGE ?? 'com.naturalplantation.app.dev';
@@ -40,7 +49,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   android: {
     package: ANDROID_PACKAGE,
     // Play used versionCodes 1-5 (old Flutter app). First new build = 6; bump by hand for every Play upload (eas.json appVersionSource is local).
-    versionCode: APP_ENV === 'production' ? 6 : 1,
+    versionCode: APP_ENV === 'production' ? 7 : 1,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',
       foregroundImage: './assets/android-icon-foreground.png',
@@ -49,7 +58,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     },
     predictiveBackGestureEnabled: false,
     // The test build installs its own APK updates (REQUEST_INSTALL_PACKAGES); the Play build must never carry it (Play policy, checked by scripts/check-play-manifest.mjs).
-    ...(APP_ENV === 'staging' ? { permissions: ['android.permission.REQUEST_INSTALL_PACKAGES'] } : { blockedPermissions: ['android.permission.REQUEST_INSTALL_PACKAGES'] }),
+    ...(APP_ENV === 'staging' ? { permissions: ['android.permission.REQUEST_INSTALL_PACKAGES'] } : { blockedPermissions: PLAY_BLOCKED_PERMISSIONS }),
     ...(process.env.GOOGLE_SERVICES_FILE ? { googleServicesFile: process.env.GOOGLE_SERVICES_FILE } : {}),
     // naturalplantation://orders/ONL-1023 etc.
     intentFilters: [
