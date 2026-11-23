@@ -1,16 +1,5 @@
 {
   "file": "smoke",
-  "generated_at": "2026-11-12T10:48:26.984Z",
-  "rows": [
-    {
-      "id": "SMOKE-01",
-      "action": "Register in app",
-      "api": "POST /auth/register -> 201",
-      "cloud": "app_users {\"id\":\"e73be133-eca9-43c0-80c3-19d605980bd1\",\"name\":\"Smoke Test\",\"phone\":\"0738025975\",\"status\":\"active\",\"customer_id\":null,\"created_at\":\"2026-11-12 10:48:21\",\"updated_at\":\"2026-11-12 10:48:21\"}",
-      "pos": "App Access list 200; POS sync 2480 ms",
-      "reverse": "n/a",
-      "ms": 3868,
-      "result": "PASS"
-    }
-  ]
+  "generated_at": "2026-11-23T07:12:01.165Z",
+  "rows": []
 }

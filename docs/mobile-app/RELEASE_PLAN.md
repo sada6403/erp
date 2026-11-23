@@ -67,6 +67,9 @@ Decided by Moni on 2026-11-13 ("the v1.1 items ship as fast updates right after"
 **Smart Buy cash collection**
 - Managers see their team's collections by person and by day inside their scope.
 - Bluetooth thermal printing of receipts (PDF to WhatsApp ships in v1.0).
+**Agent-assisted ordering for Smart Buy customers (TK Fresh Choice), planned 2026-11-23, NOT built until v1.0 is live**
+- Full spec: project doc `v1_1-agent-assisted-ordering.md`. Parts: (A) Smart Buy on for TK (done for v1.0 via per-company override, see DECISIONS 2026-11-23); (B) read-only agent member profile (contributions, bills, draws, wallet); (C) "Buy for customer" (agent verifies NIC + registered phone, shop in on-behalf mode, wallet and/or COD, order pending until POS admin approves, wallet deducted on confirmation); (D) product units kg / L / ml / count / pack (POS product form + bulk-assign for TK products).
+- **Order of work:** 1) wallet sync fix (ARCHITECTURE section 10) FIRST, because wallet deduction on confirmation depends on it; 2) product units; 3) member profile; 4) Buy-for-customer. NIC stays out of the cloud customers table (verify against the stored/hashed value). OTA where no native change, otherwise a new Play build (versionCode + 1).
 **Housekeeping**
 - Native review of the Tamil and Sinhala wording (`sf.*`, `collect.*`, `fewLeft`).
 - Fix the one-day-early monthly due date in the POS (`cycleDueDate`), see PROGRESS 2026-11-13.
