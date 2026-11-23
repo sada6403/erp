@@ -34,6 +34,8 @@ const SECRET_KEYS = new Set([
 ])
 
 const DEFAULTS = {
+  keywords_enabled: false,
+  enforce_unique_codes: true,
   // Company
   company_name: 'Nature Plantation',
   company_address: '',
@@ -388,6 +390,9 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
       }
 
       const current = store.get('app_settings') as Record<string, unknown> || {}
+      for (const key of ['keywords_enabled', 'enforce_unique_codes']) {
+        if (key in payload && Boolean(payload[key]) !== (key === 'keywords_enabled' ? current[key] === true : current[key] !== false)) throw new Error('Use Search Keywords configuration to change keyword settings')
+      }
       if ('supermarket_stock_enabled' in payload && Boolean(payload.supermarket_stock_enabled) !== Boolean(current.supermarket_stock_enabled) && !callerPerms.all) throw new Error('Company Admin access required to configure supermarket stock')
       const next = normalizeForStorage(payload as Record<string, unknown>, current)
       if (next.business_type === 'supermarket' && current.business_type !== 'supermarket') {

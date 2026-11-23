@@ -1,3 +1,5 @@
+import { usePosCatalog } from '@/hooks/usePosCatalog'
+import KeywordManager from '@/components/pos/KeywordManager'
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
@@ -40,6 +42,8 @@ const TYPE_INACTIVE = 'pos-segment-inactive'
 export default function POSPage() {
   const cart = useCartStore()
   const { user } = useAuthStore()
+  const { catalog, error: catalogError } = usePosCatalog(user?.branch_id || user?.branch?.id, user?.id, `${user?.company_id||''}:${user?.deviceId||''}`)
+  const [showKeywords,setShowKeywords] = useState(false)
   const [searchQuery, setSearchQuery]   = useState('')
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [showPayment, setShowPayment]   = useState(false)
@@ -415,6 +419,8 @@ export default function POSPage() {
 
   return (
     <div className="pos-shell pos-cashier absolute inset-0 flex flex-col overflow-hidden">
+      {window.api.keywords && <div className="px-3 text-right"><button className="text-xs underline" onClick={()=>setShowKeywords(true)}>Search keywords</button></div>}
+      {showKeywords && <KeywordManager onClose={()=>setShowKeywords(false)} />}
       {/* Toolbar */}
       <div className="pos-toolbar flex items-center gap-2 px-3 py-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
         {/* Bill type selector */}
@@ -555,7 +561,7 @@ export default function POSPage() {
 
           <div className="flex-1 overflow-y-auto p-4">
             {searchQuery ? (
-              <ProductSearch query={searchQuery} onSelect={handleProductSelect} />
+              <ProductSearch query={searchQuery} catalog={catalog} error={catalogError} onSelect={handleProductSelect} />
             ) : (
               <ProductGrid categoryId={selectedCategory} onSelect={handleProductSelect} />
             )}

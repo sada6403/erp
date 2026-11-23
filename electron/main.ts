@@ -1,3 +1,4 @@
+import { registerKeywordHandlers } from './ipc/keywords'
 import { app, BrowserWindow, ipcMain, shell, protocol, net, Menu } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'path'
@@ -190,6 +191,7 @@ async function bootstrap() {
   registerSyncHandlers(ipcMain)
   registerPrinterHandlers(ipcMain)
   registerSettingsHandlers(ipcMain)
+  registerKeywordHandlers(ipcMain)
   registerAnalyticsHandlers(ipcMain)
   registerAdminHandlers(ipcMain)
   registerOrderHandlers(ipcMain)

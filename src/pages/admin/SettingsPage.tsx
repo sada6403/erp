@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import type React from 'react'
 import { useNavigate } from 'react-router-dom'
 import PageHeader from '@/components/shared/PageHeader'
+import KeywordManager from '@/components/pos/KeywordManager'
 import NumberInput from '@/components/shared/NumberInput'
 import {
   Save, Building2, Barcode, ReceiptText, Printer,
@@ -46,6 +47,7 @@ function defaultInvoiceDesign(prefix: InvoiceDesignId, name: string, paperType: 
 }
 
 export default function SettingsPage() {
+  const [showKeywords,setShowKeywords]=useState(false)
   const [tab, setTab] = useState<Tab>('general')
   const [form, setForm] = useState({
     company_name: 'Nature Plantation',
@@ -260,7 +262,10 @@ export default function SettingsPage() {
   const save = async () => {
     setSaving(true)
     try {
-      const res = await window.api.settings.update(form)
+      const generalSettings = {...form} as Record<string,unknown>
+      delete generalSettings.keywords_enabled
+      delete generalSettings.enforce_unique_codes
+      const res = await window.api.settings.update(generalSettings)
       if (res.success) {
         applySystemTheme(form)
         toast.success('Settings saved')
@@ -304,6 +309,8 @@ export default function SettingsPage() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
+        {showKeywords && <KeywordManager onClose={()=>setShowKeywords(false)} />}
+        {window.api.keywords && <button className="btn-secondary self-end m-2" onClick={()=>setShowKeywords(true)}>Search keyword settings</button>}
       <PageHeader
         title="System Settings"
         subtitle="Company, barcode label, and invoice print layout configuration"

@@ -9,6 +9,8 @@ import { AgentsSection } from './AgentsPage'
 const SUPER_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
 
 const PERMISSION_GROUPS = [
+  {key:'keywords.own',label:'Own Search Keywords',description:'Manage personal product search keywords'},
+  {key:'keywords.manage',label:'Manage Search Keywords',description:'Manage shared search keywords and review drafts'},
   { key: 'all',       label: 'Company Admin',   description: 'Full access to all modules and branches in this company' },
   { key: 'pos',       label: 'POS Billing',      description: 'POS screen, sales, quotations, credit bills' },
   { key: 'inventory', label: 'Inventory',         description: 'Products, GRN, stock lookup, stock count' },

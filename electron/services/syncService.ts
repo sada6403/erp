@@ -378,9 +378,10 @@ export class SyncService {
     const items = db.prepare(`
       SELECT * FROM sync_queue
       WHERE status = 'pending' AND attempts < ?
+      AND (table_name != 'product_search_keywords' OR ?=1)
       ORDER BY created_at ASC, rowid ASC
       LIMIT ?
-    `).all(MAX_ATTEMPTS, BATCH_SIZE) as SyncItem[]
+    `).all(MAX_ATTEMPTS, (store.get('app_settings') as Record<string,unknown> | undefined)?.keywords_enabled===true?1:0, BATCH_SIZE) as SyncItem[]
 
     if (items.length === 0) return
 
@@ -753,6 +754,9 @@ export class SyncService {
     let failure: unknown
       try { await this.pullTables(cloud, ['branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers', 'products', 'stocks', 'customers', 'agents', 'positions', 'regions', 'zones', 'invoices', 'invoice_items', 'payments', 'installment_plans', 'installments', 'installment_payments', 'returns', 'return_items', 'chit_scheme_templates', 'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions', 'chit_scheme_branches', 'withdrawal_requests', 'stock_transfers', 'stock_movements', 'deliveries', 'purchase_orders', 'purchase_items', 'installment_schedule', 'installment_reminders', 'customer_orders', 'customer_order_items', 'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches', 'branch_transfer_logs', 'branch_transfer_prints', 'coupons', 'coupon_redemptions', 'expense_categories', 'expenses', 'capital_transactions', 'cash_sessions', 'loyalty_config', 'loyalty_transactions', 'product_uom', 'product_batches', 'sale_batch_allocations', 'return_batch_allocations', 'product_attributes', 'product_attribute_values', 'product_variants', 'product_variant_stocks', 'audit_logs', 'edit_requests', 'credit_ledger', 'stock_count_sessions', 'stock_count_items', 'discounts', 'agent_remittances', 'smartbuy_wallet', 'smartbuy_wallet_transactions', 'smartbuy_transfer_history', 'commission_rules', 'commission_ledger', 'commission_payouts', 'commission_approval_logs', 'commission_statement_history', 'commission_rule_history', 'chit_payment_reminders', 'held_carts', 'data_clear_events']) } catch (error) { failure = error }
     try { await this.pullTables(cloud, ['supplier_payments']) } catch (error) { failure = failure || error }
+    if ((store.get('app_settings') as Record<string,unknown> | undefined)?.keywords_enabled === true && getDb().prepare("SELECT 1 FROM sqlite_master WHERE name='product_search_keywords' AND type='table'").get()) {
+      try { await this.pullTables(cloud, ['product_search_keywords']) } catch(error) { failure=failure||error }
+    }
     try { await this.pullDeletions(cloud, getDb()) } catch (error) { failure = failure || error }
     if (failure) throw failure
   }
@@ -1259,6 +1263,18 @@ export class SyncService {
     table: string,
     row: Record<string, unknown>
   ): void {
+    if(table==='product_search_keywords') {
+      if(!['global','branch'].includes(String(row.scope_type))||row.user_id!=null||row.terminal_id!=null)throw new Error('Private keyword rejected from company sync')
+      const old=db.prepare('SELECT * FROM product_search_keywords WHERE id=?').get(row.id) as Record<string,unknown>|undefined
+      if(old) {
+        if(old.scope_key!==row.scope_key||old.product_id!==row.product_id)throw new Error('Keyword identity conflict requires review')
+        if(Number(old.version)>Number(row.version))return
+        if(Number(old.version)===Number(row.version)) {
+          if(['keyword','keyword_normalized','review_status','source'].some(key=>old[key]!==row[key])||Number(old.is_active)!==Number(row.is_active))throw new Error('Concurrent keyword edit requires review')
+          return
+        }
+      }
+    }
     if (table === 'branches') {
       reconcileIncomingBranch(db, String(row.id || ''), row.code)
     }

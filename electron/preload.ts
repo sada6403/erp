@@ -2,6 +2,15 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // Expose typed IPC bridge to the renderer process
 const api = {
+  keywords: {
+    status: () => ipcRenderer.invoke('keywords:status'),
+    configure: (input: unknown) => ipcRenderer.invoke('keywords:configure', input),
+    snapshot: () => ipcRenderer.invoke('keywords:snapshot'),
+    list: (options?: unknown) => ipcRenderer.invoke('keywords:list', options),
+    save: (input: unknown) => ipcRenderer.invoke('keywords:save', input),
+    remove: (id: string) => ipcRenderer.invoke('keywords:remove', id),
+    review: (ids: string[], decision: string) => ipcRenderer.invoke('keywords:review', ids, decision),
+  },
   management: {
     connect: (payload: unknown) => ipcRenderer.invoke('management:connect', payload),
     read: (resource: string) => ipcRenderer.invoke('management:read', resource),
