@@ -85,6 +85,8 @@ jobs:
             exit 1
           fi
 
+          bash scripts/qa/test-publish-vps-release.sh
+
           echo "Verified commit SHA: $ACTUAL_COMMIT"
           echo "Verified target version: $pkg_version (live currently: $prev_version)"
           echo "version=$pkg_version" >> "$GITHUB_OUTPUT"
@@ -97,20 +99,18 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 5
     steps:
-      - name: Verify both update URLs share the publication directory
+      - name: Verify write access to both update publication directories
         shell: bash
         run: |
           set -euo pipefail
-          primary="$(readlink -f /var/www/updates)"
-          secondary="$(readlink -f /var/www/html/updates)"
-          echo "HTTPS directory: $primary"
-          echo "Legacy update directory: $secondary"
-          if [[ "$primary" != "$secondary" ]]; then
-            echo "ERROR: Update feeds use separate directories; desktop-only publisher must update both before release." >&2
-            exit 1
-          fi
-          test -f "$primary/latest.yml"
-          echo "Verified one atomic publication updates both feeds."
+          echo "Publisher user ID: $(id -u)"
+          for directory in /var/www/updates /var/www/html/updates; do
+            echo "Publication directory: $(readlink -f "$directory")"
+            test -d "$directory"
+            test -w "$directory" || { echo "ERROR: Release runner cannot publish $directory" >&2; exit 1; }
+            test -f "$directory/latest.yml"
+          done
+          echo "Verified publisher can update both feeds."
 
   build-desktop:
     needs: [validate, preflight-publisher]
@@ -217,6 +217,7 @@ jobs:
           path: |
             release/Enterprise POS ERP Setup ${{ needs.validate.outputs.version }}.exe
             release/latest.yml
+            release/Enterprise POS ERP Setup ${{ needs.validate.outputs.version }}.exe.blockmap
           if-no-files-found: error
           retention-days: 30
 
@@ -237,6 +238,10 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+
       - name: Archive existing live rollback metadata before publication
         env:
           PREV_VERSION: ${{ needs.validate.outputs.prev_version }}
@@ -271,7 +276,7 @@ jobs:
           name: desktop-release-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.short_sha }}
           path: /tmp/pos-desktop-release
 
-      - name: Validate staged files and publish via desktop-only VPS entrypoint
+      - name: Validate staged files and publish both desktop update feeds
         env:
           RELEASE_DIR: /tmp/pos-desktop-release
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
@@ -284,8 +289,11 @@ jobs:
           actual_sha="$(openssl dgst -sha512 -binary "$installer" | openssl base64 -A)"
           declared_sha="$(sed -nE 's/^sha512:[[:space:]]*(.+)[[:space:]]*$/\1/p' "$metadata" | tail -n 1)"
           [[ "$actual_sha" == "$declared_sha" ]] || { echo "Staged SHA-512 mismatch before publish" >&2; exit 1; }
-          : > "$RELEASE_DIR/.publish-request"
-          sudo /usr/local/bin/pos-deploy
+          # Both feeds are used by installed desktops. Publish the verified
+          # immutable installer/blockmap before metadata in each directory.
+          UPDATES_DIR=/var/www/updates bash scripts/publish-vps-release.sh "$RELEASE_DIR" "$RELEASE_VERSION"
+          UPDATES_DIR=/var/www/html/updates bash scripts/publish-vps-release.sh "$RELEASE_DIR" "$RELEASE_VERSION"
+          rm -f "$RELEASE_DIR/.publish-request"
 
       - name: Clean VPS staging directory even on failure
         if: always()

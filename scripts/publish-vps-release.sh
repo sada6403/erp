@@ -43,9 +43,15 @@ trap cleanup EXIT
 
 install -m 0644 "$artifact_dir/$installer" "$stage_dir/$installer"
 install -m 0644 "$metadata_file" "$stage_dir/latest.yml"
+if [[ -f "$artifact_dir/$installer.blockmap" ]]; then
+  install -m 0644 "$artifact_dir/$installer.blockmap" "$stage_dir/$installer.blockmap"
+fi
 
 # Publish the immutable installer first and switch clients by replacing metadata last.
 mv -f "$stage_dir/$installer" "$updates_dir/$installer"
+if [[ -f "$stage_dir/$installer.blockmap" ]]; then
+  mv -f "$stage_dir/$installer.blockmap" "$updates_dir/$installer.blockmap"
+fi
 mv -f "$stage_dir/latest.yml" "$updates_dir/latest.yml"
 
 echo "[release] Published $installer to $updates_dir"
