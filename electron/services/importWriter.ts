@@ -1,0 +1,77 @@
+import type Database from 'better-sqlite3'
+import {randomUUID} from 'crypto'
+import {ImportEffects} from './importEffects'
+import {KeywordService,type KeywordActor} from './keywords'
+import {importType,type ImportType,type ImportOptions} from '../lib/importRegistry'
+import {ensureLegacyOpeningLayer} from './batchInventory'
+import {insertStockMovement} from './stockMovement'
+import {createStockPurchase} from './purchaseEntry'
+export function writeImportRow(db:Database.Database,type:string,data:Record<string,any>,target:Record<string,any>|null,options:ImportOptions,actor:KeywordActor,jobId:string,uniqueCodes:boolean) {
+ const effects=new ImportEffects(db)
+ const reference=(field:'category'|'supplier')=>{
+  if(!data[field])return undefined
+  const table=field==='category'?'categories':'suppliers'
+  const existing=db.prepare(`SELECT id FROM ${table} WHERE LOWER(TRIM(name))=LOWER(?) AND is_active=1`).get(data[field]) as {id:string}|undefined
+  if(existing)return existing.id
+  if(options.unknown!=='create'||!actor.permissions.all)throw new Error(`Unknown ${field}`)
+  const id=randomUUID();effects.put(table,id,{name:data[field],is_active:1});return id
+ }
+ const writeNamedMaster=(table:'categories'|'suppliers')=>{
+  const values=Object.fromEntries(Object.entries(data).filter(([key,value])=>!key.startsWith('_')&&value!==''))
+  target=effects.put(table,target?.id||randomUUID(),{...values,...(!target?{is_active:1}:{})})
+ }
+ const handlers:Record<ImportType,()=>void>={
+  products:()=>{
+  const values:Record<string,any>={name:data.name,sku:data.sku}
+  for(const key of ['barcode','brand','unit','cost_price','selling_price','tax_rate','min_stock_level'])if(data[key]!==undefined&&data[key]!=='')values[key]=data[key]
+  if(data.category)values.category_id=reference('category')
+  if(data.supplier)values.supplier_id=reference('supplier')
+  if(!target)Object.assign(values,{branch_id:null,unit:values.unit||'pcs',cost_price:values.cost_price??0,selling_price:values.selling_price??0,is_active:1})
+  target=effects.put('products',target?.id||randomUUID(),values)
+  },
+  prices:()=>{effects.put('products',target!.id,{cost_price:data.cost_price,selling_price:data.selling_price})},
+  brands:()=>{effects.put('products',target!.id,{brand:data.brand})},
+  categories:()=>writeNamedMaster('categories'),
+  suppliers:()=>writeNamedMaster('suppliers'),
+  opening_stock:()=>{
+
+  const productId=target!.id
+  const read={stocks:()=>db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS NULL').all(productId,actor.branchId) as any[],product_batches:()=>db.prepare('SELECT * FROM product_batches WHERE product_id=? AND branch_id=?').all(productId,actor.branchId) as any[],stock_movements:()=>db.prepare('SELECT * FROM stock_movements WHERE product_id=? AND reference_order_id=?').all(productId,jobId) as any[]}
+  effects.observe(read,()=>{
+   ensureLegacyOpeningLayer(db,productId,actor.branchId)
+   const stocks=read.stocks();if(stocks.length>1)throw new Error('Duplicate stock balances require reconciliation before import')
+   if(stocks.length)db.prepare("UPDATE stocks SET quantity=quantity+?,updated_at=datetime('now') WHERE id=?").run(data.quantity,stocks[0].id)
+   else db.prepare('INSERT INTO stocks(id,product_id,branch_id,quantity,damaged_qty) VALUES(?,?,?,?,0)').run(randomUUID(),productId,actor.branchId,data.quantity)
+   effects.put('product_batches',randomUUID(),{product_id:productId,branch_id:actor.branchId,batch_number:data.batch_no||`IMPORT-${jobId.slice(0,8)}`,expiry_date:data.expiry_date||null,quantity:data.quantity,cost_price:data.cost_price,original_quantity:data.quantity,sold_quantity:0,returned_quantity:0,damaged_quantity:0,historical_cost_known:1,status:'available',purchase_date:data.purchase_date,created_by:actor.userId,notes:`Opening stock import ${jobId}`})
+   insertStockMovement(db,{product_id:productId,to_branch_id:actor.branchId,quantity:data.quantity,movement_type:'ADJUSTMENT',reference_order_id:jobId,created_by:actor.userId,notes:`Opening stock import ${jobId}`})
+  })
+   },
+  keywords:()=>{/* Shared scoped alias writer runs after the primary handler. */},
+  stock_in:()=>{throw new Error('Stock-in requires the grouped receipt handler')}
+ }
+ const handler=handlers[importType(type).id]
+ handler()
+ if((type==='products'||type==='keywords')&&data._aliases?.length) {
+  effects.queue(uniqueCodes) // Parent master/reference events precede alias events in the existing outbox.
+  const id=target!.id
+  effects.observe({product_search_keywords:()=>db.prepare('SELECT * FROM product_search_keywords WHERE product_id=?').all(id) as any[]},()=>{
+   const service=new KeywordService(db,actor,uniqueCodes)
+   for(const keyword of data._aliases)service.save({id:type==='keywords'?data._keyword_id:undefined,version:type==='keywords'?data._keyword_version:undefined,product_id:id,keyword,scope_type:type==='keywords'?data.scope:'global',keyword_type:type==='keywords'?data.keyword_type||undefined:keyword===data.quick_code?'code':undefined,source:'import'})
+  })
+  effects.acknowledge('product_search_keywords') // KeywordService already queued these atomically.
+ }
+ return effects
+}
+export function writeImportReceipt(db:Database.Database,rows:Record<string,any>[],actor:KeywordActor,jobId:string,saveBills:(id:string)=>void) {
+ const effects=new ImportEffects(db),first=rows[0]
+ const products=[...new Set(rows.map(row=>row.product_id))]
+ const placeholders=products.map(()=>'?').join(',')
+ const reads:Record<string,()=>Record<string,any>[]>={}
+ for(const table of ['products','stocks','product_batches'])reads[table]=()=>db.prepare(`SELECT * FROM ${table} WHERE ${table==='products'?'id':'product_id'} IN (${placeholders})`).all(...products) as any[]
+ reads.purchase_orders=()=>db.prepare('SELECT * FROM purchase_orders WHERE id=?').all(jobId) as any[]
+ reads.purchase_items=()=>db.prepare('SELECT * FROM purchase_items WHERE po_id=?').all(jobId) as any[]
+ reads.purchase_attachments=()=>db.prepare('SELECT * FROM purchase_attachments WHERE purchase_id=?').all(jobId) as any[]
+ reads.stock_movements=()=>db.prepare('SELECT * FROM stock_movements WHERE reference_order_id=?').all(jobId) as any[]
+ effects.observe(reads,()=>createStockPurchase(db,{id:jobId,poNumber:`IMP-${jobId}`,branchId:actor.branchId,userId:actor.userId,supplierId:first.supplier_id,purchaseType:'direct',purchaseDate:first.purchase_date,invoiceNumber:first.invoice_no,notes:`Stock-in import ${jobId}`,items:rows.map(row=>({product_id:row.product_id,quantity:row.quantity,unit_cost:row.cost_price,selling_price:row.selling_price,batch_number:row.batch_no,expiry_date:row.expiry_date}))},saveBills))
+ return effects
+}

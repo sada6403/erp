@@ -63,7 +63,7 @@ export class KeywordService {
     const rows=this.db.prepare("SELECT k.* FROM product_search_keywords k JOIN products p ON p.id=k.product_id WHERE p.is_active=1 AND k.is_active=1 AND k.review_status='approved'").all() as KeywordRow[]
     return rows.filter(row=>visibleKeyword(row,this.actor))
   }
-  save(input:{id?:string;version?:number;product_id:string;keyword:string;scope_type:KeywordScope;keyword_type?:string;is_active?:boolean}) {
+  save(input:{id?:string;version?:number;product_id:string;keyword:string;scope_type:KeywordScope;keyword_type?:string;is_active?:boolean;source?:'manual'|'import'}) {
     this.ready();this.product(input.product_id)
     const text=validateKeyword(input.keyword)
     if(!['global','branch','terminal','user'].includes(input.scope_type))throw new Error('Invalid keyword scope')
@@ -78,7 +78,7 @@ export class KeywordService {
     if(!['word','tanglish','native_script','code'].includes(type))throw new Error('Invalid keyword type')
     const now=new Date().toISOString()
     const row={id:old?.id||randomUUID(),product_id:input.product_id,keyword:text.keyword,keyword_normalized:text.normalized,keyword_type:type,script:text.script,
-      source:'manual',scope_type:input.scope_type,scope_key:scopeKey,branch_id:input.scope_type==='branch'?owner:null,terminal_id:input.scope_type==='terminal'?owner:null,user_id:input.scope_type==='user'?owner:null,
+      source:input.source==='import'?'import':'manual',scope_type:input.scope_type,scope_key:scopeKey,branch_id:input.scope_type==='branch'?owner:null,terminal_id:input.scope_type==='terminal'?owner:null,user_id:input.scope_type==='user'?owner:null,
       parent_id:null,review_status:'approved',created_by:old?.created_by||this.actor.userId,created_at:old?.created_at||now,updated_at:now,version:Number(old?.version||0)+1,is_active:input.is_active===false?0:1} as KeywordRow
     this.mayWrite(row)
     if(old&&(old.product_id!==row.product_id||old.scope_key!==row.scope_key))throw new Error('Create a separate keyword instead of changing its product or scope')

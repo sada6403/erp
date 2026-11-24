@@ -9,7 +9,7 @@ export interface StockPurchaseInput {
   id: string; poNumber: string; branchId: string; userId?: string | null
   supplierId: string; purchaseType: 'order' | 'direct'; purchaseDate: string
   invoiceNumber?: string; expectedDate?: string; notes?: string
-  items: { product_id: string; quantity: number; unit_cost: number; selling_price?: number | null }[]
+  items: { product_id: string; quantity: number; unit_cost: number; selling_price?: number | null; batch_number?:string|null; expiry_date?:string|null }[]
 }
 const round = (value: number) => Math.round(value * 1e6)/1e6
 export function createStockPurchase(db: Database.Database, input: StockPurchaseInput, saveBills?: (purchaseId: string) => void) {
@@ -53,7 +53,7 @@ export function createStockPurchase(db: Database.Database, input: StockPurchaseI
         if(stock) db.prepare("UPDATE stocks SET quantity=quantity+?,updated_at=datetime('now') WHERE id=?").run(row.quantity,stock.id)
         else db.prepare('INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)').run(randomUUID(),item.product_id,input.branchId,row.quantity)
         createReceiptBatch(db,{productId:item.product_id,branchId:input.branchId,purchaseId:input.id,purchaseItemId:row.id,
-          quantity:row.quantity,unitCost:item.unit_cost,sellingPrice:row.selling_price,purchaseDate:input.purchaseDate,createdBy:input.userId})
+          quantity:row.quantity,unitCost:item.unit_cost,sellingPrice:row.selling_price,purchaseDate:input.purchaseDate,createdBy:input.userId,batchNumber:item.batch_number,expiryDate:item.expiry_date})
         insertStockMovement(db,{product_id:item.product_id,to_branch_id:input.branchId,quantity:row.quantity,
           movement_type:'RECEIVE',reference_order_id:input.id,created_by:input.userId,notes:`Direct stock purchase ${input.poNumber}`})
       }
