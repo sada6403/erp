@@ -234,6 +234,11 @@ const api = {
       verify:            (id: string, action: 'approve' | 'reject', notes?: string) => ipcRenderer.invoke('chits:contributions:verify', id, action, notes),
       pendingTransfers: (filters?: unknown) => ipcRenderer.invoke('chits:contributions:pendingTransfers', filters),
     },
+    // Cash the mobile-app agents collected, waiting for the branch to receive it and approve in bulk.
+    appCollections: {
+      pending: (filters?: { agent_id?: string }) => ipcRenderer.invoke('chits:appCollections:pending', filters),
+      settle:  (payload: { agent_id: string; approve_ids?: string[]; reject?: Array<{ id: string; reason: string }>; received_amount?: number; notes?: string }) => ipcRenderer.invoke('chits:appCollections:settle', payload),
+    },
     agents: {
       report: (filters?: unknown) => ipcRenderer.invoke('chits:agents:report', filters),
       detail: (agentId: string)   => ipcRenderer.invoke('chits:agents:detail', agentId),
@@ -339,6 +344,61 @@ const api = {
     logPrint:       (id: string) => ipcRenderer.invoke('branchTransfers:logPrint', id),
   },
 
+  // Mobile app admin (Super Admin only; enforced again in the main process)
+  appAccess: {
+    list:        (filters?: unknown) => ipcRenderer.invoke('appAccess:list', filters),
+    invite:      (targets: unknown) => ipcRenderer.invoke('appAccess:invite', targets),
+    openChat:    (dispatchId: string) => ipcRenderer.invoke('appAccess:openChat', dispatchId),
+    discardChat: (dispatchId: string) => ipcRenderer.invoke('appAccess:discardChat', dispatchId),
+    setStatus:   (userId: string, status: 'active' | 'disabled') => ipcRenderer.invoke('appAccess:setStatus', userId, status),
+    resetRequests: (filters?: unknown) => ipcRenderer.invoke('appAccess:resetRequests', filters),
+    resendTempPassword: (requestId: string) => ipcRenderer.invoke('appAccess:resendTempPassword', requestId),
+  },
+  appRequests: {
+    joinList:    (filters?: unknown) => ipcRenderer.invoke('joinRequests:list', filters),
+    joinPhoto:   (id: string, side: 'front' | 'back') => ipcRenderer.invoke('joinRequests:photo', id, side),
+    joinDecide:  (id: string, decision: 'approve' | 'reject', reason?: string) => ipcRenderer.invoke('joinRequests:decide', id, decision, reason),
+    slipList:    (filters?: unknown) => ipcRenderer.invoke('paymentSlips:list', filters),
+    slipImage:   (id: string) => ipcRenderer.invoke('paymentSlips:image', id),
+    slipDecide:  (id: string, decision: 'verify' | 'reject', reason?: string) => ipcRenderer.invoke('paymentSlips:decide', id, decision, reason),
+  },
+  salesTeam: {
+    assignments: () => ipcRenderer.invoke('salesTeam:assignments'),
+    assign:      (input: unknown) => ipcRenderer.invoke('salesTeam:assign', input),
+    unassign:    (staffId: string) => ipcRenderer.invoke('salesTeam:unassign', staffId),
+    overview:    (period?: string) => ipcRenderer.invoke('salesTeam:overview', period),
+    targets:     (staffId: string) => ipcRenderer.invoke('salesTeam:targets', staffId),
+    setTarget:   (input: unknown) => ipcRenderer.invoke('salesTeam:setTarget', input),
+  },
+  productReviews: {
+    list:      (filters?: unknown) => ipcRenderer.invoke('productReviews:list', filters),
+    setHidden: (id: string, hidden: boolean, reason?: string) => ipcRenderer.invoke('productReviews:setHidden', id, hidden, reason),
+  },
+  appVersions: {
+    list:    () => ipcRenderer.invoke('appVersions:list'),
+    save:    (payload: unknown) => ipcRenderer.invoke('appVersions:save', payload),
+    hashApk: (channel: 'test') => ipcRenderer.invoke('appVersions:hashApk', channel),
+  },
+  onlineStore: {
+    bannersList:   () => ipcRenderer.invoke('onlineStore:banners:list'),
+    bannerSave:    (payload: unknown) => ipcRenderer.invoke('onlineStore:banners:save', payload),
+    bannerDelete:  (id: string) => ipcRenderer.invoke('onlineStore:banners:delete', id),
+    bannerSetActive: (id: string, active: boolean) => ipcRenderer.invoke('onlineStore:banners:setActive', id, active),
+    bannersReorder:  (ids: string[]) => ipcRenderer.invoke('onlineStore:banners:reorder', ids),
+    bannerStats:     (range?: { from?: string; to?: string }) => ipcRenderer.invoke('onlineStore:banners:stats', range),
+    categoriesList:  () => ipcRenderer.invoke('onlineStore:categories:list'),
+    homeLayoutGet:   () => ipcRenderer.invoke('onlineStore:homeLayout:get'),
+    homeLayoutSave:  (sections: unknown) => ipcRenderer.invoke('onlineStore:homeLayout:save', sections),
+    setFeatured:     (ids: string[], featured: boolean) => ipcRenderer.invoke('onlineStore:products:setFeatured', ids, featured),
+    flashDealsList:  () => ipcRenderer.invoke('onlineStore:flashDeals:list'),
+    productsList:  (filters?: unknown) => ipcRenderer.invoke('onlineStore:products:list', filters),
+    setOnline:     (ids: string[], online: boolean) => ipcRenderer.invoke('onlineStore:products:setOnline', ids, online),
+    deliveryList: () => ipcRenderer.invoke('onlineStore:delivery:list'),
+    deliverySave: (branchId: string, payload: unknown) => ipcRenderer.invoke('onlineStore:delivery:save', branchId, payload),
+    settingsGet:   () => ipcRenderer.invoke('onlineStore:settings:get'),
+    settingsSave:  (payload: unknown) => ipcRenderer.invoke('onlineStore:settings:save', payload),
+  },
+
   stockCounts: {
     list:       () => ipcRenderer.invoke('stockCounts:list'),
     create:     (payload: unknown) => ipcRenderer.invoke('stockCounts:create', payload),
@@ -355,6 +415,9 @@ const api = {
     get:          (id: string) => ipcRenderer.invoke('orders:get', id),
     create:       (payload: unknown) => ipcRenderer.invoke('orders:create', payload),
     updateStatus: (id: string, status: string, payload?: unknown) => ipcRenderer.invoke('orders:updateStatus', id, status, payload),
+    agentsForOrder: (orderId: string) => ipcRenderer.invoke('orders:agentsForOrder', orderId),
+    assignAgent:    (orderId: string, agentId: string | null) => ipcRenderer.invoke('orders:assignAgent', orderId, agentId),
+    convertToInvoice: (orderId: string, input?: unknown) => ipcRenderer.invoke('orders:convertToInvoice', orderId, input),
   },
 
   // Analytics

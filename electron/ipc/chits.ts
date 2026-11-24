@@ -16,6 +16,7 @@ import * as XLSX from 'xlsx'
 import { safeHandle } from './ipcHandler'
 import { PHONE_RE, EMAIL_RE, NIC_RE, validateContactFields } from '../services/contactValidation'
 import { simulateSmartBuyScheme, findBreakEvenMembers, maxEarlyWinners, type ViabilityInputs } from '../services/smartBuyViability'
+import { colomboToday } from '../lib/colomboDate'
 
 const store = createCompanyStore()
 
@@ -2362,7 +2363,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
         db.prepare(`
           UPDATE chit_members
-          SET redemption_type=?, won_cycle_no=?, product_received_at=date('now'),
+          SET redemption_type=?, won_cycle_no=?, product_received_at=date('now','+330 minutes'),
               installment_id=NULL, status='redeemed',
               claim_status='pending_claim', claim_due_date=?, entitlement_value=?, voucher_id=?,
               updated_at=datetime('now')
@@ -2372,7 +2373,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           table: 'chit_members', id: String(winner.id), op: 'UPDATE',
           row: {
             id: winner.id, redemption_type: isFinalCycle ? 'final_batch' : 'draw',
-            won_cycle_no: cycleNo, product_received_at: new Date().toISOString().slice(0, 10),
+            won_cycle_no: cycleNo, product_received_at: colomboToday(),
             installment_id: null, status: 'redeemed',
             claim_status: 'pending_claim', claim_due_date: claimDueDate, entitlement_value: entitlementValue,
             voucher_id: voucher.couponId,
@@ -2521,14 +2522,14 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
       db.prepare(`
         UPDATE chit_members
-        SET redemption_type='early', product_received_at=date('now'), installment_id=?,
+        SET redemption_type='early', product_received_at=date('now','+330 minutes'), installment_id=?,
             contributions_paid=contributions_paid+?, status='redeemed', updated_at=datetime('now')
         WHERE id=?
       `).run(repayment?.installmentId || null, amount, memberId)
       enqueue.push({
         table: 'chit_members', id: memberId, op: 'UPDATE',
         row: {
-          id: memberId, redemption_type: 'early', product_received_at: new Date().toISOString().slice(0, 10),
+          id: memberId, redemption_type: 'early', product_received_at: colomboToday(),
           installment_id: repayment?.installmentId || null,
           contributions_paid: money(Number(member.contributions_paid || 0) + amount), status: 'redeemed',
         },
@@ -2730,7 +2731,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     return { success: true, data: contributionQuote(db, member, scheme, resolvedCycle, paidAt || new Date().toISOString()) }
   })
 
-  safeHandle(ipcMain, 'chits:contributions:verify', async (_e, contributionId: string, action: 'approve' | 'reject', notes?: string) => {
+  // Named (not inline) so the app-collections settlement below approves through exactly the same code. Body unchanged.
+  const verifyContribution = async (contributionId: string, action: 'approve' | 'reject', notes?: string) => {
     const perms = currentPerms()
     if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
 
@@ -2815,6 +2817,124 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     }
     await touchSchemeSync(db, String(contribution.scheme_id))
     return { success: true, data: { creditApplied, creditBalance: creditBalanceAfter } }
+  }
+  safeHandle(ipcMain, 'chits:contributions:verify', (_e, contributionId: string, action: 'approve' | 'reject', notes?: string) => verifyContribution(contributionId, action, notes))
+
+  // ── App cash collections (additive) ─────────────────────────────────────
+  // Rows the mobile app creates: method 'cash', status 'pending_verification', collected_by_agent_id set (the POS itself only ever
+  // makes bank_transfer rows pending). The branch receives the agent's cash, then approves in bulk; every approval goes through
+  // verifyContribution above, which stays the single authority for member totals, credit and sync.
+  const APP_COLLECTION_WHERE = `cc.status = 'pending_verification' AND cc.method = 'cash' AND cc.collected_by_agent_id IS NOT NULL`
+
+  // The POS recomputes the late-fee SPLIT at approval (the app only displays a port of the rule). The cash amount the agent
+  // actually took is a fact and never changes, so only late_fee_applied moves, and the remittance still matches.
+  function reconcileAppCollectionFee(db: ReturnType<typeof getDb>, contribution: Record<string, unknown>): { from: number; to: number } | null {
+    if (contribution.cycle_no === null || contribution.cycle_no === undefined) return null
+    const scheme = db.prepare('SELECT contribution_amount, start_date, late_payment_days, late_fee_amount, frequency FROM chit_schemes WHERE id=?').get(contribution.scheme_id) as Record<string, unknown> | undefined
+    if (!scheme) return null
+    const cycleNo = Number(contribution.cycle_no)
+    const balance = computeMemberCycleBalance(db, String(contribution.member_id), String(contribution.scheme_id), cycleNo, Number(scheme.contribution_amount) || 0)
+    const dueDate = cycleDueDate(String(scheme.start_date), cycleNo, Number(scheme.late_payment_days) || 0, String(scheme.frequency || 'monthly'))
+    const isLate = String(contribution.paid_at || '').slice(0, 10) > dueDate && balance.balanceDue > 0.01
+    const others = db.prepare(`
+      SELECT COALESCE(SUM(late_fee_applied), 0) as total FROM chit_contributions
+      WHERE member_id=? AND scheme_id=? AND cycle_no=? AND id<>? AND status IN ('approved','pending_verification')
+    `).get(contribution.member_id, contribution.scheme_id, cycleNo, contribution.id) as { total: number }
+    const wanted = isLate && Number(others.total || 0) <= 0.005 ? money(Number(scheme.late_fee_amount) || 0) : 0
+    const fee = Math.min(wanted, money(Number(contribution.amount) || 0))
+    const from = money(Number(contribution.late_fee_applied) || 0)
+    if (Math.abs(fee - from) < 0.005) return null
+    db.prepare(`UPDATE chit_contributions SET late_fee_applied=?, updated_at=datetime('now') WHERE id=?`).run(fee, contribution.id)
+    contribution.late_fee_applied = fee
+    return { from, to: fee }
+  }
+
+  safeHandle(ipcMain, 'chits:appCollections:pending', (_e, filters: { agent_id?: string } = {}) => {
+    const db = getDb()
+    const caller = authUser()
+    const perms = currentPerms(caller)
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
+    const branchId = resolveScopedBranchId(perms, caller, undefined)
+    const conditions = [APP_COLLECTION_WHERE]
+    const params: unknown[] = []
+    if (branchId) { conditions.push('cc.branch_id = ?'); params.push(branchId) }
+    if (filters?.agent_id) { conditions.push('cc.collected_by_agent_id = ?'); params.push(filters.agent_id) }
+    const rows = db.prepare(`
+      SELECT cc.id, cc.amount, cc.late_fee_applied, cc.cycle_no, cc.receipt_number, cc.paid_at, cc.collected_by_agent_id as agent_id,
+        ag.code as agent_code, ag.name as agent_name, cs.name as scheme_name, c.name as customer_name
+      FROM chit_contributions cc
+      LEFT JOIN agents ag ON ag.id = cc.collected_by_agent_id
+      LEFT JOIN chit_schemes cs ON cs.id = cc.scheme_id
+      LEFT JOIN chit_members m ON m.id = cc.member_id
+      LEFT JOIN customers c ON c.id = m.customer_id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY ag.name, cc.paid_at
+    `).all(...params)
+    return { success: true, data: rows }
+  })
+
+  // One agent's hand-over: approve the cash that was received, reject the rest with a reason. received_amount must equal the approved total.
+  safeHandle(ipcMain, 'chits:appCollections:settle', async (_e, payload: { agent_id?: string; approve_ids?: string[]; reject?: Array<{ id: string; reason: string }>; received_amount?: number; notes?: string }) => {
+    const perms = currentPerms()
+    if (!canManage(perms)) return { success: false, error: 'Smart Buy management access required' }
+    const db = getDb()
+    const caller = authUser()
+    const agentId = String(payload?.agent_id || '')
+    const agent = db.prepare('SELECT id, branch_id FROM agents WHERE id=?').get(agentId) as { id: string; branch_id: unknown } | undefined
+    if (!agent) return { success: false, error: 'Agent not found' }
+    if (!assertBranchScope(perms, caller, agent.branch_id)) return { success: false, error: 'You do not have access to this agent' }
+    const approveIds = [...new Set((payload.approve_ids || []).map(String))]
+    const rejects = (payload.reject || []).map(r => ({ id: String(r.id), reason: String(r.reason || '').trim() }))
+    if (!approveIds.length && !rejects.length) return { success: false, error: 'Nothing selected' }
+    if (rejects.some(r => !r.reason)) return { success: false, error: 'A reason is required to reject a collection' }
+    if (approveIds.some(id => rejects.some(r => r.id === id))) return { success: false, error: 'A collection cannot be approved and rejected at once' }
+
+    const load = (id: string) => db.prepare(`SELECT cc.* FROM chit_contributions cc WHERE cc.id=? AND ${APP_COLLECTION_WHERE}`).get(id) as Record<string, unknown> | undefined
+    const rows = new Map<string, Record<string, unknown>>()
+    for (const id of [...approveIds, ...rejects.map(r => r.id)]) {
+      const row = load(id)
+      if (!row || String(row.collected_by_agent_id) !== agentId) return { success: false, error: 'A selected collection is not pending for this agent' }
+      if (!assertBranchScope(perms, caller, row.branch_id)) return { success: false, error: 'You do not have access to a selected collection' }
+      rows.set(id, row)
+    }
+    const approveTotal = money(approveIds.reduce((a, id) => a + (Number(rows.get(id)!.amount) || 0), 0))
+    const received = payload.received_amount === undefined || payload.received_amount === null ? null : money(Number(payload.received_amount))
+    if (approveIds.length && (received === null || Math.abs(received - approveTotal) > 0.005)) {
+      return { success: false, error: `Cash received (Rs.${received ?? 0}) does not match the approved total (Rs.${approveTotal})` }
+    }
+    if (!approveIds.length && received !== null && received > 0) return { success: false, error: 'No collection is approved, so no cash can be received' }
+
+    const approved: string[] = []; const rejected: string[] = []; const failed: Array<{ id: string; error: string }> = []
+    let remitted = 0
+    for (const id of approveIds) {
+      const row = rows.get(id)!
+      const split = reconcileAppCollectionFee(db, row)
+      if (split) await enqueuSync('chit_contributions', id, 'UPDATE', { id, late_fee_applied: split.to })
+      const res = await verifyContribution(id, 'approve') as { success: boolean; error?: string }
+      if (res.success) { approved.push(id); remitted = money(remitted + (Number(row.amount) || 0)) } else failed.push({ id, error: res.error || 'Failed' })
+    }
+    for (const r of rejects) {
+      const res = await verifyContribution(r.id, 'reject', r.reason) as { success: boolean; error?: string }
+      if (res.success) rejected.push(r.id); else failed.push({ id: r.id, error: res.error || 'Failed' })
+    }
+    let remittanceId: string | null = null
+    if (remitted > 0) {
+      remittanceId = crypto.randomUUID()
+      const row = {
+        id: remittanceId, agent_id: agentId, branch_id: agent.branch_id, amount: remitted, method: 'cash', bank_reference: null,
+        submitted_at: new Date().toISOString(), received_by: caller.id || null, notes: payload.notes || `App collections: ${approved.length} receipt(s)`,
+      }
+      db.prepare(`
+        INSERT INTO agent_remittances (id, agent_id, branch_id, amount, method, bank_reference, submitted_at, received_by, notes)
+        VALUES (@id,@agent_id,@branch_id,@amount,@method,@bank_reference,@submitted_at,@received_by,@notes)
+      `).run(row)
+      logAudit(db, {
+        userId: (caller.id as string) || null, branchId: (agent.branch_id as string) || null,
+        action: 'AGENT_REMITTANCE_RECORDED', tableName: 'agent_remittances', recordId: remittanceId, newValues: { agentId, amount: remitted, approved: approved.length },
+      })
+      await enqueuSync('agent_remittances', remittanceId, 'INSERT', row)
+    }
+    return { success: true, data: { approved, rejected, failed, remitted, remittance_id: remittanceId } }
   })
 
   safeHandle(ipcMain, 'chits:contributions:pendingTransfers', (_e, filters: Record<string, unknown> = {}) => {
@@ -2858,8 +2978,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (filters.branchId) { conditions.push('cs.branch_id = ?'); params.push(filters.branchId) }
     if (filters.status) { conditions.push('cs.status = ?'); params.push(filters.status) }
     if (filters.agentId) { conditions.push('cs.agent_id = ?'); params.push(filters.agentId) }
-    if (filters.dateFrom) { conditions.push('date(cs.created_at) >= date(?)'); params.push(filters.dateFrom) }
-    if (filters.dateTo) { conditions.push('date(cs.created_at) <= date(?)'); params.push(filters.dateTo) }
+    if (filters.dateFrom) { conditions.push("date(cs.created_at,'+330 minutes') >= date(?)"); params.push(filters.dateFrom) }
+    if (filters.dateTo) { conditions.push("date(cs.created_at,'+330 minutes') <= date(?)"); params.push(filters.dateTo) }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
 
     const rows = db.prepare(`
@@ -3111,8 +3231,8 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     if (filters.agentId) { conditions.push('cc.collected_by_agent_id = ?'); params.push(filters.agentId) }
     conditions.push('cc.status = ?')
     params.push(filters.status || 'approved')
-    if (filters.dateFrom) { conditions.push('date(cc.paid_at) >= date(?)'); params.push(filters.dateFrom) }
-    if (filters.dateTo) { conditions.push('date(cc.paid_at) <= date(?)'); params.push(filters.dateTo) }
+    if (filters.dateFrom) { conditions.push("date(cc.paid_at,'+330 minutes') >= date(?)"); params.push(filters.dateFrom) }
+    if (filters.dateTo) { conditions.push("date(cc.paid_at,'+330 minutes') <= date(?)"); params.push(filters.dateTo) }
     const where = `WHERE ${conditions.join(' AND ')}`
 
     const rows = db.prepare(`
@@ -3385,7 +3505,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           WHERE cc.collected_by_agent_id = a.id AND cc.status = 'approved') as total_collected,
         (SELECT COALESCE(SUM(cc.amount), 0) FROM chit_contributions cc
           WHERE cc.collected_by_agent_id = a.id AND cc.status = 'approved'
-            AND strftime('%Y-%m', cc.paid_at) = strftime('%Y-%m', 'now')) as collected_this_month,
+            AND strftime('%Y-%m', cc.paid_at, '+330 minutes') = strftime('%Y-%m', 'now', '+330 minutes')) as collected_this_month,
         (SELECT COALESCE(SUM(
             CASE WHEN cl.registration_agent_id = a.id THEN cl.registration_commission ELSE 0 END +
             CASE WHEN cl.sales_agent_id = a.id THEN cl.sales_commission ELSE 0 END
@@ -3660,7 +3780,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     // deliberately re-send (e.g. the customer says they never got it).
     const lastToday = db.prepare(`
       SELECT id, sent_at FROM chit_payment_reminders
-      WHERE member_id=? AND cycle_no=? AND date(sent_at) = date('now')
+      WHERE member_id=? AND cycle_no=? AND date(sent_at,'+330 minutes') = date('now','+330 minutes')
       ORDER BY sent_at DESC LIMIT 1
     `).get(memberId, ctx.resolvedCycle) as { id: string; sent_at: string } | undefined
     if (lastToday && !force) {
@@ -4518,10 +4638,10 @@ export function registerChitHandlers(ipcMain: IpcMain) {
           ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} m.status = 'redeemed') as winner_count,
         (SELECT COALESCE(SUM(cc.amount), 0) FROM chit_contributions cc JOIN chit_schemes cs ON cs.id = cc.scheme_id
           ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'approved'
-          AND strftime('%Y-%m', cc.paid_at) = strftime('%Y-%m', 'now')) as collected_this_month,
+          AND strftime('%Y-%m', cc.paid_at, '+330 minutes') = strftime('%Y-%m', 'now', '+330 minutes')) as collected_this_month,
         (SELECT COALESCE(SUM(cc.amount), 0) FROM chit_contributions cc JOIN chit_schemes cs ON cs.id = cc.scheme_id
           ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'approved'
-          AND date(cc.paid_at) = date('now')) as collected_today,
+          AND date(cc.paid_at,'+330 minutes') = date('now','+330 minutes')) as collected_today,
         (SELECT COALESCE(SUM(cc.amount), 0) FROM chit_contributions cc JOIN chit_schemes cs ON cs.id = cc.scheme_id
           ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'pending_verification') as pending_payments,
         (SELECT COALESCE(SUM(cl.total_commission), 0) FROM commission_ledger cl JOIN chit_schemes cs ON cs.id = cl.scheme_id
@@ -4659,35 +4779,35 @@ export function registerChitHandlers(ipcMain: IpcMain) {
 
     // Monthly Collection + Commission Trend — last 6 calendar months.
     const monthlyCollectionTrend = db.prepare(`
-      SELECT strftime('%Y-%m', cc.paid_at) as month, COALESCE(SUM(cc.amount),0) as total
+      SELECT strftime('%Y-%m', cc.paid_at, '+330 minutes') as month, COALESCE(SUM(cc.amount),0) as total
       FROM chit_contributions cc JOIN chit_schemes cs ON cs.id = cc.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'approved' AND date(cc.paid_at) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} cc.status = 'approved' AND date(cc.paid_at,'+330 minutes') >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
     const commissionTrend = db.prepare(`
-      SELECT strftime('%Y-%m', cl.created_at) as month, COALESCE(SUM(cl.total_commission),0) as total
+      SELECT strftime('%Y-%m', cl.created_at, '+330 minutes') as month, COALESCE(SUM(cl.total_commission),0) as total
       FROM commission_ledger cl JOIN chit_schemes cs ON cs.id = cl.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(cl.created_at) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(cl.created_at,'+330 minutes') >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
     // New Customers — first-created month for a customer who is also a chit
     // member in scope (no separate customer-acquisition table exists).
     const monthlyNewCustomers = db.prepare(`
-      SELECT strftime('%Y-%m', c.created_at) as month, COUNT(DISTINCT c.id) as total
+      SELECT strftime('%Y-%m', c.created_at, '+330 minutes') as month, COUNT(DISTINCT c.id) as total
       FROM customers c
       JOIN chit_members m ON m.customer_id = c.id
       JOIN chit_schemes cs ON cs.id = m.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(c.created_at) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(c.created_at,'+330 minutes') >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
     // Scheme Registrations — member enrollments per month.
     const monthlySchemeRegistrations = db.prepare(`
-      SELECT strftime('%Y-%m', m.created_at) as month, COUNT(*) as total
+      SELECT strftime('%Y-%m', m.created_at, '+330 minutes') as month, COUNT(*) as total
       FROM chit_members m JOIN chit_schemes cs ON cs.id = m.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(m.created_at) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(m.created_at,'+330 minutes') >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
@@ -4695,7 +4815,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const winnerTimeline = db.prepare(`
       SELECT strftime('%Y-%m', d.draw_date) as month, COALESCE(SUM(d.settled_count),0) as winners
       FROM chit_draws d JOIN chit_schemes cs ON cs.id = d.scheme_id
-      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(d.draw_date) >= date('now', '-5 months', 'start of month')
+      ${schemeWhere} ${schemeWhere ? 'AND' : 'WHERE'} date(d.draw_date) >= date('now', '+330 minutes', '-5 months', 'start of month')
       GROUP BY month ORDER BY month
     `).all(...schemeParams)
 
@@ -4742,7 +4862,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
     const recentlyCompletedDraws = db.prepare(`
       SELECT d.cycle_no, cs.id as scheme_id, cs.name as scheme_name, cs.scheme_number
       FROM chit_draws d JOIN chit_schemes cs ON cs.id = d.scheme_id
-      ${schemeWhere ? schemeWhere + " AND" : "WHERE"} date(d.draw_date) >= date('now', '-3 days')
+      ${schemeWhere ? schemeWhere + " AND" : "WHERE"} date(d.draw_date) >= date('now', '+330 minutes', '-3 days')
       ORDER BY d.draw_date DESC LIMIT 10
     `).all(...schemeParams) as { cycle_no: number; scheme_id: string; scheme_name: string; scheme_number: string }[]
     for (const d of recentlyCompletedDraws) {

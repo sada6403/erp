@@ -1553,7 +1553,7 @@ export function registerStockHandlers(ipcMain: IpcMain) {
             `).get(sessionId, cols[skuIdx]) as { id: string } | undefined
           }
           if (!item) continue
-          db.prepare('UPDATE stock_count_items SET counted_qty=?, updated_at=datetime("now") WHERE id=?')
+          db.prepare('UPDATE stock_count_items SET counted_qty=?, updated_at=datetime(\x27now\x27) WHERE id=?')
             .run(counted, item.id)
           imported++
         }

@@ -1,6 +1,12 @@
 import nodemailer from 'nodemailer'
 import { pool } from './db'
 import { decryptSecret } from './secretCrypto'
+import { decideDelivery } from './app/emailPolicy'
+
+// Last line of defence for every outgoing mail: outside EMAIL_MODE=production only EMAIL_ALLOWLIST addresses are sent.
+function blockedByPolicy(to: string): boolean {
+  return decideDelivery(to, { EMAIL_MODE: process.env.EMAIL_MODE, EMAIL_ALLOWLIST: process.env.EMAIL_ALLOWLIST }).action === 'suppress'
+}
 
 async function getSmtpSettings() {
   const { rows } = await pool.query(`SELECT value FROM system_settings WHERE \`key\` = 'smtp' LIMIT 1`)
@@ -22,6 +28,7 @@ export async function sendEmail(opts: {
   html: string
   text?: string
 }): Promise<{ ok: boolean; error?: string }> {
+  if (blockedByPolicy(opts.to)) return { ok: false, error: 'SUPPRESSED: recipient not allowed in non-production mode' }
   try {
     const smtp = await getSmtpSettings()
     if (!smtp?.host) return { ok: false, error: 'SMTP not configured' }
@@ -97,6 +104,7 @@ export async function sendCompanyEmail(
   },
   overrideSmtp?: Record<string, unknown>
 ): Promise<{ ok: boolean; error?: string }> {
+  if (blockedByPolicy(opts.to)) return { ok: false, error: 'SUPPRESSED: recipient not allowed in non-production mode' }
   try {
     const storedSmtp = await getCompanySmtpSettings(companyId)
     const smtp = overrideSmtp ? { ...storedSmtp, ...overrideSmtp } : storedSmtp

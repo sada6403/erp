@@ -10,3 +10,21 @@ release/
 .local-backups/
 .local-audit/
 .next/
+
+# Signing keys and credentials (never commit)
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+key.properties
+credentials.json
+google-services.json
+GoogleService-Info.plist
+.env.*
+!.env.example
+android/keystores/
+
+# local MySQL test account for the integration harness (never commit)
+backend/.int-mysql.env
+.int-mysql.env

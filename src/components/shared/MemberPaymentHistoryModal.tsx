@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import Modal from '@/components/shared/Modal'
 import toast from 'react-hot-toast'
+import { parseUtc } from '../../lib/datetime'
 
 type Row = Record<string, unknown>
 const money = (v: unknown) => Number(v || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -38,7 +39,7 @@ export default function MemberPaymentHistoryModal({ memberId, onClose }: { membe
                 <tr><td colSpan={7} className="text-center py-8" style={{ color: 'var(--text-3)' }}>No payments recorded yet</td></tr>
               ) : rows.map(r => (
                 <tr key={r.id as string} className="border-t" style={{ borderColor: 'var(--border)' }}>
-                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-2)' }}>{new Date(String(r.paid_at)).toLocaleDateString()}</td>
+                  <td className="px-3 py-2 text-xs" style={{ color: 'var(--text-2)' }}>{parseUtc(r.paid_at).toLocaleDateString()}</td>
                   <td className="px-3 py-2 text-right tabular-nums font-semibold" style={{ color: 'var(--text-1)' }}>Rs.{money(r.amount)}</td>
                   <td className="px-3 py-2 text-xs capitalize" style={{ color: 'var(--text-2)' }}>{(r.method as string)?.replace('_', ' ')}</td>
                   <td className="px-3 py-2 text-xs font-mono" style={{ color: 'var(--text-3)' }}>{(r.receipt_number as string) || '—'}</td>

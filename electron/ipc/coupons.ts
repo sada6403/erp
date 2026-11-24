@@ -427,8 +427,8 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
     }
     if (filters.status)      { conditions.push(`cp.status = ?`); params.push(filters.status) }
     if (filters.customerId)  { conditions.push(`cp.customer_id = ?`); params.push(filters.customerId) }
-    if (filters.dateFrom)    { conditions.push(`date(cp.created_at) >= date(?)`); params.push(filters.dateFrom) }
-    if (filters.dateTo)      { conditions.push(`date(cp.created_at) <= date(?)`); params.push(filters.dateTo) }
+    if (filters.dateFrom)    { conditions.push(`date(cp.created_at,'+330 minutes') >= date(?)`); params.push(filters.dateFrom) }
+    if (filters.dateTo)      { conditions.push(`date(cp.created_at,'+330 minutes') <= date(?)`); params.push(filters.dateTo) }
     addSmartBuyFilters('cp', filters, conditions, params)
 
     const rows = db.prepare(`

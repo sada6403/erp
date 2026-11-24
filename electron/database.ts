@@ -172,6 +172,38 @@ function runMigrations(): void {
     ['invoice_items',   'variant_id',     "TEXT"],
     ['invoice_items',   'variant_title',  "TEXT"],
     ['stock_movements', 'variant_id',     "TEXT"],
+    // Mobile app (Natural Plantation): synced columns, additive
+    ['products', 'is_online',          "INTEGER NOT NULL DEFAULT 1"],
+    ['products', 'is_featured',        "INTEGER NOT NULL DEFAULT 0"],
+    ['products', 'slug',               "TEXT"],
+    ['products', 'gallery',            "TEXT"],
+    ['products', 'short_description',  "TEXT"],
+    ['products', 'unit',               "TEXT"],
+    ['branches', 'latitude',           "REAL"],
+    ['branches', 'longitude',          "REAL"],
+    ['branches', 'delivery_eta_min_days', "INTEGER"],
+    ['branches', 'delivery_eta_max_days', "INTEGER"],
+    ['branches', 'delivery_eta_text',     "TEXT"],
+    ['customer_orders', 'channel',                  "TEXT NOT NULL DEFAULT 'pos'"],
+    ['customer_orders', 'app_user_id',              "TEXT"],
+    ['customer_orders', 'assigned_agent_id',        "TEXT"],
+    ['customer_orders', 'delivery_fee',             "REAL NOT NULL DEFAULT 0"],
+    ['customer_orders', 'payment_method',           "TEXT"],
+    ['customer_orders', 'wallet_amount',            "REAL NOT NULL DEFAULT 0"],
+    ['customer_orders', 'delivery_otp_hash',        "TEXT"],
+    ['customer_orders', 'needs_call_confirmation',  "INTEGER NOT NULL DEFAULT 0"],
+    ['customer_orders', 'estimated_delivery_date',  "TEXT"],
+    ['customer_orders', 'status_history',           "TEXT"],
+    ['customer_orders', 'payment_reference',        "TEXT"],
+    ['customer_orders', 'invoice_id',               "TEXT"],
+    ['invoices', 'source_order_id',                 "TEXT"],
+    ['invoices', 'delivery_fee',                    "REAL NOT NULL DEFAULT 0"],
+    ['customer_order_items', 'net_unit_price',      "REAL"],
+    ['customer_order_items', 'tax_rate',            "REAL"],
+    ['customer_order_items', 'tax_amount',          "REAL"],
+    ['customer_order_items', 'variant_id',          "TEXT"],
+    ['customer_order_items', 'variant_name',        "TEXT"],
+    ['customer_order_items', 'product_name',        "TEXT"],
   ]
 
   for (const [table, column, definition] of migrations) {
@@ -180,6 +212,9 @@ function runMigrations(): void {
       console.log(`[DB] Migration: added ${table}.${column}`)
     }
   }
+
+  // One invoice per app order (convert-to-invoice is idempotent).
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_invoices_source_order ON invoices(source_order_id) WHERE source_order_id IS NOT NULL`)
 
   // Supplier liability settlements. Payments are immutable ledger rows;
   // suppliers.due_balance stores the current outstanding snapshot.
@@ -2687,6 +2722,75 @@ function runMigrations(): void {
       synced_at  TEXT
     );
   `)
+
+  // ── Mobile app synced tables (UI is built later in POS: App Access / Online Store) ──
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS app_password_reset_requests (
+      id           TEXT PRIMARY KEY,
+      user_id      TEXT NOT NULL,
+      name         TEXT,
+      phone        TEXT,
+      status       TEXT NOT NULL DEFAULT 'pending',
+      requested_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at  TEXT,
+      resolved_by  TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at    TEXT
+    );
+    CREATE TABLE IF NOT EXISTS app_banners (
+      id         TEXT PRIMARY KEY,
+      title      TEXT NOT NULL,
+      subtitle   TEXT,
+      image_url  TEXT,
+      link_url   TEXT,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active  INTEGER NOT NULL DEFAULT 1,
+      starts_at  TEXT,
+      ends_at    TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at  TEXT
+    );
+    CREATE TABLE IF NOT EXISTS app_settings (
+      id          TEXT PRIMARY KEY,
+      setting_key TEXT NOT NULL UNIQUE,
+      value       TEXT,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at   TEXT
+    );
+    -- Customer reviews of delivered products. Created in the cloud (mobile app), pulled to the POS;
+    -- the POS only edits is_hidden / hidden_* (moderation) and syncs that back.
+    CREATE TABLE IF NOT EXISTS product_reviews (
+      id            TEXT PRIMARY KEY,
+      product_id    TEXT NOT NULL,
+      customer_id   TEXT,
+      app_user_id   TEXT,
+      order_item_id TEXT NOT NULL UNIQUE,
+      author_name   TEXT,
+      rating        INTEGER NOT NULL,
+      comment       TEXT,
+      is_hidden     INTEGER NOT NULL DEFAULT 0,
+      hidden_by     TEXT,
+      hidden_at     TEXT,
+      hidden_reason TEXT,
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_product_reviews_product ON product_reviews(product_id);
+  `)
+
+  // App Control: banner targeting + per-language images (additive; mirrors backend/lib/appSchema.ts)
+  for (const [col, def] of [
+    ['link_type', "TEXT NOT NULL DEFAULT 'none'"], ['link_target', 'TEXT'], ['audience', "TEXT NOT NULL DEFAULT 'all'"],
+    ['image_en', 'TEXT'], ['image_ta', 'TEXT'], ['image_si', 'TEXT'],
+  ] as const) {
+    if (!hasColumn('app_banners', col)) db.exec(`ALTER TABLE app_banners ADD COLUMN ${col} ${def}`)
+  }
+  // Old banners only had link_url: an https link becomes link_type 'url' (non-https links stay unreadable by the app)
+  db.exec(`UPDATE app_banners SET link_type='url', link_target=link_url WHERE link_type='none' AND link_url LIKE 'https://%'`)
 
   seedProductAttributes(db)
 }

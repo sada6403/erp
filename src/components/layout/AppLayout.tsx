@@ -9,7 +9,7 @@ import {
   Truck, Settings, LogOut, Wifi, WifiOff, AlertCircle, UserCog,
   FileText, ShoppingCart, Receipt, Sun, Moon, ChevronDown,
   ChevronRight, ShoppingBag, Menu, Building2, Shield, HardDrive,
-  Activity, Download, RefreshCw, Ticket, Coins, Percent, KeyRound, type LucideIcon
+  Activity, Download, RefreshCw, Ticket, Coins, Percent, KeyRound, Smartphone, type LucideIcon
 } from 'lucide-react'
 import { useState, useEffect, useRef, memo } from 'react'
 import toast from 'react-hot-toast'
@@ -106,6 +106,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: '/admin/smart-buy', label: 'Dashboard', perm: ['chits'] },
       { to: '/admin/smart-buy-award', label: 'Award Winners', perm: ['chits'] },
+      { to: '/admin/agent-cash', label: 'Agent Cash', perm: ['chits'] },
       // Was adminOnly:true, hiding this from every chits-only user even
       // though both the route (RequireSmartBuyAccess) and the backend
       // (chits:templates:list -> canManage = chits∨all) already allow a
@@ -191,6 +192,15 @@ const NAV_GROUPS: NavGroup[] = [
       { to: '/admin/edit-requests', label: 'Edit Requests', adminOnly: true },
       { to: '/admin/sync', label: 'Sync Monitor', adminOnly: true },
       { to: '/admin/operations', label: 'Operations Hub' },
+    ]
+  },
+  {
+    // Super Admin only (route is wrapped in RequireSuperAdmin; branch roles never see it).
+    label: 'App Control', icon: Smartphone, adminOnly: true,
+    items: [
+      { to: '/admin/app-control',  label: 'App Control',  adminOnly: true },
+      { to: '/admin/app-requests', label: 'App Requests', adminOnly: true },
+      { to: '/admin/sales-team',   label: 'Sales Team',   adminOnly: true },
     ]
   },
   {

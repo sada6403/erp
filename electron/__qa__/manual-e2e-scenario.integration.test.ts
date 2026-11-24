@@ -233,9 +233,11 @@ describe('MANUAL E2E QA SCENARIO — SmartBuy payment gate / manual draw / remin
     expect(ruleRes.success).toBe(true)
     setSession(mgrA)
     const redemption = await call('chits:members:recordRedemption', winnerMember, { product_id: 'e2e-prod', qty: 1 })
-    check('14', 'Product award (recordRedemption) succeeds for the drawn winner', redemption.success === true, `error=${redemption.error}`)
+    // Since the voucher rework (e05fcb7, Aug 2026) a draw winner gets the full entitlement as a POS voucher, so there is
+    // no product to pick and no redemption invoice: recordRedemption must refuse, and no redemption commission row exists.
+    check('14', 'Product award is refused for a drawn winner (they already hold a full voucher)', redemption.success === false && /full SmartBuy voucher/.test(String(redemption.error)), `error=${redemption.error}`)
     const ledgerRow = db.prepare('SELECT * FROM commission_ledger WHERE member_id=?').get(winnerMember) as any
-    check('14', 'Commission ledger row created at redemption (10% of 60000 = 6000)', Boolean(ledgerRow) && Math.abs(Number(ledgerRow?.total_commission || 0) - 6000) < 0.01, `total_commission=${ledgerRow?.total_commission}`)
+    check('14', 'No redemption-time commission row for a voucher winner', !ledgerRow, `total_commission=${ledgerRow?.total_commission}`)
 
     const auditRow = db.prepare(`SELECT * FROM audit_logs WHERE action='CHIT_DRAW_CONDUCTED' AND record_id=? ORDER BY created_at DESC LIMIT 1`).get(drawRow?.id) as any
     if (auditRow) {

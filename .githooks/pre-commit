@@ -1,0 +1,9 @@
+#!/bin/sh
+# Blocks committing signing keys and credential files. No dependencies.
+bad=$(git diff --cached --name-only --diff-filter=ACMR | grep -Ei '(\.(jks|keystore|p12|pfx|pem)$|(^|/)key\.properties$|(^|/)credentials\.json$|(^|/)google-services\.json$|(^|/)GoogleService-Info\.plist$|(^|/)\.env(\.[^/]*)?$|(^|/)android/keystores/)' | grep -v '\.env\.example$')
+if [ -n "$bad" ]; then
+  echo "COMMIT BLOCKED: key/credential files are staged:" >&2
+  echo "$bad" | sed 's/^/  /' >&2
+  echo "Unstage them (git reset HEAD <file>). Keys live outside the repo." >&2
+  exit 1
+fi

@@ -7,7 +7,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "node scripts/start.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test-run.cjs",
+    "test:updates": "node --env-file=.env --experimental-strip-types --no-warnings --test tests/updates.test.mjs",
+    "test:email": "node --experimental-strip-types --no-warnings --test tests/email.test.mjs",
+    "email:preview": "node --experimental-strip-types --no-warnings scripts/email-preview.mjs",
+    "email:smoke": "node --env-file=.env scripts/run-ts.cjs scripts/email-smoke.ts",
+    "seed:app": "node scripts/run-ts.cjs scripts/seed-app-test-company.ts",
+    "seed:test-banners": "node --env-file=.env scripts/run-ts.cjs scripts/seed-test-banners.ts"
   },
   "dependencies": {
     "@types/nodemailer": "^8.0.1",
@@ -19,7 +26,8 @@
     "nodemailer": "^9.0.1",
     "pdfkit": "^0.19.1",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "sharp": "^0.34.5"
   },
   "devDependencies": {
     "@types/bcryptjs": "^2.4.6",

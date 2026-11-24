@@ -3,6 +3,7 @@ import { resolveCompany, AccountStatusError, resolveDeviceAuthorization, DeviceA
 import { assertTable, quoteIdentifier } from '@/lib/sync'
 import { syncLimiter } from '@/lib/rateLimit'
 import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
+import { pullSinceSql } from '@/lib/syncCursor'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     for (const item of normalized) {
       try {
-        const sqlTime = new Date(item.since).toISOString().slice(0, 23).replace('T', ' ')
+        const sqlTime = pullSinceSql(item.since)
         const { rows: data } = await company.tp.query<Record<string, unknown>>(
           `SELECT * FROM ${quoteIdentifier(item.table)}
             WHERE updated_at > ? AND updated_at <= ?

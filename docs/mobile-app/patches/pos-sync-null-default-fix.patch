@@ -1,0 +1,59 @@
+commit e7e227e6d0a4614aec2f56238d0c996f44eb6d29
+Author: Nithu2801 <mathanmonishan@gmail.com>
+Date:   Thu Nov 12 16:18:52 2026 +0530
+
+    fix(sync,app): POS pulls rows with NULL for defaulted NOT NULL columns; ETA only from POS settings; staging live tests; integration report
+    
+    - SyncService.insertFiltered: NULL in a locally NOT NULL DEFAULT column no longer isolates the row (real 'test' data has products.unit NULL, so a new POS device got no products)
+    - no built-in delivery estimate; tracking hides ETA unless POS settings define it; removed 'Fast ... Dispatch' and bank names
+    - staging-test-company integration suite (runs only with STAGING_SEED) + harness INT_MYSQL_* override and self-cleaning POS temp dir
+    - INTEGRATION_REPORT.md regenerated (71 PASS, 0 FAIL, 2 SKIP), DECISIONS updated
+    
+    Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+
+diff --git a/electron/services/syncService.ts b/electron/services/syncService.ts
+index bdcc3c1..ef1483b 100644
+--- a/electron/services/syncService.ts
++++ b/electron/services/syncService.ts
+@@ -92,6 +92,7 @@ export class SyncService {
+   private watermarkChecking = false
+   private running = false
+   private colCache = new Map<string, Set<string>>()
++  private notNullDefaultCache = new Map<string, Set<string>>()
+   private backoffUntil = 0
+   // Issue 35: reconcileDefaultRolesFromCloud() previously only ran inside
+   // needsBootstrapPull() (empty local `users` table) — so an already-
+@@ -1200,6 +1201,19 @@ export class SyncService {
+     return cols
+   }
+ 
++  /** Columns that are NOT NULL with a DEFAULT locally: a NULL from the cloud must fall back to that default, not reject the row. */
++  private getDefaultedNotNullColumns(db: ReturnType<typeof getDb>, table: string): Set<string> {
++    let set = this.notNullDefaultCache.get(table)
++    if (!set) {
++      set = new Set(
++        (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; notnull: number; dflt_value: string | null }[])
++          .filter(c => c.notnull === 1 && c.dflt_value !== null).map(c => c.name)
++      )
++      this.notNullDefaultCache.set(table, set)
++    }
++    return set
++  }
++
+   private quoteLocalIdentifier(value: string): string {
+     return `"${value.replace(/"/g, '""')}"`
+   }
+@@ -1278,9 +1292,13 @@ export class SyncService {
+       reconcileIncomingProduct(db, String(row.id || ''), row.sku)
+     }
+     const validColumns = this.getColumns(db, table)
++    const defaulted = this.getDefaultedNotNullColumns(db, table)
+     const localRow: Record<string, unknown> = {}
+     for (const [key, value] of Object.entries(row)) {
+       if (!validColumns.has(key)) continue
++      // Older cloud rows can carry NULL (e.g. products.unit pushed by an earlier POS version). Skip the key so the local
++      // DEFAULT applies; otherwise the whole row is isolated and a new/second POS device never receives the product.
++      if ((value === null || value === undefined) && defaulted.has(key)) continue
+       if (typeof value === 'boolean') localRow[key] = value ? 1 : 0
+       else if (value !== null && typeof value === 'object') localRow[key] = JSON.stringify(value)
+       else localRow[key] = value

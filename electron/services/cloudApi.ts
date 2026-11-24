@@ -235,6 +235,103 @@ export class CloudApi {
     return result.url
   }
 
+  // Mobile app access (admin endpoints; x-api-key = POS sync key, called from the main process only).
+  async appAccessList(): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request('/api/app/v1/admin/app-access')
+  }
+
+  async appAccessInvite(input: { targets: Array<{ customer_id?: string; agent_id?: string }>; download_link?: string; sent_by?: string }): Promise<{
+    results: Array<Record<string, unknown>>
+    channel: string
+  }> {
+    return this.request('/api/app/v1/admin/app-access/invite', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(60_000) })
+  }
+
+  async appAccessSetStatus(userId: string, status: 'active' | 'disabled'): Promise<{ ok: boolean }> {
+    return this.request('/api/app/v1/admin/app-access/status', { method: 'POST', body: JSON.stringify({ user_id: userId, status }) })
+  }
+
+  // Banner impressions / taps (admin endpoint, x-api-key)
+  async bannerStats(from?: string, to?: string): Promise<{ items: Array<{ banner_id: string; impressions: number; taps: number }>; days: Array<Record<string, unknown>> }> {
+    const q = new URLSearchParams()
+    if (from) q.set('from', from)
+    if (to) q.set('to', to)
+    return this.request(`/api/app/v1/admin/banner-stats${q.toString() ? `?${q}` : ''}`)
+  }
+
+  // App Versions (in-app update policy per platform/channel; admin endpoints, x-api-key)
+  async appVersionsList(): Promise<{ items: Array<Record<string, unknown>>; allowed_hosts: string[] }> {
+    return this.request('/api/app/v1/admin/app-versions')
+  }
+
+  async appVersionSave(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('/api/app/v1/admin/app-versions', { method: 'PUT', body: JSON.stringify(input) })
+  }
+
+  async appVersionHashApk(input: { channel: 'test'; platform?: string; updated_by?: string }): Promise<Record<string, unknown>> {
+    return this.request('/api/app/v1/admin/app-versions/hash-apk', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(125_000) })
+  }
+
+  // Smart Buy join requests + bank slips (admin endpoints; private images come back as bytes).
+  async joinRequestsList(status?: string): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request(`/api/app/v1/admin/join-requests${status ? `?status=${encodeURIComponent(status)}` : ''}`)
+  }
+
+  async joinRequestDecide(id: string, input: { decision: 'approve' | 'reject'; reason?: string; decided_by?: string }): Promise<Record<string, unknown>> {
+    return this.request(`/api/app/v1/admin/join-requests/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) })
+  }
+
+  async joinRequestPhoto(id: string, side: 'front' | 'back'): Promise<{ contentType: string; bytes: Buffer }> {
+    return this.requestBinary(`/api/app/v1/admin/join-requests/${encodeURIComponent(id)}/photo?side=${side}`)
+  }
+
+  async paymentSlipsList(status?: string): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request(`/api/app/v1/admin/payment-slips${status ? `?status=${encodeURIComponent(status)}` : ''}`)
+  }
+
+  async paymentSlipDecide(id: string, input: { decision: 'verify' | 'reject'; reason?: string; reviewed_by?: string }): Promise<Record<string, unknown>> {
+    return this.request(`/api/app/v1/admin/payment-slips/${encodeURIComponent(id)}/decision`, { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) })
+  }
+
+  async paymentSlipImage(id: string): Promise<{ contentType: string; bytes: Buffer }> {
+    return this.requestBinary(`/api/app/v1/admin/payment-slips/${encodeURIComponent(id)}/image`)
+  }
+
+  // Sales force v1.0 (hierarchy, targets, performance). Cloud-only tables, managed through the admin endpoints.
+  async staffAssignments(): Promise<{ items: Array<Record<string, unknown>>; agents: Array<Record<string, unknown>>; levels: Array<Record<string, unknown>> }> {
+    return this.request('/api/app/v1/admin/staff/assignments')
+  }
+
+  async staffAssign(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('/api/app/v1/admin/staff/assignments', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) })
+  }
+
+  async staffUnassign(staffId: string): Promise<Record<string, unknown>> {
+    return this.request(`/api/app/v1/admin/staff/assignments?staff_id=${encodeURIComponent(staffId)}`, { method: 'DELETE', signal: AbortSignal.timeout(30_000) })
+  }
+
+  async staffOverview(period?: string): Promise<{ period: string; items: Array<Record<string, unknown>> }> {
+    return this.request(`/api/app/v1/admin/staff/overview${period ? `?period=${encodeURIComponent(period)}` : ''}`, { signal: AbortSignal.timeout(60_000) })
+  }
+
+  async staffTargets(staffId: string): Promise<{ items: Array<Record<string, unknown>> }> {
+    return this.request(`/api/app/v1/admin/staff/targets?staff_id=${encodeURIComponent(staffId)}`)
+  }
+
+  async staffTargetSet(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.request('/api/app/v1/admin/staff/targets', { method: 'POST', body: JSON.stringify(input), signal: AbortSignal.timeout(30_000) })
+  }
+
+  private async requestBinary(path: string): Promise<{ contentType: string; bytes: Buffer }> {
+    const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
+    const response = await fetchFn(`${this.baseUrl}${path}`, {
+      signal: AbortSignal.timeout(30_000),
+      headers: { 'x-api-key': this.apiKey, ...(this.deviceId ? { 'x-device-id': this.deviceId } : {}) },
+    })
+    if (!response.ok) throw new Error(`Image request failed with HTTP ${response.status}`)
+    return { contentType: response.headers.get('content-type') || 'image/webp', bytes: Buffer.from(await response.arrayBuffer()) }
+  }
+
   private async request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
     const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
     const response = await fetchFn(`${this.baseUrl}${path}`, {
@@ -259,7 +356,10 @@ export class CloudApi {
     }
 
     if (!response.ok) {
-      const message = payload && typeof payload === 'object' && 'error' in payload
+      const errField = payload && typeof payload === 'object' ? (payload as { error?: unknown }).error : undefined
+      const message = errField && typeof errField === 'object' && typeof (errField as { message?: unknown }).message === 'string'
+        ? (errField as { message: string }).message
+        : payload && typeof payload === 'object' && 'error' in payload
         ? String((payload as { error: unknown }).error)
         : `Cloud API request failed with HTTP ${response.status}`
       if (response.status === 429) {

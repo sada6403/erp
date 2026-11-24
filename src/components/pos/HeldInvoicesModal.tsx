@@ -3,6 +3,7 @@ import { X, FileText, Clock } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useCartStore } from '@/store/cartStore'
 import { normalizeHeldCart } from '@/lib/heldCart'
+import { parseUtc } from '../../lib/datetime'
 
 interface Props { onClose: () => void }
 
@@ -94,7 +95,7 @@ export default function HeldInvoicesModal({ onClose }: Props) {
                 {h.source === 'publishing' ? <p className="text-xs text-orange-400">Awaiting Hub confirmation</p> : null}
                 {h.error ? <p className="text-xs text-red-400">{String(h.error)}{String(h.error).startsWith('Hold number is already in use') ? '. Resume this local cart and hold it with another number.' : ''}</p> : null}
                 {h.source === 'recovery' ? <p className="text-xs text-orange-400">Recovered recall — ready to restore</p> : null}
-                <p className="text-xs text-slate-500">{String(h.bill_type)} · {new Date(h.created_at as string).toLocaleTimeString()}</p>
+                <p className="text-xs text-slate-500">{String(h.bill_type)} · {parseUtc(h.created_at).toLocaleTimeString()}</p>
               </div>
               <p className="text-sm font-bold text-brand-400">
                 {recalling === h.id ? 'Recalling…' : `Rs.${Number(h.total_amount).toLocaleString()}`}

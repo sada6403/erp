@@ -984,11 +984,11 @@ export async function exportBillsToExcel(
       params.push(filters.billType)
     }
     if (filters.dateFrom) {
-      conditions.push('date(i.created_at) >= date(?)')
+      conditions.push("date(i.created_at,'+330 minutes') >= date(?)")
       params.push(filters.dateFrom)
     }
     if (filters.dateTo) {
-      conditions.push('date(i.created_at) <= date(?)')
+      conditions.push("date(i.created_at,'+330 minutes') <= date(?)")
       params.push(filters.dateTo)
     }
     if (filters.search) {

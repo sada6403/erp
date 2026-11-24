@@ -56,6 +56,10 @@ const SyncMonitorPage = adminPage('SyncMonitorPage')
 const CategoriesPage = adminPage('CategoriesPage')
 const StockCountPage = adminPage('StockCountPage')
 const OrdersPage = adminPage('OrdersPage')
+const AppRequestsPage = adminPage('AppRequestsPage')
+const SalesTeamPage = adminPage('SalesTeamPage')
+const AgentCashPage = adminPage('AgentCashPage')
+const AppControlPage = adminPage('AppControlPage')
 const StockLookupPage = adminPage('StockLookupPage')
 const QuotationsPage = adminPage('QuotationsPage')
 const BillsPage = adminPage('BillsPage')
@@ -340,6 +344,15 @@ export default function App() {
         <Route path="/admin/stock-lookup" element={<RequirePermission permission="inventory"><StockLookupPage /></RequirePermission>} />
         <Route path="/admin/bills" element={<BillsPage />} />
         <Route path="/admin/orders" element={<OrdersPage />} />
+        <Route path="/admin/app-control" element={<RequireSuperAdmin><AppControlPage /></RequireSuperAdmin>} />
+        <Route path="/admin/app-control/:tab" element={<RequireSuperAdmin><AppControlPage /></RequireSuperAdmin>} />
+        {/* old routes keep working */}
+        <Route path="/admin/app-access" element={<Navigate to="/admin/app-control/access" replace />} />
+        <Route path="/admin/online-store" element={<Navigate to="/admin/app-control/store" replace />} />
+        <Route path="/admin/reviews" element={<Navigate to="/admin/app-control/reviews" replace />} />
+        <Route path="/admin/app-versions" element={<Navigate to="/admin/app-control/versions" replace />} />
+        <Route path="/admin/app-requests" element={<RequireSuperAdmin><AppRequestsPage /></RequireSuperAdmin>} />
+        <Route path="/admin/sales-team" element={<RequireSuperAdmin><SalesTeamPage /></RequireSuperAdmin>} />
         <Route path="/admin/quotations" element={<QuotationsPage />} />
         <Route path="/admin/credit-bills" element={<CreditBillsPage />} />
         <Route path="/admin/purchase-orders" element={<RequireMainBranch><RequireModule module="purchase_orders"><PurchaseOrdersPage /></RequireModule></RequireMainBranch>} />
@@ -358,6 +371,7 @@ export default function App() {
         <Route path="/admin/analytics" element={<AnalyticsPage />} />
         <Route path="/admin/deliveries" element={<RequireModule module="deliveries"><DeliveriesPage /></RequireModule>} />
         <Route path="/admin/installments" element={<RequirePermission permission="customers"><RequireModule module="installments"><InstallmentsPage /></RequireModule></RequirePermission>} />
+        <Route path="/admin/agent-cash" element={<RequireSmartBuyAccess><AgentCashPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/chits" element={<RequireSmartBuyAccess><ChitSchemesPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/chits/:id" element={<RequireSmartBuyAccess><ChitSchemeDetailPage /></RequireSmartBuyAccess>} />
         <Route path="/admin/chit-customers" element={<RequireSmartBuyAccess><ChitCustomersPage /></RequireSmartBuyAccess>} />

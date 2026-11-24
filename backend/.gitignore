@@ -2,3 +2,10 @@ node_modules
 .next
 .env
 uploads
+
+.seed-build
+.seed-output.json
+.seed-output-testcopy.json
+private-uploads
+
+email-previews

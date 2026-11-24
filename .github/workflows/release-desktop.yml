@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       expected_version:
-        description: 'Expected desktop version in package.json (e.g. 2.9.5)'
+        description: 'Expected desktop version in package.json (e.g. 2.9.6)'
         required: true
-        default: '2.9.5'
+        default: '2.9.6'
         type: string
       expected_commit:
         description: 'Approved full 40-char commit SHA to build and publish'

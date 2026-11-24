@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { resolveCompany, AccountStatusError, resolveDeviceAuthorization, DeviceAuthorizationError } from '@/lib/auth'
 import { syncLimiter } from '@/lib/rateLimit'
 import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
+import { pullSinceSql } from '@/lib/syncCursor'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -51,7 +52,8 @@ export async function GET(request: NextRequest) {
     }
 
     const afterId = request.nextUrl.searchParams.get('afterId')
-    const sqlTime = new Date(since).toISOString().slice(0, 23).replace('T', ' ')
+    // Overlap only on the first page of a pull; later pages page by (updated_at, id) from the last row.
+    const sqlTime = pullSinceSql(since, afterId === null ? undefined : 0)
     const { rows: data } = await company.tp.query<Record<string, unknown>>(
       `SELECT id, table_name, record_id, deleted_at FROM sync_deletions WHERE ${afterId === null ? 'deleted_at > ?' : '(deleted_at > ? OR (deleted_at = ? AND id > ?))'} ORDER BY deleted_at ASC, id ASC LIMIT 5000`,
       afterId === null ? [sqlTime] : [sqlTime, sqlTime, afterId]

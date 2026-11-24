@@ -1,0 +1,110 @@
+# Natural Plantation app — 14-day release plan (7 → 21 Nov 2026)
+
+Goal: replace the old "Natural Farming" Flutter app on its existing Play Store listing with the new
+React Native app by **21 Nov 2026**, then keep shipping features as updates.
+
+## How releases work
+| Channel | Who sees it | Use |
+|---|---|---|
+| Play **Internal testing** | Up to 100 testers by email (boss, team) | Every build from day 4. Installs from the Play Store like a normal app. |
+| Play **Production** | Everyone | v1.0 on day 12, then normal updates |
+| **OTA update** (`expo-updates`) | Installed apps on that channel | JS/UI-only fixes in minutes, no Play review. Native changes still need a Play build. |
+
+Every Play build: same package name, same upload key, `versionCode` + 1.
+
+## Day by day
+
+| Day | Date | Moni | Claude Code / dev |
+|---|---|---|---|
+| 0 | Sat 7 Nov | Push branch; Play Console checks (package name, Play App Signing, upload key, production access); request upload-key reset if the key is lost; testers email list; create test company | Repo setup; start Run 1 (backend auth + catalog, app shell, POS App Access) |
+| 1–3 | 8–10 Nov | Expo account + Firebase project; give package name | Auth (phone / member no / agent code), catalog + variants sync fix, cart, COD orders into POS, order tracking, offline catalog, themes, EAS build profiles with the Play package |
+| 4 | Wed 11 Nov | Install from Play internal link and review | **Build 1 → Internal testing** (boss preview) |
+| 5–8 | 12–15 Nov | Daily feedback in one list | Smart Buy read-only (schemes, statement, draws, passbook/wallet balance), Agent (deliveries, OTP completion, members, earnings), push notifications, WhatsApp click-to-chat invites; builds every 1–2 days, OTA for JS fixes |
+| 9–10 | 16–17 Nov | Play listing: new name/icon/screenshots/description, Data safety, financial features declaration, privacy policy + account deletion URLs, reviewer test login, content rating | Hardening: test matrix, performance budget, crash fixes; privacy/deletion pages |
+| 11 | Wed 18 Nov | Approve backend production deploy; create real-company App Key; invite pilot users | Deploy backend (after approval); production build |
+| 12 | Thu 19 Nov | Submit **v1.0 to Production** | Watch crashes/logs |
+| 13–14 | 20–21 Nov | Buffer for Play review (can take hours to several days) | Fixes via OTA |
+
+## v1.0 scope (real data only — no fake data in any Play build)
+In: login (no SMS), shop (browse, search, variants, weight items, cart, COD/bank slip order, tracking,
+cancel), offline catalog, notifications, themes, languages, account deletion; Smart Buy read-only;
+Agent deliveries with OTP, members, earnings read-only.
+
+Next updates (v1.1+): draw proof video, wallet spending in shop (needs the wallet sync fix,
+ARCHITECTURE §10), Bluetooth bill printing, Join Smart Buy request, WhatsApp Cloud API, agent cash
+collection entry, reviews/returns, live agent location.
+Screens for these show "Coming in the next update", never mock data.
+
+## Risks to clear on day 0
+1. **Package name / upload key.** The Flutter source on the PC uses `com.example…` with debug signing,
+   so the Play build was made elsewhere. Get the real package name from Play Console. If the upload key
+   is lost, request an upload-key reset now (Play App Signing must be on).
+2. **Production access.** If the developer account is personal and the app has no production access
+   yet, Play requires a closed test with ≥ 12 opted-in testers for 14 days before production. Check the
+   Dashboard; if it applies, start the closed test today.
+3. **Review time** is not under our control. Submit v1.0 by day 12.
+4. **Backend deploy** touches production; only after Moni approves (day 11).
+
+## Added 2026-11-07: POS desktop release and branch hygiene
+- Convert-to-invoice lives in the POS desktop (`orders:convertToInvoice`, delivery fee on invoices, new columns). v1.0 therefore also needs a **POS desktop release with these changes installed on all branch PCs before the app goes live**. Plan it for **day 11 (Wed 18 Nov) together with the backend deploy**. Order: backend first (new columns migrate on first API hit), then desktop. Both only with Moni's approval.
+- `main` moves fast (other developers release v2.9.x). Rebase `feature/mobile-app-foundation` on `origin/main` **at least once a day** and report any conflict in POS files (`electron/ipc/invoices.ts`, `orders.ts`, `electron/preload.ts`, `electron/database.ts`) immediately. Last checked 2026-11-07: branch is 0 commits behind `origin/main`.
+
+## Proposed 2026-11-08: Sales force (Run 3) split between v1.0 and v1.1
+Not approved yet; see ARCHITECTURE.md section 18.
+- **v1.0 (21 Nov, if the demo is approved this week):** hierarchy + role dashboards (read-only), targets set in the POS, field visits with offline outbox and follow-up reminders (local notifications), agent-initiated Smart Buy join with POS approval.
+- **v1.1:** salary/commission payroll and approvals, card payments live (sandbox code may ship earlier behind a flag, never live keys), in-app target assignment, server-side reminder fallback (needs a scheduler).
+- Risk to v1.0: this adds POS desktop migrations (`branches.region_id`, `staff_assignments`, `staff_targets`) to the day-11 POS release; backend first, then desktop, only with Moni's approval.
+
+## v1.1: fast updates right after launch (target 25 to 28 Nov 2026)
+Decided by Moni on 2026-11-13 ("the v1.1 items ship as fast updates right after"). Everything moved out of v1.0 to protect 21 Nov:
+**Sales force**
+- Salary rules, commission slabs, the monthly performance job and the approval chain (reuse `commissionEngine.ts` and the existing approval states).
+- Card payment (PayHere hosted page; sandbox first, live keys only with Moni's approval).
+- Reassign customers between officers; activate / deactivate subordinates.
+- Leaderboard and alerts on the management dashboard; deliveries and join requests in the per-person drill-down; date filters beyond this month and last month.
+- Server reminder push for follow-ups (needs a scheduler: a stop-and-ask deploy item).
+- Syncing `staff_assignments`, `staff_targets` and `field_visits` to the POS database (they are cloud-only in v1.0; the POS page reads them from the cloud).
+**Smart Buy cash collection**
+- Managers see their team's collections by person and by day inside their scope.
+- Bluetooth thermal printing of receipts (PDF to WhatsApp ships in v1.0).
+**Agent-assisted ordering for Smart Buy customers (TK Fresh Choice), planned 2026-11-23, NOT built until v1.0 is live**
+- Full spec: project doc `v1_1-agent-assisted-ordering.md`. Parts: (A) Smart Buy on for TK (done for v1.0 via per-company override, see DECISIONS 2026-11-23); (B) read-only agent member profile (contributions, bills, draws, wallet); (C) "Buy for customer" (agent verifies NIC + registered phone, shop in on-behalf mode, wallet and/or COD, order pending until POS admin approves, wallet deducted on confirmation); (D) product units kg / L / ml / count / pack (POS product form + bulk-assign for TK products).
+- **Order of work:** 1) wallet sync fix (ARCHITECTURE section 10) FIRST, because wallet deduction on confirmation depends on it; 2) product units; 3) member profile; 4) Buy-for-customer. NIC stays out of the cloud customers table (verify against the stored/hashed value). OTA where no native change, otherwise a new Play build (versionCode + 1).
+**Housekeeping**
+- Native review of the Tamil and Sinhala wording (`sf.*`, `collect.*`, `fewLeft`).
+- Fix the one-day-early monthly due date in the POS (`cycleDueDate`), see PROGRESS 2026-11-13.
+**Added 2026-11-13 (from the test.3 work)**
+- Product share as an https link (universal / app links need a domain; v1.0 shares `naturalplantation://product/<id>`).
+- "Newest" sort uses `updated_at`; add `created_at` to the product list DTO for a true newest.
+- POS category image upload (today only a manual URL; the create form does not save `image_url`) and a category-assignment helper for the 775 uncategorised production products.
+- Pinch-zoom gallery uses built-in gestures (no gesture-handler); revisit if a gesture library is approved.
+- Order-by-order review prompts (push "How was your order?" after delivery) and photo reviews.
+- Email: per-user unsubscribe for marketing types (none are marketing in v1.0), delivery status webhooks from the email provider.
+- Native review of Tamil and Sinhala wording for the new `product.*`, `categories.*`, join and email strings.
+
+
+## Added 2026-11-13: App Control and Announcements
+- **v1.0:** banners v2 (link, audience, schedule in Colombo time, per-language images, view/tap counters) and home page layout (reorder / on-off). POS App Control group.
+- **v1.1 (Phase 2):** Announcements (in-app messages / inbox posts managed from the App Control "Announcements" tab, currently a "Coming in v1.1" placeholder). Also deferred: a true image crop tool in the banner form (today: 16:7 crop preview and a ratio warning).
+- **v1.1:** Delivery fees per area (decided by Moni 2026-11-14). v1.0 keeps the single flat fee plus free-over amount; per-area fees need a new fee table, POS editor and checkout lookup.
+
+## REVISED TIMELINE (Moni, 2026-11-17) - superseded by the 2026-11-23 timeline below
+| Date | What | Who / STOP |
+|---|---|---|
+| Wed 18 Nov | Full release regression on Moni's phone: every role, both themes, 3 languages, offline, POS loop, in-app update, emails once SMTP is in | Claude + Moni |
+| Thu 19 Nov | Production deploy (backend, then POS desktop) | **STOP: needs Moni's approval in chat** |
+| Fri 20 Nov | Production AAB, upload to Play Internal testing | **STOP: Moni runs / approves the build and the Play upload** |
+| Sat 21 Nov | Submit to Production | **STOP** |
+
+Threats to this timeline (2026-11-17): (1) the in-app APK update proof (test.8 to test.11) is still not confirmed on Moni's phone; (2) upload-key MATCH / NO MATCH is unchecked: a NO MATCH needs a Play upload-key reset, which takes days and would break 20 Nov; (3) `google-services.json` (FCM) and the Expo username are needed before the AAB; (4) SMTP + allow-list are needed for the 14 email types before 18 Nov; (5) the production merge/deploy needs the main developer's freeze window (RUNBOOK section 2) and the DB password rotation (3c). Items 1 to 4 are on Moni's side; item 5 needs both.
+
+
+## REVISED TIMELINE (Moni, 2026-11-23) - current, replaces both tables above
+| Date | What | Who / STOP |
+|---|---|---|
+| Mon 23 Nov | test.12 (visit roll-up, offline "Waiting to upload", update-sheet snooze fix, POS product_attributes FK fix) on Moni's phone; short regression of those 4 fixes + 9-login smoke; final phone regression | Claude + Moni |
+| Tue 24 Nov | Production deploy (backend, then POS desktop) | **STOP: needs Moni's explicit go in chat** |
+| Wed 25 Nov | Production AAB (`build-production.ps1`), upload to Play Internal testing | **STOP: Moni's go for the build and the Play upload** |
+| Thu 26 Nov | Submit to Play Production | **STOP** |
+
+Status on 2026-11-23: done = in-app APK update proof (test.8 to test.11), 14 emails on staging, POS loop on staging, step 8 integration tests, upload-key reset (SHA1 match), EAS link + FCM, branch pushed. Threats: (1) the 24 Nov production deploy still needs the main developer's freeze window (RUNBOOK section 2), the timezone precheck, the backup + restore test and the DB password / backup-secret rotation; (2) the new POS desktop build (with the product_attributes FK fix) must go out to BOTH update directories; (3) production `.env` must have `BACKUP_ENCRYPTION_KEY` and the real-company SMTP entered before emails are switched on; (4) if Play requires a closed test (12 testers for 14 days) the 26 Nov submit is not reachable, tell Moni immediately; (5) Play review time after 26 Nov is outside our control.

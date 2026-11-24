@@ -54,7 +54,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const body = await req.json()
   const { status, suspensionReason, name, email, phone, address, notes, regenerate_api_key,
-          regenerate_company_key, revoke_previous_api_key, revoke_previous_company_key,
+          regenerate_company_key, generate_app_key, revoke_previous_app_key, revoke_previous_api_key, revoke_previous_company_key,
           maxBranches, maxUsers, maxPosDevices, maxStorageGb,
           brandColor, brandLogoUrl, loginLogoUrl, smtp, sms,
           subscriptionEndsAt, newPackageId, extendTrialDays,
@@ -151,6 +151,13 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     setClauses.push('previous_company_key = ?', 'previous_company_key_expires_at = DATE_ADD(NOW(), INTERVAL ? HOUR)', 'company_key = ?')
     vals.push((old as Record<string, string>).company_key, KEY_GRACE_HOURS, randomUUID())
   }
+  // Generate App Key (mobile app). First generation or rotation; old key keeps working for the grace period.
+  if (generate_app_key) {
+    setClauses.push('previous_app_key = ?', 'previous_app_key_expires_at = CASE WHEN ? IS NULL THEN NULL ELSE DATE_ADD(NOW(), INTERVAL ? HOUR) END', 'app_key = ?')
+    const oldApp = (old as Record<string, string | null>).app_key ?? null
+    vals.push(oldApp, oldApp, KEY_GRACE_HOURS, 'npk_' + randomUUID().replace(/-/g, ''))
+  }
+  if (revoke_previous_app_key) { setClauses.push('previous_app_key = NULL, previous_app_key_expires_at = NULL') }
   if (revoke_previous_api_key)     { setClauses.push('previous_api_key = NULL, previous_api_key_expires_at = NULL') }
   if (revoke_previous_company_key) { setClauses.push('previous_company_key = NULL, previous_company_key_expires_at = NULL') }
   if (maxBranches   != null)   { setClauses.push('max_branches = ?')     ; vals.push(Number(maxBranches)) }

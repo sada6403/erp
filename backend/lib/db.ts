@@ -69,7 +69,15 @@ declare global {
   var _posErpTenantPools: Map<string, Pool> | undefined
 }
 
-const poolInstance = global._posErpPool ?? mysql.createPool(getConfig())
+// Stored timestamps are UTC. mysql2 reads DATETIME as UTC (timezone '+00:00'), so NOW()/CURRENT_TIMESTAMP must also
+// be UTC on every connection, whatever the MySQL server's own timezone is (a local server in +05:30 wrote times 5h30 ahead).
+function createUtcPool(config: PoolOptions): Pool {
+  const p = mysql.createPool(config)
+  p.on('connection', (c) => { c.query("SET time_zone = '+00:00'") })
+  return p
+}
+
+const poolInstance = global._posErpPool ?? createUtcPool(getConfig())
 global._posErpPool = poolInstance
 const tenantPoolInstances = global._posErpTenantPools ?? new Map<string, Pool>()
 global._posErpTenantPools = tenantPoolInstances
@@ -128,7 +136,7 @@ export async function rows<T = Record<string, unknown>>(sql: string, values: unk
 export function tenantPool(database: string): WrappedPool {
   let instance = tenantPoolInstances.get(database)
   if (!instance) {
-    instance = mysql.createPool(getConfig(database))
+    instance = createUtcPool(getConfig(database))
     tenantPoolInstances.set(database, instance)
   }
   return wrapPool(instance)
@@ -450,6 +458,11 @@ async function autoMigrate() {
     `ALTER TABLE companies ADD COLUMN clear_data_password_hash VARCHAR(60) NULL`,
     `ALTER TABLE companies ADD COLUMN clear_data_attempts INT NOT NULL DEFAULT 0`,
     `ALTER TABLE companies ADD COLUMN clear_data_locked_until DATETIME NULL`,
+    // Mobile app: App Key identifies the company only (not a secret); previous key has a grace period.
+    `ALTER TABLE companies ADD COLUMN app_key CHAR(36) NULL`,
+    `ALTER TABLE companies ADD COLUMN previous_app_key CHAR(36) NULL`,
+    `ALTER TABLE companies ADD COLUMN previous_app_key_expires_at DATETIME NULL`,
+    `CREATE UNIQUE INDEX uq_companies_app_key ON companies (app_key)`,
   ]
 
   for (const sql of stmts) {

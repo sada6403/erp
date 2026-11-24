@@ -285,7 +285,7 @@ export function registerNotificationHandlers() {
         const branchParams = branchId ? [branchId] : []
         const overdueCount = db.prepare(`
           SELECT COUNT(*) as cnt FROM installments
-          WHERE status = 'active' AND next_due_date < date('now') AND due_amount > paid_amount
+          WHERE status = 'active' AND next_due_date < date('now','+330 minutes') AND due_amount > paid_amount
           ${branchClause}
         `).get(...branchParams) as { cnt: number }
 
@@ -306,7 +306,7 @@ export function registerNotificationHandlers() {
 
         const dueTodayCount = db.prepare(`
           SELECT COUNT(*) as cnt FROM installments
-          WHERE status = 'active' AND next_due_date = date('now') AND due_amount > paid_amount
+          WHERE status = 'active' AND next_due_date = date('now','+330 minutes') AND due_amount > paid_amount
           ${branchClause}
         `).get(...branchParams) as { cnt: number }
 
@@ -333,14 +333,14 @@ export function registerNotificationHandlers() {
           const expiringBatches = db.prepare(`
             SELECT COUNT(*) as cnt FROM product_batches
             WHERE expiry_date IS NOT NULL AND quantity > 0
-              AND expiry_date <= date('now', '+30 days') AND expiry_date >= date('now')
+              AND expiry_date <= date('now', '+330 minutes', '+30 days') AND expiry_date >= date('now','+330 minutes')
               ${batchBranchClause}
           `).get(...batchParams) as { cnt: number }
           if (expiringBatches.cnt > 0) {
             const recent = db.prepare(`SELECT id FROM notifications WHERE title='Batches Expiring Soon' AND target_branch_id IS ? AND created_at > datetime('now', '-6 hours') LIMIT 1`).get(branchId || null)
             if (!recent) createNotification('low_stock', 'Batches Expiring Soon', `${expiringBatches.cnt} batch${expiringBatches.cnt > 1 ? 'es' : ''} will expire within 30 days. Review your inventory.`, { count: expiringBatches.cnt, branchId: branchId || null }, { branchId: branchId || null, requiredPermission: 'inventory' })
           }
-          const expiredBatches = db.prepare(`SELECT COUNT(*) as cnt FROM product_batches WHERE expiry_date IS NOT NULL AND quantity > 0 AND expiry_date < date('now') ${batchBranchClause}`).get(...batchParams) as { cnt: number }
+          const expiredBatches = db.prepare(`SELECT COUNT(*) as cnt FROM product_batches WHERE expiry_date IS NOT NULL AND quantity > 0 AND expiry_date < date('now','+330 minutes') ${batchBranchClause}`).get(...batchParams) as { cnt: number }
           if (expiredBatches.cnt > 0) {
             const recent = db.prepare(`SELECT id FROM notifications WHERE title='Expired Stock Alert' AND target_branch_id IS ? AND created_at > datetime('now', '-6 hours') LIMIT 1`).get(branchId || null)
             if (!recent) createNotification('low_stock', 'Expired Stock Alert', `${expiredBatches.cnt} batch${expiredBatches.cnt > 1 ? 'es' : ''} have expired but still have stock. Remove from sale immediately.`, { count: expiredBatches.cnt, branchId: branchId || null }, { branchId: branchId || null, requiredPermission: 'inventory' })

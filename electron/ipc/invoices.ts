@@ -3,7 +3,7 @@ import type { IpcMain } from 'electron'
 import type Database from 'better-sqlite3'
 import { getDb } from '../database'
 import crypto from 'crypto'
-import { enqueuSync } from '../services/syncQueue'
+import { enqueuSync, enqueueProductVariantRows } from '../services/syncQueue'
 import { logAudit } from '../services/auditLog'
 import { createCompanyStore } from '../services/companyWorkspace'
 import { insertStockMovement } from '../services/stockMovement'
@@ -145,6 +145,41 @@ function defaultBranchId() {
 
 const money = (v: number) => Math.round((Number(v) || 0) * 100) / 100
 
+// App prices are tax-inclusive (DECISIONS.md), so the tax inside a line is
+// derived from the locked gross instead of being added on top.
+const inclusiveTax = (gross: number, ratePct: number) => ratePct > 0 ? money(gross - gross / (1 + ratePct / 100)) : 0
+
+
+// When an app order is marked paid (slip verified, or cash collected on delivery)
+// after its invoice exists, record the payment on the invoice so it stops being due.
+export async function settleAppOrderInvoice(orderId: string, userId: string | null): Promise<void> {
+  const db = getDb()
+  const inv = db.prepare('SELECT id, branch_id, customer_id, total_amount, due_amount FROM invoices WHERE source_order_id=?').get(orderId) as
+    { id: string; branch_id: string; customer_id: string | null; total_amount: number; due_amount: number } | undefined
+  if (!inv || Number(inv.due_amount) <= 0.005) return
+  const order = db.prepare('SELECT order_number, payment_method, payment_reference FROM customer_orders WHERE id=?').get(orderId) as
+    { order_number: string; payment_method: string | null; payment_reference: string | null }
+  const due = money(Number(inv.due_amount))
+  const paymentId = crypto.randomUUID()
+  const row = { id: paymentId, invoice_id: inv.id, method: order.payment_method === 'bank_transfer' ? 'bank_transfer' : 'cash', amount: due, reference: order.payment_reference || order.order_number, received_by: userId }
+  db.transaction(() => {
+    db.prepare('INSERT INTO payments (id, invoice_id, method, amount, reference, received_by) VALUES (?,?,?,?,?,?)')
+      .run(row.id, row.invoice_id, row.method, row.amount, row.reference, row.received_by)
+    db.prepare(`UPDATE invoices SET paid_amount=total_amount, due_amount=0, updated_at=datetime('now') WHERE id=?`).run(inv.id)
+    if (inv.customer_id) db.prepare(`UPDATE customers SET outstanding_due = MAX(0, outstanding_due - ?), updated_at=datetime('now') WHERE id=?`).run(due, inv.customer_id)
+    logAudit(db, { userId, branchId: inv.branch_id, action: 'APP_ORDER_INVOICE_PAID', tableName: 'invoices', recordId: inv.id, newValues: { amount: due, order_id: orderId } })
+  })()
+  await enqueuSync('payments', paymentId, 'INSERT', row)
+  await enqueuSync('invoices', inv.id, 'UPDATE', { id: inv.id, paid_amount: inv.total_amount, due_amount: 0 })
+  if (inv.customer_id) await syncCustomerRow(db, inv.customer_id)
+}
+
+// App-order lines carry the tax rate that was locked when the customer ordered; counter lines use the product's.
+const lineTaxRate = (item: Record<string, unknown>, real: { tax_rate: number }, isApp: boolean) =>
+  isApp && item.locked_tax_rate != null ? Number(item.locked_tax_rate) || 0 : Number(real.tax_rate) || 0
+
+interface AppOrderSource { id: string; orderNumber: string }
+
 export function registerInvoiceHandlers(ipcMain: IpcMain) {
   // Get next bill number preview
   safeHandle(ipcMain, 'invoices:nextNumber', (_e, billType: BillType = 'RETAIL') => {
@@ -155,7 +190,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
   })
 
   // Create invoice — handles all 3 bill types
-  safeHandle(ipcMain, 'invoices:create', async (_e, payload) => {
+  // Shared invoice core. `invoices:create` (cashier) and `orders:convertToInvoice`
+  // (app orders) both go through here so stock, FIFO batches, commission and
+  // sync enqueue are never duplicated. `opts.appOrder` is only ever supplied by
+  // the main process, never by the renderer.
+  const createInvoice = async (payload: any, opts: { appOrder?: AppOrderSource } = {}) => {
       // Phase 1 device-authorization work — defense in depth alongside the
       // App.tsx route-level lock screen: a locked device can't record a
       // sale via this handler even if the renderer's guard were somehow
@@ -200,7 +239,8 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       // in the cart (Cart.tsx's canEditPrice) — everyone else's line's
       // unit_price must still match the product's real, current
       // selling_price exactly; quantity must be a positive whole number.
-      const priceOverrideAllowed = isAdminTypeRole(perms)
+      const appOrder = opts.appOrder
+      const priceOverrideAllowed = isAdminTypeRole(perms) || Boolean(appOrder)
       const priceByProduct = new Map<string, { selling_price: number; tax_rate: number }>()
       for (const item of (payload.items || [])) {
         const qty = Number(item.quantity)
@@ -242,7 +282,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       // including Company Admin — a product's own configured discount
       // (resolveApplicableDiscount) is the only ceiling now, for every role.
       // A product with no discount rule configured allows 0% discount.
-      let itemsSubtotal = 0, itemsDiscountTotal = 0, itemsTaxTotal = 0
+      let itemsSubtotal = 0, itemsDiscountTotal = 0, itemsTaxTotal = 0, inclusiveTaxTotal = 0
       {
         const TOLERANCE = 0.5 // absorb client-side rounding
         let clientItemDiscountTotal = 0
@@ -264,7 +304,12 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           const taxable = money(unitPrice * qty - discountAmount)
           itemsSubtotal += unitPrice * qty
           itemsDiscountTotal += discountAmount
-          itemsTaxTotal += money(taxable * (Number(real.tax_rate) || 0) / 100)
+          if (appOrder && item.tax_inclusive) {
+            const inc = inclusiveTax(taxable, lineTaxRate(item, real, true))
+            itemsTaxTotal += inc; inclusiveTaxTotal += inc
+          } else {
+            itemsTaxTotal += money(taxable * lineTaxRate(item, real, Boolean(appOrder)) / 100)
+          }
           if (unitPrice <= 0) continue
           const auto = resolveApplicableDiscount(db, item.product_id, unitPrice, branchId)
           const allowed = auto?.pct || 0
@@ -276,6 +321,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         itemsSubtotal = money(itemsSubtotal)
         itemsDiscountTotal = money(itemsDiscountTotal)
         itemsTaxTotal = money(itemsTaxTotal)
+        inclusiveTaxTotal = money(inclusiveTaxTotal)
         if (Number.isFinite(minAllowedPct)) {
           const subtotal = Number(payload.subtotal || 0)
           const globalDiscountAmount = Number(payload.discount_amount || 0) - clientItemDiscountTotal
@@ -295,8 +341,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       const finalSubtotal = itemsSubtotal
       const finalDiscountAmount = money(itemsDiscountTotal + globalDiscount)
       const finalTaxAmount = itemsTaxTotal
-      const finalTotalAmount = money(finalSubtotal - finalDiscountAmount + finalTaxAmount)
+      const deliveryFee = appOrder ? money(Math.max(0, Number(payload.delivery_fee) || 0)) : 0
+      // Tax is added on top (counter rule); only price-override / legacy app lines carry it inside the price.
+      const finalTotalAmount = money(finalSubtotal - finalDiscountAmount + (finalTaxAmount - inclusiveTaxTotal) + deliveryFee)
       const finalDueAmount = money(Math.max(0, finalTotalAmount - Number(payload.paid_amount || 0)))
+      if (appOrder && payload.items.length === 0) return { success: false, error: 'This order has no items' }
 
       // --- Credit bill validation ---
       if (billType === 'CREDIT') {
@@ -371,11 +420,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id,
             bill_type, status, valid_until, due_date, approved_by,
             subtotal, discount_amount, tax_amount, total_amount, paid_amount, due_amount,
-            agent_code, agent_name, agent_id, agent_commission_pct, agent_commission_amount, notes)
+            agent_code, agent_name, agent_id, agent_commission_pct, agent_commission_amount, notes, source_order_id, delivery_fee)
           VALUES (@id, @invoice_number, @branch_id, @customer_id, @cashier_id,
             @bill_type, @status, @valid_until, @due_date, @approved_by,
             @subtotal, @discount_amount, @tax_amount, @total_amount, @paid_amount, @due_amount,
-            @agent_code, @agent_name, @agent_id, @agent_commission_pct, @agent_commission_amount, @notes)
+            @agent_code, @agent_name, @agent_id, @agent_commission_pct, @agent_commission_amount, @notes, @source_order_id, @delivery_fee)
         `).run({
           id,
           invoice_number:  invoiceNumber,
@@ -402,6 +451,8 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           agent_commission_pct: 0,
           agent_commission_amount: 0,
           notes:           payload.notes || null,
+          source_order_id: appOrder?.id || null,
+          delivery_fee:    deliveryFee,
         })
 
         // Insert line items — money fields recomputed from the product's
@@ -423,10 +474,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           const qty = Number(item.quantity)
           const discountPct = Math.max(0, Math.min(100, Number(item.discount_pct) || 0))
           const discountAmount = money(unitPrice * qty * discountPct / 100)
-          const taxRate = Number(real.tax_rate) || 0
+          const taxRate = lineTaxRate(item, real, Boolean(appOrder))
           const taxableAmount = money(unitPrice * qty - discountAmount)
-          const taxAmount = money(taxableAmount * taxRate / 100)
-          const lineTotal = money(taxableAmount + taxAmount)
+          const inclusive = Boolean(appOrder && item.tax_inclusive)
+          const taxAmount = inclusive ? inclusiveTax(taxableAmount, taxRate) : money(taxableAmount * taxRate / 100)
+          const lineTotal = inclusive ? taxableAmount : money(taxableAmount + taxAmount)
           const itemRow = {
             id:              crypto.randomUUID(),
             invoice_id:      id,
@@ -492,10 +544,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
               const vStock = db.prepare('SELECT id, quantity FROM product_variant_stocks WHERE variant_id = ? AND branch_id = ?')
                 .get(item.variant_id, branchId) as { id: string; quantity: number } | undefined
               if (vStock) {
-                db.prepare('UPDATE product_variant_stocks SET quantity = quantity - ?, updated_at = datetime("now") WHERE variant_id = ? AND branch_id = ?')
+                db.prepare('UPDATE product_variant_stocks SET quantity = quantity - ?, updated_at = datetime(\x27now\x27) WHERE variant_id = ? AND branch_id = ?')
                   .run(item.quantity, item.variant_id, branchId)
               } else {
-                db.prepare('INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at) VALUES (?, ?, ?, ?, ?, 0, datetime("now"))')
+                db.prepare('INSERT INTO product_variant_stocks (id, variant_id, product_id, branch_id, quantity, damaged_qty, updated_at) VALUES (?, ?, ?, ?, ?, 0, datetime(\x27now\x27))')
                   .run(crypto.randomUUID(), item.variant_id, item.product_id, branchId, -item.quantity)
               }
             }
@@ -611,6 +663,11 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
           `).run(finalDueAmount, payload.customer_id)
         }
 
+        if (appOrder) {
+          db.prepare(`UPDATE customer_orders SET invoice_id=?, status='ready_for_delivery', released_by=?, updated_at=datetime('now') WHERE id=? AND invoice_id IS NULL`)
+            .run(id, (user?.id as string) || null, appOrder.id)
+        }
+
         // Audit log
         logAudit(db, {
           userId: user?.id as string, branchId,
@@ -636,10 +693,26 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         agent_commission_pct: commissionPctForSync,
         agent_commission_amount: agentCommissionAmount,
         notes: payload.notes || null,
+        source_order_id: appOrder?.id || null, delivery_fee: deliveryFee,
       })
+      if (appOrder) {
+        await enqueuSync('customer_orders', appOrder.id, 'UPDATE', { id: appOrder.id, invoice_id: id, status: 'ready_for_delivery', released_by: (user?.id as string) || null })
+      }
       for (const movement of movementRecords) {
         await enqueuSync('stock_movements', String(movement.id), 'INSERT', movement)
         await syncStockRow(db, String(movement.product_id), String(movement.from_branch_id || movement.to_branch_id))
+      }
+      // Variant stock was decremented locally; push the changed variant stock rows.
+      {
+        const variantsByProduct = new Map<string, string[]>()
+        for (const itemRow of itemRecords) {
+          const vid = (itemRow as Record<string, unknown>).variant_id
+          if (vid) {
+            const pid = String((itemRow as Record<string, unknown>).product_id)
+            variantsByProduct.set(pid, [...(variantsByProduct.get(pid) || []), String(vid)])
+          }
+        }
+        for (const [pid, vids] of variantsByProduct) await enqueueProductVariantRows(pid, vids)
       }
       for (const itemRow of itemRecords) {
         await enqueuSync('invoice_items', String(itemRow.id), 'INSERT', itemRow)
@@ -683,6 +756,117 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       }
 
       return { success: true, data: { id, invoice_number: invoiceNumber, bill_type: billType } }
+  }
+  safeHandle(ipcMain, 'invoices:create', (_e, payload) => createInvoice(payload))
+
+  // Convert an app order (channel='app') into exactly one invoice. Prices are
+  // the order's locked unit_price; the invoice core (stock, FIFO, sync) is the
+  // shared `createInvoice`.
+  safeHandle(ipcMain, 'orders:convertToInvoice', async (_e, orderId: string, input: { price_overrides?: { item_id: string; unit_price: number }[]; reason?: string } = {}) => {
+    const db = getDb()
+    const user = getAuthUser()
+    const perms = ((user?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || (user?.permissions as Record<string, unknown>) || {}
+    if (!perms.all && !perms.employees && !perms.pos) return { success: false, error: 'Access required to convert an order' }
+    const order = db.prepare('SELECT * FROM customer_orders WHERE id=?').get(String(orderId)) as Record<string, any> | undefined
+    if (!order) return { success: false, error: 'Order not found' }
+    if (order.channel !== 'app') return { success: false, error: 'Only app orders can be converted with this action' }
+    if (!perms.all && user?.branch_id && order.branch_id !== user.branch_id) return { success: false, error: 'Cannot convert an order from another branch' }
+
+    const existingFor = () => db.prepare(
+      `SELECT id, invoice_number FROM invoices WHERE id=? OR source_order_id=? ORDER BY created_at LIMIT 1`
+    ).get(order.invoice_id || '', order.id) as { id: string; invoice_number: string } | undefined
+    const existing = existingFor()
+    if (existing) return { success: true, data: { id: existing.id, invoice_number: existing.invoice_number, already_existed: true } }
+
+    if (!['confirmed', 'processing', 'preparing', 'ready_for_delivery'].includes(String(order.status))) {
+      return { success: false, error: 'Confirm the order before converting it to an invoice' }
+    }
+    const items = db.prepare('SELECT * FROM customer_order_items WHERE order_id=?').all(order.id) as Record<string, any>[]
+    if (!items.length) return { success: false, error: 'This order has no items' }
+
+    // Price changes: price-edit role + reason + audit row.
+    const overrides = new Map<string, number>()
+    for (const o of input.price_overrides || []) {
+      const item = items.find(i => i.id === o.item_id)
+      if (!item) return { success: false, error: 'Unknown order line in price override' }
+      const next = money(Number(o.unit_price))
+      if (!Number.isFinite(next) || next < 0) return { success: false, error: 'Item price must be a valid non-negative amount' }
+      if (Math.abs(next - Number(item.unit_price)) > 0.005) overrides.set(String(item.id), next)
+    }
+    const reason = String(input.reason || '').trim()
+    if (overrides.size) {
+      if (!isAdminTypeRole(perms)) return { success: false, error: 'Changing an app order price needs a user with price-edit permission' }
+      if (reason.length < 3) return { success: false, error: 'A reason is required to change an app order price' }
+    }
+
+    // Clear stock message (the core also rolls back on any shortage).
+    const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+    if (!settings.allow_negative_stock || usesSupermarketStock(settings)) {
+      const short: string[] = []
+      for (const i of items) {
+        const have = db.prepare('SELECT COALESCE(SUM(quantity - COALESCE(damaged_qty,0)),0) q FROM stocks WHERE product_id=? AND branch_id=?')
+          .get(i.product_id, order.branch_id) as { q: number }
+        if (Number(have.q) + 1e-9 < Number(i.quantity)) {
+          const name = (db.prepare('SELECT name FROM products WHERE id=?').get(i.product_id) as { name: string } | undefined)?.name || String(i.product_id)
+          short.push(`${name} (need ${Number(i.quantity)}, have ${Math.max(0, Number(have.q))})`)
+        }
+      }
+      if (short.length) return { success: false, error: `Not enough stock to convert this order: ${short.join('; ')}. Nothing was invoiced.` }
+    }
+
+    // Lines with the order-time snapshot (net price + locked tax rate) go through the normal counter path (tax added on
+    // top, same rounding), so the invoice equals a counter sale of the same item. Legacy orders without a snapshot and
+    // lines whose price was overridden (entered as the final price) keep the tax inside the price.
+    const lines = items.map(i => {
+      const edited = overrides.has(String(i.id))
+      const snap = !edited && i.net_unit_price != null
+      return {
+        product_id: i.product_id, variant_id: i.variant_id || null, variant_title: i.variant_name || null,
+        quantity: Number(i.quantity), discount_pct: 0,
+        unit_price: snap ? Number(i.net_unit_price) : (overrides.get(String(i.id)) ?? Number(i.unit_price)),
+        tax_inclusive: !snap,
+        locked_tax_rate: i.tax_rate != null ? Number(i.tax_rate) : null,
+      }
+    })
+    const fee = money(Number(order.delivery_fee) || 0)
+    // The invoice total is items + delivery fee, i.e. exactly what the customer pays and the agent collects.
+    const itemsTotal = money(lines.reduce((s, l) => {
+      const taxable = money(l.unit_price * l.quantity)
+      return s + (l.tax_inclusive ? taxable : taxable + money(taxable * (Number(l.locked_tax_rate) || 0) / 100))
+    }, 0) + fee)
+    const paidNow = order.payment_status === 'paid'
+    const method = order.payment_method === 'bank_transfer' ? 'bank_transfer' : 'cash'
+    const payload = {
+      bill_type: 'RETAIL', branch_id: order.branch_id, customer_id: order.customer_id || null, items: lines, delivery_fee: fee,
+      paid_amount: paidNow ? itemsTotal : 0,
+      payments: paidNow && itemsTotal > 0 ? [{ method, amount: itemsTotal, reference: order.payment_reference || order.order_number }] : [],
+      notes: `App order ${order.order_number}`,
+    }
+
+    let result: any
+    try {
+      result = await createInvoice(payload, { appOrder: { id: String(order.id), orderNumber: String(order.order_number) } })
+    } catch (err) {
+      const again = existingFor() || (db.prepare('SELECT id, invoice_number FROM invoices WHERE source_order_id=?').get(order.id) as { id: string; invoice_number: string } | undefined)
+      if (again && /UNIQUE/i.test(String((err as Error).message))) return { success: true, data: { id: again.id, invoice_number: again.invoice_number, already_existed: true } }
+      if (/Insufficient/i.test(String((err as Error).message))) return { success: false, error: `Not enough stock to convert this order (${(err as Error).message}). Nothing was invoiced.` }
+      throw err
+    }
+    if (!result.success) return result
+
+    if (overrides.size) {
+      logAudit(db, {
+        userId: (user?.id as string) || null, branchId: String(order.branch_id), action: 'APP_ORDER_PRICE_OVERRIDE',
+        tableName: 'invoices', recordId: result.data.id,
+        oldValues: Object.fromEntries(items.filter(i => overrides.has(String(i.id))).map(i => [i.id, Number(i.unit_price)])),
+        newValues: { prices: Object.fromEntries(overrides), reason, order_id: order.id },
+      })
+    }
+    logAudit(db, {
+      userId: (user?.id as string) || null, branchId: String(order.branch_id), action: 'APP_ORDER_CONVERTED',
+      tableName: 'customer_orders', recordId: String(order.id), newValues: { invoice_id: result.data.id, invoice_number: result.data.invoice_number },
+    })
+    return { success: true, data: { ...result.data, already_existed: false } }
   })
 
   // Convert QUOTATION → RETAIL (deducts stock, changes bill_type)
@@ -904,8 +1088,8 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       if (filters.bill_type)  { sql += ' AND i.bill_type = ?';  params.push(filters.bill_type) }
       if (filters.status)     { sql += ' AND i.status = ?';     params.push(filters.status) }
       if (filters.customer_id){ sql += ' AND i.customer_id = ?';params.push(filters.customer_id) }
-      if (filters.date_from)  { sql += ' AND date(i.created_at) >= ?'; params.push(filters.date_from) }
-      if (filters.date_to)    { sql += ' AND date(i.created_at) <= ?'; params.push(filters.date_to) }
+      if (filters.date_from)  { sql += " AND date(i.created_at,'+330 minutes') >= ?"; params.push(filters.date_from) }
+      if (filters.date_to)    { sql += " AND date(i.created_at,'+330 minutes') <= ?"; params.push(filters.date_to) }
       if (filters.search) {
         sql += ' AND (i.invoice_number LIKE ? OR c.name LIKE ?)'
         const term = `%${filters.search}%`

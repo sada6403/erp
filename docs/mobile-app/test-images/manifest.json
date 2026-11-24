@@ -1,0 +1,189 @@
+{
+ "pooni-rice": {
+  "sku": "RIC-004",
+  "product": "POONI RICE",
+  "query": "rice bowl",
+  "title": "Rice Bowl",
+  "creator": "Kawin Harasai",
+  "license": "CC0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source": "openverse/stocksnap",
+  "landing_url": "https://stocksnap.io/photo/rice-bowl-CCBWIQCNEJ",
+  "file_url": "https://cdn.stocksnap.io/img-thumbs/960w/CCBWIQCNEJ.jpg",
+  "size": [
+   960,
+   640
+  ]
+ },
+ "keeri-shamba": {
+  "sku": "PRD-007",
+  "product": "KEERI SHAMBA",
+  "query": "uncooked rice",
+  "title": "Free uncooked rice grain mat",
+  "creator": "unknown",
+  "license": "CC0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source": "openverse/rawpixel",
+  "landing_url": "https://www.rawpixel.com/image/5922922/photo-image-public-domain-food-free",
+  "file_url": "https://images.rawpixel.com/editor_1024/cHJpdmF0ZS9zdGF0aWMvaW1hZ2Uvd2Vic2l0ZS8yMDIyLTA0L2xyL3B4MTYwMzUyNy1pbWFnZS1rd3Z4cWI0ay5qcGc.jpg",
+  "size": [
+   1024,
+   768
+  ]
+ },
+ "oil": {
+  "sku": "PRD-010",
+  "product": "OIL",
+  "query": "cooking oil bottle",
+  "title": "Free olive oil bottle garlic",
+  "creator": "unknown",
+  "license": "CC0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source": "openverse/rawpixel",
+  "landing_url": "https://www.rawpixel.com/image/5927777/photo-image-background-public-domain-black",
+  "file_url": "https://images.rawpixel.com/editor_1024/czNmcy1wcml2YXRlL3Jhd3BpeGVsX2ltYWdlcy93ZWJzaXRlX2NvbnRlbnQvbHIvZmY1ODkwLWltYWdlLWt3dnlpdXMyLmpwZw.jpg",
+  "size": [
+   683,
+   1024
+  ]
+ },
+ "dhal": {
+  "sku": "PRD-013",
+  "product": "DHAL",
+  "query": "lentils",
+  "title": "Lentilles blondes, lentilles vertes",
+  "creator": "fred_v",
+  "license": "CC BY 2.0",
+  "license_version": "2.0",
+  "license_url": "https://creativecommons.org/licenses/by/2.0/",
+  "source": "openverse/flickr",
+  "landing_url": "https://www.flickr.com/photos/8514720@N04/50881647186",
+  "file_url": "https://live.staticflickr.com/65535/50881647186_eb7aceb73c_b.jpg",
+  "size": [
+   1024,
+   680
+  ]
+ },
+ "kuttha-rice": {
+  "sku": "RIC-003",
+  "product": "KUTHHA RICE",
+  "query": "white rice grains",
+  "title": "Free rice image",
+  "creator": "unknown",
+  "license": "CC0",
+  "license_version": "1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "source": "openverse/rawpixel",
+  "landing_url": "https://www.rawpixel.com/image/5905176/free-rice-image-public-domain-food-cc0-photo",
+  "file_url": "https://images.rawpixel.com/editor_1024/czNmcy1wcml2YXRlL3Jhd3BpeGVsX2ltYWdlcy93ZWJzaXRlX2NvbnRlbnQvbHIvcHg4NTU1MDItaW1hZ2Uta3d2dXlhMHcuanBn.jpg",
+  "size": [
+   1024,
+   718
+  ]
+ },
+ "white-sugar": {
+  "sku": "PRD-008",
+  "product": "WHITE SUGAR",
+  "query": "sugar cubes",
+  "title": "Individually wrapped sugar cubes.jpg",
+  "creator": "\u0412\u0438\u043a\u0438\u0434\u0438\u043c",
+  "license": "CC BY 4.0",
+  "license_version": null,
+  "license_url": "https://creativecommons.org/licenses/by/4.0",
+  "source": "wikimedia commons",
+  "landing_url": "https://commons.wikimedia.org/wiki/File:Individually_wrapped_sugar_cubes.jpg",
+  "file_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/10/Individually_wrapped_sugar_cubes.jpg/1920px-Individually_wrapped_sugar_cubes.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+  "size": [
+   1400,
+   968
+  ]
+ },
+ "white-flour": {
+  "sku": "GRO-009",
+  "product": "WHITE  FLOUR",
+  "query": "wheat flour",
+  "title": "Whole wheat grain flour being scooped.jpg",
+  "creator": "Margaret Hoogstrate",
+  "license": "CC BY 3.0",
+  "license_version": null,
+  "license_url": "https://creativecommons.org/licenses/by/3.0",
+  "source": "wikimedia commons",
+  "landing_url": "https://commons.wikimedia.org/wiki/File:Whole_wheat_grain_flour_being_scooped.jpg",
+  "file_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/6/66/Whole_wheat_grain_flour_being_scooped.jpg/1920px-Whole_wheat_grain_flour_being_scooped.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+  "size": [
+   1400,
+   933
+  ]
+ },
+ "salt": {
+  "sku": "PRD-014",
+  "product": "SALT",
+  "query": "table salt",
+  "title": "Salt shaker on white background.jpg",
+  "creator": "Dubravko Sori\u0107 SoraZG on Flickr",
+  "license": "CC BY 2.0",
+  "license_version": null,
+  "license_url": "https://creativecommons.org/licenses/by/2.0",
+  "source": "wikimedia commons",
+  "landing_url": "https://commons.wikimedia.org/wiki/File:Salt_shaker_on_white_background.jpg",
+  "file_url": "https://upload.wikimedia.org/wikipedia/commons/7/78/Salt_shaker_on_white_background.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled",
+  "size": [
+   1175,
+   1400
+  ]
+ },
+ "tea-powder": {
+  "sku": "PRD-026",
+  "product": "TEA POWDER",
+  "query": "black tea leaves",
+  "title": "Darjeeling, India, Darjeeling tea, Black tea.jpg",
+  "creator": "Vyacheslav Argenberg",
+  "license": "CC BY 4.0",
+  "license_version": null,
+  "license_url": "https://creativecommons.org/licenses/by/4.0",
+  "source": "wikimedia commons",
+  "landing_url": "https://commons.wikimedia.org/wiki/File:Darjeeling,_India,_Darjeeling_tea,_Black_tea.jpg",
+  "file_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/31/Darjeeling%2C_India%2C_Darjeeling_tea%2C_Black_tea.jpg/1920px-Darjeeling%2C_India%2C_Darjeeling_tea%2C_Black_tea.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+  "size": [
+   1400,
+   933
+  ]
+ },
+ "soap": {
+  "sku": "PRD-077",
+  "product": "SANTHOOR",
+  "query": "bar of soap",
+  "title": "Real bars of soap",
+  "creator": "datsamkong",
+  "license": "CC BY 2.0",
+  "license_version": "2.0",
+  "license_url": "https://creativecommons.org/licenses/by/2.0/",
+  "source": "openverse/flickr",
+  "landing_url": "https://www.flickr.com/photos/199019123@N05/53581606297",
+  "file_url": "https://live.staticflickr.com/65535/53581606297_75ff024286_b.jpg",
+  "size": [
+   1023,
+   682
+  ]
+ },
+ "eggs": {
+  "sku": "PRD-076",
+  "product": "EGG",
+  "query": "chicken eggs",
+  "title": "6-Pack-Chicken-Eggs.jpg",
+  "creator": "Evan-Amos",
+  "license": "Public domain",
+  "license_version": null,
+  "license_url": null,
+  "source": "wikimedia commons",
+  "landing_url": "https://commons.wikimedia.org/wiki/File:6-Pack-Chicken-Eggs.jpg",
+  "file_url": "https://thumb.wikimedia.org/wikipedia/commons/thumb/1/12/6-Pack-Chicken-Eggs.jpg/1920px-6-Pack-Chicken-Eggs.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+  "size": [
+   1400,
+   851
+  ]
+ }
+}

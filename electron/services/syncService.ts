@@ -92,6 +92,7 @@ export class SyncService {
   private watermarkChecking = false
   private running = false
   private colCache = new Map<string, Set<string>>()
+  private notNullDefaultCache = new Map<string, Set<string>>()
   private backoffUntil = 0
   // Issue 35: reconcileDefaultRolesFromCloud() previously only ran inside
   // needsBootstrapPull() (empty local `users` table) — so an already-
@@ -752,7 +753,7 @@ export class SyncService {
 
   private async pullChanges(cloud: CloudApi): Promise<void> {
     let failure: unknown
-      try { await this.pullTables(cloud, ['branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers', 'products', ...(getDb().prepare("SELECT 1 FROM sqlite_master WHERE name='product_batch_identities'").get()?['product_batch_identities']:[]), 'stocks', 'customers', 'agents', 'positions', 'regions', 'zones', 'invoices', 'invoice_items', 'payments', 'installment_plans', 'installments', 'installment_payments', 'returns', 'return_items', 'chit_scheme_templates', 'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions', 'chit_scheme_branches', 'withdrawal_requests', 'stock_transfers', 'stock_movements', 'deliveries', 'purchase_orders', 'purchase_items', 'installment_schedule', 'installment_reminders', 'customer_orders', 'customer_order_items', 'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches', 'branch_transfer_logs', 'branch_transfer_prints', 'coupons', 'coupon_redemptions', 'expense_categories', 'expenses', 'capital_transactions', 'cash_sessions', 'loyalty_config', 'loyalty_transactions', 'product_uom', 'product_batches', 'sale_batch_allocations', 'return_batch_allocations', 'product_attributes', 'product_attribute_values', 'product_variants', 'product_variant_stocks', 'audit_logs', 'edit_requests', 'credit_ledger', 'stock_count_sessions', 'stock_count_items', 'discounts', 'agent_remittances', 'smartbuy_wallet', 'smartbuy_wallet_transactions', 'smartbuy_transfer_history', 'commission_rules', 'commission_ledger', 'commission_payouts', 'commission_approval_logs', 'commission_statement_history', 'commission_rule_history', 'chit_payment_reminders', 'held_carts', 'data_clear_events']) } catch (error) { failure = error }
+      try { await this.pullTables(cloud, ['branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers', 'products', ...(getDb().prepare("SELECT 1 FROM sqlite_master WHERE name='product_batch_identities'").get()?['product_batch_identities']:[]), 'stocks', 'customers', 'agents', 'positions', 'regions', 'zones', 'invoices', 'invoice_items', 'payments', 'installment_plans', 'installments', 'installment_payments', 'returns', 'return_items', 'chit_scheme_templates', 'chit_schemes', 'chit_members', 'chit_draws', 'chit_contributions', 'chit_scheme_branches', 'withdrawal_requests', 'stock_transfers', 'stock_movements', 'deliveries', 'purchase_orders', 'purchase_items', 'installment_schedule', 'installment_reminders', 'customer_orders', 'customer_order_items', 'branch_transfers', 'branch_transfer_items', 'branch_transfer_mismatches', 'branch_transfer_logs', 'branch_transfer_prints', 'coupons', 'coupon_redemptions', 'expense_categories', 'expenses', 'capital_transactions', 'cash_sessions', 'loyalty_config', 'loyalty_transactions', 'product_uom', 'product_batches', 'sale_batch_allocations', 'return_batch_allocations', 'product_attributes', 'product_attribute_values', 'product_variants', 'product_variant_stocks', 'audit_logs', 'edit_requests', 'credit_ledger', 'stock_count_sessions', 'stock_count_items', 'discounts', 'agent_remittances', 'smartbuy_wallet', 'smartbuy_wallet_transactions', 'smartbuy_transfer_history', 'commission_rules', 'commission_ledger', 'commission_payouts', 'commission_approval_logs', 'commission_statement_history', 'commission_rule_history', 'chit_payment_reminders', 'held_carts', 'data_clear_events', 'app_password_reset_requests', 'app_banners', 'app_settings', 'product_reviews']) } catch (error) { failure = error }
     try { await this.pullTables(cloud, ['supplier_payments']) } catch (error) { failure = failure || error }
     if ((store.get('app_settings') as Record<string,unknown> | undefined)?.keywords_enabled === true && getDb().prepare("SELECT 1 FROM sqlite_master WHERE name='product_search_keywords' AND type='table'").get()) {
       try { await this.pullTables(cloud, ['product_search_keywords']) } catch(error) { failure=failure||error }
@@ -887,7 +888,19 @@ export class SyncService {
                   continue
                 }
               }
+              // The cloud has no customers.outstanding_due, so the POS balance never syncs. A cash payment created
+              // in the cloud by the mobile app (COD collected by the delivery agent) is new to this device:
+              // apply it to the local balance once, the way a counter payment would have.
+              const isNewAppCodPayment = table === 'payments' && /^COD /.test(String(row.reference ?? ''))
+                && !db.prepare('SELECT 1 FROM payments WHERE id=?').get(row.id)
               this.insertFiltered(db, table, row)
+              if (isNewAppCodPayment) {
+                const inv = db.prepare('SELECT customer_id FROM invoices WHERE id=?').get(row.invoice_id) as { customer_id: string | null } | undefined
+                if (inv?.customer_id && Number(row.amount) > 0) {
+                  db.prepare(`UPDATE customers SET outstanding_due = MAX(0, outstanding_due - ?), updated_at=datetime('now') WHERE id=?`)
+                    .run(Number(row.amount), inv.customer_id)
+                }
+              }
               if (table === 'stocks') {
                 const local = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS ?')
                   .get(row.product_id, row.branch_id, row.warehouse_id ?? null) as { id: string }
@@ -906,6 +919,14 @@ export class SyncService {
                   if (repaired) {
                     this.insertFiltered(db, table, row)
                     if (table === 'stocks') this.recordStockBaseline(db, row)
+                    this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
+                    continue
+                  }
+                  // The cloud itself has no such parent (it was deleted there and the cloud has no FK to cascade).
+                  // For an optional ON DELETE SET NULL reference, keep the row and clear the dangling reference,
+                  // exactly what the local cascade would have done, instead of isolating the row forever.
+                  if (await this.clearOrphanedOptionalReferences(cloud, db, table, row)) {
+                    this.insertFiltered(db, table, row)
                     this.resolvePullQuarantine(db, table, recordId, 'UPSERT')
                     continue
                   }
@@ -1192,6 +1213,19 @@ export class SyncService {
     return cols
   }
 
+  /** Columns that are NOT NULL with a DEFAULT locally: a NULL from the cloud must fall back to that default, not reject the row. */
+  private getDefaultedNotNullColumns(db: ReturnType<typeof getDb>, table: string): Set<string> {
+    let set = this.notNullDefaultCache.get(table)
+    if (!set) {
+      set = new Set(
+        (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string; notnull: number; dflt_value: string | null }[])
+          .filter(c => c.notnull === 1 && c.dflt_value !== null).map(c => c.name)
+      )
+      this.notNullDefaultCache.set(table, set)
+    }
+    return set
+  }
+
   private quoteLocalIdentifier(value: string): string {
     return `"${value.replace(/"/g, '""')}"`
   }
@@ -1205,6 +1239,34 @@ export class SyncService {
     if (!local) return
     db.prepare('INSERT OR REPLACE INTO sync_stock_baselines (record_id,quantity,damaged_qty) VALUES (?,?,?)')
       .run(local.id, Number(row.quantity), Number(row.damaged_qty ?? 0))
+  }
+
+  /** Clears optional (ON DELETE SET NULL) references whose parent does not exist locally AND is confirmed absent in the cloud. Mutates `row`; returns true if anything was cleared. */
+  private async clearOrphanedOptionalReferences(
+    cloud: CloudApi,
+    db: ReturnType<typeof getDb>,
+    table: string,
+    row: Record<string, unknown>
+  ): Promise<boolean> {
+    if (typeof (cloud as { related?: unknown }).related !== 'function') return false
+    const foreignKeys = db.prepare(`PRAGMA foreign_key_list(${this.quoteLocalIdentifier(table)})`).all() as Array<{
+      table: string; from: string; to: string; on_delete: string
+    }>
+    let cleared = false
+    for (const foreignKey of foreignKeys) {
+      if (foreignKey.to !== 'id' || String(foreignKey.on_delete).toUpperCase() !== 'SET NULL') continue
+      const value = row[foreignKey.from]
+      if (value === null || value === undefined || value === '') continue
+      const parentId = String(value)
+      const parentTableSql = this.quoteLocalIdentifier(foreignKey.table)
+      if (db.prepare(`SELECT 1 FROM ${parentTableSql} WHERE id=? LIMIT 1`).get(parentId)) continue
+      // A thrown lookup (old backend, network) propagates and leaves the row isolated for the normal retry.
+      const parentRows = await cloud.related(foreignKey.table, 'id', [parentId])
+      if (parentRows.some(candidate => String(candidate.id) === parentId)) continue
+      row[foreignKey.from] = null
+      cleared = true
+    }
+    return cleared
   }
 
   private async repairMissingParents(
@@ -1282,9 +1344,13 @@ export class SyncService {
       reconcileIncomingProduct(db, String(row.id || ''), row.sku)
     }
     const validColumns = this.getColumns(db, table)
+    const defaulted = this.getDefaultedNotNullColumns(db, table)
     const localRow: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(row)) {
       if (!validColumns.has(key)) continue
+      // Older cloud rows can carry NULL (e.g. products.unit pushed by an earlier POS version). Skip the key so the local
+      // DEFAULT applies; otherwise the whole row is isolated and a new/second POS device never receives the product.
+      if ((value === null || value === undefined) && defaulted.has(key)) continue
       if (typeof value === 'boolean') localRow[key] = value ? 1 : 0
       else if (value !== null && typeof value === 'object') localRow[key] = JSON.stringify(value)
       else localRow[key] = value

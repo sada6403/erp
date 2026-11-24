@@ -17,6 +17,12 @@ import { registerSettingsHandlers, ensureSettingsDefaults } from './ipc/settings
 import { registerAnalyticsHandlers } from './ipc/analytics'
 import { registerAdminHandlers } from './ipc/admin'
 import { registerOrderHandlers } from './ipc/orders'
+import { registerAppAccessHandlers } from './ipc/appAccess'
+import { registerAppRequestHandlers } from './ipc/appRequests'
+import { registerSalesTeamHandlers } from './ipc/salesTeam'
+import { registerOnlineStoreHandlers } from './ipc/onlineStore'
+import { registerAppVersionsHandlers } from './ipc/appVersions'
+import { registerProductReviewHandlers } from './ipc/productReviews'
 import { registerPurchaseHandlers } from './ipc/purchases'
 import { registerInvestmentHandlers } from './ipc/investments'
 import { registerManagementHandlers } from './ipc/management'
@@ -198,6 +204,12 @@ async function bootstrap() {
   registerAnalyticsHandlers(ipcMain)
   registerAdminHandlers(ipcMain)
   registerOrderHandlers(ipcMain)
+  registerAppAccessHandlers(ipcMain)
+  registerAppRequestHandlers(ipcMain)
+  registerSalesTeamHandlers(ipcMain)
+  registerOnlineStoreHandlers(ipcMain)
+  registerAppVersionsHandlers(ipcMain)
+  registerProductReviewHandlers(ipcMain)
   registerPurchaseHandlers(ipcMain)
   registerInvestmentHandlers(ipcMain)
   registerManagementHandlers(ipcMain)

@@ -5,6 +5,8 @@ import { applySyncOperation } from '@/lib/sync'
 import { syncLimiter } from '@/lib/rateLimit'
 import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
 import { TABLE_MODULE_MAP, ADMIN_LOCK_TABLES } from '@/lib/catalog'
+import { onOrderStatusChanged, onOrderAssigned } from '@/lib/app/ordersLib'
+import { onContributionStatusChanged } from '@/lib/app/collectionsLib'
 
 export const runtime = 'nodejs'
 
@@ -76,6 +78,24 @@ export async function POST(request: NextRequest) {
         record:    body.record as Record<string, unknown>,
         eventId:   body.eventId as string | undefined,
       })
+      // Mobile-app orders: POS-side status/assignment changes drive history, reservations and notifications.
+      // Best-effort: must never fail the sync push.
+      if (body.table === 'customer_orders' && body.operation !== 'DELETE' && body.operation !== 'delete') {
+        try {
+          await onOrderStatusChanged(conn, body.recordId as string)
+          await onOrderAssigned(conn, body.recordId as string)
+        } catch (hookErr) {
+          console.error('[sync/push] app order hook failed', hookErr)
+        }
+      }
+      // App cash collections: the branch's approve / reject (pushed by the POS) notifies the member and the agent. Best-effort.
+      if (body.table === 'chit_contributions' && body.operation !== 'DELETE' && body.operation !== 'delete') {
+        try {
+          await onContributionStatusChanged(conn, body.recordId as string)
+        } catch (hookErr) {
+          console.error('[sync/push] app collection hook failed', hookErr)
+        }
+      }
     } finally {
       conn.release()
     }

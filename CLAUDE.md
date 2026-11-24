@@ -87,3 +87,5 @@ backend/               # Next.js API, PostgreSQL schema, Docker deployment
 | Cashier | ✓ | — | — | — | — |
 | Warehouse Staff | — | ✓ | — | — | — |
 | Delivery Staff | — | — | — | — | — |
+
+> Mobile app / App API work: read AGENTS.md and docs/mobile-app/ first.

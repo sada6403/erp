@@ -3,6 +3,7 @@ import { resolveCompany, AccountStatusError, resolveDeviceAuthorization, DeviceA
 import { assertTable, quoteIdentifier } from '@/lib/sync'
 import { syncLimiter } from '@/lib/rateLimit'
 import { assertFeature, resolveEntitlements } from '@/lib/entitlements'
+import { pullSinceSql } from '@/lib/syncCursor'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -47,7 +48,8 @@ export async function GET(request: NextRequest) {
     }
 
     const afterId = request.nextUrl.searchParams.get('afterId')
-    const sqlTime = new Date(since).toISOString().slice(0, 23).replace('T', ' ')
+    // Overlap only on the first page of a pull; later pages page by (updated_at, id) from the last row.
+    const sqlTime = pullSinceSql(since, afterId === null ? undefined : 0)
     const { rows: data } = await company.tp.query<Record<string, unknown>>(
       `SELECT * FROM ${quoteIdentifier(table)} WHERE ${afterId === null ? 'updated_at > ?' : '(updated_at > ? OR (updated_at = ? AND id > ?))'} ORDER BY updated_at ASC, id ASC LIMIT 5000`,
       afterId === null ? [sqlTime] : [sqlTime, sqlTime, afterId]
