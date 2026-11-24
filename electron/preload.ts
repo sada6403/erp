@@ -2,6 +2,23 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // Expose typed IPC bridge to the renderer process
 const api = {
+  imports: {
+    status: (id?:string) => ipcRenderer.invoke('imports:status',id),
+    configure: (input:unknown) => ipcRenderer.invoke('imports:configure',input),
+    upload: (type:string) => ipcRenderer.invoke('imports:upload',type),
+    describe: (id:string,input?:unknown) => ipcRenderer.invoke('imports:describe',id,input),
+    mapping: (id:string,input:unknown) => ipcRenderer.invoke('imports:mapping',id,input),
+    validate: (id:string) => ipcRenderer.invoke('imports:validate',id),
+    commit: (id:string,reviewToken:string,billsToken?:string) => ipcRenderer.invoke('imports:commit',id,reviewToken,billsToken),
+    history: () => ipcRenderer.invoke('imports:history'),
+    rollback: (id:string) => ipcRenderer.invoke('imports:rollback',id),
+    cancel: (id:string) => ipcRenderer.invoke('imports:cancel',id),
+    selectBills: () => ipcRenderer.invoke('imports:selectBills'),
+    templates: (type:string) => ipcRenderer.invoke('imports:templates',type),
+    saveTemplate: (id:string,name:string) => ipcRenderer.invoke('imports:saveTemplate',id,name),
+    deleteTemplate: (id:string) => ipcRenderer.invoke('imports:deleteTemplate',id),
+    export: (input:unknown) => ipcRenderer.invoke('imports:export',input),
+  },
   keywords: {
     status: () => ipcRenderer.invoke('keywords:status'),
     configure: (input: unknown) => ipcRenderer.invoke('keywords:configure', input),

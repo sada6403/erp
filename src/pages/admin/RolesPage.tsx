@@ -11,6 +11,8 @@ const SUPER_ADMIN_ROLE_ID = '3a6b8c9d-1e2f-4a3b-8c9d-1e2f3a6b8c9d'
 // `key` maps to the flat permission flag (e.g. permissions.pos = view access)
 // Each action key maps to an additional flag (e.g. permissions.pos_void)
 const MODULES = [
+  {key:'import.products',label:'Import Master Products (Admin)',icon:Package,group:'Management',actions:[]},
+  {key:'import.stock',label:'Import Stock',icon:Package,group:'Operations',actions:[]},
   {key:'keywords.own',label:'Own Search Keywords',icon:Package,group:'Operations',actions:[]},
   {key:'keywords.manage',label:'Manage Search Keywords',icon:Package,group:'Management',actions:[]},
   {

@@ -1,5 +1,6 @@
 import ProductVariantBuilder, { type VariantItem } from '@/components/admin/ProductVariantBuilder'
 import FurnitureImportPreview, { type FurnitureImportFile } from '@/components/admin/FurnitureImportPreview'
+import BulkImportWizard from '@/components/admin/BulkImportWizard'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -40,6 +41,7 @@ interface BranchItem {
 const PRODUCT_PAGE_SIZE = 100
 
 export default function ProductsPage() {
+  const [showBulkImport,setShowBulkImport]=useState(false)
   const { products, categories, suppliers, loading, load: loadProducts } = useProductsStore()
   const { user: currentUser } = useAuthStore()
   const isCompanyAdmin = hasCompanyAdminAccess(currentUser)
@@ -373,6 +375,7 @@ export default function ProductsPage() {
             <button onClick={handleDownloadTemplate} className="btn-secondary btn-sm gap-1.5" title="Download Product Bulk Upload Template">
               <Download size={14} /> Download Template
             </button>
+            {window.api.imports&&<button onClick={()=>setShowBulkImport(true)} className="btn-secondary btn-sm gap-1.5">Bulk Import v2</button>}
             <button onClick={() => setShowImportModal(true)} disabled={importing} className="btn-secondary btn-sm gap-1.5">
               <FileSpreadsheet size={14} /> Import CSV / Excel
             </button>
@@ -629,6 +632,7 @@ export default function ProductsPage() {
       )}
 
       {/* Permanent Delete Confirmation Modal */}
+      {showBulkImport&&<BulkImportWizard onClose={()=>setShowBulkImport(false)} onImported={()=>{void loadProducts();window.dispatchEvent(new Event('pos:catalog-refresh'))}}/>}
       {importPreviewFile && <FurnitureImportPreview file={importPreviewFile} initialStrategy={duplicateStrategy} onClose={() => setImportPreviewFile(null)} onConfirm={(reviewId, strategy) => handleImportExcel(strategy, reviewId)} />}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>

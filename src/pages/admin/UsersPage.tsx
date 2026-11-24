@@ -9,6 +9,8 @@ import { AgentsSection } from './AgentsPage'
 const SUPER_ADMIN_ID = 'u9999999-9999-4999-8999-999999999999'
 
 const PERMISSION_GROUPS = [
+  {key:'import.products',label:'Import Master Products',description:'Admin-only master and price imports'},
+  {key:'import.stock',label:'Import Stock',description:'Opening stock and supplier receipts within existing branch access'},
   {key:'keywords.own',label:'Own Search Keywords',description:'Manage personal product search keywords'},
   {key:'keywords.manage',label:'Manage Search Keywords',description:'Manage shared search keywords and review drafts'},
   { key: 'all',       label: 'Company Admin',   description: 'Full access to all modules and branches in this company' },
