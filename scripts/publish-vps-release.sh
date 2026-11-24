@@ -32,20 +32,41 @@ actual_sha="$(openssl dgst -sha512 -binary "$artifact_dir/$installer" | openssl 
 [[ "$actual_size" == "$declared_size" ]] || fail "installer size does not match latest.yml"
 [[ "$actual_sha" == "$declared_sha" ]] || fail "installer sha512 does not match latest.yml"
 
-install -d -m 0755 "$updates_dir"
-[[ -f "$updates_dir/index.html" ]] || fail "$updates_dir/index.html is missing"
-
-stage_dir="$(mktemp -d "$updates_dir/.release-$expected_version.XXXXXX")"
+# Explicit UPDATES_DIR is useful for isolated tests. Production defaults cover
+# both the HTTPS host and the legacy /updates URL used by installed desktops.
+targets=("$updates_dir")
+if [[ -n "${UPDATES_MIRROR_DIR:-}" ]]; then
+  targets+=("$UPDATES_MIRROR_DIR")
+elif [[ -z "${UPDATES_DIR+x}" ]]; then
+  targets+=(/var/www/html/updates)
+fi
+stages=()
 cleanup() {
-  rm -rf "$stage_dir"
+  for stage in "${stages[@]}"; do rm -rf "$stage"; done
 }
 trap cleanup EXIT
 
-install -m 0644 "$artifact_dir/$installer" "$stage_dir/$installer"
-install -m 0644 "$metadata_file" "$stage_dir/latest.yml"
+# Stage and validate every destination before changing either feed.
+for target in "${targets[@]}"; do
+  install -d -m 0755 "$target"
+  [[ -f "$target/index.html" || -f "$target/latest.yml" ]] || fail "$target is not an existing update feed"
+  stage="$(mktemp -d "$target/.release-$expected_version.XXXXXX")"
+  stages+=("$stage")
+  install -m 0644 "$artifact_dir/$installer" "$stage/$installer"
+  install -m 0644 "$metadata_file" "$stage/latest.yml"
+  if [[ -f "$artifact_dir/$installer.blockmap" ]]; then
+    install -m 0644 "$artifact_dir/$installer.blockmap" "$stage/$installer.blockmap"
+  fi
+done
 
-# Publish the immutable installer first and switch clients by replacing metadata last.
-mv -f "$stage_dir/$installer" "$updates_dir/$installer"
-mv -f "$stage_dir/latest.yml" "$updates_dir/latest.yml"
-
-echo "[release] Published $installer to $updates_dir"
+# Make all immutable payloads available before advertising the new version.
+for i in "${!targets[@]}"; do
+  mv -f "${stages[$i]}/$installer" "${targets[$i]}/$installer"
+  if [[ -f "${stages[$i]}/$installer.blockmap" ]]; then
+    mv -f "${stages[$i]}/$installer.blockmap" "${targets[$i]}/$installer.blockmap"
+  fi
+done
+for i in "${!targets[@]}"; do
+  mv -f "${stages[$i]}/latest.yml" "${targets[$i]}/latest.yml"
+  echo "[release] Published $installer to ${targets[$i]}"
+done
