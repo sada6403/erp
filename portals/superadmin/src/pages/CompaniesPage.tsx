@@ -1,3 +1,4 @@
+import PasswordInput from '../../../../src/components/shared/PasswordInput'
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi, companySecurity as securityApi } from '../lib/api'
 import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield, X, ChevronRight, ArrowLeft, PackageCheck, Building2, Sparkles } from 'lucide-react'
@@ -1171,7 +1172,7 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
               </div>
               <div>
                 <label className="label">Confirm Password *</label>
-                <input className="input" type="password" required minLength={8}
+                <PasswordInput className="input"  required minLength={8}
                   placeholder="Repeat password"
                   value={form.confirmPassword} onChange={e => set('confirmPassword', e.target.value)} />
                 {form.confirmPassword && form.adminPassword !== form.confirmPassword && (
@@ -1187,13 +1188,13 @@ function CreateCompanyModal({ pkgs, onClose, onCreated }: {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="label">Password *</label>
-                <input className="input" type="password" required minLength={8}
+                <PasswordInput className="input"  required minLength={8}
                   placeholder="Min 8 characters"
                   value={form.clearDataPassword} onChange={e => set('clearDataPassword', e.target.value)} />
               </div>
               <div>
                 <label className="label">Confirm Password *</label>
-                <input className="input" type="password" required minLength={8}
+                <PasswordInput className="input"  required minLength={8}
                   placeholder="Repeat password"
                   value={form.confirmClearDataPassword} onChange={e => set('confirmClearDataPassword', e.target.value)} />
                 {form.confirmClearDataPassword && form.clearDataPassword !== form.confirmClearDataPassword && (
@@ -2617,7 +2618,7 @@ function EditCompanyModal({ company, pkgs, onClose, onSaved }: {
                 </div>
                 <div>
                   <label className="label">Change Password (leave blank to keep unchanged)</label>
-                  <input className="input" type="password" value={admin.adminPassword} onChange={e => sa('adminPassword')(e.target.value)} placeholder="Enter new password (min 8 chars)" />
+                  <PasswordInput className="input"  value={admin.adminPassword} onChange={e => sa('adminPassword')(e.target.value)} placeholder="Enter new password (min 8 chars)" />
                 </div>
               </div>
             </div>
@@ -3194,12 +3195,12 @@ function ClearDataPasswordModal({ company, onClose }: { company: Company; onClos
 
           <div>
             <label className="text-xs text-gray-500 mb-1 block">New Password</label>
-            <input type="password" className="input w-full" value={newPw} onChange={e => setNewPw(e.target.value)}
+            <PasswordInput  className="input w-full" value={newPw} onChange={e => setNewPw(e.target.value)}
               placeholder="At least 8 characters" />
           </div>
           <div>
             <label className="text-xs text-gray-500 mb-1 block">Confirm New Password</label>
-            <input type="password" className="input w-full" value={confirm} onChange={e => setConfirm(e.target.value)}
+            <PasswordInput  className="input w-full" value={confirm} onChange={e => setConfirm(e.target.value)}
               placeholder="Re-type the password" />
           </div>
 
@@ -3628,7 +3629,7 @@ function NotificationCredentialsModal({ company, onClose, onSaved }: {
             </label>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label">Username</label><input className="input" value={smtp.user} onChange={e => setSmtp(s => ({ ...s, user: e.target.value }))} placeholder="you@gmail.com" /></div>
-              <div><label className="label">Password</label><input type="password" className="input" value={smtp.pass} onChange={e => setSmtp(s => ({ ...s, pass: e.target.value }))} placeholder={initSmtp.pass ? 'Unchanged — leave blank to keep' : '••••••'} /></div>
+              <div><label className="label">Password</label><PasswordInput  className="input" value={smtp.pass} onChange={e => setSmtp(s => ({ ...s, pass: e.target.value }))} placeholder={initSmtp.pass ? 'Unchanged — leave blank to keep' : '••••••'} /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div><label className="label">From Name</label><input className="input" value={smtp.from_name} onChange={e => setSmtp(s => ({ ...s, from_name: e.target.value }))} placeholder={company.name} /></div>
@@ -3659,7 +3660,7 @@ function NotificationCredentialsModal({ company, onClose, onSaved }: {
               <div><label className="label">Content-Type</label><input className="input" value={sms.content_type} onChange={e => setSms(s => ({ ...s, content_type: e.target.value }))} /></div>
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div><label className="label">API Key / Token</label><input type="password" className="input" value={sms.api_key} onChange={e => setSms(s => ({ ...s, api_key: e.target.value }))} placeholder={initSms.api_key ? 'Unchanged — leave blank to keep' : '••••••'} /></div>
+              <div><label className="label">API Key / Token</label><PasswordInput  className="input" value={sms.api_key} onChange={e => setSms(s => ({ ...s, api_key: e.target.value }))} placeholder={initSms.api_key ? 'Unchanged — leave blank to keep' : '••••••'} /></div>
               <div><label className="label">Sender ID</label><input className="input" value={sms.sender_id} onChange={e => setSms(s => ({ ...s, sender_id: e.target.value }))} /></div>
             </div>
             <div><label className="label">Custom Headers (one per line, &quot;Name: Value&quot;)</label>

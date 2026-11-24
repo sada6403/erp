@@ -126,13 +126,13 @@ export class ImportJobs {
   if(!running.has(this.db))running.set(this.db,new Set())
   if(running.get(this.db)!.has(id))throw new Error('Import is already running')
   if(options.allOrNothing&&job.error_rows)throw new Error('All-or-nothing commit requires zero validation errors')
+  const dedupe=createHash('sha256').update([job.type,job.branch_id,job.file_hash,job.sheet_name].join('|')).digest('hex')
+  const previous=this.db.prepare('SELECT id FROM import_jobs WHERE dedupe_key=? AND id!=?').get(dedupe,id) as {id:string}|undefined
+  if(previous)throw new Error(`This file/sheet/type was already committed or started (${previous.id}); resume that job instead`)
   const pending=this.db.prepare("SELECT * FROM import_job_rows WHERE job_id=? AND status='valid' ORDER BY row_number").all(id) as StagedRow[]
   if(!pending.length&&job.applied_rows>0){this.patch(id,{status:'completed',last_error:null});return this.status(id)}
   if(!pending.length)throw new Error('No validated unapplied rows remain')
   if(options.allOrNothing&&pending.length>2000)throw new Error('All-or-nothing is limited to 2,000 rows; choose chunked valid-rows import')
-  const dedupe=createHash('sha256').update([job.type,job.branch_id,job.file_hash,job.sheet_name].join('|')).digest('hex')
-  const previous=this.db.prepare('SELECT id FROM import_jobs WHERE dedupe_key=? AND id!=?').get(dedupe,id) as {id:string}|undefined
-  if(previous)throw new Error(`This file/sheet/type was already committed or started (${previous.id}); resume that job instead`)
   const claim=this.db.prepare("UPDATE import_jobs SET dedupe_key=?,status='committing',last_error=NULL,updated_at=? WHERE id=? AND status IN ('validated','failed','partial')").run(dedupe,new Date().toISOString(),id)
   if(!claim.changes)throw new Error('Import state changed; another worker may already be committing it')
   running.get(this.db)!.add(id)

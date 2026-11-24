@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import {importDate,importNumber,type ImportOptions,importType} from '../lib/importRegistry'
 import {splitMasterName,validateMasterName} from '../lib/masterNames'
 import {normalizeKeyword,validateKeyword} from '../lib/keywordText'
+import {inspectBatch} from './batchIdentity'
 export interface ImportIssue {field:string;severity:'error'|'warning';message:string}
 export interface ValidatedImportRow {data:Record<string,any>;target:Record<string,any>|null;issues:ImportIssue[];skip:boolean}
 export function validateImportRow(db:Database.Database,type:string,input:Record<string,unknown>,options:ImportOptions,context:{branchId:string;userId?:string;terminalId?:string;admin:boolean;keywordsEnabled:boolean;uniqueCodes:boolean;format:'xlsx'|'delimited'}):ValidatedImportRow {
@@ -29,6 +30,12 @@ export function validateImportRow(db:Database.Database,type:string,input:Record<
  }
  for(const {key:field} of importType(type).fields.filter(field=>field.kind==='date'))if(data[field])try{data[field]=importDate(data[field],options.dateFormat)}catch(error){issue(field,(error as Error).message)}
  if(['opening_stock','stock_in'].includes(type)) {
+  if(target)try{
+   const check=inspectBatch(db,{product_id:target.id,batch_number:data.batch_no,expiry_date:data.expiry_date,mfg_date:data.mfg_date})
+   if(check.existing){issue('batch_no',`Already added: quantity ${check.existing.quantity}, entered ${check.existing.entered_at}. Explicitly choose Add quantity to existing batches.`,options.acknowledgeBatches?'warning':'error');if(options.acknowledgeBatches){data.batch_resolution='add_existing';data.existing_batch_id=check.existing.id;data.mfg_date=check.existing.mfg_date||undefined}}
+   for(const warning of check.warnings)issue('expiry_date',warning,options.acknowledgeBatches?'warning':'error')
+   data.acknowledge_dates=options.acknowledgeBatches===true
+  }catch(error){issue('expiry_date',(error as Error).message)}
   if(Number.isFinite(data.quantity)){data.quantity=Math.round(data.quantity*1e6)/1e6;if(data.quantity<=0)issue('quantity','Quantity is smaller than supported precision')}
   if(data.cost_price===undefined)issue('cost_price','Cost price is required')
   if(type==='stock_in'&&!(data.cost_price>0))issue('cost_price','Supplier purchase cost must be greater than zero')

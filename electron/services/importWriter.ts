@@ -6,6 +6,7 @@ import {importType,type ImportType,type ImportOptions} from '../lib/importRegist
 import {ensureLegacyOpeningLayer} from './batchInventory'
 import {insertStockMovement} from './stockMovement'
 import {createStockPurchase} from './purchaseEntry'
+import {claimBatch} from './batchIdentity'
 export function writeImportRow(db:Database.Database,type:string,data:Record<string,any>,target:Record<string,any>|null,options:ImportOptions,actor:KeywordActor,jobId:string,uniqueCodes:boolean) {
  const effects=new ImportEffects(db)
  const reference=(field:'category'|'supplier')=>{
@@ -38,11 +39,12 @@ export function writeImportRow(db:Database.Database,type:string,data:Record<stri
   const productId=target!.id
   const read={stocks:()=>db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS NULL').all(productId,actor.branchId) as any[],product_batches:()=>db.prepare('SELECT * FROM product_batches WHERE product_id=? AND branch_id=?').all(productId,actor.branchId) as any[],stock_movements:()=>db.prepare('SELECT * FROM stock_movements WHERE product_id=? AND reference_order_id=?').all(productId,jobId) as any[]}
   effects.observe(read,()=>{
+   const identity=claimBatch(db,{product_id:productId,batch_number:data.batch_no||`IMPORT-${jobId.slice(0,8)}`,expiry_date:data.expiry_date,mfg_date:data.mfg_date,batch_resolution:data.batch_resolution,existing_batch_id:data.existing_batch_id,acknowledge_dates:data.acknowledge_dates})
    ensureLegacyOpeningLayer(db,productId,actor.branchId)
    const stocks=read.stocks();if(stocks.length>1)throw new Error('Duplicate stock balances require reconciliation before import')
    if(stocks.length)db.prepare("UPDATE stocks SET quantity=quantity+?,updated_at=datetime('now') WHERE id=?").run(data.quantity,stocks[0].id)
    else db.prepare('INSERT INTO stocks(id,product_id,branch_id,quantity,damaged_qty) VALUES(?,?,?,?,0)').run(randomUUID(),productId,actor.branchId,data.quantity)
-   effects.put('product_batches',randomUUID(),{product_id:productId,branch_id:actor.branchId,batch_number:data.batch_no||`IMPORT-${jobId.slice(0,8)}`,expiry_date:data.expiry_date||null,quantity:data.quantity,cost_price:data.cost_price,original_quantity:data.quantity,sold_quantity:0,returned_quantity:0,damaged_quantity:0,historical_cost_known:1,status:'available',purchase_date:data.purchase_date,created_by:actor.userId,notes:`Opening stock import ${jobId}`})
+   effects.put('product_batches',randomUUID(),{product_id:productId,branch_id:actor.branchId,batch_number:identity.no,expiry_date:identity.expiry||null,mfg_date:identity.mfg||null,batch_identity_id:identity.id,batch_entry_mode:data.batch_resolution==='add_existing'?'add_existing':'new',batch_warning_ack:data.acknowledge_dates?1:0,quantity:data.quantity,cost_price:data.cost_price,original_quantity:data.quantity,sold_quantity:0,returned_quantity:0,damaged_quantity:0,historical_cost_known:1,status:'available',purchase_date:data.purchase_date,created_by:actor.userId,notes:`Opening stock import ${jobId}`})
    insertStockMovement(db,{product_id:productId,to_branch_id:actor.branchId,quantity:data.quantity,movement_type:'ADJUSTMENT',reference_order_id:jobId,created_by:actor.userId,notes:`Opening stock import ${jobId}`})
   })
    },
@@ -72,6 +74,6 @@ export function writeImportReceipt(db:Database.Database,rows:Record<string,any>[
  reads.purchase_items=()=>db.prepare('SELECT * FROM purchase_items WHERE po_id=?').all(jobId) as any[]
  reads.purchase_attachments=()=>db.prepare('SELECT * FROM purchase_attachments WHERE purchase_id=?').all(jobId) as any[]
  reads.stock_movements=()=>db.prepare('SELECT * FROM stock_movements WHERE reference_order_id=?').all(jobId) as any[]
- effects.observe(reads,()=>createStockPurchase(db,{id:jobId,poNumber:`IMP-${jobId}`,branchId:actor.branchId,userId:actor.userId,supplierId:first.supplier_id,purchaseType:'direct',purchaseDate:first.purchase_date,invoiceNumber:first.invoice_no,notes:`Stock-in import ${jobId}`,items:rows.map(row=>({product_id:row.product_id,quantity:row.quantity,unit_cost:row.cost_price,selling_price:row.selling_price,batch_number:row.batch_no,expiry_date:row.expiry_date}))},saveBills))
+ effects.observe(reads,()=>createStockPurchase(db,{id:jobId,poNumber:`IMP-${jobId}`,branchId:actor.branchId,userId:actor.userId,supplierId:first.supplier_id,purchaseType:'direct',purchaseDate:first.purchase_date,invoiceNumber:first.invoice_no,notes:`Stock-in import ${jobId}`,items:rows.map(row=>({...row,product_id:row.product_id,quantity:row.quantity,unit_cost:row.cost_price,selling_price:row.selling_price,batch_number:row.batch_no,expiry_date:row.expiry_date}))},saveBills))
  return effects
 }

@@ -1,3 +1,4 @@
+import {readRememberedLogin,rememberLogin} from '@/lib/rememberLogin'
 import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
@@ -112,8 +113,9 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
   const { pinLogin, user, init } = useAuthStore()
   const { status: syncStatus } = useSyncStatus()
 
-  const [mode, setMode]                 = useState<'email' | 'pin' | 'support'>('pin')
+  const [mode, setMode]                 = useState<'email' | 'pin' | 'support'>('email')
   const [email, setEmail]               = useState('')
+  const [rememberId,setRememberId]=useState(false)
   const [password, setPassword]         = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [pin, setPin]                   = useState('')
@@ -122,6 +124,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
   const [loginState, setLoginState]     = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [workspaceId, setWorkspaceId]   = useState('')
   const tenantWorkspaceId = workspaceId || 'legacy'
+  useEffect(()=>{const saved=readRememberedLogin(tenantKey('pos_remember_login_id',tenantWorkspaceId));setEmail(saved||'');setRememberId(Boolean(saved));setPassword('');setShowPassword(false)},[tenantWorkspaceId])
 
   // 2FA
   const [requires2FA, setRequires2FA] = useState(false)
@@ -317,6 +320,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
         requiresTwoFactor?: boolean; requiresPasswordChange?: boolean
         tempToken?: string; error?: string
       }
+      if(result.success){rememberLogin(tenantKey('pos_remember_login_id',tenantWorkspaceId),email,rememberId)}
       if (result.requiresTwoFactor && result.tempToken) {
         setTempToken(result.tempToken); setRequires2FA(true); setOtpCode(''); setLoginState('idle'); return
       }
@@ -496,7 +500,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
       if (res.success) {
         setForgotNoSmtp(Boolean(res.noSmtp) || !res.sent)
         setForgotStep('otp')
-        if (res.sent) toast.success('Reset code sent to your email!')
+        if (res.sent) toast.success('Check your email for the reset link / code.')
       } else {
         toast.error(res.error || 'Failed to send reset email')
       }
@@ -949,7 +953,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
                   </button>
                   <button onClick={() => { setMode('email'); setLoginState('idle') }}
                     className="flex items-center gap-1 text-xs font-semibold" style={{ color: 'rgb(var(--brand-400-rgb))' }}>
-                    <Mail size={10} /> Admin
+                    <Mail size={10} /> User ID / Email
                   </button>
                 </div>
               </div>
@@ -962,7 +966,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm font-semibold" style={{ color: 'rgb(var(--brand-400-rgb))' }}>
-                  <Mail size={13} /> Admin Login
+                  <Mail size={13} /> User ID / Email Login
                 </div>
                 <button onClick={() => { setMode('pin'); setPin(''); setLoginState('idle'); resetForgot() }}
                   className="text-xs" style={{ color: '#475569' }}>
@@ -973,12 +977,12 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
               <form onSubmit={handleSubmit} className="space-y-2.5">
                 <div className="relative">
                   <Mail size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
-                  <input ref={emailRef} type="email" value={email} onChange={e => setEmail(e.target.value)}
+                  <input ref={emailRef} type="text" name="username" autoComplete="username" aria-label="User ID or Email" value={email} onChange={e => setEmail(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 rounded-xl text-sm text-white outline-none"
                     style={{ background: '#0d1117', border: '1px solid #1e293b' }}
                     onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                     onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
-                    placeholder="Email address" required />
+                    placeholder="User ID or Email" required />
                 </div>
                 <div className="relative">
                   <Lock size={13} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }} />
@@ -988,13 +992,14 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
                     style={{ background: '#0d1117', border: '1px solid #1e293b' }}
                     onFocus={e => { e.currentTarget.style.borderColor = 'var(--brand-primary)' }}
                     onBlur={e => { e.currentTarget.style.borderColor = '#1e293b' }}
-                    placeholder="Password" required />
-                  <button type="button" onClick={() => setShowPassword(p => !p)}
+                    placeholder="Password" autoComplete="current-password" name="password" required />
+                  <button type="button" aria-label={showPassword?'Hide password':'Show password'} onClick={() => setShowPassword(p => !p)}
                     className="absolute right-3.5 top-1/2 -translate-y-1/2" style={{ color: '#334155' }}>
                     {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                   </button>
                 </div>
 
+                <label className="text-xs flex gap-2"><input type="checkbox" checked={rememberId} onChange={event=>{setRememberId(event.target.checked);if(!event.target.checked)rememberLogin(tenantKey('pos_remember_login_id',tenantWorkspaceId),'',false)}}/>Remember User ID (password is never saved by the app)</label>
                 <button type="submit" disabled={loading || loginState === 'success'}
                   className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
                   style={loginState === 'success' ? { background: '#059669' } : loginState === 'error' ? { background: '#dc2626' } : { background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))' }}>
@@ -1011,7 +1016,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
                 )}
 
                 <div className="flex justify-end">
-                  <button type="button" onClick={() => { setForgotEmail(email); setForgotStep('email') }}
+                  <button type="button" onClick={() => { setForgotEmail(email.includes('@')?email:''); setForgotStep('email') }}
                     className="text-xs font-medium" style={{ color: 'rgb(var(--brand-500-rgb))' }}>
                     Forgot Password?
                   </button>

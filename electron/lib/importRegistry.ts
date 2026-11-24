@@ -1,12 +1,12 @@
 export interface ImportField {key:string;label:string;required?:boolean;aliases?:string[];kind:'text'|'number'|'date'|'code'}
 export type ImportType='products'|'opening_stock'|'stock_in'|'prices'|'keywords'|'categories'|'suppliers'|'brands'
-const f=(key:string,label:string,required=false,aliases:string[]=[]):ImportField=>({key,label,required,aliases,kind:['cost_price','selling_price','quantity','tax_rate','min_stock_level'].includes(key)?'number':['expiry_date','purchase_date'].includes(key)?'date':['sku','barcode','quick_code'].includes(key)?'code':'text'})
+const f=(key:string,label:string,required=false,aliases:string[]=[]):ImportField=>({key,label,required,aliases,kind:['cost_price','selling_price','quantity','tax_rate','min_stock_level'].includes(key)?'number':['expiry_date','purchase_date','mfg_date'].includes(key)?'date':['sku','barcode','quick_code'].includes(key)?'code':'text'})
 const sku=f('sku','SKU',true,['item code','product code'])
 const price=f('selling_price','Selling price',false,['sale price','retail price'])
 export const IMPORT_TYPES:{id:ImportType;label:string;permission:string;admin:boolean;fields:ImportField[]}[]=[
  {id:'products',label:'Master products',permission:'import.products',admin:true,fields:[sku,f('name','Product name',true,['item name','description']),f('barcode','Barcode'),f('category','Category'),f('supplier','Supplier'),f('brand','Brand'),f('unit','Unit'),f('cost_price','Cost price'),price,f('tax_rate','Tax %'),f('min_stock_level','Minimum stock'),f('keywords','Search keywords'),f('quick_code','Quick code')]},
- {id:'opening_stock',label:'Opening stock (add quantities)',permission:'import.stock',admin:false,fields:[sku,f('quantity','Quantity',true,['qty','stock']),f('cost_price','Cost price',true,['unit cost']),f('batch_no','Batch number'),f('expiry_date','Expiry date'),f('purchase_date','Stock date')]},
- {id:'stock_in',label:'Stock-in / supplier receipt',permission:'import.stock',admin:false,fields:[sku,f('quantity','Quantity',true,['qty']),f('cost_price','Cost price',true,['unit cost']),price,f('supplier','Supplier',true),f('invoice_no','Supplier invoice number',true),f('purchase_date','Purchase date',true),f('batch_no','Batch number'),f('expiry_date','Expiry date')]},
+ {id:'opening_stock',label:'Opening stock (add quantities)',permission:'import.stock',admin:false,fields:[sku,f('quantity','Quantity',true,['qty','stock']),f('cost_price','Cost price',true,['unit cost']),f('batch_no','Batch number'),f('mfg_date','Manufacture date'),f('expiry_date','Expiry date'),f('purchase_date','Stock date')]},
+ {id:'stock_in',label:'Stock-in / supplier receipt',permission:'import.stock',admin:false,fields:[sku,f('quantity','Quantity',true,['qty']),f('cost_price','Cost price',true,['unit cost']),price,f('supplier','Supplier',true),f('invoice_no','Supplier invoice number',true),f('purchase_date','Purchase date',true),f('batch_no','Batch number'),f('mfg_date','Manufacture date'),f('expiry_date','Expiry date')]},
  {id:'prices',label:'Price update',permission:'import.products',admin:true,fields:[sku,f('cost_price','Cost price'),price]},
  {id:'keywords',label:'Search keywords',permission:'import.products',admin:true,fields:[sku,f('keyword','Keyword',true),f('scope','Scope (global / branch / terminal / user)'),f('keyword_type','Keyword type')]},
  {id:'categories',label:'Categories',permission:'import.products',admin:true,fields:[f('name','Category name',true),f('description','Description')]},
@@ -19,7 +19,7 @@ export interface ImportOptions {
  duplicate:'skip'|'update'|'error';unknown:'create'|'skip'|'error';decimal:'.'|',';
  dateFormat:'YYYY-MM-DD'|'DD/MM/YYYY'|'MM/DD/YYYY';hasHeader:boolean;splitNames:boolean;
  slashMode:'keep'|'first-part';keywordDelimiter:string;defaults:Record<string,string>;
- encoding?:string;delimiter?:string;allOrNothing:boolean
+ encoding?:string;delimiter?:string;allOrNothing:boolean;acknowledgeBatches?:boolean
 }
 export const DEFAULT_IMPORT_OPTIONS:ImportOptions={duplicate:'error',unknown:'error',decimal:'.',dateFormat:'YYYY-MM-DD',hasHeader:true,splitNames:false,slashMode:'keep',keywordDelimiter:'|',defaults:{},allOrNothing:false}
 export function normalizeImportOptions(input:Partial<ImportOptions>={}):ImportOptions {

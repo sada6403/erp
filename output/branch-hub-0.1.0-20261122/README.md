@@ -1,0 +1,31 @@
+# POS Branch Hub 0.1
+
+This package provides shared numbered holds, exclusive recall, an event transport
+foundation and verified daily SQLite backups. Existing POS billing and cloud
+inventory synchronization have not been cut over to this Hub.
+
+Requires Node.js 22 or later. Keep this installation and its data outside the
+cashier Electron installation and outside live network/OneDrive folders.
+
+For a prebuilt distribution extracted to `C:\POSHubApp`:
+
+```powershell
+Set-Location C:\POSHubApp
+npm.cmd ci --omit=dev
+node scripts/create-branch-hub-config.cjs --branch-id "YOUR-EXISTING-BRANCH-UUID" --hub-url "http://192.168.10.10:4781" --output "C:\POSHubData" --terminals "T01,T02"
+$env:POS_HUB_CONFIG = 'C:\POSHubData\hub.json'
+npm.cmd start
+```
+
+The reserved IP must belong to the Hub PC. Use the existing branch UUID and
+different terminal IDs. The generator refuses to overwrite an existing output
+directory. Copy each terminal's generated `branch-hub-terminal.json` to that
+terminal's active POS company workspace, next to `pos-erp.db`, then restart it.
+Never replace an existing POS database with the Hub database.
+
+Read `BRANCH_HUB_SETUP.md` in the prebuilt distribution (or
+`../docs/BRANCH_HUB_SETUP.md` in the source checkout) for network configuration,
+credentials, startup scheduling, offline ambiguity and restore safeguards.
+
+`npm run build` is for the full source checkout only; prebuilt distributions
+already contain `lib/` and require only dependency installation and `npm start`.

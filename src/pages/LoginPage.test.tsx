@@ -55,11 +55,16 @@ describe('LoginPage company contact details', () => {
     )
 
     expect(await screen.findByText('+94 11 234 5678')).toBeInTheDocument()
+    expect(screen.getByLabelText('User ID or Email')).toHaveAttribute('type','text')
+    expect(screen.getByPlaceholderText('Password')).toHaveAttribute('type','password')
+    fireEvent.click(screen.getByLabelText('Show password'));expect(screen.getByPlaceholderText('Password')).toHaveAttribute('type','text')
+    fireEvent.click(screen.getByLabelText('Hide password'));expect(screen.getByPlaceholderText('Password')).toHaveAttribute('type','password')
     expect(screen.getByText('hello@example.com')).toBeInTheDocument()
     expect(screen.getByText('10 Main Street, Colombo')).toBeInTheDocument()
     expect(screen.getByText('If you forgot your password, use Admin Login → Forgot Password or contact your administrator.')).toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Admin' }))
+    fireEvent.click(screen.getByRole('button', { name: /Staff PIN/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'User ID / Email' }))
     expect(screen.getByText('+94 11 234 5678')).toBeInTheDocument()
     expect(screen.getByText('hello@example.com')).toBeInTheDocument()
     expect(screen.getByText('10 Main Street, Colombo')).toBeInTheDocument()

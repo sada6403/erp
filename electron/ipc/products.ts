@@ -22,6 +22,7 @@ import { createFurnitureProductTemplate, readAdditionalProductFields } from '../
 import { buildFurnitureImportReview, describeFurnitureSheet, furnitureImportFingerprint, recommendFurnitureHeader, type FieldMapping, type ImportStrategy } from '../services/furnitureImportPreview'
 
 import { getSellingLayers } from '../services/batchInventory'
+import {createOpeningBatch} from '../services/openingBatch'
 import { KeywordSearchIndex, type SearchKeyword, type SearchMaster } from '../lib/keywordSearch'
 import { KeywordService } from '../services/keywords'
 import { keywordActor } from './keywords'
@@ -659,7 +660,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const id = crypto.randomUUID()
       const authUser = getAuthUser()
       const isAdmin = isSuperAdmin(authUser)
-      const { edit_request_id, variants, ...rest } = (payload || {}) as Record<string, unknown> & { edit_request_id?: string; variants?: any[] }
+      const { edit_request_id, variants,opening_batch, ...rest } = (payload || {}) as Record<string, unknown> & { edit_request_id?: string; variants?: any[];opening_batch?:Record<string,any> }
 
       if (!isAdmin && !edit_request_id) {
         return { success: false, error: 'No approved edit request found — please request approval first' }
@@ -709,6 +710,11 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
             @image_url, @unit, @cost_price, @selling_price, @tax_rate, @discount_pct, @min_stock_level, @product_type)
         `).run(productRow)
+        if(opening_batch){
+          if(productType!=='simple')throw new Error('Use individual stock entries for variant batches')
+          db.prepare('INSERT INTO sync_queue(id,table_name,record_id,operation,payload) VALUES(?,?,?,?,?)').run(crypto.randomUUID(),'products',id,'INSERT',JSON.stringify(productRow))
+          createOpeningBatch(db,{...opening_batch,product_id:id,branch_id:String(opening_batch.branch_id||targetBranch),created_by:String(authUser?.id||''),quantity:Number(opening_batch.quantity||0),cost_price:Number(opening_batch.cost_price||0)})
+        }
 
         // Save variants if variable product
         if (Array.isArray(variants) && variants.length > 0) {

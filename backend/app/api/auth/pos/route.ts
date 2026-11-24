@@ -1,3 +1,4 @@
+import {supportsLoginIds} from '@/lib/loginIdentity'
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { pool, tenantPool } from '@/lib/db'
@@ -55,7 +56,8 @@ export async function POST(req: NextRequest) {
     tp:       tenantPool(compRow.db_schema),
   }
 
-  const { email, password, pin } = await req.json()
+  const body=await req.json();const {password,pin}=body;const email=String(body.identifier||body.login_id||body.email||'').trim()
+  const byId=await supportsLoginIds(company.tp)
 
   if (!email || (!password && !pin)) {
     return NextResponse.json({ error: 'email and password (or pin) required' }, { status: 400 })
@@ -66,8 +68,8 @@ export async function POST(req: NextRequest) {
      FROM users u
      JOIN roles r ON r.id = u.role_id
      LEFT JOIN branches b ON b.id = u.branch_id
-     WHERE u.email = ? AND u.is_active = 1`,
-    [email.toLowerCase().trim()]
+     WHERE (LOWER(TRIM(u.email)) = ? ${byId?'OR LOWER(u.login_id)=?':''}) AND u.is_active = 1`,
+    byId?[email.toLowerCase().trim(),email.toLowerCase().trim()]:[email.toLowerCase().trim()]
   )
 
   if (!rows.length) {

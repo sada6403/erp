@@ -1,3 +1,4 @@
+import {allocateLoginId,backfillLoginIds,hasLoginIds} from '../services/loginIdentity'
 import type { IpcMain } from 'electron'
 import { app, dialog, net } from 'electron'
 import { getDb } from '../database'
@@ -966,6 +967,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
 
   // Users
   safeHandle(ipcMain, 'admin:users:list', () => {
+    if(hasLoginIds(getDb()))backfillLoginIds(getDb())
     const caller = authUser()
     const perms  = (caller.permissions as Record<string, unknown>) || {}
     const isGlobal = Boolean(perms.all)
@@ -982,7 +984,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     // existing Cashier/Warehouse/Branch Manager/Company Admin account is
     // completely unaffected.
     const selectCols = `
-      SELECT u.id, u.name, u.email, u.is_active, u.last_login_at,
+      SELECT u.id, u.name, u.email, u.login_id, u.is_active, u.last_login_at,
              u.role_id, u.branch_id,
              CASE WHEN u.pin_hash IS NOT NULL OR u.pin IS NOT NULL THEN 1 ELSE 0 END as has_pin,
              r.name as role_name, r.session_scope, b.name as branch_name,
@@ -1065,12 +1067,15 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
       p.email = email
     }
 
+    if(!p.email)throw new Error('Email is required')
+    if(typeof p.password!=='string'||p.password.length<8||Buffer.byteLength(p.password)>72)throw new Error('Password must be at least 8 characters')
     const id = crypto.randomUUID()
     const hash = await bcrypt.hash(p.password, 10)
+    const loginId=allocateLoginId(db,p.login_id,p.email)
     const pinHash = p.pin ? await bcrypt.hash(String(p.pin), 10) : null
-    db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash)
-      VALUES (?,?,?,?,?,?,?)`)
-      .run(id, p.branch_id||null, p.role_id, p.name, p.email, hash, pinHash)
+    db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash,login_id,login_id_generated)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+      .run(id, p.branch_id||null, p.role_id, p.name, p.email, hash, pinHash,loginId,p.login_id?0:1)
     await enqueueUserRow(id, 'INSERT')
     return { success: true, data: { id } }
   })
@@ -1090,6 +1095,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     delete p.id
     delete p.created_at
     delete p.synced_at
+    delete p.login_id_generated
 
     // Branch scope: non-global callers (e.g. Branch Manager) can only update
     // users of their own branch (including themselves).
@@ -1121,6 +1127,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     }
 
     if (p.password) {
+      if(typeof p.password!=='string'||p.password.length<8||Buffer.byteLength(p.password)>72)throw new Error('Password must be 8 characters minimum and at most 72 UTF-8 bytes')
       // Self-service password change requires proving the current password —
       // an admin resetting someone ELSE's password (id !== caller.id) is the
       // "Super Admin override" case and skips this, matching the existing
@@ -1169,6 +1176,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     const safe = Object.fromEntries(
       Object.entries(p).filter(([k, v]) => existingCols.has(k) && (k !== 'is_active' || v !== undefined))
     )
+    if(p.login_id!==undefined){safe.login_id=allocateLoginId(db,p.login_id,p.email||((db.prepare('SELECT email FROM users WHERE id=?').get(id) as {email:string}).email),id);safe.login_id_generated=0}
     const fields = Object.keys(safe).map(k => `${k}=@${k}`).join(',')
     if (fields) db.prepare(`UPDATE users SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({ ...safe, id })
     await enqueueUserRow(id)

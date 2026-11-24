@@ -31,6 +31,7 @@ export interface Role {
 }
 
 export interface User {
+  login_id?:string
   id: string
   branch_id?: string
   role_id: string
@@ -356,6 +357,7 @@ export interface Cart {
 // ─── Auth Types ───────────────────────────────────────────────────────────────
 
 export interface AuthUser {
+  login_id?:string
   id: string
   name: string
   email: string

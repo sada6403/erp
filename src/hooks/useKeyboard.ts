@@ -13,7 +13,7 @@ interface KeyBinding {
 
 export function useKeyboard(bindings: KeyBinding[], enabled = true) {
   const handleKey = useCallback((e: KeyboardEvent) => {
-    if (!enabled) return
+    if (!enabled || e.defaultPrevented || e.isComposing) return
 
     for (const binding of bindings) {
       const keyMatch  = e.key === binding.key
@@ -26,7 +26,7 @@ export function useKeyboard(bindings: KeyBinding[], enabled = true) {
         const isInput = ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
         const isFKey  = e.key.startsWith('F') && e.key.length <= 3
         // Allow: F-keys always, Ctrl combos always, everything else only when not in input
-        if (isInput && !isFKey && !e.ctrlKey && !e.altKey) continue
+        if (isInput && !isFKey && e.key !== 'Escape' && !e.ctrlKey && !e.metaKey && !e.altKey) continue
 
         e.preventDefault()
         binding.handler(e)
@@ -42,19 +42,20 @@ export function useKeyboard(bindings: KeyBinding[], enabled = true) {
 }
 
 export const POS_SHORTCUTS = [
-  { key: 'F1',        label: 'New Invoice' },
-  { key: 'F2',        label: 'Customer' },
-  { key: 'F3',        label: 'Hold' },
-  { key: 'F4/F12',   label: 'Payment' },
-  { key: 'F6',        label: 'Search' },
-  { key: 'F7',        label: 'Products' },
-  { key: 'F8',        label: 'Category' },
-  { key: 'F9',        label: 'Discount' },
-  { key: 'Enter',     label: 'Add / Confirm' },
-  { key: '↑↓',       label: 'Navigate list' },
-  { key: 'Ctrl+↑↓',  label: 'Cart item' },
-  { key: '+/-',       label: 'Qty' },
-  { key: 'Del',       label: 'Remove' },
-  { key: 'Ctrl+1-3',  label: 'Bill type' },
-  { key: 'Alt+T',     label: 'Theme' },
+  { key: 'F1', label: 'New Invoice' },
+  { key: 'F2', label: 'Search' },
+  { key: 'F3', label: 'Last quantity' },
+  { key: 'F4', label: 'Hold' },
+  { key: 'F5', label: 'Resume' },
+  { key: 'F6', label: 'Discount' },
+  { key: 'F8', label: 'Pay' },
+  { key: 'F9', label: 'Cash (payment)' },
+  { key: 'F10', label: 'Card (payment)' },
+  { key: 'Enter', label: 'Add / Confirm' },
+  { key: '??', label: 'Navigate list' },
+  { key: 'Ctrl+??', label: 'Cart item' },
+  { key: '+/-', label: 'Qty' },
+  { key: 'Del', label: 'Remove' },
+  { key: 'Ctrl+1-3', label: 'Bill type' },
+  { key: 'Alt+T', label: 'Theme' },
 ]

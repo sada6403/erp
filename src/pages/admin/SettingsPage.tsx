@@ -1,3 +1,4 @@
+import PasswordInput from '@/components/shared/PasswordInput'
 import { useState, useEffect, useRef } from 'react'
 import type React from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -437,8 +438,8 @@ export default function SettingsPage() {
               <label className="block text-xs font-semibold text-slate-400 mb-1.5">
                 Clear-All-Data Password
               </label>
-              <input
-                type="password"
+              <PasswordInput
+                
                 value={clearPassword}
                 onChange={e => setClearPassword(e.target.value)}
                 className="input font-mono"
@@ -668,8 +669,8 @@ function LockedApiUrlField({ value, onChange }: { value: string; onChange: (e: a
       </div>
       {asking && (
         <div className="flex gap-2 items-center">
-          <input
-            type="password"
+          <PasswordInput
+            
             value={passcode}
             onChange={e => setPasscode(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && submit()}
@@ -1504,7 +1505,7 @@ function CommunicationsSettings({ form, f, check }: {
             <input value={String(form.smtp_username || '')} onChange={f('smtp_username')} className="input" placeholder="you@gmail.com" disabled={!form.email_enabled} />
           </Field>
           <Field label="Password / App Password">
-            <input type="password" value={String(form.smtp_password || '')} onChange={f('smtp_password')} className="input" placeholder="••••••••" disabled={!form.email_enabled} />
+            <PasswordInput  value={String(form.smtp_password || '')} onChange={f('smtp_password')} className="input" placeholder="••••••••" disabled={!form.email_enabled} />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -1564,7 +1565,7 @@ function CommunicationsSettings({ form, f, check }: {
             <input value={String(form.sms_api_key || '')} onChange={f('sms_api_key')} className="input font-mono text-sm" placeholder="your-api-key" disabled={!form.sms_enabled} />
           </Field>
           <Field label="API Secret (optional)">
-            <input type="password" value={String(form.sms_api_secret || '')} onChange={f('sms_api_secret')} className="input" placeholder="••••••••" disabled={!form.sms_enabled} />
+            <PasswordInput  value={String(form.sms_api_secret || '')} onChange={f('sms_api_secret')} className="input" placeholder="••••••••" disabled={!form.sms_enabled} />
           </Field>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -1642,7 +1643,7 @@ function CommunicationsSettings({ form, f, check }: {
               <input value={String(form.whatsapp_phone_number_id || '')} onChange={f('whatsapp_phone_number_id')} className="input font-mono text-sm" placeholder="1234567890" disabled={!form.whatsapp_enabled} />
             </Field>
             <Field label="Access Token">
-              <input type="password" value={String(form.whatsapp_access_token || '')} onChange={f('whatsapp_access_token')} className="input font-mono text-sm" placeholder="EAAxxxxx…" disabled={!form.whatsapp_enabled} />
+              <PasswordInput  value={String(form.whatsapp_access_token || '')} onChange={f('whatsapp_access_token')} className="input font-mono text-sm" placeholder="EAAxxxxx…" disabled={!form.whatsapp_enabled} />
             </Field>
           </>
         )}
@@ -1654,7 +1655,7 @@ function CommunicationsSettings({ form, f, check }: {
                 <input value={String(form.whatsapp_twilio_sid || '')} onChange={f('whatsapp_twilio_sid')} className="input font-mono text-sm" placeholder="ACxxxxxxxxxx" disabled={!form.whatsapp_enabled} />
               </Field>
               <Field label="Auth Token">
-                <input type="password" value={String(form.whatsapp_twilio_token || '')} onChange={f('whatsapp_twilio_token')} className="input" placeholder="••••••••" disabled={!form.whatsapp_enabled} />
+                <PasswordInput  value={String(form.whatsapp_twilio_token || '')} onChange={f('whatsapp_twilio_token')} className="input" placeholder="••••••••" disabled={!form.whatsapp_enabled} />
               </Field>
             </div>
             <Field label="From Number (WhatsApp)">
@@ -2207,7 +2208,7 @@ function S3Settings({ form, f, check }: {
           </div>
           <div>
             <label className="label">Secret Access Key *</label>
-            <input type="password" value={String(form.s3_secret_key || '')} onChange={f('s3_secret_key')} className="input" placeholder="••••••••" />
+            <PasswordInput  value={String(form.s3_secret_key || '')} onChange={f('s3_secret_key')} className="input" placeholder="••••••••" />
           </div>
           <div className="col-span-2">
             <label className="label">Custom Endpoint (optional — for MinIO / Wasabi / BackBlaze B2)</label>

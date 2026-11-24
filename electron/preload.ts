@@ -115,6 +115,8 @@ const api = {
   // POS cart "Hold" — pauses a cart-in-progress, separate from invoices
   // (see held_carts table comment in electron/database.ts)
   holds: {
+    hubStatus: () => ipcRenderer.invoke('holds:hubStatus'),
+    acknowledgeRecall: (token: string) => ipcRenderer.invoke('holds:acknowledgeRecall', token),
     create: (payload: unknown) => ipcRenderer.invoke('holds:create', payload),
     list:   ()                 => ipcRenderer.invoke('holds:list'),
     recall: (id: string)       => ipcRenderer.invoke('holds:recall', id),
@@ -465,6 +467,7 @@ const api = {
 
   // Purchase Orders
   purchases: {
+    supplierLowStock: (supplierId: string, branchId?: string) => ipcRenderer.invoke('purchases:supplierLowStock', supplierId, branchId),
     billHistory: (filters?: unknown) => ipcRenderer.invoke('purchases:billHistory',filters),
     refreshProductPrices: (id: string) => ipcRenderer.invoke('purchases:refreshProductPrices',id),
     chooseBills: () => ipcRenderer.invoke('purchases:chooseBills'),
@@ -551,6 +554,7 @@ const api = {
 
   // Batch / Serial / Expiry Tracking
   batches: {
+    inspect: (input:unknown) => ipcRenderer.invoke('batches:inspect',input),
     list:     (filters: unknown)             => ipcRenderer.invoke('batches:list', filters),
     get:      (id: string)                   => ipcRenderer.invoke('batches:get', id),
     create:   (payload: unknown)             => ipcRenderer.invoke('batches:create', payload),

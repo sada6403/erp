@@ -1,3 +1,4 @@
+import BatchFields from '@/components/shared/BatchFields'
 import ProductVariantBuilder, { type VariantItem } from '@/components/admin/ProductVariantBuilder'
 import FurnitureImportPreview, { type FurnitureImportFile } from '@/components/admin/FurnitureImportPreview'
 import BulkImportWizard from '@/components/admin/BulkImportWizard'
@@ -1493,6 +1494,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
     u.map((row, n) => ({ ...row, is_base: n === i }))
   )
 
+  const [openingBatch,setOpeningBatch]=useState<Record<string,string>>({})
   const save = async () => {
     if (!form.name.trim()) { toast.error('Product name is required'); return }
     if (stockHasChanged && !stockReason.trim()) { toast.error('Enter a reason for the stock correction'); return }
@@ -1507,6 +1509,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
       const varStockTotal = form.product_type === 'variable' ? formVariants.filter(v => v.selected).reduce((acc, v) => acc + Number(v.stock || 0), 0) : stockQty
       const payload = {
         ...form,
+        opening_batch:!product&&form.product_type==='simple'&&Object.values(openingBatch).some(Boolean)?{...openingBatch,quantity:stockQty,cost_price:Number(form.cost_price||0),branch_id:String(branchId)}:undefined,
         name:                   form.name.trim(),
         unit:                   finalUnit,
         min_stock_level:        form.alert_qty,
@@ -1529,7 +1532,9 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
         if (!res.success) { toast.error(res.error || 'Failed'); return }
         productId = (res.data as { id: string }).id
       }
-      const stockPromise = stockIsReadOnly
+      const stockPromise = payload.opening_batch
+        ? Promise.resolve({success:true} as {success:boolean;error?:string})
+        : stockIsReadOnly
         ? Promise.resolve({ success: true } as { success: boolean; error?: string })
         : product
           ? stockHasChanged
@@ -1612,6 +1617,8 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
+        {!product&&<BatchFields value={openingBatch} onChange={(key,value)=>setOpeningBatch(old=>({...old,[key]:value}))}/>}
+
                 📦 Simple Product
               </button>
               <button

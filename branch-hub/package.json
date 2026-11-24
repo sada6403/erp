@@ -1,0 +1,17 @@
+{
+  "name": "pos-erp-branch-hub",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Branch LAN hold service and event transport foundation",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "npm --prefix .. run hub:build && node ../scripts/build-branch-hub-package.cjs",
+    "start": "node lib/cli.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.10.0",
+    "ws": "^8.21.0"
+  }
+}

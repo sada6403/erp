@@ -1,0 +1,6 @@
+lib/
+node_modules/
+hub.json
+branch-hub-terminal.json
+backups/
+*.partial

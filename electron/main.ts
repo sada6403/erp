@@ -1,5 +1,3 @@
-import { registerImportHandlers } from './ipc/imports'
-import { registerKeywordHandlers } from './ipc/keywords'
 import { app, BrowserWindow, ipcMain, shell, protocol, net, Menu } from 'electron'
 import { autoUpdater } from 'electron-updater'
 import path from 'path'
@@ -44,6 +42,9 @@ import { startLicenseChecks, stopLicenseChecks } from './services/licenseService
 import { type SyncService, getSyncService } from './services/syncService'
 import { type ClaimReminderService, getClaimReminderService } from './services/claimReminderService'
 import { getWorkspaceDataPath } from './services/companyWorkspace'
+import { stopTerminalHub } from './services/branchHubRuntime'
+import { registerKeywordHandlers } from './ipc/keywords'
+import { registerImportHandlers } from './ipc/imports'
 
 const isDev = process.env.NODE_ENV === 'development'
 const devPort = process.env.DEV_PORT || '5173'
@@ -270,6 +271,13 @@ bootstrap().catch((err) => {
   const { dialog } = require('electron')
   try { dialog.showErrorBox('Startup Error', String(err?.message || err)) } catch {}
   app.quit()
+})
+
+let hubShutdownFinished = false
+app.on('before-quit', event => {
+  if (hubShutdownFinished) return
+  event.preventDefault()
+  void stopTerminalHub().catch(err => console.error('[Hub] Shutdown failed:', (err as Error).message)).finally(() => { hubShutdownFinished = true; app.quit() })
 })
 
 app.on('window-all-closed', () => {

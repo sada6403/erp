@@ -1,0 +1,92 @@
+{
+  "dry_run": true,
+  "generated_at": "2026-11-23T10:19:54.136Z",
+  "policy": {
+    "latin_script_only": true,
+    "automatic_translation": false,
+    "slash_aliases": false,
+    "writes_performed": false
+  },
+  "summary": {
+    "scannedProducts": 176,
+    "activeProducts": 174,
+    "reviewRows": 5,
+    "changedProposals": 5,
+    "invalidProposals": 0,
+    "tamilNames": 0,
+    "sinhalaNames": 0,
+    "mojibakeSuspects": 0,
+    "replacementCharacterNames": 0,
+    "invalidOriginalNames": 0
+  },
+  "rows": [
+    {
+      "id": "2830cffe-73da-47e1-8dc4-1e966731182c",
+      "sku": "PRD-101",
+      "active": true,
+      "original_name": "SOOPIN  (S)",
+      "proposed_name": "SOOPIN (S)",
+      "proposed_keywords": [],
+      "original_issues": [],
+      "proposed_issues": [],
+      "warnings": [],
+      "requires_manual_name": false
+    },
+    {
+      "id": "82c420b0-0ad7-49a8-bc65-e7cf059010bc",
+      "sku": "GRO-009",
+      "active": true,
+      "original_name": "WHITE  FLOUR",
+      "proposed_name": "WHITE FLOUR",
+      "proposed_keywords": [],
+      "original_issues": [],
+      "proposed_issues": [],
+      "warnings": [],
+      "requires_manual_name": false
+    },
+    {
+      "id": "8f851647-b231-48de-9deb-20f61dc9bd8f",
+      "sku": "PRD-102",
+      "active": true,
+      "original_name": "SOOPIN  (M)",
+      "proposed_name": "SOOPIN (M)",
+      "proposed_keywords": [],
+      "original_issues": [],
+      "proposed_issues": [],
+      "warnings": [],
+      "requires_manual_name": false
+    },
+    {
+      "id": "9be55230-dda4-40ef-af5d-31a9e8f091d1",
+      "sku": "PRD-073",
+      "active": true,
+      "original_name": "DIN  MILK",
+      "proposed_name": "DIN MILK",
+      "proposed_keywords": [],
+      "original_issues": [],
+      "proposed_issues": [],
+      "warnings": [],
+      "requires_manual_name": false
+    },
+    {
+      "id": "ff95fd80-4401-4b21-8f79-963f52eb7e8d",
+      "sku": "PRD-160",
+      "active": true,
+      "original_name": "TOILET  BRUSH",
+      "proposed_name": "TOILET BRUSH",
+      "proposed_keywords": [],
+      "original_issues": [],
+      "proposed_issues": [],
+      "warnings": [],
+      "requires_manual_name": false
+    }
+  ],
+  "audit": {
+    "operation": "PRODUCT_NAMES_DRY_RUN",
+    "operator": "USER",
+    "source": "C:\\Users\\USER\\OneDrive\\Documents\\Desktop\\POS_ERP\\backups\\pre-deploy-58ace25-20261110\\local-pos-workspace\\backups\\pos-erp-backup-2026-11-07T01-44-41.db",
+    "staging_copy_declared": true,
+    "database_mode": "read-only",
+    "schema_changed": false
+  }
+}

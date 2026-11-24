@@ -1,3 +1,4 @@
+import PasswordInput from '@/components/shared/PasswordInput'
 import { useState, useEffect } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -82,7 +83,7 @@ export default function UsersPage() {
   const filteredUsers = visibleUsers.filter(u => {
     const q = search.toLowerCase().trim()
     if (!q) return true
-    return [u.name, u.email, u.role_name, u.branch_name].some(v =>
+    return [u.name, u.email, u.login_id, u.role_name, u.branch_name].some(v =>
       String(v || '').toLowerCase().includes(q)
     )
   })
@@ -399,7 +400,7 @@ function UsersTable({
                     </div>
                   </div>
                 </td>
-                <td className="table-cell text-slate-400 text-xs">{u.email as string}</td>
+                <td className="table-cell text-slate-400 text-xs">{u.email as string}<br/><span className="font-mono">{String(u.login_id||'')}</span></td>
                 <td className="table-cell font-mono text-xs text-slate-400">{(u.agent_code as string) || '—'}</td>
                 <td className="table-cell text-slate-400">{(u.agent_position as string) || '—'}</td>
                 <td className="table-cell">
@@ -638,6 +639,7 @@ function UserForm({
   const [form, setForm] = useState({
     name:      String(user?.name     || ''),
     email:     String(user?.email    || ''),
+    login_id: String(user?.login_id||''),
     password:  '',
     current_password: '',
     role_id:   String(user?.role_id  || ''),
@@ -773,28 +775,17 @@ function UserForm({
     }
 
     if (!form.name) { toast.error('Name is required'); return }
-    if (isAdminRole) {
-      if (!form.email) { toast.error('Email is required for admin accounts'); return }
-      if (!user && !form.password) { toast.error('Password is required for admin accounts'); return }
+    if (!isAgentRole) {
+      if (!form.email) { toast.error('Email is required'); return }
+      if (!user && !form.password) { toast.error('Password is required'); return }
       if (form.password && isEditingSelf && !form.current_password) {
         toast.error('Enter your current password to set a new one'); return
       }
     }
-    if (isPinOnly && !form.pin && !(user && user.has_pin)) {
-      toast.error('PIN is required for staff accounts'); return
-    }
-
     setSaving(true)
     const payload: Record<string,unknown> = { ...form }
     if (!payload.password) delete payload.password
     if (!payload.password || !isEditingSelf) delete payload.current_password
-
-    // Staff roles: auto-generate placeholder email & password (DB requires NOT NULL)
-    if (isPinOnly && !user) {
-      const slug = form.name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z0-9.]/g, '')
-      payload.email    = `${slug}.${Date.now()}@staff.local`
-      payload.password = crypto.randomUUID()
-    }
 
     try {
       const res = user
@@ -1006,7 +997,7 @@ function UserForm({
 
         {isAgentRole && (
           <div className="col-span-2">
-            <label className="label">PIN {user?.has_pin ? '(leave blank to keep current)' : '* (4-6 digits)'}</label>
+            <label className="label">PIN {user?.has_pin ? '(leave blank to keep current)' : '(optional, 4-6 digits)'}</label>
             <input
               value={form.pin}
               onChange={f('pin')}
@@ -1028,7 +1019,7 @@ function UserForm({
               Staff role — login via PIN only. Email &amp; password not required.
             </div>
             <div className="col-span-2">
-              <label className="label">PIN {user?.has_pin ? '(leave blank to keep current)' : '* (4-6 digits)'}</label>
+              <label className="label">PIN {user?.has_pin ? '(leave blank to keep current)' : '(optional, 4-6 digits)'}</label>
               <input
                 value={form.pin}
                 onChange={f('pin')}
@@ -1039,27 +1030,28 @@ function UserForm({
                 pattern="[0-9]*"
               />
               <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
-                Staff will use this PIN to login from the POS terminal.
+                If configured, this PIN is also available at the POS terminal.
               </p>
             </div>
           </>
         )}
 
         {/* ── Admin roles (Company Admin / Branch Manager) ── */}
-        {isAdminRole && (
+        {!isAgentRole && (
           <>
             <div>
+              <label className="label">User ID</label><input aria-label="User ID" autoComplete="username" value={form.login_id} onChange={f('login_id')} className="input" placeholder="Optional: generate from email"/>
               <label className="label">Email *</label>
               <input value={form.email} onChange={f('email')} type="email" className="input" />
             </div>
             <div>
               <label className="label">Password {user ? '(leave blank to keep)' : '*'}</label>
-              <input type="password" value={form.password} onChange={f('password')} className="input" />
+              <PasswordInput  value={form.password} onChange={f('password')} className="input" />
             </div>
             {isEditingSelf && form.password && (
               <div>
                 <label className="label">Current Password *</label>
-                <input type="password" value={form.current_password} onChange={f('current_password')} className="input" placeholder="Required to set a new password" />
+                <PasswordInput  value={form.current_password} onChange={f('current_password')} className="input" placeholder="Required to set a new password" />
               </div>
             )}
             <div>
@@ -1462,8 +1454,8 @@ function UserActionsModal({
 
             <div>
               <label className="label">New Password *</label>
-              <input
-                type="password"
+              <PasswordInput
+                
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
                 className="input"
@@ -1482,8 +1474,8 @@ function UserActionsModal({
 
             <div>
               <label className="label">Confirm Password *</label>
-              <input
-                type="password"
+              <PasswordInput
+                
                 value={confirmPassword}
                 onChange={e => setConfirmPassword(e.target.value)}
                 className="input"
@@ -1615,8 +1607,8 @@ function ChangePinModal({ user, onClose, onDone }: {
       <div className="space-y-4">
         <div>
           <label className="label">New PIN * (4-6 digits)</label>
-          <input
-            type="password"
+          <PasswordInput
+            
             value={pin}
             onChange={e => setPin(e.target.value.replace(/\D/g, ''))}
             className="input font-mono text-xl tracking-widest"
@@ -1628,8 +1620,8 @@ function ChangePinModal({ user, onClose, onDone }: {
         </div>
         <div>
           <label className="label">Confirm PIN *</label>
-          <input
-            type="password"
+          <PasswordInput
+            
             value={confirmPin}
             onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))}
             onKeyDown={e => e.key === 'Enter' && submit()}

@@ -1,3 +1,4 @@
+import {useBatchGuard} from '@/hooks/useBatchGuard'
 import { useState, useEffect } from 'react'
 import NumberInput from '@/components/shared/NumberInput'
 import { useBusinessType } from '@/hooks/useBusinessType'
@@ -218,6 +219,7 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   const [productSearch, setProductSearch] = useState('')
   const [branches, setBranches]   = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving]       = useState(false)
+  const batchGuard=useBatchGuard()
   const [form, setForm]           = useState({
     product_id: '', batch_number: '', serial_number: '',
     expiry_date: '', mfg_date: '', quantity: 1, cost_price: 0, branch_id: '',
@@ -251,7 +253,8 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     if (form.quantity <= 0) { toast.error('Quantity must be > 0'); return }
     setSaving(true)
     try {
-      const res = await window.api.batches.create(form) as { success: boolean; error?: string }
+      const prepared=await batchGuard.confirm([form]);if(!prepared)return
+      const res = await window.api.batches.create({...prepared[0],add_to_stock:true}) as { success: boolean; error?: string }
       if (res.success) { toast.success('Batch added'); onSaved() }
       else toast.error(res.error || 'Failed to add batch')
     } catch (err) {
@@ -268,7 +271,7 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
 
   return (
     <Modal title="Add Batch / Serial / Expiry" onClose={onClose} size="md"
-      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Add Batch'}</button></>}>
+      footer={<>{batchGuard.dialog}<button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Add Batch'}</button></>}>
       <div className="space-y-4">
         <div>
           <label className="label">Product *</label>

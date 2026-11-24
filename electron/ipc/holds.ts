@@ -4,6 +4,9 @@ import crypto from 'crypto'
 import { createCompanyStore } from '../services/companyWorkspace'
 import { enqueuSync } from '../services/syncQueue'
 import { safeHandle } from './ipcHandler'
+import { getTerminalHub } from '../services/branchHubRuntime'
+import { localNumberedHolds } from '../services/numberedHoldsRuntime'
+import { manualHoldNumber } from '../lib/holdNumber'
 
 const store = createCompanyStore()
 
@@ -23,7 +26,13 @@ function currentPerms(user: Record<string, unknown>): Record<string, unknown> {
 // POS "Hold" — see the held_carts table comment in electron/database.ts for
 // why this is kept entirely separate from invoices:create.
 export function registerHoldHandlers(ipcMain: IpcMain) {
+  safeHandle(ipcMain, 'holds:hubStatus', () => ({ success: true, data: getTerminalHub()?.status() || { configured: false, hub_online: false, cloud: 'not_configured', pending: 0 } }))
+  safeHandle(ipcMain, 'holds:acknowledgeRecall', (_e, token: string) => {
+    getTerminalHub()?.acknowledgeRecall(token)
+    return { success: true }
+  })
   safeHandle(ipcMain, 'holds:create', async (_e, payload: {
+    hold_number?: string
     bill_type?: string
     customer_id?: string | null
     customer_name?: string | null
@@ -37,6 +46,14 @@ export function registerHoldHandlers(ipcMain: IpcMain) {
     if (!payload.items || payload.items.length === 0) {
       return { success: false, error: 'Cannot hold an empty cart' }
     }
+    const hub = getTerminalHub()
+    if (payload.hold_number !== undefined) {
+      payload.hold_number = manualHoldNumber(payload.hold_number)
+      const branch = String(getAuthUser()?.branch_id || defaultBranchId())
+      if (localNumberedHolds()?.has(branch, payload.hold_number)) return { success: false, error: 'Hold number is already in use; choose another number' }
+      return { success: true, data: hub ? hub.createHold(payload as unknown as Record<string, unknown>) : localNumberedHolds(true)!.create(branch, payload as unknown as Record<string, unknown>) }
+    }
+    if (hub) return { success: true, data: hub.createHold(payload as unknown as Record<string, unknown>) }
     const db = getDb()
     const user = getAuthUser()
     const id = crypto.randomUUID()
@@ -66,6 +83,7 @@ export function registerHoldHandlers(ipcMain: IpcMain) {
   })
 
   safeHandle(ipcMain, 'holds:list', (_e) => {
+    const hub = getTerminalHub()
     const db = getDb()
     const user = getAuthUser()
     const perms = currentPerms(user)
@@ -74,11 +92,21 @@ export function registerHoldHandlers(ipcMain: IpcMain) {
       ? db.prepare(`SELECT ${cols} FROM held_carts ORDER BY created_at DESC LIMIT 20`).all()
       : db.prepare(`SELECT ${cols} FROM held_carts WHERE branch_id=? ORDER BY created_at DESC LIMIT 20`)
           .all((user?.branch_id as string) || defaultBranchId())
-    return { success: true, data: rows }
+    // Existing legacy holds remain recoverable, but are never uploaded to the
+    // new Hub without a deliberate ownership migration.
+    return { success: true, data: [...(hub?.listHolds() || []), ...(localNumberedHolds()?.list(String(user?.branch_id || defaultBranchId())) || []), ...(rows as Record<string, unknown>[]).map(row => ({ ...row, source: 'legacy' }))] }
   })
 
   safeHandle(ipcMain, 'holds:recall', async (_e, id: string) => {
+    const branch = String(getAuthUser()?.branch_id || defaultBranchId())
+    const numbered = localNumberedHolds()
+    if (numbered?.has(branch, id)) return { success: true, data: numbered.recall(branch, id) }
     const db = getDb()
+    const hub = getTerminalHub()
+    if (hub) {
+      const legacy = db.prepare('SELECT id FROM held_carts WHERE id=?').get(id)
+      if (!legacy) return { success: true, data: await hub.recallHold(id) }
+    }
     const user = getAuthUser()
     const perms = currentPerms(user)
     const row = db.prepare('SELECT * FROM held_carts WHERE id=?').get(id) as Record<string, unknown> | undefined
@@ -95,6 +123,7 @@ export function registerHoldHandlers(ipcMain: IpcMain) {
         bill_type:       row.bill_type,
         customer_id:     row.customer_id,
         customer_name:   row.customer_name,
+        customer:        row.customer_id ? db.prepare('SELECT * FROM customers WHERE id=?').get(row.customer_id) || null : null,
         items:           JSON.parse(String(row.items_json)),
         global_discount: row.global_discount,
         notes:           row.notes,

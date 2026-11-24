@@ -1,3 +1,4 @@
+import PasswordInput from '../../../../src/components/shared/PasswordInput'
 import { useEffect, useState, FormEvent } from 'react'
 import { settings as api, email as emailApi, me as meApi, danger as dangerApi, dbInfo as dbApi } from '../lib/api'
 import { Save, Send, Mail, RotateCcw, Shield, Eye, EyeOff, AlertTriangle, Trash2, Building2, Database, RefreshCw, CheckCircle, XCircle, Wifi } from 'lucide-react'
@@ -517,7 +518,7 @@ export default function SettingsPage() {
 
             <div>
               <label className="label">Confirm New Password</label>
-              <input className="input w-full" type="password" placeholder="Repeat new password"
+              <PasswordInput className="input w-full"  placeholder="Repeat new password"
                 value={pw.confirm} onChange={e => setPw(p => ({ ...p, confirm: e.target.value }))} />
               {pw.confirm && pw.newPw !== pw.confirm && (
                 <p className="text-xs text-red-400 mt-1">Passwords do not match</p>

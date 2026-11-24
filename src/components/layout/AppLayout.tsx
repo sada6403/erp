@@ -1,3 +1,4 @@
+import PasswordInput from '@/components/shared/PasswordInput'
 import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/authStore'
 import { useBusinessType } from '@/hooks/useBusinessType'
@@ -1024,8 +1025,8 @@ export default function AppLayout() {
           <div className="space-y-3">
             <div>
               <label className="label">Current Password</label>
-              <input
-                type="password"
+              <PasswordInput
+                
                 autoComplete="current-password"
                 value={passwordForm.current}
                 onChange={e => setPasswordForm(p => ({ ...p, current: e.target.value }))}
@@ -1034,8 +1035,8 @@ export default function AppLayout() {
             </div>
             <div>
               <label className="label">New Password</label>
-              <input
-                type="password"
+              <PasswordInput
+                
                 autoComplete="new-password"
                 value={passwordForm.next}
                 onChange={e => setPasswordForm(p => ({ ...p, next: e.target.value }))}
@@ -1045,8 +1046,8 @@ export default function AppLayout() {
             </div>
             <div>
               <label className="label">Confirm New Password</label>
-              <input
-                type="password"
+              <PasswordInput
+                
                 autoComplete="new-password"
                 value={passwordForm.confirm}
                 onChange={e => setPasswordForm(p => ({ ...p, confirm: e.target.value }))}

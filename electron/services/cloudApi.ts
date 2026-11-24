@@ -34,6 +34,7 @@ export class DeviceRevokedError extends Error {
 }
 
 export class CloudApi {
+  requestPasswordReset(email:string){return this.request('/api/auth/password-reset/request',{method:'POST',body:JSON.stringify({email})})}
   private readonly baseUrl: string
   private readonly apiKey: string
   private readonly deviceId: string | null

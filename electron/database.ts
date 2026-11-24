@@ -6,6 +6,7 @@ import crypto from 'crypto'
 import { enqueuSync } from './services/syncQueue'
 import { createCompanyStore, getActiveWorkspaceDir } from './services/companyWorkspace'
 import { initPendingBranchStocksTable } from './services/pendingBranchStocks'
+import { migrateRelease210 } from './services/releaseMigration'
 
 let db: Database.Database
 
@@ -68,6 +69,7 @@ export async function initDatabase(): Promise<void> {
   `)
   runMigrations()
   initPendingBranchStocksTable(db)
+  await migrateRelease210(db,path.join(userDataPath,'backups'),fs.readFileSync(path.join(path.dirname(schemaPath),'migrations/release-2.10.up.sql'),'utf8'))
 
   console.log('[DB] SQLite initialized at', dbPath)
 }

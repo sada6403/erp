@@ -1,3 +1,4 @@
+import {backfillLoginIds,hasLoginIds} from './loginIdentity'
 import { getDb } from '../database'
 import { randomUUID } from 'crypto'
 
@@ -17,8 +18,9 @@ function wakeSyncService(): void {
 export async function enqueueUserRow(userId: string, operation: 'INSERT' | 'UPDATE' = 'UPDATE'): Promise<void> {
   try {
     const db = getDb()
+    if(hasLoginIds(db))backfillLoginIds(db)
     const row = db.prepare(`
-      SELECT id, branch_id, role_id, name, email, password_hash, pin_hash,
+      SELECT id, branch_id, role_id, name, email, password_hash, pin_hash, ${hasLoginIds(db)?'login_id,login_id_generated,':''}
              is_active, last_login_at, created_at, updated_at
       FROM users WHERE id = ?
     `).get(userId) as Record<string, unknown> | undefined
