@@ -99,18 +99,19 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 5
     steps:
-      - name: Verify write access to both update publication directories
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+      - name: Verify privileged publisher handles both update feeds
         shell: bash
         run: |
           set -euo pipefail
-          echo "Publisher user ID: $(id -u)"
+          sudo -n -l /usr/local/bin/pos-deploy >/dev/null
+          cmp scripts/publish-vps-release.sh /var/www/pos-backend/scripts/publish-vps-release.sh
           for directory in /var/www/updates /var/www/html/updates; do
-            echo "Publication directory: $(readlink -f "$directory")"
-            test -d "$directory"
-            test -w "$directory" || { echo "ERROR: Release runner cannot publish $directory" >&2; exit 1; }
             test -f "$directory/latest.yml"
           done
-          echo "Verified publisher can update both feeds."
+          echo "Verified installed privileged publisher and both feeds."
 
   build-desktop:
     needs: [validate, preflight-publisher]
@@ -289,11 +290,8 @@ jobs:
           actual_sha="$(openssl dgst -sha512 -binary "$installer" | openssl base64 -A)"
           declared_sha="$(sed -nE 's/^sha512:[[:space:]]*(.+)[[:space:]]*$/\1/p' "$metadata" | tail -n 1)"
           [[ "$actual_sha" == "$declared_sha" ]] || { echo "Staged SHA-512 mismatch before publish" >&2; exit 1; }
-          # Both feeds are used by installed desktops. Publish the verified
-          # immutable installer/blockmap before metadata in each directory.
-          UPDATES_DIR=/var/www/updates bash scripts/publish-vps-release.sh "$RELEASE_DIR" "$RELEASE_VERSION"
-          UPDATES_DIR=/var/www/html/updates bash scripts/publish-vps-release.sh "$RELEASE_DIR" "$RELEASE_VERSION"
-          rm -f "$RELEASE_DIR/.publish-request"
+          : > "$RELEASE_DIR/.publish-request"
+          sudo /usr/local/bin/pos-deploy
 
       - name: Clean VPS staging directory even on failure
         if: always()
