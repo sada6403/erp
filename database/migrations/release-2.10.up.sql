@@ -8,10 +8,6 @@ CREATE TABLE IF NOT EXISTS product_batch_identities (
  created_at TEXT NOT NULL,updated_at TEXT NOT NULL,
  UNIQUE(product_id,batch_no,expiry_date)
 );
-CREATE TABLE IF NOT EXISTS user_password_reset_links (
- token_hash TEXT PRIMARY KEY,user_id TEXT NOT NULL REFERENCES users(id),
- expires_at TEXT NOT NULL,used_at TEXT,created_at TEXT NOT NULL
-);
 CREATE TABLE IF NOT EXISTS release_migration_receipts (
  version TEXT PRIMARY KEY,backup_path TEXT NOT NULL,applied_at TEXT NOT NULL
 );

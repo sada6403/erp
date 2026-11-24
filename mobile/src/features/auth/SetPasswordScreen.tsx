@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/theme';
 import { Text } from '@/components/Text';
 import { Button } from '@/components/Button';
-import { FormField } from '@/components/FormField';
+import { PasswordFormField } from '@/components/PasswordFormField';
 import { zodResolver } from '@/lib/zodResolver';
 import { errorMessage } from '@/lib/errors';
 import { authApi } from '@/api/endpoints';
@@ -63,9 +63,9 @@ export function SetPasswordScreen({ voluntary = false }: { voluntary?: boolean }
         <Text size={12} color="textMuted" align="center" style={{ marginBottom: 20 }} lineHeightRatio={1.45}>
           {voluntary ? t('auth.changePasswordSub') : t('auth.setPasswordSub')}
         </Text>
-        <FormField control={control} name="current" label={voluntary ? t('auth.currentPassword') : t('auth.tempPassword')} secureTextEntry autoCapitalize="none" />
-        <FormField control={control} name="next" label={t('auth.newPassword')} secureTextEntry autoCapitalize="none" hint={t('auth.passwordHint')} />
-        <FormField control={control} name="confirm" label={t('auth.confirmPassword')} secureTextEntry autoCapitalize="none" />
+        <PasswordFormField control={control} name="current" label={voluntary ? t('auth.currentPassword') : t('auth.tempPassword')} autoCapitalize="none" />
+        <PasswordFormField control={control} name="next" label={t('auth.newPassword')} autoCapitalize="none" hint={t('auth.passwordHint')} />
+        <PasswordFormField control={control} name="confirm" label={t('auth.confirmPassword')} autoCapitalize="none" />
         <Button label={t('auth.savePassword')} loading={busy} onPress={submit} />
         {voluntary ? <Button label={t('common.cancel')} variant="link" onPress={() => router.back()} /> : null}
       </ScrollView>

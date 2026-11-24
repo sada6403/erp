@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import {storage} from '@/lib/storage';
+import React, { useState, useEffect } from 'react';
 import { Image } from 'expo-image';
 import { Pressable, ScrollView, View } from 'react-native';
 import { useForm } from 'react-hook-form';
@@ -25,6 +26,7 @@ import { loginSchema, registerSchema, resetSchema, type LoginForm, type Register
 const logo = require('../../../assets/logo.jpg');
 
 /** The demo pre-fills the sign-in form; only with dev mocks (never in a real build). */
+const rememberKey = `auth.rememberedIdentifier:${ENV.apiBaseUrl}:${ENV.appKey}`;
 const DEV_LOGIN = __DEV__ && ENV.useMocks ? { identifier: '0771234567', password: 'dev-password' } : { identifier: '', password: '' };
 
 type Mode = 'login' | 'register' | 'forgot' | 'reset';
@@ -71,13 +73,16 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const showToast = useUiStore((x) => x.showToast);
-  const [mode, setMode] = useState<Mode>(initialMode);
+  const [mode, setModeState] = useState<Mode>(initialMode);
   const [show, setShow] = useState(false);
+  const setMode=(value:Mode)=>{setShow(false);setModeState(value)};
   const [remember, setRemember] = useState(true);
   const [busy, setBusy] = useState(false);
   const [forgotId, setForgotId] = useState('');
 
   const loginForm = useForm<LoginForm>({ resolver: zodResolver(loginSchema), defaultValues: DEV_LOGIN, mode: 'onTouched' });
+  useEffect(()=>{try{const remembered=storage.getItem(rememberKey);if(remembered)loginForm.setValue('identifier',remembered)}catch{}},[loginForm]);
+
   const regForm = useForm<RegisterForm>({ resolver: zodResolver(registerSchema), defaultValues: { name: '', phone: '', password: '' } });
   const resetForm = useForm<{ code: string; password: string }>({ resolver: zodResolver(resetSchema), defaultValues: { code: '', password: '' } });
 
@@ -102,6 +107,8 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
     try {
       const res = await login(identifier, password);
       perf('login:response+session stored', t0);
+      try{if(remember)storage.setItem(rememberKey,identifier.trim());else storage.removeItem(rememberKey)}catch{}
+      loginForm.setValue('password','');
       finish(res.user, t('auth.welcome', { name: res.user.name }));
       perf('login:navigated', t0);
     } catch (e) {
@@ -253,7 +260,7 @@ export function AuthScreen({ initialMode = 'login' }: { initialMode?: Mode }) {
           <View>
             <Text size={15} weight={800} style={{ marginBottom: 12 }}>{t('auth.resetTitle')}</Text>
             <FormField control={resetForm.control} name="code" label={t('auth.code')} keyboardType="number-pad" maxLength={6} />
-            <FormField control={resetForm.control} name="password" label={t('auth.newPassword')} secureTextEntry autoCapitalize="none" />
+            <FormField control={resetForm.control} name="password" label={t('auth.newPassword')} secureTextEntry={!show} right={eye} autoCapitalize="none" />
             <Button label={t('auth.resetPassword')} loading={busy} onPress={onReset} />
             <Button label={t('common.cancel')} variant="link" onPress={() => setMode('login')} />
           </View>

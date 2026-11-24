@@ -5,7 +5,7 @@
   "scripts": {
     "predev": "node scripts/prepare-dev.js",
     "dev": "next dev",
-    "build": "next build",
+    "build": "node scripts/build.mjs",
     "start": "node scripts/start.js",
     "typecheck": "tsc --noEmit",
     "test": "node scripts/test-run.cjs",

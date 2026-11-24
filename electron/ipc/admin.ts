@@ -1071,8 +1071,8 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
     if(typeof p.password!=='string'||p.password.length<8||Buffer.byteLength(p.password)>72)throw new Error('Password must be at least 8 characters')
     const id = crypto.randomUUID()
     const hash = await bcrypt.hash(p.password, 10)
-    const loginId=allocateLoginId(db,p.login_id,p.email)
     const pinHash = p.pin ? await bcrypt.hash(String(p.pin), 10) : null
+    const loginId=allocateLoginId(db,p.login_id,p.email)
     db.prepare(`INSERT INTO users (id,branch_id,role_id,name,email,password_hash,pin_hash,login_id,login_id_generated)
       VALUES (?,?,?,?,?,?,?,?,?)`)
       .run(id, p.branch_id||null, p.role_id, p.name, p.email, hash, pinHash,loginId,p.login_id?0:1)

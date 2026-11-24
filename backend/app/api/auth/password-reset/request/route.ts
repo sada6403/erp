@@ -8,7 +8,7 @@ export async function POST(request:NextRequest){
  const generic=()=>NextResponse.json({success:true,message:'If the email is registered, a reset link will be sent. Admin reset remains available.'})
  try{
   const input=await request.json();const email=String(input.email||'').trim().toLowerCase(),key=request.headers.get('x-api-key')||''
-  const {rows:companies}=await pool.query('SELECT id,slug,db_schema FROM companies WHERE (slug=? OR api_key=?) AND status IN (\'active\',\'trial\') LIMIT 1',[String(input.company_slug||''),key])
+  const {rows:companies}=await pool.query('SELECT id,slug,db_schema FROM companies WHERE ((?<>\'\' AND slug=?) OR (?<>\'\' AND api_key=?)) AND status IN (\'active\',\'trial\') LIMIT 1',[String(input.company_slug||''),String(input.company_slug||''),key,key])
   const company=companies[0] as Record<string,string>|undefined;if(!company||!email)return generic()
   const db=tenantPool(company.db_schema)
   const {rows}=await db.query<Record<string,string>>('SELECT id,password_hash FROM users WHERE LOWER(TRIM(email))=? AND is_active=1',[email]);if(!rows[0])return generic()

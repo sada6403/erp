@@ -32,6 +32,7 @@ export function claimBatch(db:Database.Database,input:BatchInput,excludeId?:stri
  const id=createHash('sha256').update(JSON.stringify([input.product_id,check.dates.no,check.dates.expiry])).digest('hex').slice(0,32),now=new Date().toISOString()
  const inserted=db.prepare('INSERT OR IGNORE INTO product_batch_identities(id,product_id,batch_no,expiry_date,mfg_date,created_at,updated_at) VALUES(?,?,?,?,?,?,?)').run(id,input.product_id,check.dates.no,check.dates.expiry,check.dates.mfg||null,now,now)
  const identity=db.prepare('SELECT * FROM product_batch_identities WHERE id=?').get(id) as Record<string,any>
+ if(String(identity.mfg_date||'')!==check.dates.mfg)throw new Error('Use the existing physical batch manufacture date, or choose the correct batch number and expiry')
  if(identity.needs_review)throw new Error('Legacy batch manufacture dates conflict; Company Admin must review this physical batch before adding stock')
  if(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_queue'").get())db.prepare('INSERT INTO sync_queue(id,table_name,record_id,operation,payload) VALUES(?,?,?,?,?)').run(randomUUID(),'product_batch_identities',id,'INSERT',JSON.stringify(identity))
  return {id,...check.dates}

@@ -25,6 +25,8 @@ function currentPerms(caller: Record<string, unknown> = authUser()): Record<stri
 interface BatchRow {
   id: string
   batch_identity_id?:string|null
+  batch_entry_mode?:string
+  batch_warning_ack?:number
   product_id: string
   branch_id: string | null
   batch_number: string | null
@@ -108,7 +110,7 @@ export function registerBatchHandlers() {
       VALUES (@id, @product_id, @branch_id, @batch_number, @serial_number, @expiry_date, @mfg_date, @quantity, @cost_price, @po_id, @notes, @created_by)
     `).run(row)
     const columns=new Set((db.prepare('PRAGMA table_info(product_batches)').all() as {name:string}[]).map(column=>column.name))
-    if(columns.has('batch_identity_id'))db.prepare('UPDATE product_batches SET batch_identity_id=?,batch_entry_mode=? WHERE id=?').run(identity.id,payload.batch_resolution==='add_existing'?'add_existing':'new',id)
+    if(columns.has('batch_identity_id'))db.prepare('UPDATE product_batches SET batch_identity_id=?,batch_entry_mode=?,batch_warning_ack=? WHERE id=?').run(identity.id,payload.batch_resolution==='add_existing'?'add_existing':'new',payload.acknowledge_dates===true?1:0,id)
     if(payload.add_to_stock){
       if(!branch_id)throw new Error('Select a branch before adding stock')
       if(!Number.isFinite(Number(row.quantity))||Number(row.quantity)<=0||!Number.isFinite(Number(row.cost_price))||Number(row.cost_price)<0)throw new Error('Valid positive quantity and non-negative cost required')
@@ -125,7 +127,7 @@ export function registerBatchHandlers() {
     return { success: true, id }
   })
 
-  safeHandle(ipcMain, 'batches:update', async (_e, id: string, payload: Partial<BatchRow>) => {
+  safeHandle(ipcMain, 'batches:update', async (_e, id: string, payload: Partial<BatchRow> & Partial<BatchInput>) => {
     const caller = authUser()
     const perms = currentPerms(caller)
     if (!perms.all && !perms.inventory) return { success: false, error: 'Inventory access required' }
@@ -137,13 +139,18 @@ export function registerBatchHandlers() {
     }
     if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) && (payload.quantity !== undefined || payload.cost_price !== undefined)) throw new Error('Use purchase receipts to change supermarket inventory; purchase costs are immutable')
     if (payload.selling_price != null && (!Number.isFinite(Number(payload.selling_price)) || Number(payload.selling_price)<0)) throw new Error('Invalid selling price')
+    db.transaction(()=>{
     delete payload.batch_identity_id
-    if(['batch_number','mfg_date','expiry_date'].some(key=>key in payload)){const key=claimBatch(db,{...existing,...payload,product_id:existing.product_id},id);payload.batch_identity_id=key.id}
-    const allowed = ['batch_identity_id','selling_price','batch_number','serial_number','expiry_date','mfg_date','quantity','cost_price','notes'] as const
-    const sets = allowed.filter(k => payload[k] !== undefined).map(k => `${k} = ?`)
-    const vals = allowed.filter(k => payload[k] !== undefined).map(k => payload[k])
+    delete payload.batch_entry_mode
+    delete payload.batch_warning_ack
+    if(['batch_number','mfg_date','expiry_date'].some(key=>key in payload)){const key=claimBatch(db,{...existing,...payload,product_id:existing.product_id},id);payload.batch_identity_id=key.id;payload.batch_entry_mode=payload.batch_resolution==='add_existing'?'add_existing':'new';payload.batch_warning_ack=payload.acknowledge_dates===true?1:0}
+    const allowed = ['batch_identity_id','batch_entry_mode','batch_warning_ack','selling_price','batch_number','serial_number','expiry_date','mfg_date','quantity','cost_price','notes'] as const
+    const existingColumns=new Set((db.prepare('PRAGMA table_info(product_batches)').all() as {name:string}[]).map(column=>column.name))
+    const sets = allowed.filter(k => existingColumns.has(k)&&payload[k] !== undefined).map(k => `${k} = ?`)
+    const vals = allowed.filter(k => existingColumns.has(k)&&payload[k] !== undefined).map(k => payload[k])
     if (!sets.length) return { success: false, error: 'Nothing to update' }
     db.prepare(`UPDATE product_batches SET ${sets.join(', ')}, updated_at = datetime('now') WHERE id = ?`).run(...vals, id)
+    }).immediate()
     const row = db.prepare(`SELECT * FROM product_batches WHERE id = ?`).get(id) as Record<string, unknown>
     await enqueuSync('product_batches', id, 'UPDATE', row)
     logAudit(db, { userId: (caller.id as string) || null, branchId: existing.branch_id, action: 'BATCH_UPDATED', tableName: 'product_batches', recordId: id, newValues: payload })

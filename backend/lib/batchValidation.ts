@@ -6,7 +6,8 @@ export async function validateSyncedBatch(client:QueryClient,record:Record<strin
  const {rows:old}=await client.query<Record<string,unknown>>('SELECT * FROM product_batches WHERE id=?',[id])
  if(old.length&&['product_id','batch_number','expiry_date','mfg_date','batch_identity_id'].every(key=>record[key]===undefined||String(record[key]||'')===String(old[0][key]||'')))return
  if(!no)return
- const {rows:duplicates}=await client.query('SELECT id,quantity,created_at FROM product_batches WHERE product_id=? AND TRIM(batch_number)=? AND COALESCE(expiry_date,\'\')=? AND id<>?',[record.product_id,no,expiry,id])
+ if(record.batch_identity_id)await client.query('SELECT id FROM product_batch_identities WHERE id=? FOR UPDATE',[record.batch_identity_id])
+ const {rows:duplicates}=await client.query('SELECT id,quantity,created_at FROM product_batches WHERE product_id=? AND TRIM(batch_number)=? AND COALESCE(expiry_date,\'\')=? AND id<>? FOR UPDATE',[record.product_id,no,expiry,id])
  if(duplicates.length&&record.batch_entry_mode!=='add_existing')throw new Error('Idhu already add panni irukku — explicit add_existing batch resolution is required')
  const {rows:variants}=await client.query<Record<string,unknown>>('SELECT expiry_date,mfg_date FROM product_batches WHERE product_id=? AND TRIM(batch_number)=? AND id<>?',[record.product_id,no,id])
  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Colombo',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())

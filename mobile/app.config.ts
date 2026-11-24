@@ -42,14 +42,14 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
   slug: 'nfplantation', // must equal the slug of EAS project 5dd24d2b
   owner: 'natural-plantation', // Expo account/organisation that owns EAS project 5dd24d2b (login user: nfplantation, member of natural-plantation)
   scheme: 'naturalplantation',
-  version: APP_ENV === 'staging' ? '1.0.0-test.13' : '1.0.0',
+  version: APP_ENV === 'staging' ? '1.1.0-rc.1' : '1.1.0',
   orientation: 'portrait',
   userInterfaceStyle: 'light',
   icon: './assets/icon.png',
   android: {
     package: ANDROID_PACKAGE,
     // Play used versionCodes 1-5 (old Flutter app). First new build = 6; bump by hand for every Play upload (eas.json appVersionSource is local).
-    versionCode: APP_ENV === 'production' ? 7 : 1,
+    versionCode: APP_ENV === 'production' ? 8 : 1,
     adaptiveIcon: {
       backgroundColor: '#FFFFFF',
       foregroundImage: './assets/android-icon-foreground.png',

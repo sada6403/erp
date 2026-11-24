@@ -143,7 +143,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
   const [supportState,   setSupportState]   = useState<'idle' | 'error'>('idle')
 
   // Forgot password
-  const [forgotStep,    setForgotStep]    = useState<'off' | 'email' | 'otp' | 'done'>('off')
+  const [forgotStep,    setForgotStep]    = useState<'off' | 'email' | 'otp' | 'link' | 'done'>('off')
   const [forgotEmail,   setForgotEmail]   = useState('')
   const [forgotOtp,     setForgotOtp]     = useState('')
   const [forgotNewPw,   setForgotNewPw]   = useState('')
@@ -496,8 +496,9 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
   const handleForgotRequest = async (e: React.FormEvent) => {
     e.preventDefault(); setForgotLoading(true)
     try {
-      const res = await (window as unknown as { api: { auth: { forgotPassword: (e: string) => Promise<{ success: boolean; sent?: boolean; noSmtp?: boolean; error?: string }> } } }).api.auth.forgotPassword(forgotEmail)
+      const res = await (window as unknown as { api: { auth: { forgotPassword: (e: string) => Promise<{ success: boolean; sent?: boolean; linkRequested?: boolean; noSmtp?: boolean; error?: string }> } } }).api.auth.forgotPassword(forgotEmail)
       if (res.success) {
+        if(res.linkRequested){setForgotStep('link');return}
         setForgotNoSmtp(Boolean(res.noSmtp) || !res.sent)
         setForgotStep('otp')
         if (res.sent) toast.success('Check your email for the reset link / code.')
@@ -1028,6 +1029,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
           {/* ═══════════ FORGOT PASSWORD ═══════════ */}
           {mode === 'email' && forgotStep !== 'off' && !requires2FA && !requiresPwChange && (
             <div className="space-y-3">
+              {forgotStep === 'link' && <div className="space-y-4"><p style={{color:'var(--text-2)'}}>If this email is registered, a password reset link will be sent. Open the link within 15 minutes. If no email arrives, ask your administrator to reset your password.</p><button type="button" onClick={resetForgot} className="btn-secondary">Back to login</button></div>}
               {forgotStep === 'done' && (
                 <div className="text-center space-y-3 py-4">
                   <CheckCircle size={32} className="mx-auto text-emerald-400" />
@@ -1063,7 +1065,7 @@ export default function LoginPage({ onChangeCompany }: { onChangeCompany?: () =>
                   <button type="submit" disabled={forgotLoading || !forgotEmail.trim()}
                     className="w-full py-2.5 rounded-xl text-white font-bold text-sm flex items-center justify-center"
                     style={{ background: 'linear-gradient(135deg, rgb(var(--brand-600-rgb)), rgb(var(--brand-800-rgb)))', opacity: !forgotEmail.trim() ? 0.5 : 1 }}>
-                    {forgotLoading ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Sending…</> : 'Send Reset Code'}
+                    {forgotLoading ? <><RefreshCw size={13} className="mr-1.5 animate-spin" />Sending…</> : 'Send reset link / code'}
                   </button>
                 </form>
               )}

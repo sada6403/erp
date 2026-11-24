@@ -88,4 +88,16 @@ describe('LoginPage company contact details', () => {
     expect(screen.getByText('support@example.com')).toBeInTheDocument()
     expect(screen.getByText('20 New Road, Kandy')).toBeInTheDocument()
   })
+  it('shows email-link instructions without requesting an OTP when the cloud accepts reset',async()=>{
+    const request=vi.fn(async()=>({success:true,linkRequested:true}));Object.assign(window.api,{auth:{forgotPassword:request}})
+    render(<MemoryRouter><LoginPage/></MemoryRouter>)
+    await screen.findByText('+94 11 234 5678')
+    fireEvent.click(screen.getByRole('button',{name:'Forgot Password?'}))
+    fireEvent.change(screen.getByPlaceholderText('Your email address'),{target:{value:'cashier@example.com'}})
+    fireEvent.click(screen.getByRole('button',{name:'Send reset link / code'}))
+    expect(await screen.findByText(/Open the link within 15 minutes/)).toBeInTheDocument()
+    expect(request).toHaveBeenCalledWith('cashier@example.com')
+    expect(screen.queryByText('Enter Reset Code')).not.toBeInTheDocument()
+  })
+
 })

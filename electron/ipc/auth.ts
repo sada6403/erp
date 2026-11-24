@@ -612,7 +612,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'auth:forgotPassword', async (_e, { email }: { email: string }) => {
       const db = getDb()
       const targetEmail = email.toLowerCase().trim()
-      try{await getCloudApi()?.requestPasswordReset(targetEmail)}catch{/* Local OTP/admin reset remains available offline. */}
+      try{const cloud=getCloudApi();if(cloud){const response=await cloud.requestPasswordReset(targetEmail) as {success?:boolean};if(response.success)return {success:true,linkRequested:true}}}catch{/* Local OTP/admin reset remains available offline. */}
 
       const user = db.prepare(
         `SELECT id, name, email FROM users WHERE LOWER(email) = ? AND is_active = 1`

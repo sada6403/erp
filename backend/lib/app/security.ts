@@ -60,7 +60,11 @@ export function maskPhone(p: string | null): string | null {
 /** Resolve phone / member number / agent code to ONE app_users row. */
 export async function findUserByIdentifier(company: AppCompany, identifier: string): Promise<Record<string, unknown> | null> {
   const raw = String(identifier || '').trim()
-  if (!raw || raw.length > 64) return null
+  if (!raw || raw.length > 254) return null
+  if(raw.includes('@')) {
+    const {rows}=await company.tp.query(`SELECT * FROM app_users WHERE LOWER(TRIM(email))=? AND deleted_at IS NULL LIMIT 2`,[raw.toLowerCase()])
+    return rows.length===1 ? rows[0] as Record<string,unknown> : null
+  }
   const tp = company.tp
   const phone = normalizePhone(raw)
   if (phone) {
