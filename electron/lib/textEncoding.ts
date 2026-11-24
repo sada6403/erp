@@ -54,6 +54,9 @@ export function proposeMojibakeRepair(original: string, maxPasses = 2) {
 }
 
 function decode(bytes: Uint8Array, encoding: TextEncoding): string {
+  // Node/ICU releases differ in their legacy TextDecoder aliases. Use the
+  // explicit WHATWG map so Electron and build/test runtimes agree.
+  if (encoding === 'windows-1252') return Array.from(bytes, byte => String.fromCodePoint(byte >= 0x80 && byte <= 0x9f ? cp1252[byte - 0x80] : byte)).join('')
   if (encoding === 'iso-8859-1') return Array.from(bytes, byte => String.fromCharCode(byte)).join('')
   return new TextDecoder(encoding === 'utf-8-bom' ? 'utf-8' : encoding, { fatal: true, ignoreBOM: true }).decode(bytes)
 }

@@ -1,3 +1,4 @@
+import {ensureBatchSyncSchema} from './batchSyncSchema'
 import { timingSafeEqual } from 'crypto'
 import type { NextRequest } from 'next/server'
 import { pool, tenantPool } from './db'
@@ -39,6 +40,7 @@ export async function ensureTenantCompatibility(dbSchema: string) {
 
 async function runTenantCompatibility(dbSchema: string) {
   const tp = tenantPool(dbSchema)
+  await ensureBatchSyncSchema(tp)
   const statements = [
     `ALTER TABLE categories ADD COLUMN description TEXT NULL`,
     `ALTER TABLE categories ADD COLUMN sort_order INT NOT NULL DEFAULT 0`,
