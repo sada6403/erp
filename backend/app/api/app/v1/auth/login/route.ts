@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 export const POST = appRoute({ auth: 'none', limiter: 'auth' }, async ({ company, body }): Promise<LoginResponse> => {
   const b = await body()
   only(b, ['identifier', 'password', 'device_id'])
-  const identifier = reqStr(b.identifier, 'identifier', 1, 64)
+  const identifier = reqStr(b.identifier, 'identifier', 1, 254)
   const password = reqStr(b.password, 'password', 1, 100)
   const deviceId = optStr(b.device_id, 'device_id', 191)
 

@@ -1,5 +1,7 @@
+import BatchFields from '@/components/shared/BatchFields'
 import ProductVariantBuilder, { type VariantItem } from '@/components/admin/ProductVariantBuilder'
 import FurnitureImportPreview, { type FurnitureImportFile } from '@/components/admin/FurnitureImportPreview'
+import BulkImportWizard from '@/components/admin/BulkImportWizard'
 import { useState, useEffect, useMemo, useRef } from 'react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -40,6 +42,7 @@ interface BranchItem {
 const PRODUCT_PAGE_SIZE = 100
 
 export default function ProductsPage() {
+  const [showBulkImport,setShowBulkImport]=useState(false)
   const { products, categories, suppliers, loading, load: loadProducts } = useProductsStore()
   const { user: currentUser } = useAuthStore()
   const isCompanyAdmin = hasCompanyAdminAccess(currentUser)
@@ -373,6 +376,7 @@ export default function ProductsPage() {
             <button onClick={handleDownloadTemplate} className="btn-secondary btn-sm gap-1.5" title="Download Product Bulk Upload Template">
               <Download size={14} /> Download Template
             </button>
+            {window.api.imports&&<button onClick={()=>setShowBulkImport(true)} className="btn-secondary btn-sm gap-1.5">Bulk Import v2</button>}
             <button onClick={() => setShowImportModal(true)} disabled={importing} className="btn-secondary btn-sm gap-1.5">
               <FileSpreadsheet size={14} /> Import CSV / Excel
             </button>
@@ -629,6 +633,7 @@ export default function ProductsPage() {
       )}
 
       {/* Permanent Delete Confirmation Modal */}
+      {showBulkImport&&<BulkImportWizard onClose={()=>setShowBulkImport(false)} onImported={()=>{void loadProducts();window.dispatchEvent(new Event('pos:catalog-refresh'))}}/>}
       {importPreviewFile && <FurnitureImportPreview file={importPreviewFile} initialStrategy={duplicateStrategy} onClose={() => setImportPreviewFile(null)} onConfirm={(reviewId, strategy) => handleImportExcel(strategy, reviewId)} />}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}>
@@ -1489,6 +1494,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
     u.map((row, n) => ({ ...row, is_base: n === i }))
   )
 
+  const [openingBatch,setOpeningBatch]=useState<Record<string,string>>({})
   const save = async () => {
     if (!form.name.trim()) { toast.error('Product name is required'); return }
     if (stockHasChanged && !stockReason.trim()) { toast.error('Enter a reason for the stock correction'); return }
@@ -1503,6 +1509,7 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
       const varStockTotal = form.product_type === 'variable' ? formVariants.filter(v => v.selected).reduce((acc, v) => acc + Number(v.stock || 0), 0) : stockQty
       const payload = {
         ...form,
+        opening_batch:!product&&form.product_type==='simple'&&Object.values(openingBatch).some(Boolean)?{...openingBatch,quantity:stockQty,cost_price:Number(form.cost_price||0),branch_id:String(branchId)}:undefined,
         name:                   form.name.trim(),
         unit:                   finalUnit,
         min_stock_level:        form.alert_qty,
@@ -1525,7 +1532,9 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
         if (!res.success) { toast.error(res.error || 'Failed'); return }
         productId = (res.data as { id: string }).id
       }
-      const stockPromise = stockIsReadOnly
+      const stockPromise = payload.opening_batch
+        ? Promise.resolve({success:true} as {success:boolean;error?:string})
+        : stockIsReadOnly
         ? Promise.resolve({ success: true } as { success: boolean; error?: string })
         : product
           ? stockHasChanged
@@ -1608,6 +1617,8 @@ function ProductForm({ product, categories, suppliers, stockBranchId, stockScope
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
+        {!product&&<BatchFields value={openingBatch} onChange={(key,value)=>setOpeningBatch(old=>({...old,[key]:value}))}/>}
+
                 📦 Simple Product
               </button>
               <button

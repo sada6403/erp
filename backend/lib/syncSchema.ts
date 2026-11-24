@@ -23,6 +23,7 @@ export async function ensureSyncSchema(client: Pick<QueryClient, 'query'>): Prom
     'SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE()')
   for (const table of ALLOWED_TABLES) {
     const columns = rows.filter(r => r.TABLE_NAME === table).map(r => r.COLUMN_NAME)
+    if (!columns.length && ['product_search_keywords','product_batch_identities'].includes(table)) continue // Backup-first tenant migrations.
     if (!columns.length) throw new Error(`Sync schema incomplete: missing ${table}`)
     if (!columns.includes('updated_at')) {
       try {

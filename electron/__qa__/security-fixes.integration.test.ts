@@ -1205,3 +1205,18 @@ describe('Requested admin-boundary and own-password regressions', () => {
     expect(await bcrypt.compare('ManagerNew123!', row.password_hash)).toBe(true)
   })
 })
+
+
+describe('2.10 User ID and email password login',()=>{
+ it('logs in the same cashier with User ID or email while preserving permissions',async()=>{
+  seedBranch('login-210-branch','Login branch','L210')
+  db.prepare("INSERT OR REPLACE INTO roles(id,name,permissions) VALUES('login-210-role','Cashier',?)").run(JSON.stringify({pos:true}))
+  const hash=await bcrypt.hash('Login210-secret',4)
+  db.prepare("INSERT INTO users(id,name,email,login_id,role_id,branch_id,password_hash,is_active) VALUES('login-210-user','Login Cashier','login210@example.com','cashier210','login-210-role','login-210-branch',?,1)").run(hash)
+  const byId=await call('auth:login',{identifier:'CASHIER210',password:'Login210-secret'})
+  expect(byId.success).toBe(true);expect(byId.data.user.id).toBe('login-210-user');expect(byId.data.user.role.permissions).toMatchObject({pos:true});expect(byId.data.user.role.permissions.all).toBeUndefined()
+  const byEmail=await call('auth:login',{email:'LOGIN210@EXAMPLE.COM',password:'Login210-secret'})
+  expect(byEmail.success).toBe(true);expect(byEmail.data.user.id).toBe(byId.data.user.id)
+  expect(JSON.stringify(byEmail.data)).not.toContain('Login210-secret');expect(JSON.stringify(byEmail.data)).not.toContain(hash)
+ })
+})

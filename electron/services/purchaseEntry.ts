@@ -1,3 +1,4 @@
+import {batchDates,claimBatch} from './batchIdentity'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 import { createReceiptBatch, ensureLegacyOpeningLayer } from './batchInventory'
@@ -9,7 +10,7 @@ export interface StockPurchaseInput {
   id: string; poNumber: string; branchId: string; userId?: string | null
   supplierId: string; purchaseType: 'order' | 'direct'; purchaseDate: string
   invoiceNumber?: string; expectedDate?: string; notes?: string
-  items: { product_id: string; quantity: number; unit_cost: number; selling_price?: number | null }[]
+  items: { product_id: string; quantity: number; unit_cost: number; selling_price?: number | null; batch_number?:string|null; expiry_date?:string|null;mfg_date?:string|null;batch_resolution?:'add_existing'|'acknowledge';existing_batch_id?:string;acknowledge_dates?:boolean }[]
 }
 const round = (value: number) => Math.round(value * 1e6)/1e6
 export function createStockPurchase(db: Database.Database, input: StockPurchaseInput, saveBills?: (purchaseId: string) => void) {
@@ -18,6 +19,7 @@ export function createStockPurchase(db: Database.Database, input: StockPurchaseI
   if (!db.prepare('SELECT 1 FROM suppliers WHERE id=?').get(input.supplierId)) throw new Error('Supplier not found')
   if (!input.items.length) throw new Error('At least one product is required')
   for (const item of input.items) {
+    batchDates({...item})
     if (!db.prepare('SELECT 1 FROM products WHERE id=?').get(item.product_id)) throw new Error('Product not found')
     if (!Number.isFinite(item.quantity) || round(item.quantity)<=0) throw new Error('Quantity must be greater than zero')
     if (!Number.isFinite(item.unit_cost) || item.unit_cost<=0) throw new Error('Purchase price must be greater than zero')
@@ -30,6 +32,7 @@ export function createStockPurchase(db: Database.Database, input: StockPurchaseI
       return existing
     }
     if(input.invoiceNumber?.trim() && db.prepare('SELECT 1 FROM purchase_orders WHERE supplier_id=? AND supplier_invoice_number=?').get(input.supplierId,input.invoiceNumber.trim())) throw new Error('This supplier bill number is already saved. Open the existing purchase.')
+    if(input.purchaseType==='order')for(const item of input.items)claimBatch(db,{...item,product_id:item.product_id})
     const total=Math.round(input.items.reduce((sum,item)=>sum+round(item.quantity)*item.unit_cost,0)*100)/100
     const purchase={id:input.id,po_number:input.poNumber,branch_id:input.branchId,supplier_id:input.supplierId,
       purchase_type:input.purchaseType,status:input.purchaseType==='direct'?'RECEIVED':'DRAFT',
@@ -46,6 +49,8 @@ export function createStockPurchase(db: Database.Database, input: StockPurchaseI
         selling_price:item.selling_price??null,received_qty:input.purchaseType==='direct'?round(item.quantity):0}
       db.prepare(`INSERT INTO purchase_items (id,po_id,product_id,quantity,unit_cost,line_total,selling_price,received_qty)
         VALUES (@id,@po_id,@product_id,@quantity,@unit_cost,@line_total,@selling_price,@received_qty)`).run(row)
+      const cols=new Set((db.prepare('PRAGMA table_info(purchase_items)').all() as {name:string}[]).map(col=>col.name))
+      for(const field of ['batch_number','expiry_date','mfg_date'] as const)if(cols.has(field))db.prepare(`UPDATE purchase_items SET ${field}=? WHERE id=?`).run(item[field]||null,row.id)
       if(input.purchaseType==='direct'){
         applyReceiptProductPrices(db,item.product_id,item.unit_cost,row.selling_price)
         ensureLegacyOpeningLayer(db,item.product_id,input.branchId)
@@ -53,7 +58,7 @@ export function createStockPurchase(db: Database.Database, input: StockPurchaseI
         if(stock) db.prepare("UPDATE stocks SET quantity=quantity+?,updated_at=datetime('now') WHERE id=?").run(row.quantity,stock.id)
         else db.prepare('INSERT INTO stocks (id,product_id,branch_id,quantity,damaged_qty) VALUES (?,?,?,?,0)').run(randomUUID(),item.product_id,input.branchId,row.quantity)
         createReceiptBatch(db,{productId:item.product_id,branchId:input.branchId,purchaseId:input.id,purchaseItemId:row.id,
-          quantity:row.quantity,unitCost:item.unit_cost,sellingPrice:row.selling_price,purchaseDate:input.purchaseDate,createdBy:input.userId})
+          quantity:row.quantity,unitCost:item.unit_cost,sellingPrice:row.selling_price,purchaseDate:input.purchaseDate,createdBy:input.userId,batchNumber:item.batch_number,expiryDate:item.expiry_date,mfgDate:item.mfg_date,batchResolution:item.batch_resolution,existingBatchId:item.existing_batch_id,acknowledgeDates:item.acknowledge_dates})
         insertStockMovement(db,{product_id:item.product_id,to_branch_id:input.branchId,quantity:row.quantity,
           movement_type:'RECEIVE',reference_order_id:input.id,created_by:input.userId,notes:`Direct stock purchase ${input.poNumber}`})
       }

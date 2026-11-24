@@ -1,3 +1,4 @@
+import {supportsLoginIds} from '@/lib/loginIdentity'
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { pool } from '@/lib/db'
@@ -38,7 +39,7 @@ export async function POST(req: NextRequest) {
   const limited = authLimiter(req)
   if (limited) return limited
 
-  const { email, password, company_slug } = await req.json()
+  const body=await req.json();const {password,company_slug}=body;const email=String(body.identifier||body.login_id||body.email||'').trim()
   if (!email || !password || !company_slug) {
     return NextResponse.json({ error: 'email, password and company_slug required' }, { status: 400 })
   }
@@ -55,12 +56,13 @@ export async function POST(req: NextRequest) {
 
   let user: Record<string, unknown> | null = null
   await withTenant(company.id, async (client) => {
+    const byId=await supportsLoginIds(client)
     const { rows } = await client.query(
       `SELECT u.*, r.name as role_name, r.permissions
        FROM users u JOIN roles r ON r.id = u.role_id
-       WHERE u.email = ? AND u.is_active = 1
+       WHERE (LOWER(TRIM(u.email)) = ? ${byId?'OR LOWER(u.login_id)=?':''}) AND u.is_active = 1
          AND (JSON_EXTRACT(r.permissions,'$.all') = true OR r.name IN ('Company Admin','Branch Manager'))`,
-      [email.toLowerCase().trim()]
+      byId?[email.toLowerCase().trim(),email.toLowerCase().trim()]:[email.toLowerCase().trim()]
     )
     user = rows[0] ?? null
   })
@@ -107,7 +109,7 @@ export async function POST(req: NextRequest) {
     user: {
       id: u.id,
       name: u.name,
-      email: u.email,
+      email: u.email,login_id:u.login_id||null,
       role: u.role_name,
       role_id: u.role_id ?? null,
       portal,

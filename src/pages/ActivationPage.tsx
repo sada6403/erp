@@ -1,3 +1,4 @@
+import PasswordInput from '@/components/shared/PasswordInput'
 import { useState, useEffect } from 'react'
 import { Loader2, CheckCircle2, Monitor, Globe, GitBranch, ChevronRight, ShieldCheck, ArrowLeft, Settings } from 'lucide-react'
 
@@ -310,8 +311,8 @@ export default function ActivationPage({ onActivated, bannerMessage, switchingCo
               {showPasscodePrompt && (
                 <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: '#2a2d3a', background: '#12151d' }}>
                   <label className="block text-xs font-medium text-gray-400">Support Passcode</label>
-                  <input
-                    type="password"
+                  <PasswordInput
+                    
                     autoFocus
                     className="w-full px-4 py-3 rounded-xl font-mono text-sm text-white border outline-none focus:border-emerald-500 transition-colors"
                     style={{ background: '#16181f', borderColor: '#2a2d3a' }}

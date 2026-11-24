@@ -27,8 +27,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
+  let device
   try {
-    await resolveDeviceAuthorization(request, company.id)
+    device = await resolveDeviceAuthorization(request, company.id)
   } catch (err) {
     if (err instanceof DeviceAuthorizationError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: 403 })
@@ -55,6 +56,10 @@ export async function POST(request: NextRequest) {
     }
 
     const requiredModule = TABLE_MODULE_MAP[body.table]
+    if(body.table==='product_search_keywords') {
+      const record=body.record as Record<string,unknown>
+      if(!device || record.scope_type==='branch'&&record.branch_id!==device.branchId) return NextResponse.json({error:'Authorized device and matching branch required for keyword sync'},{status:403})
+    }
     if (requiredModule && !entitlements.enabledModules.includes(requiredModule)) {
       return NextResponse.json({ error: `Feature disabled: ${requiredModule}` }, { status: 403 })
     }

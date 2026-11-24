@@ -1,3 +1,4 @@
+import {claimBatch,inspectBatch,type BatchInput} from './batchIdentity'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
 
@@ -48,12 +49,18 @@ export function ensureLegacyOpeningLayer(db: Database.Database, productId: strin
     WHERE product_id=? AND branch_id=?`).get(productId, branchId) as { quantity: number }
   const gap = qty(Number(stock?.available || 0) - Number(known.quantity || 0))
   if (gap <= 0) return
+  const openingId=randomUUID()
   db.prepare(`INSERT INTO product_batches
     (id,product_id,branch_id,batch_number,quantity,cost_price,original_quantity,
      historical_cost_known,status,notes,created_at,updated_at)
     VALUES (?,?,?,?,?,?,?,0,'available',?,datetime('now'),datetime('now'))`)
-    .run(randomUUID(), productId, branchId, `OPENING-${productId.slice(0, 8)}`, gap, 0, gap,
+    .run(openingId, productId, branchId, `OPENING-${productId.slice(0, 8)}`, gap, 0, gap,
       'Opening stock migrated without historical purchase cost or purchase date')
+  if((db.prepare('PRAGMA table_info(product_batches)').all() as {name:string}[]).some(column=>column.name==='batch_identity_id')){
+    const input={product_id:productId,batch_number:`OPENING-${productId.slice(0,8)}`};const existing=inspectBatch(db,input,openingId).existing
+    const identity=claimBatch(db,{...input,batch_resolution:existing?'add_existing':undefined,existing_batch_id:existing?.id,acknowledge_dates:true},openingId)
+    db.prepare('UPDATE product_batches SET batch_identity_id=?,batch_entry_mode=? WHERE id=?').run(identity.id,existing?'add_existing':'new',openingId)
+  }
 }
 
 export function allocateSaleBatches(db: Database.Database, input: {
@@ -194,28 +201,30 @@ export function createReceiptBatch(db: Database.Database, input: {
   expiryDate?: string | null
   purchaseDate: string
   createdBy?: string | null
+  mfgDate?:string|null;batchResolution?:BatchInput['batch_resolution'];existingBatchId?:string;acknowledgeDates?:boolean
 }): Record<string, unknown> {
+  return db.transaction(()=>{
   if (input.sellingPrice != null && (!Number.isFinite(input.sellingPrice) || input.sellingPrice < 0)) throw new Error('Selling price must be a valid non-negative amount')
   const received = qty(input.quantity)
   if (!Number.isFinite(received) || received <= 0) throw new Error('Received batch quantity must be greater than zero')
   if (!Number.isFinite(input.unitCost) || input.unitCost < 0) throw new Error('Batch unit cost cannot be negative')
+  const generated=input.batchNumber||`${input.purchaseId.slice(0,8)}-${input.purchaseItemId.slice(0,8)}-${randomUUID().slice(0,8)}`
+  const identity=claimBatch(db,{product_id:input.productId,batch_number:generated,expiry_date:input.expiryDate,mfg_date:input.mfgDate,batch_resolution:input.batchResolution,existing_batch_id:input.existingBatchId,acknowledge_dates:input.acknowledgeDates})
   const row = {
+    batch_identity_id:identity.id,mfg_date:identity.mfg||null,batch_entry_mode:input.batchResolution==='add_existing'?'add_existing':'new',batch_warning_ack:input.acknowledgeDates?1:0,
     id: randomUUID(), product_id: input.productId, branch_id: input.branchId,
-    batch_number: input.batchNumber || `${input.purchaseId.slice(0, 8)}-${input.purchaseItemId.slice(0, 8)}`,
+    batch_number: identity.no,
     expiry_date: input.expiryDate || null, quantity: received, cost_price: input.unitCost,
     selling_price: input.sellingPrice ?? null, po_id: input.purchaseId,
     purchase_item_id: input.purchaseItemId, purchase_date: input.purchaseDate,
     original_quantity: received, sold_quantity: 0, returned_quantity: 0, damaged_quantity: 0,
     historical_cost_known: 1, status: 'available', created_by: input.createdBy || null,
   }
-  db.prepare(`INSERT INTO product_batches
-    (id,product_id,branch_id,batch_number,expiry_date,quantity,cost_price,selling_price,po_id,
-     purchase_item_id,purchase_date,original_quantity,sold_quantity,returned_quantity,damaged_quantity,
-     historical_cost_known,status,created_by)
-    VALUES (@id,@product_id,@branch_id,@batch_number,@expiry_date,@quantity,@cost_price,@selling_price,@po_id,
-     @purchase_item_id,@purchase_date,@original_quantity,@sold_quantity,@returned_quantity,@damaged_quantity,
-     @historical_cost_known,@status,@created_by)`).run(row)
-  return row
+  const columns=new Set((db.prepare('PRAGMA table_info(product_batches)').all() as {name:string}[]).map(column=>column.name))
+  const saved=Object.fromEntries(Object.entries(row).filter(([key])=>columns.has(key)))
+  db.prepare(`INSERT INTO product_batches (${Object.keys(saved).join(',')}) VALUES (${Object.keys(saved).map(key=>'@'+key).join(',')})`).run(saved)
+  return saved
+  }).immediate()
 }
 
 export function getSellingLayers(db: Database.Database, productId: string, branchId: string) {

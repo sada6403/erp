@@ -347,6 +347,133 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
     await publishProductPrices(rows.map(row=>String(row.id)))
     return {success:true,data:{updated:rows.length}}
   })
+
+  // Analyze low stock and list supplier-specific products for quotation / order generation
+  safeHandleModule(ipcMain, 'purchases:supplierLowStock', 'purchase_orders', async (_e, supplierId: string, branchId?: string) => {
+    const db = getDb()
+    if (!supplierId) return { success: false, error: 'Supplier ID is required' }
+
+    const supplier = db.prepare(`
+      SELECT id, name, business_name, email, phone, mobile_number, address, city
+      FROM suppliers WHERE id = ?
+    `).get(supplierId) as Record<string, unknown> | undefined
+
+    if (!supplier) return { success: false, error: 'Supplier not found' }
+
+    const targetBranch = branchId || resolveMainBranchId(db)
+    const stockJoin = targetBranch
+      ? `LEFT JOIN (
+           SELECT product_id,
+                  CASE WHEN (SUM(COALESCE(quantity, 0)) - SUM(COALESCE(damaged_qty, 0))) > 0
+                       THEN (SUM(COALESCE(quantity, 0)) - SUM(COALESCE(damaged_qty, 0)))
+                       ELSE 0
+                  END as current_stock
+           FROM stocks
+           WHERE branch_id = ?
+           GROUP BY product_id
+         ) s ON s.product_id = p.id`
+      : `LEFT JOIN (
+           SELECT product_id,
+                  CASE WHEN (SUM(COALESCE(quantity, 0)) - SUM(COALESCE(damaged_qty, 0))) > 0
+                       THEN (SUM(COALESCE(quantity, 0)) - SUM(COALESCE(damaged_qty, 0)))
+                       ELSE 0
+                  END as current_stock
+           FROM stocks
+           GROUP BY product_id
+         ) s ON s.product_id = p.id`
+
+    const params: unknown[] = targetBranch ? [targetBranch, supplierId, supplierId] : [supplierId, supplierId]
+
+    const sql = `
+      SELECT
+        p.id,
+        p.name,
+        p.sku,
+        p.barcode,
+        p.unit,
+        p.cost_price,
+        p.selling_price,
+        p.min_stock_level,
+        p.supplier_id,
+        p.image_url,
+        c.name as category_name,
+        COALESCE(s.current_stock, 0) as current_stock,
+        COALESCE(s.current_stock, 0) as stock
+      FROM products p
+      LEFT JOIN categories c ON c.id = p.category_id
+      ${stockJoin}
+      WHERE p.is_active = 1
+        AND (
+          p.supplier_id = ?
+          OR p.id IN (
+            SELECT DISTINCT pi.product_id
+            FROM purchase_items pi
+            JOIN purchase_orders po ON po.id = pi.po_id
+            WHERE po.supplier_id = ?
+          )
+        )
+      GROUP BY p.id, p.name, p.sku, p.barcode, p.unit, p.cost_price, p.selling_price, p.min_stock_level, p.supplier_id, p.image_url, c.name
+      ORDER BY p.name ASC
+    `
+
+    const allSupplierProducts = db.prepare(sql).all(...params) as Record<string, unknown>[]
+
+    const lowStockItems: Record<string, unknown>[] = []
+    for (const prod of allSupplierProducts) {
+      const currentStock = Number(prod.current_stock || 0)
+      const minStock = Number(prod.min_stock_level ?? 5)
+      if (currentStock <= minStock) {
+        const isOut = currentStock <= 0
+        const targetStock = Math.max(minStock * 2, minStock + 10, 5)
+        const suggestedQty = isOut ? targetStock : Math.max(1, targetStock - currentStock)
+
+        lowStockItems.push({
+          product_id: String(prod.id),
+          product_name: String(prod.name),
+          sku: String(prod.sku || ''),
+          barcode: String(prod.barcode || ''),
+          unit: String(prod.unit || 'pcs'),
+          unit_cost: Number(prod.cost_price || 0),
+          selling_price: prod.selling_price != null ? String(prod.selling_price) : '',
+          current_stock: currentStock,
+          min_stock_level: minStock,
+          quantity: suggestedQty,
+          suggested_qty: suggestedQty,
+          is_out_of_stock: isOut,
+          is_auto_low_stock: true,
+        })
+      }
+    }
+
+    let unassignedProducts: Record<string, unknown>[] = []
+    if (allSupplierProducts.length === 0) {
+      const unassignedSql = `
+        SELECT p.id, p.name, p.sku, p.barcode, p.unit, p.cost_price, p.selling_price, p.min_stock_level, p.image_url,
+               COALESCE(s.current_stock, 0) as stock,
+               COALESCE(s.current_stock, 0) as current_stock
+        FROM products p
+        ${stockJoin}
+        WHERE p.is_active = 1 AND (p.supplier_id IS NULL OR p.supplier_id = '')
+        GROUP BY p.id, p.name, p.sku, p.barcode, p.unit, p.cost_price, p.selling_price, p.min_stock_level, p.image_url
+        ORDER BY p.name ASC
+      `
+      const unassignedParams: unknown[] = targetBranch ? [targetBranch] : []
+      unassignedProducts = db.prepare(unassignedSql).all(...unassignedParams) as Record<string, unknown>[]
+    }
+
+    return {
+      success: true,
+      data: {
+        supplier,
+        allSupplierProducts,
+        lowStockItems,
+        unassignedProducts,
+        totalSupplierProducts: allSupplierProducts.length,
+        lowStockCount: lowStockItems.length,
+      }
+    }
+  })
+
   // List POs with optional filters
   safeHandleModule(ipcMain, 'purchases:list', 'purchase_orders', (_e, filters: Record<string, unknown> = {}) => {
     const db = getDb()
@@ -419,7 +546,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             supplierId:String(payload.supplier_id||''),purchaseType:payload.purchase_type==='direct'?'direct':'order',
             purchaseDate:String(payload.purchase_date||new Date().toISOString().slice(0,10)),invoiceNumber:payload.supplier_invoice_number,
             expectedDate:payload.expected_date,notes:payload.notes,
-            items:(payload.items||[]).map((item:Record<string,unknown>)=>({product_id:String(item.product_id||''),quantity:Number(item.quantity),unit_cost:Number(item.unit_cost),selling_price:item.selling_price==null||item.selling_price===''?null:Number(item.selling_price)})),
+            items:(payload.items||[]).map((item:Record<string,unknown>)=>({product_id:String(item.product_id||''),quantity:Number(item.quantity),unit_cost:Number(item.unit_cost),selling_price:item.selling_price==null||item.selling_price===''?null:Number(item.selling_price),batch_number:item.batch_number?String(item.batch_number):null,expiry_date:item.expiry_date?String(item.expiry_date):null,mfg_date:item.mfg_date?String(item.mfg_date):null,batch_resolution:item.batch_resolution as 'add_existing'|'acknowledge',existing_batch_id:String(item.existing_batch_id||''),acknowledge_dates:item.acknowledge_dates===true})),
           },id=>persistStagedBills(db,id,billsToken,String(user.id)))
           logAudit(db,{userId:String(user.id),branchId:mainBranchId,action:row.status==='RECEIVED'?'DIRECT_STOCK_RECEIVED':'PO_CREATE',tableName:'purchase_orders',recordId:purchaseId,newValues:row})
           return row
@@ -611,6 +738,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
                   unitCost: Number(poItem.unit_cost || 0),
                   sellingPrice: item.selling_price !== undefined ? (item.selling_price === '' || item.selling_price == null ? null : Number(item.selling_price)) : poItem.selling_price == null ? null : Number(poItem.selling_price),
                   batchNumber: String(item.batch_number || poItem.batch_number || '').trim() || null,
+                  mfgDate:String(item.mfg_date||poItem.mfg_date||'')||null,batchResolution:item.batch_resolution as 'add_existing'|'acknowledge',existingBatchId:String(item.existing_batch_id||''),acknowledgeDates:item.acknowledge_dates===true,
                   expiryDate: String(item.expiry_date || poItem.expiry_date || '').trim() || null,
                   purchaseDate: String(item.purchase_date || po.purchase_date || now).slice(0, 10),
                   createdBy: (user?.id as string) || null,

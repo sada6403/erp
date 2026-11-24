@@ -2,6 +2,32 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // Expose typed IPC bridge to the renderer process
 const api = {
+  imports: {
+    status: (id?:string) => ipcRenderer.invoke('imports:status',id),
+    configure: (input:unknown) => ipcRenderer.invoke('imports:configure',input),
+    upload: (type:string) => ipcRenderer.invoke('imports:upload',type),
+    describe: (id:string,input?:unknown) => ipcRenderer.invoke('imports:describe',id,input),
+    mapping: (id:string,input:unknown) => ipcRenderer.invoke('imports:mapping',id,input),
+    validate: (id:string) => ipcRenderer.invoke('imports:validate',id),
+    commit: (id:string,reviewToken:string,billsToken?:string) => ipcRenderer.invoke('imports:commit',id,reviewToken,billsToken),
+    history: () => ipcRenderer.invoke('imports:history'),
+    rollback: (id:string) => ipcRenderer.invoke('imports:rollback',id),
+    cancel: (id:string) => ipcRenderer.invoke('imports:cancel',id),
+    selectBills: () => ipcRenderer.invoke('imports:selectBills'),
+    templates: (type:string) => ipcRenderer.invoke('imports:templates',type),
+    saveTemplate: (id:string,name:string) => ipcRenderer.invoke('imports:saveTemplate',id,name),
+    deleteTemplate: (id:string) => ipcRenderer.invoke('imports:deleteTemplate',id),
+    export: (input:unknown) => ipcRenderer.invoke('imports:export',input),
+  },
+  keywords: {
+    status: () => ipcRenderer.invoke('keywords:status'),
+    configure: (input: unknown) => ipcRenderer.invoke('keywords:configure', input),
+    snapshot: () => ipcRenderer.invoke('keywords:snapshot'),
+    list: (options?: unknown) => ipcRenderer.invoke('keywords:list', options),
+    save: (input: unknown) => ipcRenderer.invoke('keywords:save', input),
+    remove: (id: string) => ipcRenderer.invoke('keywords:remove', id),
+    review: (ids: string[], decision: string) => ipcRenderer.invoke('keywords:review', ids, decision),
+  },
   management: {
     connect: (payload: unknown) => ipcRenderer.invoke('management:connect', payload),
     read: (resource: string) => ipcRenderer.invoke('management:read', resource),
@@ -89,6 +115,8 @@ const api = {
   // POS cart "Hold" — pauses a cart-in-progress, separate from invoices
   // (see held_carts table comment in electron/database.ts)
   holds: {
+    hubStatus: () => ipcRenderer.invoke('holds:hubStatus'),
+    acknowledgeRecall: (token: string) => ipcRenderer.invoke('holds:acknowledgeRecall', token),
     create: (payload: unknown) => ipcRenderer.invoke('holds:create', payload),
     list:   ()                 => ipcRenderer.invoke('holds:list'),
     recall: (id: string)       => ipcRenderer.invoke('holds:recall', id),
@@ -502,6 +530,7 @@ const api = {
 
   // Purchase Orders
   purchases: {
+    supplierLowStock: (supplierId: string, branchId?: string) => ipcRenderer.invoke('purchases:supplierLowStock', supplierId, branchId),
     billHistory: (filters?: unknown) => ipcRenderer.invoke('purchases:billHistory',filters),
     refreshProductPrices: (id: string) => ipcRenderer.invoke('purchases:refreshProductPrices',id),
     chooseBills: () => ipcRenderer.invoke('purchases:chooseBills'),
@@ -588,6 +617,7 @@ const api = {
 
   // Batch / Serial / Expiry Tracking
   batches: {
+    inspect: (input:unknown) => ipcRenderer.invoke('batches:inspect',input),
     list:     (filters: unknown)             => ipcRenderer.invoke('batches:list', filters),
     get:      (id: string)                   => ipcRenderer.invoke('batches:get', id),
     create:   (payload: unknown)             => ipcRenderer.invoke('batches:create', payload),

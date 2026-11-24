@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       expected_version:
-        description: 'Expected desktop version in package.json (e.g. 2.9.6)'
+        description: 'Expected desktop version in package.json (e.g. 2.10.0)'
         required: true
-        default: '2.9.6'
+        default: '2.10.0'
         type: string
       expected_commit:
         description: 'Approved full 40-char commit SHA to build and publish'
@@ -85,6 +85,8 @@ jobs:
             exit 1
           fi
 
+          bash scripts/qa/test-publish-vps-release.sh
+
           echo "Verified commit SHA: $ACTUAL_COMMIT"
           echo "Verified target version: $pkg_version (live currently: $prev_version)"
           echo "version=$pkg_version" >> "$GITHUB_OUTPUT"
@@ -92,8 +94,27 @@ jobs:
           echo "short_sha=${ACTUAL_COMMIT:0:7}" >> "$GITHUB_OUTPUT"
           echo "prev_version=$prev_version" >> "$GITHUB_OUTPUT"
 
-  build-desktop:
+  preflight-publisher:
     needs: validate
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+      - name: Verify privileged publisher handles both update feeds
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n -l /usr/local/bin/pos-deploy >/dev/null
+          cmp scripts/publish-vps-release.sh /var/www/pos-backend/scripts/publish-vps-release.sh
+          for directory in /var/www/updates /var/www/html/updates; do
+            test -f "$directory/latest.yml"
+          done
+          echo "Verified installed privileged publisher and both feeds."
+
+  build-desktop:
+    needs: [validate, preflight-publisher]
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -125,7 +146,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run test:unit
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run test:integration
+          # App API integration files need a running seeded MySQL/API service;
+          # those have a separate test:integration-app command. Run every local
+          # desktop database/IPC test here, with no production network target.
+          $localTests = @(Get-ChildItem electron,src -Recurse -Filter '*.integration.test.ts' |
+            Where-Object { $_.FullName -notmatch '[\\/]integration-app[\\/]' } |
+            ForEach-Object { $_.FullName.Replace('\', '/') })
+          if ($localTests.Count -eq 0) { throw 'No local integration tests found' }
+          npm run test:integration -- @localTests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows NSIS installer
@@ -190,6 +218,7 @@ jobs:
           path: |
             release/Enterprise POS ERP Setup ${{ needs.validate.outputs.version }}.exe
             release/latest.yml
+            release/Enterprise POS ERP Setup ${{ needs.validate.outputs.version }}.exe.blockmap
           if-no-files-found: error
           retention-days: 30
 
@@ -210,6 +239,10 @@ jobs:
     runs-on: self-hosted
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.validate.outputs.commit_sha }}
+
       - name: Archive existing live rollback metadata before publication
         env:
           PREV_VERSION: ${{ needs.validate.outputs.prev_version }}
@@ -244,7 +277,7 @@ jobs:
           name: desktop-release-${{ needs.validate.outputs.version }}-${{ needs.validate.outputs.short_sha }}
           path: /tmp/pos-desktop-release
 
-      - name: Validate staged files and publish via desktop-only VPS entrypoint
+      - name: Validate staged files and publish both desktop update feeds
         env:
           RELEASE_DIR: /tmp/pos-desktop-release
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}

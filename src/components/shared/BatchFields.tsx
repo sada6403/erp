@@ -1,0 +1,3 @@
+export default function BatchFields({value,onChange}:{value:Record<string,any>;onChange:(key:string,value:string)=>void}){
+ return <div className="grid grid-cols-3 gap-2"><label className="text-xs">Batch Number<input aria-label="Batch Number" className="input w-full" value={value.batch_number||''} onChange={e=>onChange('batch_number',e.target.value)}/></label><label className="text-xs">Manufacture Date<input aria-label="Manufacture Date" type="date" className="input w-full" value={value.mfg_date||''} onChange={e=>onChange('mfg_date',e.target.value)}/></label><label className="text-xs">Expiry Date<input aria-label="Expiry Date" type="date" className="input w-full" value={value.expiry_date||''} onChange={e=>onChange('expiry_date',e.target.value)}/></label></div>
+}

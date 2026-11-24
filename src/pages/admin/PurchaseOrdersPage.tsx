@@ -1,7 +1,9 @@
+import BatchFields from '@/components/shared/BatchFields'
+import {useBatchGuard} from '@/hooks/useBatchGuard'
 import { useEffect, useState } from 'react'
 import {
   Plus, RefreshCw, Eye, Send, PackageCheck, XCircle, MessageSquare, Mail, Phone,
-  Upload, Download, CheckCircle, FileSpreadsheet
+  Upload, Download, CheckCircle, FileSpreadsheet, Printer, AlertTriangle
 } from 'lucide-react'
 import { useBusinessType } from '@/hooks/useBusinessType'
 import PageHeader from '@/components/shared/PageHeader'
@@ -12,6 +14,7 @@ import { useProductsStore } from '@/store/productsStore'
 import PurchaseBillPicker from '@/components/shared/PurchaseBillPicker'
 import NumberInput from '@/components/shared/NumberInput'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
+import { printPurchaseQuotation, type PurchaseQuotationItem } from '@/lib/purchaseQuotationPrint'
 import toast from 'react-hot-toast'
 import { colomboToday } from '../../lib/datetime'
 
@@ -171,6 +174,55 @@ export default function PurchaseOrdersPage() {
     }
   }
 
+  const quickPrintPO = async (po: PO) => {
+    try {
+      const res = await window.api.purchases.get(String(po.id))
+      if (!res?.success || !res?.data) {
+        toast.error('Could not load PO details for quotation')
+        return
+      }
+      const fullPO = res.data as Record<string, unknown> & { items?: Record<string, unknown>[] }
+      const settingsRes = await window.api?.settings?.get?.().catch(() => null)
+      const settings = settingsRes?.success ? (settingsRes.data as Record<string, unknown>) : {}
+
+      const items = (fullPO.items || []) as Record<string, unknown>[]
+      const printItems: PurchaseQuotationItem[] = items.map(item => ({
+        product_name: String(item.product_name || 'Product'),
+        sku: String(item.sku || ''),
+        barcode: String(item.barcode || ''),
+        unit: String(item.unit || 'pcs'),
+        quantity: Number(item.quantity || 0),
+        unit_cost: Number(item.unit_cost || 0),
+        line_total: Number(item.line_total || (Number(item.quantity || 0) * Number(item.unit_cost || 0))),
+      }))
+
+      printPurchaseQuotation({
+        document_title: fullPO.purchase_type === 'direct' ? 'STOCK RECEIPT & INVOICE SHEET' : 'SUPPLIER PURCHASE QUOTATION / PO',
+        document_number: String(fullPO.po_number || 'PO'),
+        date: String(fullPO.purchase_date || String(fullPO.created_at || '').slice(0, 10)),
+        expected_date: fullPO.expected_date ? String(fullPO.expected_date) : undefined,
+        company_name: String(settings.company_name || 'Nature Plantation'),
+        company_address: String(settings.company_address || ''),
+        company_phone: String(settings.company_phone || ''),
+        company_email: String(settings.company_email || ''),
+        supplier: {
+          name: String(fullPO.supplier_name || 'Supplier'),
+          business_name: fullPO.business_name ? String(fullPO.business_name) : undefined,
+          phone: fullPO.phone ? String(fullPO.phone) : undefined,
+          mobile_number: fullPO.mobile_number ? String(fullPO.mobile_number) : undefined,
+          email: fullPO.email ? String(fullPO.email) : undefined,
+          address: fullPO.address ? String(fullPO.address) : undefined,
+          city: fullPO.city ? String(fullPO.city) : undefined,
+        },
+        items: printItems,
+        total_amount: Number(fullPO.total_amount || 0),
+        notes: fullPO.notes ? String(fullPO.notes) : undefined,
+      })
+    } catch (err) {
+      toast.error('Failed to print quotation: ' + String(err))
+    }
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <PageHeader
@@ -252,6 +304,11 @@ export default function PurchaseOrdersPage() {
                     <button className="btn-ghost btn-sm gap-1"
                       onClick={() => { loadDetail(String(po.id)) }}>
                       <Eye size={12} /> View
+                    </button>
+                    <button className="btn-ghost btn-sm text-sky-400 hover:text-sky-300 gap-1"
+                      title="Print Quotation / PO Sheet"
+                      onClick={() => quickPrintPO(po)}>
+                      <Printer size={12} /> Quotation
                     </button>
                     <button
                       className="btn-ghost btn-sm text-emerald-400 hover:text-emerald-300 gap-1"
@@ -475,6 +532,49 @@ function PODetailModal({ po, onClose, onReceive, onSend, onCancel, onNotify }:
     if (!res.success) return toast.error(res.error || 'Could not remove attachment')
     setDetail(d => ({ ...d, attachments: ((d.attachments as PO[]) || []).filter(a => String(a.id) !== id) })); toast.success('Attachment correction recorded')
   }
+
+  const printPOQuotation = async () => {
+    try {
+      const settingsRes = await window.api?.settings?.get?.().catch(() => null)
+      const settings = settingsRes?.success ? (settingsRes.data as Record<string, unknown>) : {}
+
+      const items = (detail.items || []) as Record<string, unknown>[]
+      const printItems: PurchaseQuotationItem[] = items.map(item => ({
+        product_name: String(item.product_name || 'Product'),
+        sku: String(item.sku || ''),
+        barcode: String(item.barcode || ''),
+        unit: String(item.unit || 'pcs'),
+        quantity: Number(item.quantity || 0),
+        unit_cost: Number(item.unit_cost || 0),
+        line_total: Number(item.line_total || (Number(item.quantity || 0) * Number(item.unit_cost || 0))),
+      }))
+
+      printPurchaseQuotation({
+        document_title: detail.purchase_type === 'direct' ? 'STOCK RECEIPT & INVOICE SHEET' : 'SUPPLIER PURCHASE QUOTATION / PO',
+        document_number: String(detail.po_number || 'PO'),
+        date: String(detail.purchase_date || String(detail.created_at || '').slice(0, 10)),
+        expected_date: detail.expected_date ? String(detail.expected_date) : undefined,
+        company_name: String(settings.company_name || 'Nature Plantation'),
+        company_address: String(settings.company_address || ''),
+        company_phone: String(settings.company_phone || ''),
+        company_email: String(settings.company_email || ''),
+        supplier: {
+          name: String(detail.supplier_name || 'Supplier'),
+          business_name: detail.business_name ? String(detail.business_name) : undefined,
+          phone: detail.phone ? String(detail.phone) : undefined,
+          mobile_number: detail.mobile_number ? String(detail.mobile_number) : undefined,
+          email: detail.email ? String(detail.email) : undefined,
+          address: detail.address ? String(detail.address) : undefined,
+          city: detail.city ? String(detail.city) : undefined,
+        },
+        items: printItems,
+        total_amount: Number(detail.total_amount || 0),
+        notes: detail.notes ? String(detail.notes) : undefined,
+      })
+    } catch (err) {
+      toast.error('Failed to print quotation: ' + String(err))
+    }
+  }
   return (
     <Modal title={`PO — ${po.po_number}`} onClose={onClose}>
       <div className="space-y-4">
@@ -547,6 +647,9 @@ function PODetailModal({ po, onClose, onReceive, onSend, onCancel, onNotify }:
 
         <div className="flex justify-between pt-2">
           <div className="flex gap-2">
+            <button className="btn-secondary btn-sm gap-1 text-sky-400 hover:text-sky-300" onClick={printPOQuotation}>
+              <Printer size={12}/> Print Quotation Sheet
+            </button>
             {po.status === 'DRAFT' && <button className="btn-secondary btn-sm gap-1" onClick={onSend}><Send size={12}/>Send to Supplier</button>}
             {(po.status === 'SENT' || po.status === 'PARTIAL') && <button className="btn-primary btn-sm gap-1" onClick={onReceive}><PackageCheck size={12}/>Receive Items</button>}
             {(po.status === 'DRAFT' || po.status === 'SENT') && <button className="btn-ghost btn-sm text-red-400" onClick={onCancel}><XCircle size={12}/>Cancel PO</button>}
@@ -566,6 +669,8 @@ function itemPackUom(item: POItem): PackUom | null {
 
 function ReceivePOModal({ po, onClose, onDone }:
   { po: PO & { items?: POItem[] }; onClose: () => void; onDone: (items: Record<string, unknown>[], token?: string) => Promise<boolean> }) {
+  const batchGuard=useBatchGuard()
+  const [batchValues,setBatchValues]=useState<Record<string,Record<string,string>>>({})
   const { isSupermarket: supermarket } = useBusinessType()
   const [attachmentToken,setAttachmentToken] = useState('')
   const [saving,setSaving] = useState(false)
@@ -585,6 +690,7 @@ function ReceivePOModal({ po, onClose, onDone }:
     if(supermarket && !attachmentToken && !((po.attachments as PO[]|undefined)?.length)) {toast.error('Upload a supplier bill before receiving stock.');return}
     if (!purchaseDate) { toast.error('Purchase date is required'); return }
     const items = (po.items || []).map((item: POItem) => ({
+      ...item,...batchValues[String(item.id)],
       id: item.id,
       received_qty: qtys[String(item.id)] || 0,
       purchase_date: purchaseDate,
@@ -593,11 +699,13 @@ function ReceivePOModal({ po, onClose, onDone }:
       already_received: item.received_qty || 0,
     }))
     setSaving(true)
-    try { await onDone(items,attachmentToken) } finally { setSaving(false) }
+    try {const prepared=await batchGuard.confirm(items.filter(item=>Number(item.received_qty)>0));if(prepared)await onDone(prepared,attachmentToken) } finally { setSaving(false) }
   }
 
   return (
     <Modal title={`Receive Items — ${po.po_number}`} onClose={onClose}>
+      {batchGuard.dialog}
+      <div className="space-y-2">{(po.items||[]).map(item=><div key={String(item.id)}><p className="text-sm">{String(item.product_name||'Product')}</p><BatchFields value={{...item,...batchValues[String(item.id)]}} onChange={(key,value)=>setBatchValues(old=>({...old,[String(item.id)]:{...old[String(item.id)],[key]:value}}))}/></div>)}</div>
       <div className="space-y-4">
         <label hidden={!supermarket} className="label">Purchase date<input type="date" className="input" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} /></label>
         <p hidden={!supermarket} className="text-xs text-slate-400">Leave selling price blank to use the product's common price. Enter a price to apply it to this purchase batch.</p>
@@ -674,16 +782,46 @@ function ReceivePOModal({ po, onClose, onDone }:
 }
 
 function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void; onDone: () => void; mode?: 'order'|'direct' }) {
+  const batchGuard=useBatchGuard()
   const { isSupermarket: supermarket }=useBusinessType()
   const direct=mode==='direct'
   const [entryId]=useState(()=>crypto.randomUUID())
   const [attachmentToken,setAttachmentToken]=useState('')
   const [suppliers, setSuppliers] = useState<Record<string, unknown>[]>([])
   const [products, setProducts]   = useState<Record<string, unknown>[]>([])
+  const [supplierProducts, setSupplierProducts] = useState<Record<string, unknown>[]>([])
+  const [onlySupplierProducts, setOnlySupplierProducts] = useState(true)
+  const [analyzingStock, setAnalyzingStock] = useState(false)
+  const [lowStockCount, setLowStockCount] = useState(0)
   const [sendWhatsApp, setSendWhatsApp] = useState(false)
   const [sendEmail, setSendEmail]       = useState(false)
-  const [form, setForm] = useState({
-    supplier_id: '', expected_date: '', notes: '', purchase_date: colomboToday(), supplier_invoice_number: '',
+  const [form, setForm] = useState<{
+    supplier_id: string
+    expected_date: string
+    notes: string
+    purchase_date: string
+    supplier_invoice_number: string
+    items: Array<{
+      product_id: string
+      quantity: number
+      unit_cost: number
+      selling_price: string
+      batch_number?:string;mfg_date?:string;expiry_date?:string
+      current_stock?: number
+      min_stock_level?: number
+      is_low_stock?: boolean
+      is_out_of_stock?: boolean
+      product_name?: string
+      sku?: string
+      barcode?: string
+      unit?: string
+    }>
+  }>({
+    supplier_id: '',
+    expected_date: '',
+    notes: '',
+    purchase_date: colomboToday(),
+    supplier_invoice_number: '',
     items: [{ product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }]
   })
   const [saving, setSaving] = useState(false)
@@ -701,24 +839,175 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
     }).catch((err: unknown) => toast.error('Failed to load products: ' + String(err)))
   }, [])
 
+  const analyzeSupplierLowStock = async (supplierId: string) => {
+    if (!supplierId) return
+    setAnalyzingStock(true)
+    try {
+      const res = await window.api.purchases.supplierLowStock(supplierId)
+      if (res?.success && res.data) {
+        const suppProds = (res.data.allSupplierProducts as Record<string, unknown>[]) || []
+        const lowStock = (res.data.lowStockItems as Record<string, unknown>[]) || []
+        setSupplierProducts(suppProds)
+        setLowStockCount(lowStock.length)
+
+        if (suppProds.length > 0) {
+          setOnlySupplierProducts(true)
+        } else {
+          setOnlySupplierProducts(false)
+        }
+
+        if (lowStock.length > 0) {
+          setForm(f => ({
+            ...f,
+            supplier_id: supplierId,
+            items: lowStock.map(item => ({
+              product_id: String(item.product_id),
+              product_name: String(item.product_name || ''),
+              sku: String(item.sku || ''),
+              barcode: String(item.barcode || ''),
+              unit: String(item.unit || 'pcs'),
+              quantity: Number(item.suggested_qty || item.quantity || 1),
+              unit_cost: Number(item.unit_cost || 0),
+              selling_price: item.selling_price != null ? String(item.selling_price) : '',
+              current_stock: Number(item.current_stock ?? 0),
+              min_stock_level: Number(item.min_stock_level ?? 5),
+              is_low_stock: true,
+              is_out_of_stock: Boolean(item.is_out_of_stock),
+            }))
+          }))
+          toast.success(`⚡ Auto-analyzed: ${lowStock.length} low-stock items loaded into quotation!`, { duration: 4000 })
+        } else {
+          if (form.items.every(i => !i.product_id)) {
+            setForm(f => ({
+              ...f,
+              supplier_id: supplierId,
+              items: [{ product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }]
+            }))
+          }
+          if (suppProds.length > 0) {
+            toast(`Supplier selected. ${suppProds.length} products found. All stock levels are currently healthy.`, { icon: 'ℹ️' })
+          } else {
+            toast(`Supplier selected. No existing products mapped to this supplier yet. You can select products from catalog.`, { icon: 'ℹ️' })
+          }
+        }
+      } else {
+        toast.error(res?.error || 'Failed to analyze supplier stock')
+      }
+    } catch (err) {
+      console.error('Failed to analyze supplier stock:', err)
+      toast.error('Failed to analyze supplier stock: ' + String(err))
+    } finally {
+      setAnalyzingStock(false)
+    }
+  }
+
+  const handleSupplierSelect = (id: string) => {
+    setForm(f => ({ ...f, supplier_id: id }))
+    if (id) {
+      analyzeSupplierLowStock(id)
+    } else {
+      setSupplierProducts([])
+      setLowStockCount(0)
+    }
+  }
+
+  const activeProducts = (onlySupplierProducts && supplierProducts.length > 0)
+    ? supplierProducts
+    : products
+
   const setItem = (index: number, key: string, value: unknown) => {
     setForm(f => ({
       ...f,
       items: f.items.map((item, i) => {
         if (i !== index) return item
         if (key === 'product_id') {
-          const prod = products.find(p => p.id === value) as Record<string, unknown> | undefined
-          return { ...item, product_id: String(value), unit_cost: Number(prod?.cost_price || 0) }
+          const prod = activeProducts.find(p => String(p.id) === String(value))
+            || products.find(p => String(p.id) === String(value))
+          const curStock = prod ? Number(prod.current_stock ?? prod.stock ?? 0) : undefined
+          const minStock = prod ? Number(prod.min_stock_level ?? 5) : undefined
+          return {
+            ...item,
+            product_id: String(value),
+            product_name: String(prod?.name || ''),
+            sku: String(prod?.sku || ''),
+            barcode: String(prod?.barcode || ''),
+            unit: String(prod?.unit || 'pcs'),
+            unit_cost: Number(prod?.cost_price || 0),
+            selling_price: prod?.selling_price != null ? String(prod.selling_price) : '',
+            current_stock: curStock,
+            min_stock_level: minStock,
+            is_low_stock: curStock !== undefined && minStock !== undefined && curStock <= minStock,
+            is_out_of_stock: curStock !== undefined && curStock <= 0,
+          }
         }
         return { ...item, [key]: value }
       })
     }))
   }
 
-  const addItem = () => setForm(f => ({ ...f, items: [...f.items, { product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }] }))
+  const addItem = () => setForm(f => ({
+    ...f,
+    items: [...f.items, { product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }]
+  }))
+
+  const clearItems = () => setForm(f => ({
+    ...f,
+    items: [{ product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }]
+  }))
+
   const removeItem = (i: number) => setForm(f => ({ ...f, items: f.items.filter((_, n) => n !== i) }))
 
   const totalAmount = form.items.reduce((s, i) => s + i.quantity * i.unit_cost, 0)
+
+  const handlePrintQuotationSheet = async () => {
+    if (!selectedSupplier) { toast.error('Select a supplier first'); return }
+    const validItems = form.items.filter(i => i.product_id)
+    if (validItems.length === 0) { toast.error('Add at least one product to quotation'); return }
+
+    const settingsRes = await window.api?.settings?.get?.().catch(() => null)
+    const settings = settingsRes?.success ? (settingsRes.data as Record<string, unknown>) : {}
+
+    const printItems: PurchaseQuotationItem[] = validItems.map(item => {
+      const prod = activeProducts.find(p => String(p.id) === String(item.product_id))
+        || products.find(p => String(p.id) === String(item.product_id))
+      return {
+        product_name: item.product_name || String(prod?.name || 'Product'),
+        sku: item.sku || String(prod?.sku || ''),
+        barcode: item.barcode || String(prod?.barcode || ''),
+        unit: item.unit || String(prod?.unit || 'pcs'),
+        quantity: Number(item.quantity),
+        unit_cost: Number(item.unit_cost),
+        line_total: Number(item.quantity) * Number(item.unit_cost),
+        current_stock: item.current_stock,
+        min_stock_level: item.min_stock_level,
+        is_low_stock: item.is_low_stock,
+        is_out_of_stock: item.is_out_of_stock,
+      }
+    })
+
+    printPurchaseQuotation({
+      document_title: direct ? 'DIRECT STOCK RECEIPT ESTIMATE' : 'SUPPLIER PURCHASE QUOTATION / REORDER SHEET',
+      document_number: `QUO-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${String(Math.floor(Math.random() * 900) + 100)}`,
+      date: form.purchase_date || new Date().toISOString().slice(0, 10),
+      expected_date: form.expected_date || undefined,
+      company_name: String(settings.company_name || 'Nature Plantation'),
+      company_address: String(settings.company_address || ''),
+      company_phone: String(settings.company_phone || ''),
+      company_email: String(settings.company_email || ''),
+      supplier: {
+        name: String(selectedSupplier.name || ''),
+        business_name: selectedSupplier.business_name ? String(selectedSupplier.business_name) : undefined,
+        phone: selectedSupplier.phone ? String(selectedSupplier.phone) : undefined,
+        mobile_number: selectedSupplier.mobile_number ? String(selectedSupplier.mobile_number) : undefined,
+        email: selectedSupplier.email ? String(selectedSupplier.email) : undefined,
+        address: selectedSupplier.address ? String(selectedSupplier.address) : undefined,
+        city: selectedSupplier.city ? String(selectedSupplier.city) : undefined,
+      },
+      items: printItems,
+      total_amount: totalAmount,
+      notes: form.notes || undefined,
+    })
+  }
 
   const save = async () => {
     if (!form.supplier_id) { toast.error('Select a supplier'); return }
@@ -727,8 +1016,9 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
     if(direct) { const missing=form.items.find(item=>item.selling_price==='' && !(Number(products.find(p=>p.id===item.product_id)?.selling_price)>0)); if(missing) { toast.error('Enter a Selling Price: this product has no common selling price yet.'); return } }
     setSaving(true)
     try {
+      const prepared=await batchGuard.confirm(form.items);if(!prepared)return
       const res = await window.api.purchases.create({
-        ...form,
+        ...form,items:prepared,
         purchase_type: mode, entry_id: entryId, attachment_token: attachmentToken,
         open_whatsapp: !direct && sendWhatsApp,
         send_email: !direct && sendEmail,
@@ -751,7 +1041,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
   }
 
   return (
-    <Modal title={direct ? "Add Received Stock Directly" : "New Purchase Order"} onClose={()=>{if(!saving)onClose()}} size="lg">
+    <Modal title={direct ? "Add Received Stock Directly" : "New Purchase Order / Quotation"} onClose={()=>{if(!saving)onClose()}} size="lg">{batchGuard.dialog}
       <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
         <div className="grid grid-cols-2 gap-3">
           <div>
@@ -759,7 +1049,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
             <CreatableSearchSelect
               items={suppliers.map(s => ({ id: String(s.id), label: String(s.name) }))}
               value={form.supplier_id}
-              onChange={id => setForm(f => ({ ...f, supplier_id: id }))}
+              onChange={handleSupplierSelect}
               placeholder="Select supplier..."
               createLabel="Add supplier"
               onCreate={async (name) => {
@@ -811,9 +1101,50 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
         </div>
 
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-semibold">Items</p>
-            <button className="btn-ghost btn-sm gap-1" onClick={addItem}><Plus size={12}/>Add Item</button>
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-semibold">Items ({form.items.length})</p>
+              {lowStockCount > 0 && (
+                <span className="bg-red-500/20 text-red-300 border border-red-500/30 text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center gap-1">
+                  ⚡ {lowStockCount} Low stock auto-analyzed
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {selectedSupplier && (
+                <>
+                  <label className="flex items-center gap-1.5 text-xs text-slate-300 hover:text-white cursor-pointer select-none bg-surface-900/60 px-2.5 py-1 rounded border border-slate-700/60" title="Only display products dealing with this supplier">
+                    <input
+                      type="checkbox"
+                      checked={onlySupplierProducts}
+                      disabled={supplierProducts.length === 0}
+                      onChange={e => setOnlySupplierProducts(e.target.checked)}
+                      className="rounded text-brand-500 focus:ring-brand-400 bg-surface-900 border-slate-700"
+                    />
+                    <span>Only supplier's products ({supplierProducts.length})</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="btn-ghost btn-sm text-xs text-sky-400 hover:text-sky-300 gap-1 px-2 py-1"
+                    onClick={() => analyzeSupplierLowStock(form.supplier_id)}
+                    disabled={analyzingStock}
+                    title="Re-analyze low stock for this supplier"
+                  >
+                    <RefreshCw size={11} className={analyzingStock ? 'animate-spin' : ''} />
+                    Re-analyze
+                  </button>
+                </>
+              )}
+              {form.items.length > 1 && (
+                <button type="button" className="btn-ghost btn-sm text-xs text-slate-400 hover:text-red-300" onClick={clearItems}>
+                  Clear all
+                </button>
+              )}
+              <button type="button" className="btn-ghost btn-sm gap-1" onClick={addItem}>
+                <Plus size={12}/>Add Item
+              </button>
+            </div>
           </div>
 
           {/* Column headers */}
@@ -827,11 +1158,25 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
             {form.items.map((item, idx) => (
               <div key={idx} className="grid gap-2 items-center rounded-lg px-1 py-1.5"
                 style={{ gridTemplateColumns: supermarket ? 'minmax(170px,1fr) 65px 90px 95px 80px 20px' : '1fr 72px 110px 80px 20px', background: 'var(--bg-soft)', minWidth: 0 }}>
-                <ProductSearchSelect
-                  products={products}
-                  value={item.product_id}
-                  onChange={id => setItem(idx, 'product_id', id)}
-                />
+                <div className="col-span-full"><BatchFields value={item} onChange={(key,value)=>setItem(idx,key,value)}/></div>
+                <div className="min-w-0">
+                  <ProductSearchSelect
+                    products={activeProducts}
+                    value={item.product_id}
+                    onChange={id => setItem(idx, 'product_id', id)}
+                  />
+                  {item.current_stock !== undefined && (
+                    <div className="text-[10px] flex items-center gap-1.5 mt-0.5 px-0.5">
+                      {item.is_out_of_stock ? (
+                        <span className="text-red-400 font-bold">🚨 Out of stock (0)</span>
+                      ) : item.is_low_stock ? (
+                        <span className="text-amber-400 font-semibold">⚠️ Low: {item.current_stock} / Min: {item.min_stock_level ?? 5}</span>
+                      ) : (
+                        <span className="text-emerald-400">Stock: {item.current_stock}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <NumberInput
                   min={0.000001}
                   step="any"
@@ -893,11 +1238,26 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
           </div>
         </div>
 
-        <div className="flex justify-end gap-3 pt-2 border-t border-slate-700">
-          <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn-primary gap-1" onClick={save} disabled={saving || (supermarket && direct && !attachmentToken)}>
-            {saving ? 'Saving...' : direct ? 'Save & Receive Stock' : 'Create Purchase Order'}
-          </button>
+        <div className="flex justify-between items-center gap-3 pt-2 border-t border-slate-700">
+          <div>
+            {!direct && (
+              <button
+                type="button"
+                className="btn-secondary btn-sm gap-1.5 text-sky-400 hover:text-sky-300"
+                onClick={handlePrintQuotationSheet}
+                disabled={!form.supplier_id || form.items.every(i => !i.product_id)}
+                title="Print / Save Supplier Quotation sheet"
+              >
+                <Printer size={13} /> Print Quotation Sheet
+              </button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <button className="btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn-primary gap-1" onClick={save} disabled={saving || (supermarket && direct && !attachmentToken)}>
+              {saving ? 'Saving...' : direct ? 'Save & Receive Stock' : 'Create Purchase Order'}
+            </button>
+          </div>
         </div>
       </div>
     </Modal>

@@ -1,0 +1,30 @@
+-- Optional tenant migration. Take and verify a tenant backup BEFORE running.
+-- No private user/terminal keywords are accepted by the cloud sync receiver.
+CREATE TABLE IF NOT EXISTS product_search_keywords (
+ id CHAR(36) NOT NULL PRIMARY KEY,
+ product_id CHAR(36) NOT NULL,
+ keyword VARCHAR(255) NOT NULL,
+ keyword_normalized VARCHAR(255) NOT NULL,
+ keyword_type VARCHAR(20) NOT NULL,
+ script VARCHAR(16) NOT NULL,
+ source VARCHAR(20) NOT NULL,
+ scope_type VARCHAR(16) NOT NULL,
+ scope_key VARCHAR(191) NOT NULL,
+ branch_id CHAR(36) NULL,
+ terminal_id CHAR(36) NULL,
+ user_id CHAR(36) NULL,
+ parent_id CHAR(36) NULL,
+ review_status VARCHAR(16) NOT NULL DEFAULT 'approved',
+ created_by CHAR(36) NOT NULL,
+ created_at DATETIME(3) NOT NULL,
+ updated_at DATETIME(3) NOT NULL,
+ version INT NOT NULL DEFAULT 1,
+ is_active BOOLEAN NOT NULL DEFAULT 1,
+ UNIQUE KEY uq_keyword_identity(product_id,keyword_normalized,scope_key),
+ INDEX idx_keywords_normalized(keyword_normalized),
+ INDEX idx_keywords_product(product_id),
+ INDEX idx_keywords_scope(scope_type,scope_key,is_active,review_status),
+ INDEX idx_keywords_updated(updated_at,id),
+ CHECK(scope_type IN ('global','branch')),
+ CHECK(terminal_id IS NULL AND user_id IS NULL)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;

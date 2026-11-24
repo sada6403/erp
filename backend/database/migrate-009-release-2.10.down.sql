@@ -1,0 +1,3 @@
+-- Non-destructive rollback: retain generated User IDs, hashes and batch links.
+-- Runner removes only added login/email unique indexes after a backup.
+-- Never drop receipt cost layers or replace quantities to undo this release.

@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.10.0 - 2026-11-24
+
+- Keep email and add unique, case-insensitive User IDs with backup-first legacy ID generation. Login accepts either identifier; cashier passwords, admin identity editing and identifier-only remembering are supported.
+- Default-hidden password fields have visibility controls. Added expiring, single-use email reset links using hashed tokens, with admin reset remaining available.
+- Added manufacture/expiry/batch validation to product opening stock, batch entry, purchase receipt and bulk import. Duplicate batches require explicit Add quantity confirmation; mismatched dates and expired stock require acknowledgement.
+- Unique physical batch identities preserve all historic receipt quantities and purchase cost layers. Batch display aggregates quantities by physical batch and branch.
+- Added SQLite/MySQL staging migration and compatibility rollback runners. See docs/releases/2.10.0.md for deployment order and validation limits.
+
 ## 2.9.6 - 2026-11-23 - Mobile app orders, Smart Buy app features & sync fixes
 
 - App orders: convert a mobile-app order to a POS invoice with locked prices, delivery fee and extracted tax; the order's stock reservation is released at conversion (no double count); Cash on Delivery settles the invoice paid amount.

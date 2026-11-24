@@ -1,6 +1,6 @@
 {
   "name": "pos-erp",
-  "version": "2.9.6",
+  "version": "2.10.0",
   "description": "Enterprise Multi Branch Offline-First POS ERP for Furniture & Electronics",
   "main": "dist-electron/main.js",
   "author": "Enterprise POS ERP",
@@ -24,7 +24,11 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e:debug": "playwright test --debug",
+    "hub:build": "tsc -p tsconfig.electron.json",
+    "hub:start": "npm run hub:build && cross-env ELECTRON_RUN_AS_NODE=1 electron ./dist-electron/branchHub/cli.js",
+    "test:hub": "npm run test:integration -- electron/branchHub/branchHub.integration.test.ts",
+    "names:scan": "tsc -p tsconfig.electron.json && cross-env ELECTRON_RUN_AS_NODE=1 electron ./scripts/scan-product-names.cjs"
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.4",
@@ -37,6 +41,7 @@
     "@types/node": "^20.11.19",
     "@types/react": "^18.2.56",
     "@types/react-dom": "^18.2.19",
+    "@types/ws": "^8.18.2",
     "@vitejs/plugin-react": "^4.2.1",
     "@vitest/coverage-v8": "^2.1.9",
     "autoprefixer": "^10.4.17",
@@ -63,6 +68,7 @@
     "electron-store": "^8.1.0",
     "electron-updater": "^6.8.9",
     "immer": "^10.0.3",
+    "jschardet": "^3.1.4",
     "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.344.0",
     "nanoid": "^5.0.6",
@@ -73,6 +79,7 @@
     "react-hot-toast": "^2.4.1",
     "react-router-dom": "^6.22.1",
     "recharts": "^2.12.0",
+    "ws": "^8.23.0",
     "xlsx": "^0.18.5",
     "zustand": "^4.5.1"
   },

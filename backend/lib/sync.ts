@@ -1,7 +1,12 @@
 import { randomUUID, createHash } from 'crypto'
 import type { QueryClient } from './db'
+import { applyKeywordSync } from './keywordSync'
+import {prepareUserIdentity} from './loginIdentity'
+import {validateSyncedBatch} from './batchValidation'
 
 export const ALLOWED_TABLES = new Set([
+  'product_batch_identities',
+  'product_search_keywords',
   'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers', 'supplier_payments',
   'products', 'stocks', 'stock_movements', 'stock_transfers', 'customers',
   'purchase_orders', 'purchase_items',
@@ -66,7 +71,7 @@ export const ALLOWED_TABLES = new Set([
 ])
 
 const RELATED_KEYS: Record<string, Set<string>> = {
-  users:                  new Set(['email']),
+  users:                  new Set(['email','login_id']),
   invoice_items:          new Set(['invoice_id']),
   payments:               new Set(['invoice_id']),
   installment_payments:   new Set(['installment_id']),
@@ -241,6 +246,11 @@ export async function applySyncOperation(
 ): Promise<void> {
   let lock: string | undefined
   try {
+    if(input.table==='product_search_keywords') {
+      lock='keyword:'+createHash('sha256').update(String(input.record.keyword_normalized)).digest('hex').slice(0,55)
+      const {rows}=await client.query<{acquired:number}>('SELECT GET_LOCK(?, 10) AS acquired',[lock])
+      if(Number(rows[0]?.acquired)!==1)throw new Error('Keyword busy; retry shortly')
+    }
     if (input.table === 'stocks' && input.operation !== 'DELETE') {
       const { product_id, branch_id, warehouse_id } = input.record
       if (!product_id || !branch_id) throw new Error('Stock identity is required')
@@ -263,6 +273,10 @@ export async function applySyncOperation(
       }
     }
     await applyOperation(client, input)
+    if(input.table==='products' && (input.record.is_active===0||input.record.is_active===false)) {
+      try { await client.query('UPDATE product_search_keywords SET is_active=0,version=version+1,updated_at=CURRENT_TIMESTAMP(3) WHERE product_id=? AND is_active=1',[input.recordId]) }
+      catch(error) { if((error as {code?:string}).code!=='ER_NO_SUCH_TABLE')throw error }
+    }
     if (input.eventId) {
       await client.query(
         'INSERT INTO sync_push_receipts(event_id,table_name,record_id) VALUES (?,?,?)',
@@ -288,6 +302,7 @@ async function applyOperation(
   }
 ): Promise<void> {
   assertTable(input.table)
+  if(input.table==='product_search_keywords') { await applyKeywordSync(client,input);return }
   const columns = await getColumns(client, input.table)
   let operation = input.operation
   const record = Object.fromEntries(
@@ -296,6 +311,7 @@ async function applyOperation(
       .map(([key, value]) => [key, normalizeValue(value)])
   )
 
+  if(input.table==='product_batches'&&columns.has('batch_identity_id')&&input.operation!=='DELETE')await validateSyncedBatch(client,record,String(record.id||input.recordId))
   // Older desktop builds render numeric fields through a text-backed input,
   // so the HTML max=100 attribute does not stop an out-of-range product tax
   // from reaching the durable outbox. For an UPDATE, preserve the last valid
@@ -341,6 +357,7 @@ async function applyOperation(
   }
 
   if (input.table === 'users') {
+    if(columns.has('login_id'))await prepareUserIdentity(client,record,String(record.id||input.recordId))
     // Never blank stored credentials: a partial UPDATE (e.g. a PIN or name change)
     // must not overwrite password_hash/pin_hash with an empty value.
     if (!record.password_hash) {

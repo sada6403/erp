@@ -1,3 +1,5 @@
+import {readRememberedLogin,rememberLogin} from '../../../../src/lib/rememberLogin'
+import PasswordInput from '../../../../src/components/shared/PasswordInput'
 import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'
@@ -7,7 +9,8 @@ import { ShieldCheck, ArrowLeft, KeyRound, Mail, CheckCircle2, Monitor, Lock } f
 
 export default function LoginPage() {
   const [mode, setMode]               = useState<'login' | 'forgot' | 'reset'>('login')
-  const [email, setEmail]             = useState('')
+  const [email, setEmail]             = useState(()=>readRememberedLogin('sa_remember_login_id')||'')
+  const [rememberId,setRememberId]=useState(()=>Boolean(readRememberedLogin('sa_remember_login_id')))
   const [password, setPassword]       = useState('')
   const [pcName, setPcNameState]      = useState(() => getPCName())
   const [otp, setOtp]                 = useState('')
@@ -27,6 +30,7 @@ export default function LoginPage() {
     try {
       const activePc = setPCName(pcName)
       const d = await auth.login(email, password, activePc) as { accessToken: string; refreshToken: string; user: { id: string; name: string; email: string } }
+      rememberLogin('sa_remember_login_id',email,rememberId)
       setUser({ ...d.user, portal: 'superadmin' }, d.accessToken, d.refreshToken)
       localStorage.setItem('sa_user', JSON.stringify({ ...d.user, portal: 'superadmin' }))
       navigate('/')
@@ -144,9 +148,9 @@ export default function LoginPage() {
           {mode === 'login' && (
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
-                <label className="label">Email</label>
-                <input className="input" type="email" autoFocus value={email}
-                  onChange={e => setEmail(e.target.value)} placeholder="superadmin@example.com" required />
+                <label className="label">User ID or Email</label>
+                <input className="input" type={mode==='login'?'text':'email'} autoComplete="username" aria-label="User ID or Email" autoFocus value={email}
+                  onChange={e => setEmail(e.target.value)} placeholder="User ID or Email" required />
               </div>
 
               <div>
@@ -160,7 +164,7 @@ export default function LoginPage() {
                     Forgot password?
                   </button>
                 </div>
-                <input className="input" type="password" value={password}
+                <label><input type="checkbox" checked={rememberId} onChange={e=>{setRememberId(e.target.checked);if(!e.target.checked)rememberLogin('sa_remember_login_id','',false)}}/>Remember User ID</label><PasswordInput className="input" autoComplete="current-password" value={password}
                   onChange={e => setPassword(e.target.value)} placeholder="••••••••" required />
               </div>
 
@@ -239,13 +243,13 @@ export default function LoginPage() {
 
               <div>
                 <label className="label">New Password</label>
-                <input className="input" type="password" value={newPassword}
+                <PasswordInput className="input"  value={newPassword}
                   onChange={e => setNewPassword(e.target.value)} placeholder="Minimum 8 characters" required />
               </div>
 
               <div>
                 <label className="label">Confirm New Password</label>
-                <input className="input" type="password" value={confirmPassword}
+                <PasswordInput className="input"  value={confirmPassword}
                   onChange={e => setConfirmPassword(e.target.value)} placeholder="Re-enter new password" required />
               </div>
 

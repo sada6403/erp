@@ -1,12 +1,17 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import type { Product } from '@/types'
 import { Package, MapPin, ArrowRightLeft, Plus, Minus, Check, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import toast from 'react-hot-toast'
 import { resolveImageSrc } from '@/lib/imageUrl'
 
+import type { PosCatalog } from '@/lib/posCatalog'
+import KeywordManager from './KeywordManager'
+
 interface Props {
   query: string
+  catalog?: PosCatalog
+  error?: string
   onSelect: (product: Product) => void
 }
 
@@ -165,9 +170,10 @@ function BranchPanel({ product, currentBranchId }: {
 }
 
 // ─── Product Search ───────────────────────────────────────────────────────────
-export default function ProductSearch({ query, onSelect }: Props) {
-  const [results, setResults]       = useState<Product[]>([])
-  const [loading, setLoading]       = useState(false)
+export default function ProductSearch({ query, onSelect, catalog, error }: Props) {
+  const [keywordProduct, setKeywordProduct] = useState<Product>()
+  const results = useMemo(() => catalog?.search(query) || [], [catalog, query])
+  const loading = !catalog && !error
   const [focused, setFocused]       = useState(0)
   const [expanded, setExpanded]     = useState<string | null>(null)
 
@@ -176,27 +182,21 @@ export default function ProductSearch({ query, onSelect }: Props) {
     user?.branch?.id || (user as unknown as Record<string, string>)?.branch_id || ''
   )
 
-  useEffect(() => {
-    if (!query) { setResults([]); setExpanded(null); return }
-    const t = setTimeout(async () => {
-      setLoading(true)
-      try {
-        const res = await window.api.products.search(query)
-        if (res.success) { setResults(res.data as Product[]); setFocused(0) }
-      } finally { setLoading(false) }
-    }, 150)
-    return () => clearTimeout(t)
-  }, [query])
+  useEffect(() => { setFocused(0); setExpanded(null) }, [query])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowDown') { e.preventDefault(); setFocused(f => Math.min(f+1, results.length-1)) }
+      const target = e.target as HTMLElement
+      if (target.getAttribute('data-pos-search') !== 'true' || e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return
+      if (e.key === 'ArrowDown') { e.preventDefault(); setFocused(f => Math.max(0, Math.min(f+1, results.length-1))) }
       if (e.key === 'ArrowUp')   { e.preventDefault(); setFocused(f => Math.max(f-1, 0)) }
       if (e.key === 'Enter' && results[focused]) { e.preventDefault(); onSelect(results[focused]) }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [results, focused, onSelect])
+
+  if (error && !catalog) return <p role="alert">Local catalog unavailable: {error}</p>
 
   if (loading) return (
     <div className="space-y-2 animate-pulse">
@@ -216,6 +216,7 @@ export default function ProductSearch({ query, onSelect }: Props) {
 
   return (
     <div className="space-y-2">
+      {keywordProduct && <KeywordManager product={keywordProduct} initialKeyword={query} onClose={() => setKeywordProduct(undefined)} />}
       {results.map((product, idx) => {
         const outOfStock = !product.stock || product.stock <= 0
         const lowStock   = !outOfStock && (product.stock ?? 0) <= product.min_stock_level
@@ -241,7 +242,9 @@ export default function ProductSearch({ query, onSelect }: Props) {
 
               <div className="flex-1 min-w-0">
                 <p className="font-semibold text-sm truncate" style={{ color: 'var(--text-1)' }}>{product.name}</p>
-                <p className="text-xs font-mono" style={{ color: 'var(--text-3)' }}>{product.sku}</p>
+                {catalog?.match(query,product.id)?.matchedBy && <p className="text-xs keyword-text">Matched by: {catalog.match(query,product.id)?.matchedBy}</p>}
+                {catalog?.keywordsEnabled && <button className="text-xs underline" onClick={event=>{event.stopPropagation();setKeywordProduct(product)}}>Add my keyword</button>}
+                <p className="text-xs font-mono" style={{ color: 'var(--text-3)' }}>{product.sku} ? {product.unit || 'pcs'}</p>
               </div>
 
               <div className="text-right flex-shrink-0 mr-2">

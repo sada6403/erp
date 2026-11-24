@@ -101,7 +101,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
           <ShoppingCart size={28} />
         </div>
         <p className="text-sm" style={{ color: 'var(--text-2)' }}>Cart is empty</p>
-        <p className="text-xs text-center">Search products (F6) then press Enter to add</p>
+        <p className="text-xs text-center">Search products (F2) then press Enter to add</p>
       </div>
     )
   }

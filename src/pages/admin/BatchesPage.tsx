@@ -1,3 +1,5 @@
+import {groupPhysicalBatches} from '@/lib/batchGroups'
+import {useBatchGuard} from '@/hooks/useBatchGuard'
 import { useState, useEffect } from 'react'
 import NumberInput from '@/components/shared/NumberInput'
 import { useBusinessType } from '@/hooks/useBusinessType'
@@ -15,6 +17,8 @@ function getPerms(u: unknown): Record<string, unknown> {
 
 interface Batch {
   id: string
+  batch_identity_id?: string | null
+  branch_id?: string | null
   product_id: string
   product_name: string
   product_sku: string
@@ -81,7 +85,7 @@ export default function BatchesPage() {
 
   useEffect(() => { load() }, [filter])
 
-  const filtered = batches.filter(b =>
+  const filtered = groupPhysicalBatches(batches).filter(b =>
     !search || b.product_name.toLowerCase().includes(search.toLowerCase()) ||
     b.batch_number?.toLowerCase().includes(search.toLowerCase()) ||
     b.product_sku.toLowerCase().includes(search.toLowerCase())
@@ -168,8 +172,8 @@ export default function BatchesPage() {
                       </td>
                       <td className="table-cell px-4 py-3 text-xs" style={{ color: 'var(--text-3)' }}>{b.branch_name || '—'}</td>
                       <td className="table-cell px-4 py-3 text-xs" style={{ color: 'var(--text-3)' }}>
-                        Rs.{Number(b.cost_price).toLocaleString(undefined, { maximumFractionDigits: 2 })}
-                        {supermarket && b.status && <button className="block text-xs underline" onClick={async e => { e.stopPropagation(); const price = window.prompt('Selling price for this batch (leave blank to use common product price)', b.selling_price == null ? '' : String(b.selling_price)); if (price === null) return; const r = await window.api.batches.update(b.id, { selling_price: price.trim() === '' ? null : Number(price) }); if (r.success) load(); else toast.error(r.error || 'Could not save price') }}>Selling: {b.selling_price == null ? 'Common price' : `Rs.${b.selling_price}`}</button>}
+                        {b.layers.some(layer=>layer.cost_price!==b.cost_price)?'See receipt costs':`Rs.${Number(b.cost_price).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                        {supermarket && b.layers.length===1 && b.status && <button className="block text-xs underline" onClick={async e => { e.stopPropagation(); const price = window.prompt('Selling price for this batch (leave blank to use common product price)', b.selling_price == null ? '' : String(b.selling_price)); if (price === null) return; const r = await window.api.batches.update(b.id, { selling_price: price.trim() === '' ? null : Number(price) }); if (r.success) load(); else toast.error(r.error || 'Could not save price') }}>Selling: {b.selling_price == null ? 'Common price' : `Rs.${b.selling_price}`}</button>}
                       </td>
                       <td className="table-cell px-4 py-3">
                         {isExp ? <ChevronUp size={13} style={{ color: 'var(--text-3)' }} /> : <ChevronDown size={13} style={{ color: 'var(--text-3)' }} />}
@@ -178,6 +182,7 @@ export default function BatchesPage() {
                     isExp && (
                       <tr key={`${b.id}-detail`} style={{ background: 'var(--bg-soft)' }}>
                         <td colSpan={7} className="px-6 py-3">
+                          {b.layers.length>1 && <ul className="text-xs mb-3">{b.layers.map(layer=><li key={layer.id}>Receipt {layer.purchase_date || layer.created_at}: quantity {layer.quantity}, cost Rs.{layer.cost_price}</li>)}</ul>}
                           <div className="grid grid-cols-4 gap-4 text-xs" style={{ color: 'var(--text-2)' }}>
                             <div><span style={{ color: 'var(--text-3)' }}>Batch ID</span><br /><span className="font-mono">{b.id.slice(0, 16)}…</span></div>
                             <div><span style={{ color: 'var(--text-3)' }}>Mfg Date</span><br />{b.mfg_date || '—'}</div>
@@ -218,6 +223,7 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   const [productSearch, setProductSearch] = useState('')
   const [branches, setBranches]   = useState<{ id: string; name: string }[]>([])
   const [saving, setSaving]       = useState(false)
+  const batchGuard=useBatchGuard()
   const [form, setForm]           = useState({
     product_id: '', batch_number: '', serial_number: '',
     expiry_date: '', mfg_date: '', quantity: 1, cost_price: 0, branch_id: '',
@@ -251,7 +257,8 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
     if (form.quantity <= 0) { toast.error('Quantity must be > 0'); return }
     setSaving(true)
     try {
-      const res = await window.api.batches.create(form) as { success: boolean; error?: string }
+      const prepared=await batchGuard.confirm([form]);if(!prepared)return
+      const res = await window.api.batches.create({...prepared[0],add_to_stock:true}) as { success: boolean; error?: string }
       if (res.success) { toast.success('Batch added'); onSaved() }
       else toast.error(res.error || 'Failed to add batch')
     } catch (err) {
@@ -269,6 +276,7 @@ function AddBatchModal({ onClose, onSaved }: { onClose: () => void; onSaved: () 
   return (
     <Modal title="Add Batch / Serial / Expiry" onClose={onClose} size="md"
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Add Batch'}</button></>}>
+      {batchGuard.dialog}
       <div className="space-y-4">
         <div>
           <label className="label">Product *</label>

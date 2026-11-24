@@ -1,6 +1,7 @@
 import type { IpcMain } from 'electron'
 import { getDb } from '../database'
 import bcrypt from 'bcryptjs'
+import {backfillLoginIds,hasLoginIds} from '../services/loginIdentity'
 import jwt from 'jsonwebtoken'
 import { createCompanyStore } from '../services/companyWorkspace'
 import crypto from 'crypto'
@@ -131,6 +132,7 @@ function buildAuthUserPayload(user: Record<string, unknown>, company?: { id: str
     id: String(user.id),
     name: String(user.name || ''),
     email: String(user.email || ''),
+    login_id: String(user.login_id || ''),
     company_id: company?.id ?? null,
     portal,
     role_id: user.role_id ? String(user.role_id) : undefined,
@@ -237,9 +239,10 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
       }
   })
 
-  safeHandle(ipcMain, 'auth:login', async (_e, { email, password }) => {
+  safeHandle(ipcMain, 'auth:login', async (_e, { email, identifier, password }) => {
       const db = getDb()
-      const normalizedEmail = String(email || '').trim().toLowerCase()
+      if(hasLoginIds(db))backfillLoginIds(db)
+      const normalizedEmail = String(identifier || email || '').trim().toLowerCase()
 
       const findLocalUser = () => db.prepare(`
           SELECT u.*, r.name as role_name, r.permissions as role_permissions, r.session_scope as role_session_scope,
@@ -247,8 +250,8 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
           FROM users u
           LEFT JOIN roles r ON r.id = u.role_id
           LEFT JOIN branches b ON b.id = u.branch_id
-          WHERE LOWER(u.email) = ?
-        `).get(normalizedEmail) as Record<string, unknown> | undefined
+          WHERE (LOWER(TRIM(u.email)) = ? OR LOWER(u.login_id) = ?)
+        `).get(normalizedEmail,normalizedEmail) as Record<string, unknown> | undefined
 
       let user = findLocalUser()
       let repairAttempted = false
@@ -311,18 +314,6 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
 
       // Reset failed attempts on success
       db.prepare(`UPDATE users SET login_attempts=0, locked_until=NULL WHERE id=?`).run(user.id)
-
-      // Email+password is reserved for admin-type roles — staff/cashier
-      // accounts must sign in with a PIN instead, even if a password_hash
-      // happens to exist on the row (e.g. an older account from before this
-      // rule existed).
-      if (!isAdminTypeRole(readPermissions(user))) {
-        logAudit(db, {
-          userId: user.id as string, branchId: user.branch_id as string,
-          action: 'LOGIN_FAILED', newValues: { reason: 'Non-admin role attempted email+password login' },
-        })
-        return { success: false, error: 'This account signs in with a PIN, not email and password. Use the PIN login screen.' }
-      }
 
       // Check 2FA
       if (user.two_factor_enabled && user.two_factor_secret) {
@@ -621,6 +612,7 @@ export function registerAuthHandlers(ipcMain: IpcMain) {
   safeHandle(ipcMain, 'auth:forgotPassword', async (_e, { email }: { email: string }) => {
       const db = getDb()
       const targetEmail = email.toLowerCase().trim()
+      try{const cloud=getCloudApi();if(cloud){const response=await cloud.requestPasswordReset(targetEmail) as {success?:boolean};if(response.success)return {success:true,linkRequested:true}}}catch{/* Local OTP/admin reset remains available offline. */}
 
       const user = db.prepare(
         `SELECT id, name, email FROM users WHERE LOWER(email) = ? AND is_active = 1`

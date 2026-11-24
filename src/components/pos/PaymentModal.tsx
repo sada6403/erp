@@ -14,6 +14,7 @@ import type { PaymentMethod } from '@/types'
 
 interface Props {
   invoiceNumber: string
+  initialMethod?: PaymentMethod
   billType: BillType
   onClose: () => void
   onSuccess: () => void
@@ -41,10 +42,10 @@ const BILL_TYPE_LABELS: Record<BillType, string> = {
 // Denomination buttons for cash
 const CASH_DENOMS = [500, 1000, 2000, 5000, 10000]
 
-export default function PaymentModal({ invoiceNumber, billType, onClose, onSuccess }: Props) {
+export default function PaymentModal({ invoiceNumber, billType, onClose, onSuccess, initialMethod = 'cash' }: Props) {
   const cart = useCartStore()
   const { user } = useAuthStore()
-  const [method, setMethod]             = useState<PaymentMethod>('cash')
+  const [method, setMethod]             = useState<PaymentMethod>(initialMethod)
   const [received, setReceived]         = useState<string>(String(cart.total.toFixed(2)))
   const [reference, setReference]       = useState('')
   const [agentCode, setAgentCode]         = useState('')
@@ -236,7 +237,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [method, cart.total, loyaltyDiscount, couponApplied, walletApplied])
 
-  const receivedAmount      = parseFloat(received) || 0
+  const receivedAmount      = method === 'cash' && received.trim() === '' ? totalAfterWallet : parseFloat(received) || 0
   const effectivePaidAmount = isCredit || method === 'installment'
     ? 0
     : receivedAmount + couponApplied + walletApplied
@@ -476,6 +477,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   // Keyboard shortcuts
   useKeyboard([
     { key: 'Escape', handler: () => done ? onSuccess() : onClose() },
+    { key: 'F9', handler: () => { if (!done) { setMethod('cash'); receivedRef.current?.focus(); receivedRef.current?.select() } } },
+    { key: 'F10', handler: () => { if (!done) { setMethod('card'); receivedRef.current?.focus(); receivedRef.current?.select() } } },
     // Payment method shortcuts (work even when amount input is focused — ctrlKey bypass)
     { key: '1', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('cash');          receivedRef.current?.select() } } },
     { key: '2', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('card');          receivedRef.current?.select() } } },

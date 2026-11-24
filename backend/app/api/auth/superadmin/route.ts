@@ -1,3 +1,4 @@
+import {supportsLoginIds} from '@/lib/loginIdentity'
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { pool } from '@/lib/db'
@@ -34,14 +35,15 @@ async function ensureActiveSessionsTable() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}))
-  const { email, password } = body
+  const {password}=body;const email=String(body.identifier||body.login_id||body.email||'').trim()
+  const byId=await supportsLoginIds(pool,'superadmins')
   if (!email || !password) {
     return NextResponse.json({ error: 'email and password required' }, { status: 400 })
   }
 
   const { rows } = await pool.query(
-    `SELECT * FROM superadmins WHERE email = ? AND is_active = 1`,
-    [email.toLowerCase().trim()]
+    `SELECT * FROM superadmins WHERE (LOWER(TRIM(email)) = ? ${byId?'OR LOWER(login_id)=?':''}) AND is_active = 1`,
+    byId?[email.toLowerCase().trim(),email.toLowerCase().trim()]:[email.toLowerCase().trim()]
   )
   if (!rows.length) return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
 

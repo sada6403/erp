@@ -3,6 +3,10 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {font-family:'Keyword Tamil';src:url('/fonts/notosanstamil.ttf') format('truetype');font-weight:100 900;font-display:swap;}
+@font-face {font-family:'Keyword Sinhala';src:url('/fonts/notosanssinhala.ttf') format('truetype');font-weight:100 900;font-display:swap;}
+.keyword-text {font-family:'Keyword Tamil','Keyword Sinhala',sans-serif;}
+
 :root {
   --brand-primary: #2563eb;
   --brand-primary-hover: #1d4ed8;
