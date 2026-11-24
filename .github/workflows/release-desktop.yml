@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       expected_version:
-        description: 'Expected desktop version in package.json (e.g. 2.9.6)'
+        description: 'Expected desktop version in package.json (e.g. 2.10.0)'
         required: true
-        default: '2.9.6'
+        default: '2.10.0'
         type: string
       expected_commit:
         description: 'Approved full 40-char commit SHA to build and publish'
@@ -92,8 +92,28 @@ jobs:
           echo "short_sha=${ACTUAL_COMMIT:0:7}" >> "$GITHUB_OUTPUT"
           echo "prev_version=$prev_version" >> "$GITHUB_OUTPUT"
 
-  build-desktop:
+  preflight-publisher:
     needs: validate
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - name: Verify both update URLs share the publication directory
+        shell: bash
+        run: |
+          set -euo pipefail
+          primary="$(readlink -f /var/www/updates)"
+          secondary="$(readlink -f /var/www/html/updates)"
+          echo "HTTPS directory: $primary"
+          echo "Legacy update directory: $secondary"
+          if [[ "$primary" != "$secondary" ]]; then
+            echo "ERROR: Update feeds use separate directories; desktop-only publisher must update both before release." >&2
+            exit 1
+          fi
+          test -f "$primary/latest.yml"
+          echo "Verified one atomic publication updates both feeds."
+
+  build-desktop:
+    needs: [validate, preflight-publisher]
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -125,7 +145,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm run test:unit
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npm run test:integration
+          # App API integration files need a running seeded MySQL/API service;
+          # those have a separate test:integration-app command. Run every local
+          # desktop database/IPC test here, with no production network target.
+          $localTests = @(Get-ChildItem electron,src -Recurse -Filter '*.integration.test.ts' |
+            Where-Object { $_.FullName -notmatch '[\\/]integration-app[\\/]' } |
+            ForEach-Object { $_.FullName.Replace('\', '/') })
+          if ($localTests.Count -eq 0) { throw 'No local integration tests found' }
+          npm run test:integration -- @localTests
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows NSIS installer
