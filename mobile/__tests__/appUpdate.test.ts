@@ -54,5 +54,15 @@ describe('Play manifest guard', () => {
       'android.permission.READ_MEDIA_IMAGES', 'android.permission.READ_MEDIA_VIDEO', 'android.permission.READ_EXTERNAL_STORAGE', 'android.permission.WRITE_EXTERNAL_STORAGE',
     ]);
     expect(declaredForbidden(`<manifest>${p('READ_MEDIA_IMAGES', ' tools:node="remove"')}${p('CAMERA')}${p('INTERNET')}</manifest>`)).toEqual([]);
+    expect(declaredForbidden('<manifest><uses-permission android:name="com.google.android.gms.permission.AD_ID"/></manifest>')).toEqual(['com.google.android.gms.permission.AD_ID']);
+  });
+
+  it('featureProblems fails when wifi / screen.portrait are missing or required', () => {
+    const { featureProblems } = require('../scripts/check-play-manifest.cjs') as { featureProblems: (xml: string) => string[] };
+    const f = (n: string, extra: string) => `<uses-feature android:name="android.hardware.${n}"${extra}/>`;
+    expect(featureProblems(`<manifest>${f('wifi', ' android:required="false"')}${f('screen.portrait', ' android:required="false"')}</manifest>`)).toEqual([]);
+    expect(featureProblems(`<manifest>${f('wifi', ' android:required="true"')}${f('screen.portrait', ' android:required="false"')}</manifest>`)).toEqual(['android.hardware.wifi is required=true']);
+    expect(featureProblems(`<manifest>${f('wifi', '')}${f('screen.portrait', ' android:required="false"')}</manifest>`)).toEqual(['android.hardware.wifi is required=true']);
+    expect(featureProblems('<manifest></manifest>')).toHaveLength(2);
   });
 });

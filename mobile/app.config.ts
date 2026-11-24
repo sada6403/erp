@@ -14,6 +14,7 @@ const PLAY_BLOCKED_PERMISSIONS = [
   'android.permission.READ_MEDIA_VIDEO',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
+  'com.google.android.gms.permission.AD_ID', // the app shows no ads and uses no advertising ID
 ];
 const APP_ENV = process.env.APP_ENV ?? 'development';
 // Dev default only. The real Play package comes from ANDROID_PACKAGE (Moni supplies it).
@@ -86,6 +87,7 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
     'expo-localization',
     'expo-video',
     'expo-sharing',
+    './plugins/withOptionalHardware.js', // wifi + screen.portrait uses-feature required=false (Play device filters)
     [
       'expo-image-picker',
       {
