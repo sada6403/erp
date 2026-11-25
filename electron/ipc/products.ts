@@ -1,3 +1,4 @@
+import {resolveProductSku} from '../services/productSku'
 import { usesSupermarketStock } from '../services/supermarketModule'
 import type { IpcMain } from 'electron'
 import { dialog, app } from 'electron'
@@ -671,7 +672,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const targetBranch = branch_id || (authUser?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111'
       const rawSku = String((rest as Record<string, unknown>)?.sku || '').trim()
       const rawBarcode = String((rest as Record<string, unknown>)?.barcode || '').trim()
-      const sku = rawSku || (rawBarcode ? rawBarcode : `NO-SKU-${id.slice(0, 8).toUpperCase()}`)
+      let sku = ''
       const productType = (rest.product_type as string) || (Array.isArray(variants) && variants.length > 0 ? 'variable' : 'simple')
 
       db.transaction(() => {
@@ -685,13 +686,15 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
             .run(request.id)
         }
+        sku = resolveProductSku(db,id,rawSku,rawBarcode)
         const productRow = {
+          ...rest,
           id,
           branch_id: branch_id ?? null,
           category_id: (rest.category_id as string) || null,
           supplier_id: (rest.supplier_id as string) || null,
           sku,
-          barcode: (rest.barcode as string) || null,
+          barcode: rawBarcode || null,
           name: (rest.name as string) || 'Unnamed Product',
           description: (rest.description as string) || '',
           image_url: (rest.image_url as string) || null,
@@ -702,7 +705,6 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           discount_pct: Number(rest.discount_pct) || 0,
           min_stock_level: Number(rest.min_stock_level) || 0,
           product_type: productType,
-          ...rest,
         }
         db.prepare(`
           INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
@@ -759,7 +761,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
       })()
 
-      await enqueuSync('products', id, 'INSERT', { id, branch_id, ...rest, sku, product_type: productType })
+      await enqueuSync('products', id, 'INSERT', { ...rest, id, branch_id, sku, barcode:rawBarcode||null, product_type: productType })
       if (Array.isArray(variants) && variants.length > 0) await enqueueProductVariantRows(id)
       // the aggregate stock row of a variant product is written locally above; without this push other devices and the cloud never get it
       if (Array.isArray(variants) && variants.length > 0) await syncStockRow(db, id, targetBranch)
@@ -777,16 +779,16 @@ export function registerProductHandlers(ipcMain: IpcMain) {
       const db = getDb()
       const { edit_request_id, variants, ...rest } = (payload || {}) as Record<string, unknown> & { edit_request_id?: string; variants?: any[] }
       const nextPayload = { ...rest }
-      if (!String(nextPayload.sku || '').trim()) {
-        const rawBarcode = String(nextPayload.barcode || '').trim()
-        nextPayload.sku = rawBarcode || `NO-SKU-${id.slice(0, 8).toUpperCase()}`
-      }
 
       const caller = getAuthUser()
       const isAdmin = isSuperAdmin(caller)
       if (!isAdmin && !edit_request_id) {
         return { success: false, error: 'No approved edit request found — please request approval first' }
       }
+
+      const existingProduct = db.prepare('SELECT sku,barcode FROM products WHERE id=?').get(id) as {sku:string;barcode:string|null}|undefined
+      if(!existingProduct)throw new Error('Product not found')
+      // A price/status-only update must not silently replace its existing SKU.
 
       const targetBranch = (caller?.branch_id as string) || 'b1111111-1111-4111-8111-111111111111'
       const validCols = new Set(
@@ -810,6 +812,10 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           db.prepare(`UPDATE edit_requests SET status='consumed', consumed_at=datetime('now'), updated_at=datetime('now') WHERE id=?`)
             .run(request.id)
         }
+        if(Object.prototype.hasOwnProperty.call(rest,'sku')){
+          const sku=resolveProductSku(db,id,rest.sku,rest.barcode===undefined?existingProduct.barcode:rest.barcode)
+          nextPayload.sku=sku;filteredPayload.sku=sku
+        }
         if (fields) {
           db.prepare(`UPDATE products SET ${fields}, updated_at = datetime('now') WHERE id = @id`)
             .run({ ...filteredPayload, id })
@@ -831,7 +837,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           for (let idx = 0; idx < variants.length; idx++) {
             const v = variants[idx]
             const varId = v.id || crypto.randomUUID()
-            const varSku = String(v.sku || '').trim() || `${nextPayload.sku || 'SKU'}-${idx + 1}`
+            const varSku = String(v.sku || '').trim() || `${nextPayload.sku || existingProduct.sku || 'SKU'}-${idx + 1}`
             const varBarcode = String(v.barcode || '').trim() || null
             const varCost = Number(v.cost_price) || Number(nextPayload.cost_price) || 0
             const varPrice = Number(v.selling_price) || Number(nextPayload.selling_price) || 0
@@ -898,7 +904,7 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
       })()
 
-      await enqueuSync('products', id, 'UPDATE', { id, ...nextPayload })
+      await enqueuSync('products', id, 'UPDATE', { ...nextPayload, id })
       if (Array.isArray(variants)) await enqueueProductVariantRows(id)
       if (Array.isArray(variants) && variants.length > 0) await syncStockRow(db, id, targetBranch)
       if (!isAdmin && edit_request_id) {

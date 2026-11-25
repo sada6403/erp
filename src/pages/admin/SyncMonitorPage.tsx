@@ -81,9 +81,14 @@ export default function SyncMonitorPage() {
 
   const handleSync = async () => {
     setSyncing(true)
-    await triggerSync()
-    await refreshAll()
-    setSyncing(false)
+    try {
+      await triggerSync()
+      await refreshAll()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Could not contact the cloud server')
+    } finally {
+      setSyncing(false)
+    }
   }
 
   const handleResetFailed = async () => {

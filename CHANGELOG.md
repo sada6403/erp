@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.10.2 - 2026-11-25 - Product SKU save and offline sync handling
+
+- Preserve generated SKUs when blank form values are submitted; normalize barcode-derived codes and reject duplicates with an existing-product warning.
+- Keep existing SKUs on partial price/status edits; retain product codes when a barcode matches a different product SKU. Inactive product codes remain reserved.
+- Keep approval and duplicate checks transactional; preserve canonical product identity in sync payloads.
+- Always release Sync Now loading state after rejected requests and skip extra remote diagnostic queries when the cloud health check has already failed.
+
 ## 2.10.1 - 2026-11-25 - Keyboard checkout and cloud batch sync repair
 
 - Payment dialog: reliable amount focus, contained Tab/Shift+Tab navigation, agent Arrow/Enter selection, Ctrl+1-4 and F9/F10 method selection, F2 customer picker, and native Enter on buttons.

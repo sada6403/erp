@@ -324,11 +324,12 @@ let isRefreshing = false
     } catch (error) {
       networkDetail = (error as Error).message
     }
-    steps.push({ step: 'Next.js API + PostgreSQL', ok: networkOk, detail: networkDetail })
+    steps.push({ step: 'Cloud API + MySQL', ok: networkOk, detail: networkDetail })
 
     let queryOk = false
     let queryDetail = ''
     try {
+      if (!networkOk) throw new Error('Skipped: cloud API is unreachable. Local data remains queued for automatic retry.')
       if (!url || !key) throw new Error('Cloud API URL/key is missing')
       const db = getDb()
       const activeQueue = (db.prepare("SELECT COUNT(*) as c FROM sync_queue WHERE status IN ('pending','processing')").get() as { c: number }).c

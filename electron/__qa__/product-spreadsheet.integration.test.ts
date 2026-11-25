@@ -238,3 +238,43 @@ describe('furniture import mapping preview', () => {
     finally { state.settings.app_settings = { business_type: 'furniture' } }
   })
 })
+
+
+describe('product SKU save regressions',()=>{
+ it('persists distinct generated SKUs when two forms submit blank SKU/barcode',async()=>{
+  const first=await call('products:create',{name:'Blank SKU first',sku:'',barcode:'',selling_price:10})
+  const second=await call('products:create',{name:'Blank SKU second',sku:'',barcode:'',selling_price:20})
+  expect(first.success).toBe(true);expect(second.success).toBe(true)
+  const rows=db.prepare('SELECT id,sku FROM products WHERE id IN (?,?)').all(first.data.id,second.data.id) as {id:string;sku:string}[]
+  expect(rows).toHaveLength(2);expect(new Set(rows.map(row=>row.sku)).size).toBe(2)
+  for(const row of rows){expect(row.sku).toMatch(/^NO-SKU-/);const queued=db.prepare("SELECT payload FROM sync_queue WHERE table_name='products' AND record_id=? ORDER BY created_at DESC LIMIT 1").get(row.id) as {payload:string};expect(JSON.parse(queued.payload).sku).toBe(row.sku)}
+ })
+ it('trims barcode-derived SKUs and reports an existing product instead of raw UNIQUE errors',async()=>{
+  const first=await call('products:create',{name:'SKU owner',sku:'',barcode:'  SKU-OWNER-TEST  ',selling_price:10})
+  expect(first.success).toBe(true);expect(db.prepare('SELECT sku,barcode FROM products WHERE id=?').get(first.data.id)).toEqual({sku:'SKU-OWNER-TEST',barcode:'SKU-OWNER-TEST'})
+  const result=await call('products:create',{name:'Duplicate',sku:' sku-owner-test ',selling_price:20})
+  expect(result.success).toBe(false);expect(result.error).toContain('SKU owner');expect(result.error).not.toContain('UNIQUE constraint failed')
+ })
+ it('keeps a SKU unchanged on partial edits and rejects changing it to another product code',async()=>{
+  const first=await call('products:create',{name:'Partial edit owner',sku:'PARTIAL-SKU-TEST',selling_price:10})
+  const other=await call('products:create',{name:'Other SKU owner',sku:'OTHER-SKU-TEST',selling_price:20})
+  expect((await call('products:update',first.data.id,{selling_price:15})).success).toBe(true)
+  expect(db.prepare('SELECT sku,selling_price FROM products WHERE id=?').get(first.data.id)).toEqual({sku:'PARTIAL-SKU-TEST',selling_price:15})
+  const rejected=await call('products:update',first.data.id,{sku:'OTHER-SKU-TEST',selling_price:99})
+  expect(rejected.success).toBe(false);expect(rejected.error).toContain('already used');expect(db.prepare('SELECT selling_price FROM products WHERE id=?').get(first.data.id)).toEqual({selling_price:15});expect(other.success).toBe(true)
+ })
+})
+
+it('keeps inactive product SKUs reserved with a clear warning',async()=>{
+ const first=await call('products:create',{name:'Inactive SKU owner',sku:'INACTIVE-SKU-TEST',selling_price:10});expect(first.success).toBe(true)
+ db.prepare('UPDATE products SET is_active=0 WHERE id=?').run(first.data.id)
+ const result=await call('products:create',{name:'Attempted reuse',sku:'inactive-sku-test',selling_price:20})
+ expect(result.success).toBe(false);expect(result.error).toContain('inactive product');expect(db.prepare('SELECT COUNT(*) n FROM products WHERE LOWER(sku)=?').get('inactive-sku-test')).toEqual({n:1})
+})
+
+it('does not collide with another SKU when toggling a product that shares its barcode',async()=>{
+ const owner=await call('products:create',{name:'Barcode SKU owner',sku:'SHARED-BARCODE-CODE',selling_price:10});expect(owner.success).toBe(true)
+ const other=await call('products:create',{name:'Different product SKU',sku:'DIFFERENT-PRODUCT-CODE',barcode:'SHARED-BARCODE-CODE',selling_price:20});expect(other.success).toBe(true)
+ expect((await call('products:update',other.data.id,{is_active:0})).success).toBe(true)
+ expect(db.prepare('SELECT sku,is_active FROM products WHERE id=?').get(other.data.id)).toEqual({sku:'DIFFERENT-PRODUCT-CODE',is_active:0})
+})
