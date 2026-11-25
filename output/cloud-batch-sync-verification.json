@@ -1,0 +1,16 @@
+[
+  {
+    "table": "product_batch_identities",
+    "status": 200,
+    "success": true,
+    "returnedRows": 0,
+    "error": null
+  },
+  {
+    "table": "product_batches",
+    "status": 200,
+    "success": true,
+    "returnedRows": 0,
+    "error": null
+  }
+]
