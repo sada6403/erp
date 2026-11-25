@@ -1,5 +1,5 @@
 import {readRememberedLogin,rememberLogin} from '../../../../src/lib/rememberLogin'
-import PasswordInput from '../../../../src/components/shared/PasswordInput'
+import PasswordInput from '../components/PasswordInput'
 import { useState, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../store/authStore'

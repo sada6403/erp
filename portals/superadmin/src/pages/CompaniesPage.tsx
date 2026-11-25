@@ -1,4 +1,4 @@
-import PasswordInput from '../../../../src/components/shared/PasswordInput'
+import PasswordInput from '../components/PasswordInput'
 import React, { useEffect, useState, useRef, FormEvent } from 'react'
 import { companies as api, packages as pkgApi, modules as modulesApi, features as featuresApi, companyLimits as limitsApi, devices as devicesApi, backups as backupsApi, type BackupRow, type BackupSchedule, exports_ as exportsApi, type ExportRow, type ExportEntity, type ExportFormat, settings as settingsApi, audit as auditApi, companyNotifications as notifApi, companySecurity as securityApi } from '../lib/api'
 import { Plus, Search, RefreshCw, Ban, CheckCircle, Trash2, Key, Copy, GitBranch, Users, Monitor, LayoutGrid, Smartphone, Palette, ShieldCheck, Edit2, CalendarClock, Sliders, Eye, EyeOff, AlertTriangle, KeyRound, Settings2, FileText, BadgeInfo, Database, Download, RotateCcw, Lock, Unlock, FileDown, MoreVertical, Mail, Send, UserCheck, Shield, X, ChevronRight, ArrowLeft, PackageCheck, Building2, Sparkles } from 'lucide-react'

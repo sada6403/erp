@@ -1,4 +1,4 @@
-import PasswordInput from '../../../../src/components/shared/PasswordInput'
+import PasswordInput from '../components/PasswordInput'
 import { useEffect, useState, FormEvent } from 'react'
 import { settings as api, email as emailApi, me as meApi, danger as dangerApi, dbInfo as dbApi } from '../lib/api'
 import { Save, Send, Mail, RotateCcw, Shield, Eye, EyeOff, AlertTriangle, Trash2, Building2, Database, RefreshCw, CheckCircle, XCircle, Wifi } from 'lucide-react'
