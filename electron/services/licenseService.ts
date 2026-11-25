@@ -1,3 +1,4 @@
+import { canonicalCloudBaseUrl } from '../lib/cloudEndpoint'
 import { createCompanyStore } from './companyWorkspace'
 import { net } from 'electron'
 import { decryptSecret } from '../ipc/settings'
@@ -107,7 +108,7 @@ function checkOfflineLeaseExpiry(): void {
 
 export async function fetchAndCacheLicense(): Promise<LicenseData | null> {
   const settings = (store.get('app_settings') as Record<string, unknown>) ?? {}
-  const apiUrl = String(settings.cloud_api_url ?? '').trim()
+  const apiUrl = canonicalCloudBaseUrl(settings.cloud_api_url)
   const apiKey = decryptSecret(settings.cloud_api_key).trim()
   const deviceId = (store.get('device_id') as string | undefined) ?? null
 

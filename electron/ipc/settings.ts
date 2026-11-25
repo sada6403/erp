@@ -1,3 +1,4 @@
+import { canonicalCloudBaseUrl } from '../lib/cloudEndpoint'
 import type { IpcMain } from 'electron'
 import { BrowserWindow } from 'electron'
 import { createCompanyStore, getWorkspaceDataPath } from '../services/companyWorkspace'
@@ -368,6 +369,7 @@ export function ensureSettingsDefaults() {
   for (const [k, v] of Object.entries(saved)) {
     if (v !== '' && v !== null && v !== undefined) merged[k] = v
   }
+  merged.cloud_api_url = canonicalCloudBaseUrl(merged.cloud_api_url)
   store.set('app_settings', merged)
 }
 
@@ -400,6 +402,7 @@ export function registerSettingsHandlers(ipcMain: IpcMain) {
       if('bulk_import_v2_enabled' in payload&&payload.bulk_import_v2_enabled!==(current.bulk_import_v2_enabled===true)||'import_limits' in payload&&JSON.stringify(payload.import_limits)!==JSON.stringify(current.import_limits))throw new Error('Use Bulk Import v2 settings to configure imports')
       if ('supermarket_stock_enabled' in payload && Boolean(payload.supermarket_stock_enabled) !== Boolean(current.supermarket_stock_enabled) && !callerPerms.all) throw new Error('Company Admin access required to configure supermarket stock')
       const next = normalizeForStorage(payload as Record<string, unknown>, current)
+      next.cloud_api_url = canonicalCloudBaseUrl(next.cloud_api_url)
       if (next.business_type === 'supermarket' && current.business_type !== 'supermarket') {
         next.allow_negative_stock = true
         next.weighing_scale_barcode = true

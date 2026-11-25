@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.10.3 - 2026-11-25 - HTTPS cloud endpoint recovery
+
+- Automatically migrate only the legacy service HTTP :4001 URL to the existing HTTPS POS API for sync, license refresh and saved settings. Custom server endpoints remain unchanged.
+- Includes the 2.10.2 product SKU save and offline sync handling fixes.
+
+
 ## 2.10.2 - 2026-11-25 - Product SKU save and offline sync handling
 
 - Preserve generated SKUs when blank form values are submitted; normalize barcode-derived codes and reject duplicates with an existing-product warning.

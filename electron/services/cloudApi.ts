@@ -1,3 +1,4 @@
+import { canonicalCloudBaseUrl } from '../lib/cloudEndpoint'
 import fs from 'fs'
 import { net } from 'electron'
 
@@ -40,7 +41,7 @@ export class CloudApi {
   private readonly deviceId: string | null
 
   constructor(config: CloudConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/+$/, '')
+    this.baseUrl = canonicalCloudBaseUrl(config.baseUrl)
     this.apiKey = config.apiKey
     this.deviceId = config.deviceId ?? null
   }
