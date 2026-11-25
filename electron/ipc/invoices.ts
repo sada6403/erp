@@ -1,4 +1,6 @@
 import { usesSupermarketStock } from '../services/supermarketModule'
+import { getTerminalHub } from '../services/branchHubRuntime'
+import { claimBillingInvoice } from '../branchHub/billing'
 import type { IpcMain } from 'electron'
 import type Database from 'better-sqlite3'
 import { getDb } from '../database'
@@ -105,7 +107,8 @@ export function getNextBillNumber(branchId: string, billType: BillType): string 
   const year = new Date().getFullYear()
   const prefix = BILL_PREFIX[billType]
   const settings = (store.get('app_settings') as Record<string, unknown>) || {}
-  const rawPrefix = String(settings.counter_prefix || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const hub = getTerminalHub()
+  const rawPrefix = hub ? hub.config.terminalId.toUpperCase() : String(settings.counter_prefix || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
   const counterPart = rawPrefix ? `${rawPrefix}-` : ''
 
   const branch = db.prepare('SELECT code, name FROM branches WHERE id = ?').get(branchId) as
@@ -411,6 +414,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
       }
 
       const insertInvoice = db.transaction(() => {
+        claimBillingInvoice(db,id)
         // Determine status based on bill type
         let status = 'completed'
         if (billType === 'QUOTATION') status = 'draft'

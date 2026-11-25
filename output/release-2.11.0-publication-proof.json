@@ -1,0 +1,16 @@
+[
+  {
+    "feed": "https://updates.nfplantation.com/",
+    "version": "2.11.0",
+    "installerStatus": 200,
+    "blockmapStatus": 200,
+    "size": 96400317
+  },
+  {
+    "feed": "http://72.61.115.222/updates/",
+    "version": "2.11.0",
+    "installerStatus": 200,
+    "blockmapStatus": 200,
+    "size": 96400317
+  }
+]

@@ -7,6 +7,8 @@ import { safeHandle } from './ipcHandler'
 import { getTerminalHub } from '../services/branchHubRuntime'
 import { localNumberedHolds } from '../services/numberedHoldsRuntime'
 import { manualHoldNumber } from '../lib/holdNumber'
+import fs from 'fs'
+import { getWorkspaceDataPath } from '../services/companyWorkspace'
 
 const store = createCompanyStore()
 
@@ -26,7 +28,25 @@ function currentPerms(user: Record<string, unknown>): Record<string, unknown> {
 // POS "Hold" — see the held_carts table comment in electron/database.ts for
 // why this is kept entirely separate from invoices:create.
 export function registerHoldHandlers(ipcMain: IpcMain) {
-  safeHandle(ipcMain, 'holds:hubStatus', () => ({ success: true, data: getTerminalHub()?.status() || { configured: false, hub_online: false, cloud: 'not_configured', pending: 0 } }))
+  safeHandle(ipcMain, 'holds:hubStatus', () => {
+    const hub=getTerminalHub()
+    if(!hub)return {success:true,data:{configured:false,hub_online:false,pending:0}}
+    const queued=getDb().prepare('SELECT count(*) AS n FROM branch_billing_outbox').get() as {n:number}
+    return {success:true,data:{...hub.status(),server_url:hub.config.url,billing_pending:queued.n}}
+  })
+  safeHandle(ipcMain, 'holds:updateHubUrl', (_e, address: string) => {
+    if(!currentPerms(getAuthUser()).all)return {success:false,error:'Admin permission required'}
+    const url=new URL(String(address))
+    if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.pathname!=='/'||url.search||url.hash)throw new Error('Enter a server URL such as http://BRANCH-SERVER:4781')
+    const filename=getWorkspaceDataPath('branch-hub-terminal.json')
+    if(!fs.existsSync(filename))throw new Error('Enroll this terminal before changing its server address')
+    const original=fs.readFileSync(filename,'utf8'),config=JSON.parse(original)
+    fs.writeFileSync(`${filename}.backup-${Date.now()}`,original,{flag:'wx',mode:0o600})
+    const pending=`${filename}.pending-${process.pid}`
+    fs.writeFileSync(pending,JSON.stringify({...config,url:url.origin},null,2),{mode:0o600})
+    fs.renameSync(pending,filename)
+    return {success:true,data:{restart_required:true}}
+  })
   safeHandle(ipcMain, 'holds:acknowledgeRecall', (_e, token: string) => {
     getTerminalHub()?.acknowledgeRecall(token)
     return { success: true }

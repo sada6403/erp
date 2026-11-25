@@ -30,4 +30,7 @@ describe('branch enrollment configuration generator', () => {
   it('rejects duplicate terminal IDs before creating files', () => {
     expect(() => createConfiguration(['--branch-id', 'BR01', '--hub-url', 'http://localhost:4781', '--output', 'not-created', '--terminals', 'T01,T01'])).toThrow(/distinct/)
   })
+  it('rejects IDs differing only by case', () => {
+    expect(() => createConfiguration(['--branch-id', 'BR01', '--hub-url', 'http://localhost:4781', '--output', 'not-created', '--terminals', 'T01,t01'])).toThrow(/distinct/)
+  })
 })

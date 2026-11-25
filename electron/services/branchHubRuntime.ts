@@ -3,6 +3,8 @@ import { BrowserWindow } from 'electron'
 import { TerminalHubClient, type TerminalHubConfig } from '../branchHub/client'
 import { createCompanyStore, getWorkspaceDataPath } from './companyWorkspace'
 import { stopNumberedHolds } from './numberedHoldsRuntime'
+import { getDb } from '../database'
+import { initializeBillingOutbox, flushBillingSnapshots } from '../branchHub/billing'
 
 let client: TerminalHubClient | undefined
 let activeConfigPath = ''
@@ -18,10 +20,13 @@ export function getTerminalHub(): TerminalHubClient | undefined {
   if (!client) {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as TerminalHubConfig
     if (config.branchId !== user.branch_id) throw new Error('Hub configuration does not match the signed-in branch')
+    initializeBillingOutbox(getDb(), config.branchId, config.terminalId)
     client = new TerminalHubClient(config, getWorkspaceDataPath('branch-terminal.db'), () => {
       for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('branchHub:changed')
     })
     activeConfigPath = configPath
+    const billingClient = client
+    client.setBillingSync(() => flushBillingSnapshots(getDb(), event => billingClient.sendBillingSnapshot(event)))
     client.start()
   }
   if (client.config.branchId !== user.branch_id) throw new Error('Hub client belongs to a different branch; restart and reconfigure')

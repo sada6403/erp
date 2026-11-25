@@ -116,6 +116,7 @@ const api = {
   // (see held_carts table comment in electron/database.ts)
   holds: {
     hubStatus: () => ipcRenderer.invoke('holds:hubStatus'),
+    updateHubUrl: (url: string) => ipcRenderer.invoke('holds:updateHubUrl', url),
     acknowledgeRecall: (token: string) => ipcRenderer.invoke('holds:acknowledgeRecall', token),
     create: (payload: unknown) => ipcRenderer.invoke('holds:create', payload),
     list:   ()                 => ipcRenderer.invoke('holds:list'),
@@ -595,6 +596,7 @@ const api = {
 
   // Coupons (balance-type gift vouchers)
   coupons: {
+    suggest:  (query: string, customerId?: string) => ipcRenderer.invoke('coupons:suggest', query, customerId),
     create:   (payload: unknown)              => ipcRenderer.invoke('coupons:create', payload),
     list:     (filters?: unknown)             => ipcRenderer.invoke('coupons:list', filters),
     get:      (idOrCode: string)              => ipcRenderer.invoke('coupons:get', idOrCode),

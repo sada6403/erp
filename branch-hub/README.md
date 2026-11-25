@@ -1,8 +1,10 @@
-# POS Branch Hub 0.1.1
+# POS Branch Hub 0.2.0
 
-This package provides shared numbered holds, exclusive recall, an event transport
-foundation and verified daily SQLite backups. Existing POS billing and cloud
-inventory synchronization have not been cut over to this Hub.
+This package provides shared numbered holds, exclusive recall, verified SQLite
+backups and opt-in billing snapshot replication to branch PostgreSQL. Existing
+cloud inventory synchronization retains its current path. Read
+`../docs/BRANCH_POSTGRES_WINDOWS.md` for the PostgreSQL Windows deployment,
+changeable server addresses and the scope/limits of the billing replica.
 
 Requires Node.js 22 or later. Keep this installation and its data outside the
 cashier Electron installation and outside live network/OneDrive folders.

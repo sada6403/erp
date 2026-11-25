@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useId, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, useId, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
@@ -73,6 +73,29 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [couponInfo, setCouponInfo]     = useState<Record<string, unknown> | null>(null)
   const [couponAmount, setCouponAmount] = useState('0')
   const [couponChecking, setCouponChecking] = useState(false)
+  const couponRef = useRef<HTMLInputElement>(null)
+  const couponBusy = useRef(false)
+  const [couponMatches, setCouponMatches] = useState<Record<string, unknown>[]>([])
+  const [couponSuggestOpen, setCouponSuggestOpen] = useState(false)
+  const [activeCoupon, setActiveCoupon] = useState(0)
+  const couponListId = useId()
+  const focusCouponOrPayment = () => {
+    if (couponRef.current) { couponRef.current.focus(); couponRef.current.scrollIntoView?.({ block: 'nearest' }) }
+    else focusPaymentField()
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    setCouponMatches([]); setActiveCoupon(0)
+    if (!couponSuggestOpen || couponInfo || couponCode.trim().length < 2) return
+    const timer = setTimeout(async () => {
+      try {
+        const result = await window.api.coupons.suggest(couponCode, cart.customer?.id)
+        if (!cancelled && result.success) setCouponMatches(result.data || [])
+      } catch { /* A full scanned code can still be validated with Apply. */ }
+    }, 100)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [couponCode, couponSuggestOpen, couponInfo, cart.customer?.id])
   // SmartBuy Wallet — tied directly to the selected customer, no code to
   // scan/type (unlike a coupon, a wallet has no separate "bearer").
   const [walletBalance, setWalletBalance] = useState(0)
@@ -114,15 +137,19 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   useEffect(() => {
     window.api.agents?.list?.({ status: 'active' }).then((r: { success: boolean; data?: Record<string, unknown>[] }) => {
       if (r.success) setAgents(r.data || [])
-    })
+    }).catch(() => undefined)
   }, [])
 
-  const agentMatches = agentQuery.trim()
-    ? agents.filter(a =>
-        String(a.code || '').toLowerCase().includes(agentQuery.trim().toLowerCase()) ||
-        String(a.name || '').toLowerCase().includes(agentQuery.trim().toLowerCase())
-      ).slice(0, 8)
-    : []
+  const agentMatches = useMemo(() => {
+    const query = agentQuery.trim().toLowerCase()
+    if (!query) return []
+    const score = (a: Record<string, unknown>) => {
+      const code = String(a.code || '').toLowerCase(), name = String(a.name || '').toLowerCase()
+      return code === query ? 0 : code.startsWith(query) ? 1 : name.startsWith(query) ? 2 : 3
+    }
+    return agents.filter(a => [a.code, a.name].some(value => String(value || '').toLowerCase().includes(query)))
+      .sort((a, b) => score(a) - score(b)).slice(0, 8)
+  }, [agents, agentQuery])
 
   const selectAgent = (a: Record<string, unknown>) => {
     setAgentCode(String(a.code || ''))
@@ -229,9 +256,11 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     : 0
   const totalAfterWallet = Math.max(0, Number((totalAfterCoupon - walletApplied).toFixed(2)))
 
-  const validateCoupon = async () => {
-    const code = couponCode.trim()
-    if (!code) return
+  const validateCoupon = async (selectedCode?: string) => {
+    const code = (selectedCode ?? couponCode).trim()
+    if (!code || couponBusy.current) return
+    couponBusy.current = true
+    setCouponCode(code); setCouponSuggestOpen(false)
     setCouponChecking(true)
     try {
       const res = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> }; error?: string }
@@ -245,7 +274,9 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       const balance = Number(res.data.coupon.balance || 0)
       setCouponAmount(String(Math.min(balance, totalAfterLoyalty).toFixed(2)))
       toast.success(`Coupon OK — balance Rs.${balance.toFixed(2)}`)
-    } finally { setCouponChecking(false) }
+      focusPaymentField()
+    } catch { toast.error('Could not check coupon. Try again.') }
+    finally { couponBusy.current = false; setCouponChecking(false) }
   }
 
   const clearCoupon = () => { setCouponInfo(null); setCouponCode(''); setCouponAmount('0') }
@@ -316,7 +347,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   })
 
   const handleConfirm = useCallback(async () => {
-    if (loading || done || confirmingRef.current) return
+    if (loading || done || confirmingRef.current || couponBusy.current) return
 
     // ── Installment sale: needs a registered customer + a plan, then builds a
     //    proper installment account + schedule (not a plain invoice). ──
@@ -723,7 +754,11 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                     event.preventDefault(); event.stopPropagation()
                     if (event.repeat) return
                     if (agentSuggestOpen && agentMatches.length) selectAgent(agentMatches[activeAgent] || agentMatches[0])
-                    setAgentSuggestOpen(false); focusPaymentField()
+                    setAgentSuggestOpen(false); focusCouponOrPayment()
+                  } else if (event.key === 'Tab' && !event.shiftKey) {
+                    event.preventDefault(); event.stopPropagation()
+                    if (agentSuggestOpen && agentMatches.length) selectAgent(agentMatches[activeAgent] || agentMatches[0])
+                    setAgentSuggestOpen(false); focusCouponOrPayment()
                   } else if (event.key === 'Escape' && agentSuggestOpen && agentMatches.length) {
                     event.preventDefault(); event.stopPropagation(); setAgentSuggestOpen(false)
                   }
@@ -768,7 +803,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                       tabIndex={-1}
                       type="button"
                       onMouseDown={event => event.preventDefault()}
-                      onClick={() => { selectAgent(a); focusPaymentField() }}
+                      onClick={() => { selectAgent(a); focusCouponOrPayment() }}
                       className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-700/40 ${activeAgent === index ? 'bg-slate-700/40' : ''}`}
                     >
                       <span className="font-mono text-xs font-semibold mr-2">{String(a.code)}</span>
@@ -827,16 +862,51 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                 )}
               </div>
               {!couponInfo ? (
-                <div className="flex gap-2">
+                <div className="flex gap-2 relative">
                   <input
+                    ref={couponRef}
+                    role="combobox"
+                    aria-label="Gift coupon code"
+                    aria-autocomplete="list"
+                    aria-expanded={couponSuggestOpen && couponMatches.length > 0}
+                    aria-controls={couponSuggestOpen && couponMatches.length ? couponListId : undefined}
+                    aria-activedescendant={couponSuggestOpen && couponMatches[activeCoupon] ? `${couponListId}-${activeCoupon}` : undefined}
                     type="text"
                     value={couponCode}
-                    onChange={e => setCouponCode(e.target.value.toUpperCase())}
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); validateCoupon() } }}
+                    disabled={couponChecking || loading}
+                    onChange={e => { setCouponCode(e.target.value.toUpperCase()); setCouponSuggestOpen(true) }}
+                    onFocus={() => setCouponSuggestOpen(true)}
+                    onBlur={() => setCouponSuggestOpen(false)}
+                    onKeyDown={e => {
+                      if (e.nativeEvent.isComposing) return
+                      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && couponMatches.length) {
+                        e.preventDefault(); e.stopPropagation(); setCouponSuggestOpen(true)
+                        setActiveCoupon(i => (i + (e.key === 'ArrowDown' ? 1 : -1) + couponMatches.length) % couponMatches.length)
+                      } else if (e.key === 'Escape' && couponSuggestOpen) {
+                        e.preventDefault(); e.stopPropagation(); setCouponSuggestOpen(false)
+                      } else if (e.key === 'Enter' || (e.key === 'Tab' && !e.shiftKey)) {
+                        e.preventDefault(); e.stopPropagation()
+                        if (e.repeat) return
+                        if (couponCode.trim()) void validateCoupon(couponSuggestOpen && couponMatches[activeCoupon] ? String(couponMatches[activeCoupon].code) : undefined)
+                        else focusPaymentField()
+                      }
+                    }}
                     className="input py-1.5 text-sm font-mono flex-1"
                     placeholder="Scan or type CPN-…"
                   />
-                  <button onClick={validateCoupon} disabled={couponChecking || !couponCode.trim()}
+                  {couponSuggestOpen && couponMatches.length > 0 && (
+                    <div id={couponListId} role="listbox" aria-label="Gift coupon suggestions" className="absolute z-20 top-full mt-1 w-full rounded-lg border border-slate-700 bg-surface-800 max-h-48 overflow-y-auto">
+                      {couponMatches.map((coupon, index) => (
+                        <button key={String(coupon.code)} id={`${couponListId}-${index}`} role="option" type="button" tabIndex={-1}
+                          aria-selected={index === activeCoupon} onMouseDown={e => e.preventDefault()}
+                          onClick={() => void validateCoupon(String(coupon.code))}
+                          className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-700 ${index === activeCoupon ? 'bg-slate-700' : ''}`}>
+                          {String(coupon.code)} — {String(coupon.name || 'Gift coupon')} · Rs.{Number(coupon.balance).toFixed(2)}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  <button onClick={() => void validateCoupon()} disabled={couponChecking || !couponCode.trim()}
                     className="btn-secondary btn-sm px-3 disabled:opacity-40">
                     {couponChecking ? 'Checking…' : 'Apply'}
                   </button>

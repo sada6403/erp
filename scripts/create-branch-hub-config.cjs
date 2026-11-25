@@ -15,7 +15,7 @@ function createConfiguration(args) {
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.pathname !== '/' || url.search || url.hash) throw new Error('Hub URL must be an HTTP(S) origin')
   // Direct service is HTTP; HTTPS requires a correctly configured reverse proxy.
   const terminalIds = options['--terminals'].split(',')
-  if (!terminalIds.length || terminalIds.length > 5 || new Set(terminalIds).size !== terminalIds.length || terminalIds.some(id => !/^[A-Za-z0-9_-]{1,40}$/.test(id))) throw new Error('Use 1–5 distinct terminal IDs')
+  if (!terminalIds.length || terminalIds.length > 5 || new Set(terminalIds.map(id => id.toUpperCase())).size !== terminalIds.length || terminalIds.some(id => !/^[A-Za-z0-9_-]{1,40}$/.test(id))) throw new Error('Use 1–5 distinct terminal IDs')
   const output = path.resolve(options['--output'])
   fs.mkdirSync(output) // Intentionally non-recursive: output must be a NEW directory.
   const tokens = Object.fromEntries(terminalIds.map(id => [id, randomBytes(32).toString('hex')]))

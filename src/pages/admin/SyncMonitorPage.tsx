@@ -38,6 +38,28 @@ export default function SyncMonitorPage() {
   const [diagnosing, setDiagnosing] = useState(false)
   const [diagSteps, setDiagSteps] = useState<DiagStep[]>([])
   const [queue, setQueue] = useState<QueueItem[]>([])
+  const [branchHub, setBranchHub] = useState<any>(null)
+  const [hubUrl, setHubUrl] = useState('')
+  const [savingHubUrl, setSavingHubUrl] = useState(false)
+  useEffect(() => {
+    let active=true
+    const refresh=async()=>{
+      try {
+        const result=await window.api.holds.hubStatus()
+        if(active&&result.success){setBranchHub(result.data);setHubUrl(current=>current||result.data.server_url||'')}
+      } catch { /* Older installations can still use cloud synchronization. */ }
+    }
+    void refresh();const timer=setInterval(()=>void refresh(),5000)
+    return()=>{active=false;clearInterval(timer)}
+  },[])
+  const saveHubUrl=async()=>{
+    setSavingHubUrl(true)
+    try {
+      const result=await window.api.holds.updateHubUrl(hubUrl)
+      if(!result.success)throw new Error(result.error)
+      toast.success('Server address saved. Restart POS to reconnect. Pending bills are retained.')
+    }catch(err){toast.error((err as Error).message)}finally{setSavingHubUrl(false)}
+  }
   const [quarantine, setQuarantine] = useState<QuarantineItem[]>([])
   const queueRefreshRunning = useRef(false)
 
@@ -211,6 +233,19 @@ export default function SyncMonitorPage() {
       />
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {branchHub?.configured && (
+          <section className="card p-4 space-y-3" aria-label="Branch server">
+            <h3 className="font-semibold text-sm">Branch server · {branchHub.terminal_id}</h3>
+            <p className="text-sm">LAN: {branchHub.hub_online ? 'Connected' : 'Offline'} · Bills awaiting Hub: {branchHub.billing_pending || 0} · PostgreSQL: {branchHub.postgres?.configured ? branchHub.postgres.connected ? 'Connected' : 'Reconnecting' : 'Not configured'} · Awaiting PostgreSQL: {branchHub.postgres?.pending || 0}</p>
+            {(branchHub.error || branchHub.postgres?.error) && <p role="status" className="text-sm text-yellow-400">{branchHub.error || branchHub.postgres.error}</p>}
+            {canManageSync && <div className="flex gap-2 items-end">
+              <label className="flex-1 text-xs">Branch server address
+                <input aria-label="Branch server address" className="input mt-1" value={hubUrl} onChange={e=>setHubUrl(e.target.value)} placeholder="http://BRANCH-SERVER:4781" />
+              </label>
+              <button className="btn-secondary btn-sm" onClick={()=>void saveHubUrl()} disabled={savingHubUrl || !hubUrl.trim()}>Save address</button>
+            </div>}
+          </section>
+        )}
         {(status.error || Object.keys(status.pull_errors || {}).length > 0) && (
           <div className="card border border-red-400/40 text-sm" role="alert">
             <p className="text-red-400 font-semibold">Synchronization incomplete</p>

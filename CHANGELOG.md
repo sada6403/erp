@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.11.0 - 2026-11-25 - Guided checkout and branch PostgreSQL billing replica
+
+- Agent suggestions prioritize exact codes; Enter/Tab advances agent → gift coupon → payment amount without submitting a sale. Typed coupon prefixes show bounded local suggestions, with customer/date/status filtering and final validation before applying.
+- Reuse the warm keyword search index without rereading the full product catalog on every key; matched products retain current prices and stock.
+- Add opt-in, per-terminal billing outboxes in the existing SQLite transaction, authenticated background delivery to branch Hub SQLite and a retry-safe PostgreSQL invoice snapshot projection. Cloud MySQL and existing product/stock sync remain unchanged.
+- Branch Hub 0.2.0 supports 1–5 terminals, separate terminal invoice prefixes, changeable server addresses, PostgreSQL backlog/status and a Windows setup/rollback guide. PostgreSQL credentials stay on the branch server.
+- Branch PostgreSQL support requires explicit enrollment and branch machine setup; it is not a full ERP database migration or a shared stock/wallet authority.
+
 ## 2.10.3 - 2026-11-25 - HTTPS cloud endpoint recovery
 
 - Automatically migrate only the legacy service HTTP :4001 URL to the existing HTTPS POS API for sync, license refresh and saved settings. Custom server endpoints remain unchanged.

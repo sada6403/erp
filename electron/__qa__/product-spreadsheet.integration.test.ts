@@ -241,6 +241,23 @@ describe('furniture import mapping preview', () => {
 
 
 describe('product SKU save regressions',()=>{
+ it('uses a warm keyword index without reading the full catalog again and refreshes prices',async()=>{
+  const created=await call('products:create',{name:'Fast checkout probe',sku:'FAST-PROBE',selling_price:42})
+  expect(created.success).toBe(true)
+  state.settings.app_settings={business_type:'furniture',keywords_enabled:true}
+  const prepare=vi.spyOn(db,'prepare')
+  try {
+   const first=await call('products:search','Fast checkout probe');expect(first.success).toBe(true)
+   const coldCatalogReads=prepare.mock.calls.filter(([sql])=>String(sql).includes('FROM products p')&&!String(sql).includes('p.name LIKE ?')&&!String(sql).includes('p.id IN (')).length
+   expect(coldCatalogReads).toBeGreaterThan(0)
+   prepare.mockClear()
+   const warm=await call('products:search','Fast checkout');expect(warm.success).toBe(true)
+   expect(warm.data.find((p:any)=>p.id===created.data.id).selling_price).toBe(42)
+   expect(prepare.mock.calls.filter(([sql])=>String(sql).includes('FROM products p')&&!String(sql).includes('p.name LIKE ?')&&!String(sql).includes('p.id IN ('))).toHaveLength(0)
+   db.prepare('UPDATE products SET selling_price=43 WHERE id=?').run(created.data.id)
+   const updated=await call('products:search','Fast checkout');expect(updated.data.find((p:any)=>p.id===created.data.id).selling_price).toBe(43)
+  } finally {prepare.mockRestore();state.settings.app_settings={business_type:'furniture'}}
+ })
  it('persists distinct generated SKUs when two forms submit blank SKU/barcode',async()=>{
   const first=await call('products:create',{name:'Blank SKU first',sku:'',barcode:'',selling_price:10})
   const second=await call('products:create',{name:'Blank SKU second',sku:'',barcode:'',selling_price:20})

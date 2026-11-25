@@ -1,5 +1,6 @@
 import {allocateLoginId,backfillLoginIds,hasLoginIds} from '../services/loginIdentity'
 import type { IpcMain } from 'electron'
+import { claimBillingInvoice } from '../branchHub/billing'
 import { app, dialog, net } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
@@ -1887,6 +1888,7 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         )
       }
 
+      claimBillingInvoice(db,invoiceId)
       db.prepare(`
         INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id, bill_type, status,
           subtotal, discount_amount, tax_amount, total_amount, paid_amount, due_amount, notes)

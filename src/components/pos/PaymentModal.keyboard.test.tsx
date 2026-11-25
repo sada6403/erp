@@ -15,6 +15,7 @@ beforeEach(()=>{
  Object.defineProperty(window,'api',{configurable:true,value:{
   settings:{get:vi.fn().mockResolvedValue({success:true,data:{branch_id:'main'}})},
   agents:{list:vi.fn().mockResolvedValue({success:true,data:[{id:'a',code:'AG1',name:'First agent'},{id:'b',code:'AG2',name:'Second agent'}]})},
+  coupons:{suggest:vi.fn().mockResolvedValue({success:true,data:[{code:'CPN-MAIN-1234',name:'Gift',balance:100}]}),validate:vi.fn().mockResolvedValue({success:true,data:{valid:true,coupon:{code:'CPN-MAIN-1234',balance:100}}})},
   invoices:{create},admin:{installments:{plans:vi.fn().mockResolvedValue({success:true,data:[]})}},customers:{list:vi.fn().mockResolvedValue({success:true,data:[]})},
  }})
 })
@@ -37,12 +38,30 @@ describe('payment keyboard checkout',()=>{
  it('selects an agent with arrows and Enter without submitting payment',async()=>{
   show();const user=userEvent.setup();const agent=screen.getByRole('combobox',{name:'Agent'})
   await user.type(agent,'AG');await screen.findByRole('option',{name:/Second agent/});await user.keyboard('{ArrowDown}{Enter}')
-  expect((agent as HTMLInputElement).value).toContain('AG2');expect(screen.getByRole('textbox',{name:'Amount received'})).toHaveFocus();expect(create).not.toHaveBeenCalled()
+  expect((agent as HTMLInputElement).value).toContain('AG2');expect(screen.getByRole('combobox',{name:'Gift coupon code'})).toHaveFocus();expect(create).not.toHaveBeenCalled()
  })
  it('activates payment method and Cancel buttons with their native Enter actions',async()=>{
   show();const user=userEvent.setup();screen.getByRole('button',{name:'Cash'}).focus();await user.keyboard('{ArrowRight}{Enter}')
   expect(screen.getByRole('button',{name:'Card'})).toHaveAttribute('aria-pressed','true');expect(create).not.toHaveBeenCalled()
   screen.getByRole('button',{name:/Cancel/}).focus();await user.keyboard('{Enter}');expect(close).toHaveBeenCalledTimes(1);expect(create).not.toHaveBeenCalled()
+ })
+ it('advances agent to coupon to amount using Tab, without saving a bill',async()=>{
+  show();const user=userEvent.setup();const agent=screen.getByRole('combobox',{name:'Agent'})
+  await user.type(agent,'AG1');await screen.findByRole('option',{name:/First agent/});await user.tab()
+  expect((agent as HTMLInputElement).value).toContain('First agent');expect(screen.getByRole('combobox',{name:'Gift coupon code'})).toHaveFocus()
+  await user.tab();expect(screen.getByRole('textbox',{name:'Amount received'})).toHaveFocus();expect(create).not.toHaveBeenCalled()
+ })
+ it('suggests a typed coupon, validates the chosen code and advances to amount',async()=>{
+  show();const user=userEvent.setup();await user.type(screen.getByRole('combobox',{name:'Gift coupon code'}),'CPN')
+  await screen.findByRole('option',{name:/CPN-MAIN-1234/});await user.keyboard('{Enter}')
+  await waitFor(()=>expect(window.api.coupons.validate).toHaveBeenCalledWith('CPN-MAIN-1234'))
+  await waitFor(()=>expect(screen.getByRole('textbox',{name:'Amount received'})).toHaveFocus());expect(create).not.toHaveBeenCalled()
+ })
+ it('handles coupon failure and permits retry without confirming payment',async()=>{
+  vi.mocked(window.api.coupons.validate).mockRejectedValueOnce(new Error('IPC offline'))
+  show();const user=userEvent.setup();await user.type(screen.getByRole('combobox',{name:'Gift coupon code'}),'UNKNOWN');await user.keyboard('{Enter}')
+  await waitFor(()=>expect(screen.getByRole('button',{name:'Apply'})).not.toBeDisabled());expect(create).not.toHaveBeenCalled()
+  await user.keyboard('{Enter}');await waitFor(()=>expect(window.api.coupons.validate).toHaveBeenCalledTimes(2))
  })
  it('Escape closes suggestions first, then closes the payment dialog',async()=>{
   show();const user=userEvent.setup();await user.type(screen.getByRole('combobox',{name:'Agent'}),'AG');await screen.findByRole('option',{name:/First agent/})

@@ -1,5 +1,10 @@
 # Branch Hub: install, operation and recovery
 
+**0.2.0 update:** opt-in terminal billing outboxes and branch PostgreSQL invoice
+replication are now available. Use [Windows PostgreSQL setup](BRANCH_POSTGRES_WINDOWS.md)
+for this deployment. The foundation-only description below documents 0.1.x;
+cloud inventory still uses the existing path and Hub cloud forwarding is not enabled.
+
 Implemented on 2026-11-22; manual cashier numbering updated 2026-11-23. This release enables shared branch holds and provides
 an event-transport foundation. Existing sale/stock cloud synchronization is still
 the old path: **billing is not yet routed through this Hub**. The Hub accurately

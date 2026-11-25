@@ -14,11 +14,13 @@ export interface HubConfig {
   port?: number
   terminals: Record<string, string>
   backupDirectory?: string
+  postgresStatus?: () => Record<string, unknown>
 }
 
 export function createBranchHub(config: HubConfig) {
-  if (!Object.entries(config.terminals).length || Object.entries(config.terminals).some(([id, token]) => !/^[A-Za-z0-9_-]{1,40}$/.test(id) || typeof token !== 'string' || token.length < 24)) throw new Error('Configure terminal IDs with unique credentials of at least 24 characters')
+  if (!Object.entries(config.terminals).length || Object.entries(config.terminals).length > 5 || Object.entries(config.terminals).some(([id, token]) => !/^[A-Za-z0-9_-]{1,40}$/.test(id) || typeof token !== 'string' || token.length < 24)) throw new Error('Configure 1–5 terminal IDs with unique credentials of at least 24 characters')
   if (new Set(Object.values(config.terminals)).size !== Object.values(config.terminals).length) throw new Error('Each terminal requires a different credential')
+  if (new Set(Object.keys(config.terminals).map(id => id.toUpperCase())).size !== Object.keys(config.terminals).length) throw new Error('Terminal IDs must be unique ignoring case')
   const store = new BranchHubStore(config.database, config.branchId, config.timezone)
   const sockets = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const live = new Set<WebSocket>()
@@ -46,7 +48,7 @@ export function createBranchHub(config: HubConfig) {
       const terminal = authenticate(req)
       const url = new URL(req.url || '/', 'http://hub.local')
       if (req.method === 'GET' && url.pathname === '/v1/status') {
-        respond(res, 200, { branch_id: config.branchId, hub: 'online', cloud: 'not_configured', pending_cloud: store.pendingCloud(), business_day: businessDay(new Date(), store.timezone) })
+        respond(res, 200, { branch_id: config.branchId, hub: 'online', cloud: 'not_configured', postgres: config.postgresStatus?.() || { configured: false }, pending_cloud: store.pendingCloud(), business_day: businessDay(new Date(), store.timezone) })
         return
       }
       if (req.method === 'GET' && url.pathname === '/v1/holds') { respond(res, 200, { holds: store.listHolds() }); return }

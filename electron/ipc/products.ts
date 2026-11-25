@@ -526,18 +526,22 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         if((store.get('app_settings') as Record<string,unknown> | undefined)?.keywords_enabled===true) {
           const actor=keywordActor()
           const allSql=sql.replace('AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)','')+' ORDER BY p.name'
-          const all=db.prepare(allSql).all(...(!superAdmin&&branchId?[branchId]:[])) as (SearchMaster & Record<string,unknown>)[]
           const fallback=db.prepare(sql+' ORDER BY p.name LIMIT 50').all(...params) as SearchMaster[]
           const revision=(db.prepare('SELECT total_changes() AS n').get() as {n:number}).n
           const cacheKey=JSON.stringify([revision,actor.userId,actor.branchId,actor.terminalId,actor.permissions])
           let index=keywordIndexes.get(db)?.key===cacheKey?keywordIndexes.get(db)!.index:undefined
           if(!index) {
+            const all=db.prepare(allSql).all(...(!superAdmin&&branchId?[branchId]:[])) as (SearchMaster & Record<string,unknown>)[]
             const keywords=new KeywordService(db,actor).snapshot()
             index=new KeywordSearchIndex(all,keywords as unknown as SearchKeyword[],actor)
             keywordIndexes.set(db,{key:cacheKey,index})
           }
           const ids=index.search(query,50,fallback).map(match=>match.productId)
-          const byId=new Map(all.map(row=>[row.id,row]))
+          if (!ids.length) return { success: true, data: [] }
+          // Fetch only matched products on a warm index, with current prices/stock.
+          const matchedSql=sql.replace('AND (p.name LIKE ? OR p.sku LIKE ? OR p.barcode LIKE ?)', `AND p.id IN (${ids.map(()=>'?').join(',')})`)
+          const matched=db.prepare(matchedSql).all(...(!superAdmin&&branchId?[branchId]:[]),...ids) as (SearchMaster & Record<string,unknown>)[]
+          const byId=new Map(matched.map(row=>[row.id,row]))
           return {success:true,data:ids.map(id=>withSellingLayers(byId.get(id)))}
         }
         sql += ' ORDER BY p.name LIMIT 50'

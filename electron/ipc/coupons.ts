@@ -407,6 +407,23 @@ export function registerCouponHandlers(customIpcMain: IpcMain = realIpcMain) {
   })
 
   // List with filters — visible to admins/managers with coupons access
+  // Bounded local checkout lookup; never load the management report on each key.
+  safeHandle(ipcMain, 'coupons:suggest', (_e, query: string, customerId?: string) => {
+    if (!currentUser()) return { success: false, error: 'Sign in to search coupons' }
+    const key = String(query || '').trim().slice(0, 80)
+    if (key.length < 2) return { success: true, data: [] }
+    const prefix = key.replace(/[\\%_]/g, '\\$&') + '%'
+    const data = getDb().prepare(`
+      SELECT code, name, balance FROM coupons
+      WHERE code LIKE ? ESCAPE '\\' AND status = 'active' AND balance > 0.005
+        AND (valid_from IS NULL OR datetime(valid_from) <= datetime('now'))
+        AND (valid_until IS NULL OR datetime(valid_until) >= datetime('now'))
+        AND (customer_id IS NULL OR customer_id = ?)
+      ORDER BY code LIMIT 8
+    `).all(prefix, customerId || null)
+    return { success: true, data }
+  })
+
   safeHandle(ipcMain, 'coupons:list', (_e, filters: Record<string, unknown> = {}) => {
     const perms = currentPermissions()
     if (!perms.all && !perms.coupons) {

@@ -24,6 +24,13 @@ export class TerminalHubClient {
   private lastError = ''
   private lastHeartbeat = 0
   private activeRecalls = 0
+  private billingSync?: () => Promise<void>
+  private postgres: Record<string, unknown> = { configured: false }
+  setBillingSync(sync: () => Promise<void>) { this.billingSync = sync }
+  async sendBillingSnapshot(event: { event_id: string; kind: 'invoice.snapshot'; payload: unknown }): Promise<boolean> {
+    const response = await this.request<{ acknowledged: string[] }>('/v1/events', { events: [event] })
+    return response.acknowledged?.includes(event.event_id) === true
+  }
 
   constructor(readonly config: TerminalHubConfig, filename: string, private changed = () => {}) {
     const url = new URL(config.url)
@@ -47,10 +54,12 @@ export class TerminalHubClient {
         payload TEXT, error TEXT, created_at TEXT NOT NULL);
     `)
     const identity = this.db.prepare('SELECT * FROM terminal_hub_identity WHERE id=1').get() as Record<string, string> | undefined
-    if (identity && (identity.branch_id !== config.branchId || identity.terminal_id !== config.terminalId || identity.hub_url !== config.url)) {
+    if (identity && (identity.branch_id !== config.branchId || identity.terminal_id !== config.terminalId)) {
       this.db.close(); throw new Error('Terminal Hub database identity cannot be reassigned; recover pending holds first')
     }
     this.db.prepare('INSERT OR IGNORE INTO terminal_hub_identity VALUES (1,?,?,?)').run(config.branchId, config.terminalId, config.url)
+    // Address changes retain all pending work; branch/terminal identity stays fixed.
+    this.db.prepare('UPDATE terminal_hub_identity SET hub_url=? WHERE id=1').run(config.url)
   }
 
   private headers() { return { authorization: `Bearer ${this.config.token}`, 'x-pos-terminal': this.config.terminalId, 'x-pos-branch': this.config.branchId } }
@@ -89,7 +98,7 @@ export class TerminalHubClient {
     const recoverable = (this.db.prepare("SELECT count(*) AS n FROM terminal_hub_recalls WHERE state='ready'").get() as { n: number }).n
     const blocked = (this.db.prepare("SELECT count(*) AS n FROM terminal_hub_holds WHERE state='blocked'").get() as { n: number }).n
     const last = this.db.prepare("SELECT coalesce(remote_number,hold_number) AS number FROM terminal_hub_holds WHERE state!='consumed' ORDER BY created_at DESC,rowid DESC LIMIT 1").get() as { number: string } | undefined
-    return { configured: true, hub_online: this.online, cloud: this.cloud, pending, recoverable, blocked, last_hold_number: last?.number || '', terminal_id: this.config.terminalId, error: this.lastError }
+    return { configured: true, hub_online: this.online, cloud: this.cloud, postgres: this.postgres, pending, recoverable, blocked, last_hold_number: last?.number || '', terminal_id: this.config.terminalId, error: this.lastError }
   }
 
   createHold(payload: Record<string, unknown>) {
@@ -205,9 +214,10 @@ export class TerminalHubClient {
     if (this.running) return
     this.running = true
     try {
-      const status = await this.request<{ branch_id: string; cloud: string }>('/v1/status')
+      const status = await this.request<{ branch_id: string; cloud: string; postgres?: Record<string, unknown> }>('/v1/status')
       if (status.branch_id !== this.config.branchId) throw new Error('Hub branch identity mismatch')
       this.online = true; this.cloud = status.cloud; this.lastError = ''; this.failures = 0
+      this.postgres = status.postgres || { configured: false }
       this.connectSocket()
       if (this.socket && Date.now() - this.lastHeartbeat > 30_000) this.socket.terminate()
       const pending = this.db.prepare("SELECT * FROM terminal_hub_recalls WHERE state='pending' LIMIT 20").all() as Record<string, unknown>[]
@@ -233,6 +243,8 @@ export class TerminalHubClient {
           else throw err
         }
       }
+      // Billing replication has a separate durable outbox and must not block holds.
+      if (this.billingSync) await this.billingSync().catch(() => { this.lastError = 'Invoice replication pending; verify branch Hub/PostgreSQL status' })
       const response = await this.request<{ holds: (HubHold & { overdue?: boolean })[] }>('/v1/holds')
       this.hubHolds = response.holds
     } catch (err) {

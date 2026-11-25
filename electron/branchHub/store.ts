@@ -55,6 +55,8 @@ export class BranchHubStore {
         kind TEXT NOT NULL, payload TEXT NOT NULL, payload_hash TEXT NOT NULL, created_at TEXT NOT NULL);
       CREATE UNIQUE INDEX IF NOT EXISTS hub_paid_bill_id ON hub_events(json_extract(payload,'$.bill_id')) WHERE kind='bill.paid';
       CREATE UNIQUE INDEX IF NOT EXISTS hub_paid_bill_number ON hub_events(json_extract(payload,'$.bill_number')) WHERE kind='bill.paid';
+      CREATE INDEX IF NOT EXISTS hub_snapshot_invoice ON hub_events(json_extract(payload,'$.bill_id')) WHERE kind='invoice.snapshot';
+      CREATE INDEX IF NOT EXISTS hub_snapshot_number ON hub_events(json_extract(payload,'$.bill_number')) WHERE kind='invoice.snapshot';
       CREATE TABLE IF NOT EXISTS hub_stock_balances (
         product_id TEXT NOT NULL, variant_id TEXT NOT NULL DEFAULT '', quantity REAL NOT NULL,
         PRIMARY KEY(product_id,variant_id));
@@ -135,11 +137,11 @@ export class BranchHubStore {
 
   /** Transport contract for future billing cutover. Append-only delta events,
    * not absolute legacy stock rows. Inbox, projection and cloud outbox commit together. */
-  appendEvents(terminal: string, events: { event_id: string; kind: 'stock.delta' | 'bill.paid'; payload: Record<string, unknown> }[]): string[] {
+  appendEvents(terminal: string, events: { event_id: string; kind: 'stock.delta' | 'bill.paid' | 'invoice.snapshot'; payload: Record<string, unknown> }[]): string[] {
     if (!Array.isArray(events) || !events.length || events.length > 500) throw new HubError('Batch must contain 1–500 events')
     return this.db.transaction(() => {
       for (const event of events) {
-        if (!event || typeof event.event_id !== 'string' || !event.event_id || event.event_id.length > 100 || !['stock.delta', 'bill.paid'].includes(event.kind) || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) throw new HubError('Invalid event')
+        if (!event || typeof event.event_id !== 'string' || !event.event_id || event.event_id.length > 100 || !['stock.delta', 'bill.paid', 'invoice.snapshot'].includes(event.kind) || !event.payload || typeof event.payload !== 'object' || Array.isArray(event.payload)) throw new HubError('Invalid event')
         const hash = digest({ kind: event.kind, payload: event.payload })
         const previous = this.db.prepare('SELECT terminal_id,payload_hash FROM hub_events WHERE event_id=?').get(event.event_id) as { terminal_id: string; payload_hash: string } | undefined
         if (previous) {
@@ -152,6 +154,16 @@ export class BranchHubStore {
           if (!Number.isSafeInteger(Math.round(delta * 1e6)) || Math.abs(delta * 1e6 - Math.round(delta * 1e6)) > 0.001) throw new HubError('Stock delta supports at most six decimal places within the safe numeric range')
           this.db.prepare('INSERT INTO hub_stock_balances VALUES (?,?,?) ON CONFLICT(product_id,variant_id) DO UPDATE SET quantity=round(quantity+excluded.quantity,6)')
             .run(product_id, variant_id || '', delta)
+        } else if (event.kind === 'invoice.snapshot') {
+          const p = event.payload
+          const invoice = p.invoice as Record<string, unknown> | undefined
+          if (p.branch_id !== this.branchId || !Number.isSafeInteger(p.revision) || Number(p.revision) < 1 ||
+            typeof p.bill_id !== 'string' || !p.bill_id || typeof p.bill_number !== 'string' || !p.bill_number ||
+            !invoice || invoice.id !== p.bill_id || invoice.invoice_number !== p.bill_number || invoice.branch_id !== this.branchId ||
+            !Array.isArray(p.items) || !Array.isArray(p.payments) ||
+            [...p.items, ...p.payments].some(row => !row || typeof row !== 'object' || row.invoice_id !== p.bill_id)) throw new HubError('Invalid branch invoice snapshot')
+          const owner = this.db.prepare("SELECT terminal_id FROM hub_events WHERE kind='invoice.snapshot' AND (json_extract(payload,'$.bill_id')=? OR json_extract(payload,'$.bill_number')=?) LIMIT 1").get(p.bill_id, p.bill_number) as { terminal_id: string } | undefined
+          if (owner && owner.terminal_id !== terminal) throw new HubError('Invoice belongs to another terminal; verify counter prefixes', 409)
         } else {
           if (typeof event.payload.bill_id !== 'string' || !event.payload.bill_id || typeof event.payload.bill_number !== 'string' || !event.payload.bill_number || !Array.isArray(event.payload.items) || !event.payload.items.length) throw new HubError('Invalid paid bill event')
           const collision = this.db.prepare("SELECT event_id FROM hub_events WHERE kind='bill.paid' AND (json_extract(payload,'$.bill_id')=? OR json_extract(payload,'$.bill_number')=?)").get(event.payload.bill_id, event.payload.bill_number)

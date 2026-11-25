@@ -8,15 +8,16 @@ import { createBranchHub } from './server'
 import { BranchHubStore } from './store'
 import { TerminalHubClient, type TerminalHubConfig } from './client'
 import { LocalNumberedHolds } from './localHolds'
+import { initializeBillingOutbox, flushBillingSnapshots, claimBillingInvoice } from './billing'
 
-const tokens = { T01: 'a'.repeat(32), T02: 'b'.repeat(32) }
+const tokens = { T01: 'a'.repeat(32), T02: 'b'.repeat(32), T03: 'c'.repeat(32), T04: 'd'.repeat(32), T05: 'e'.repeat(32) }
 const cart = { items: [{ product: { id: 'milk', name: 'Milk' }, quantity: 2 }], bill_type: 'RETAIL', total_amount: 100, customer_name: 'Walk-in' }
 let directory: string
 let hub: ReturnType<typeof createBranchHub>
 let url: string
 let clients: TerminalHubClient[]
-const config = (terminalId: 'T01' | 'T02'): TerminalHubConfig => ({ url, terminalId, branchId: 'BR01', token: tokens[terminalId] })
-function terminal(id: 'T01' | 'T02', notify = () => {}) {
+const config = (terminalId: keyof typeof tokens): TerminalHubConfig => ({ url, terminalId, branchId: 'BR01', token: tokens[terminalId] })
+function terminal(id: keyof typeof tokens, notify = () => {}) {
   const client = new TerminalHubClient(config(id), path.join(directory, `${id}.db`), notify)
   clients.push(client)
   return client
@@ -38,6 +39,49 @@ afterEach(async () => {
 })
 
 describe('Branch Hub with real SQLite and LAN transport', () => {
+  it('accepts 100 invoices from five concurrent terminals without duplicate identities', async () => {
+    await Promise.all((Object.keys(tokens) as (keyof typeof tokens)[]).map(async terminalId=>{
+      const client=terminal(terminalId)
+      for(let revision=1;revision<=20;revision++){
+        const id=`${terminalId}-${revision}`,number=`BR01-${terminalId}-INV-${revision}`
+        const event={event_id:`${terminalId}:invoice:${revision}`,kind:'invoice.snapshot' as const,payload:{
+          branch_id:'BR01',bill_id:id,bill_number:number,revision,
+          invoice:{id,invoice_number:number,branch_id:'BR01',status:'completed'},
+          items:[{id:`line-${id}`,invoice_id:id}],payments:[],
+        }}
+        expect(await client.sendBillingSnapshot(event)).toBe(true)
+        expect(await client.sendBillingSnapshot(event)).toBe(true)
+      }
+    }))
+    expect(hub.store.changes(0).events).toHaveLength(100)
+    expect(hub.store.db.prepare("SELECT count(DISTINCT json_extract(payload,'$.bill_id')) AS n FROM hub_events").get()).toEqual({n:100})
+  })
+  it('delivers an invoice snapshot over authenticated LAN without a cloud connection', async () => {
+    const billing=new Database(':memory:'),client=terminal('T01')
+    billing.exec(`CREATE TABLE invoices(id TEXT,invoice_number TEXT,branch_id TEXT,status TEXT);
+      CREATE TABLE invoice_items(id TEXT,invoice_id TEXT);CREATE TABLE payments(id TEXT,invoice_id TEXT);`)
+    initializeBillingOutbox(billing,'BR01','T01')
+    try {
+      billing.transaction(()=>{
+        claimBillingInvoice(billing,'offline-sale')
+        billing.prepare('INSERT INTO invoices VALUES(?,?,?,?)').run('offline-sale','BR01-T01-INV-1','BR01','completed')
+        billing.prepare('INSERT INTO invoice_items VALUES(?,?)').run('line1','offline-sale')
+      })()
+      client.setBillingSync(()=>flushBillingSnapshots(billing,event=>client.sendBillingSnapshot(event)))
+      await client.syncOnce()
+      expect(billing.prepare('SELECT count(*) AS n FROM branch_billing_outbox').get()).toEqual({n:0})
+      expect(hub.store.changes(0).events[0].kind).toBe('invoice.snapshot')
+      expect((hub.store.changes(0).events[0].payload as any).items).toHaveLength(1)
+    } finally {await client.close();billing.close()}
+  })
+  it('retains pending holds when the same branch server address changes', async () => {
+    const client=terminal('T01');const held=client.createHold({...cart,hold_number:'101'})
+    await client.close()
+    const changed=new TerminalHubClient({...config('T01'),url:url.replace('127.0.0.1','localhost')},path.join(directory,'T01.db'))
+    clients.push(changed)
+    expect(changed.listHolds().some(row=>row.id===held.id)).toBe(true)
+    await changed.syncOnce();expect(changed.status().hub_online).toBe(true)
+  })
   it('preserves cashier-entered numbers through sync, prevents duplicates and allows reuse after resume', async () => {
     const t1 = terminal('T01'), t2 = terminal('T02')
     expect(t1.createHold({ ...cart, hold_number: '25' }).hold_number).toBe('25')

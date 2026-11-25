@@ -1,4 +1,5 @@
 import type { IpcMain } from 'electron'
+import { claimBillingInvoice } from '../branchHub/billing'
 import { dialog } from 'electron'
 import { getDb } from '../database'
 import crypto from 'crypto'
@@ -4035,6 +4036,7 @@ export function registerChitHandlers(ipcMain: IpcMain) {
         paid_amount: totalAmount, due_amount: 0,
         notes: notesParts.join(' — '),
       }
+      claimBillingInvoice(db,invoiceId)
       db.prepare(`
         INSERT INTO invoices (id, invoice_number, branch_id, customer_id, cashier_id, bill_type, status,
           subtotal, discount_amount, tax_amount, total_amount, paid_amount, due_amount, notes)
