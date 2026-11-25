@@ -664,6 +664,7 @@ export default function POSPage() {
       {/* Modals */}
       {showPayment && (
         <PaymentModal
+          keyboardActive={!showCustomer}
           invoiceNumber={invoiceNumber}
           initialMethod={paymentInitialMethod}
           billType={cart.billType}

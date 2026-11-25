@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.10.1 - 2026-11-25 - Keyboard checkout and cloud batch sync repair
+
+- Payment dialog: reliable amount focus, contained Tab/Shift+Tab navigation, agent Arrow/Enter selection, Ctrl+1-4 and F9/F10 method selection, F2 customer picker, and native Enter on buttons.
+- Prevent repeated Enter from creating duplicate payments; suspend parent shortcuts under the customer picker and keep the footer visible while payment fields scroll.
+- Add the missing cloud physical-batch identity schema through additive tenant compatibility; existing receipt quantities and costs are preserved.
+- Make Windows-1252 decoding consistent between Electron/Node 20 and newer development runtimes.
+- Fix standalone superadmin password-input imports so production deployment does not depend on desktop node_modules.
+
 ## 2.10.0 - 2026-11-24
 
 - Keep email and add unique, case-insensitive User IDs with backup-first legacy ID generation. Login accepts either identifier; cashier passwords, admin identity editing and identifier-only remembering are supported.

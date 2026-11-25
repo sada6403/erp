@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useId, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
@@ -18,6 +18,7 @@ interface Props {
   billType: BillType
   onClose: () => void
   onSuccess: () => void
+  keyboardActive?: boolean
 }
 
 const PAYMENT_METHODS: { value: PaymentMethod; label: string; icon: React.ReactNode; key: string }[] = [
@@ -42,7 +43,7 @@ const BILL_TYPE_LABELS: Record<BillType, string> = {
 // Denomination buttons for cash
 const CASH_DENOMS = [500, 1000, 2000, 5000, 10000]
 
-export default function PaymentModal({ invoiceNumber, billType, onClose, onSuccess, initialMethod = 'cash' }: Props) {
+export default function PaymentModal({ invoiceNumber, billType, onClose, onSuccess, initialMethod = 'cash', keyboardActive = true }: Props) {
   const cart = useCartStore()
   const { user } = useAuthStore()
   const [method, setMethod]             = useState<PaymentMethod>(initialMethod)
@@ -77,7 +78,22 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [walletBalance, setWalletBalance] = useState(0)
   const [walletAmount, setWalletAmount]   = useState('0')
   const [useWallet, setUseWallet]         = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const confirmingRef = useRef(false)
+  const [activeAgent, setActiveAgent] = useState(0)
+  const agentListId = useId()
   const receivedRef = useRef<HTMLInputElement>(null)
+  const focusPaymentField = useCallback(() => {
+    const field = receivedRef.current || dialogRef.current?.querySelector<HTMLElement>('[data-payment-primary]')
+    field?.focus()
+    if (field instanceof HTMLInputElement && field.type !== 'date') field.select()
+    field?.scrollIntoView?.({ block: 'nearest' })
+  }, [])
+  const chooseMethod = (next: PaymentMethod) => {
+    if (loading || confirmingRef.current) return
+    if (next === method) focusPaymentField()
+    else setMethod(next)
+  }
   const navigate    = useNavigate()
   const [createdInvoiceId, setCreatedInvoiceId] = useState<string | null>(null)
   const [appSettings, setAppSettings] = useState<Record<string, unknown>>({})
@@ -91,8 +107,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const isSupermarket = appSettings.business_type === 'supermarket'
 
   useEffect(() => {
-    receivedRef.current?.focus()
-    receivedRef.current?.select()
+    const previous = document.activeElement as HTMLElement | null
+    return () => { if (previous?.isConnected) previous.focus() }
   }, [])
 
   useEffect(() => {
@@ -180,6 +196,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const isQuotation = billType === 'QUOTATION'
   const isCredit    = billType === 'CREDIT'
   const isRetail    = billType === 'RETAIL'
+
+  useEffect(() => { if (keyboardActive) focusPaymentField() }, [method, done, keyboardActive, focusPaymentField])
 
   // Loyalty discount computed from redeemPoints
   const loyaltyCfg          = loyaltyBalance?.config
@@ -298,7 +316,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   })
 
   const handleConfirm = useCallback(async () => {
-    if (loading) return
+    if (loading || done || confirmingRef.current) return
 
     // ── Installment sale: needs a registered customer + a plan, then builds a
     //    proper installment account + schedule (not a plain invoice). ──
@@ -306,6 +324,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       if (!cart.customer) { toast.error('Installment requires a customer — press F2 to select or add one'); return }
       if (!planId) { toast.error('Select an installment plan'); return }
       const plan = plans.find(p => String(p.id) === planId)
+      confirmingRef.current = true
       setLoading(true)
       try {
         const settings = await window.api.settings.get()
@@ -331,7 +350,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
         window.dispatchEvent(new Event('pos:stock-changed'))
         setReceiptPayload(buildPayload(res.data?.invoice_number || invoiceNumber))
         setDone(true)
-      } catch (err) { toast.error((err as Error).message) } finally { setLoading(false) }
+      } catch (err) { toast.error((err as Error).message) } finally { confirmingRef.current = false; setLoading(false) }
       return
     }
 
@@ -350,6 +369,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
       return
     }
 
+    confirmingRef.current = true
     setLoading(true)
     try {
       const settings = await window.api.settings.get()
@@ -442,9 +462,10 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     } catch (err: unknown) {
       toast.error((err as Error).message)
     } finally {
+      confirmingRef.current = false
       setLoading(false)
     }
-  }, [loading, isRetail, isCredit, isQuotation, method, receivedAmount, reference,
+  }, [loading, done, isRetail, isCredit, isQuotation, method, receivedAmount, reference,
       cart, billType, validUntil, dueDate,
       effectivePaidAmount, invoiceNumber, user, agentCode, agentName, agentId,
       planId, downPayment, plans, couponApplied, couponInfo, totalAfterCoupon,
@@ -474,24 +495,47 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
     finally { setEmailing(false) }
   }, [receiptPayload])
 
+  const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!keyboardActive || event.defaultPrevented || event.nativeEvent.isComposing) return
+    const target = event.target as HTMLElement
+    if (event.key === 'Tab') {
+      const fields = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled):not([type="hidden"]),select:not(:disabled),textarea:not(:disabled),[tabindex="0"]'))
+        .filter(field => (field.getAttribute('tabindex') == null || Number(field.getAttribute('tabindex')) >= 0) && !field.closest('[hidden],[inert]'))
+      const first = fields[0], last = fields[fields.length - 1]
+      if (first && ((event.shiftKey && target === first) || (!event.shiftKey && target === last))) {
+        event.preventDefault(); (event.shiftKey ? last : first).focus()
+      }
+      return
+    }
+    if (event.key === 'Escape' && loading) { event.preventDefault(); event.stopPropagation(); return }
+    if (event.key !== 'Enter') return
+    if (event.repeat) { event.preventDefault(); event.stopPropagation(); return }
+    // Native buttons keep their own Enter action (especially Cancel and methods).
+    if (!event.ctrlKey && !event.metaKey && target.closest('button,select,textarea')) return
+    if (event.ctrlKey || event.metaKey || target === event.currentTarget) {
+      event.preventDefault(); event.stopPropagation()
+      if (done) onSuccess(); else void handleConfirm()
+    }
+  }
+
   // Keyboard shortcuts
   useKeyboard([
-    { key: 'Escape', handler: () => done ? onSuccess() : onClose() },
-    { key: 'F9', handler: () => { if (!done) { setMethod('cash'); receivedRef.current?.focus(); receivedRef.current?.select() } } },
-    { key: 'F10', handler: () => { if (!done) { setMethod('card'); receivedRef.current?.focus(); receivedRef.current?.select() } } },
+    { key: 'Escape', handler: () => { if (!loading && !confirmingRef.current) { if (done) onSuccess(); else onClose() } } },
+    { key: 'F2', handler: () => { if (!done && !loading) window.dispatchEvent(new Event('pos:open-customer')) } },
+    { key: 'F9', handler: () => { if (!done) { chooseMethod('cash') } } },
+    { key: 'F10', handler: () => { if (!done) { chooseMethod('card') } } },
     // Payment method shortcuts (work even when amount input is focused — ctrlKey bypass)
-    { key: '1', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('cash');          receivedRef.current?.select() } } },
-    { key: '2', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('card');          receivedRef.current?.select() } } },
-    { key: '3', ctrl: true, handler: () => { if (!done && isRetail) { setMethod('bank_transfer'); receivedRef.current?.select() } } },
-    { key: '4', ctrl: true, handler: () => { if (!done && isRetail && !isSupermarket) { setMethod('installment');   receivedRef.current?.select() } } },
-    // Confirm (fires only when NOT in an input — handled directly on input below)
-    { key: 'Enter', handler: () => { if (done) onSuccess(); else handleConfirm() } },
+    { key: '1', ctrl: true, handler: () => { if (!done && isRetail) { chooseMethod('cash') } } },
+    { key: '2', ctrl: true, handler: () => { if (!done && isRetail) { chooseMethod('card') } } },
+    { key: '3', ctrl: true, handler: () => { if (!done && isRetail) { chooseMethod('bank_transfer') } } },
+    { key: '4', ctrl: true, handler: () => { if (!done && isRetail && !isSupermarket) { chooseMethod('installment') } } },
+    ...(done ? [{ key: 'F1', handler: onSuccess }] : []),
     // Success screen print shortcuts
     { key: 'p', handler: () => { if (done) handlePrint('thermal') } },
     { key: 'd', handler: () => { if (done) handlePrint('dot') } },
     { key: 'a', handler: () => { if (done) handlePrint('a4') } },
     { key: 'e', handler: () => { if (done) handleEmail() } },
-  ])
+  ], keyboardActive)
 
   // ── Success screen ──────────────────────────────────────────────────────────
   if (done) {
@@ -500,7 +544,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
 
     return (
       <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-        <div className="bg-surface-800 rounded-2xl p-8 w-full max-w-md text-center animate-slide-up border border-slate-700">
+        <div ref={dialogRef} role="dialog" aria-modal={keyboardActive} aria-label="Payment complete" onKeyDown={handleDialogKeyDown} className="bg-surface-800 rounded-2xl p-8 w-full max-w-md text-center animate-slide-up border border-slate-700">
           <div className={`w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4
             ${isPendingApproval ? 'bg-amber-500/20' : 'bg-green-500/20'}`}>
             {isPendingApproval
@@ -586,7 +630,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
           </div>
 
           {/* New invoice CTA — primary action */}
-          <button onClick={onSuccess} className="btn-primary w-full btn-lg mt-3 gap-2">
+          <button data-payment-primary onClick={onSuccess} className="btn-primary w-full btn-lg mt-3 gap-2">
             <CheckCircle2 size={16} />
             New Invoice
             <kbd className="kbd text-[9px] ml-auto">Enter</kbd>
@@ -600,10 +644,10 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   // ── Payment form ────────────────────────────────────────────────────────────
   return (
     <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-surface-800 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col animate-slide-up border border-slate-700">
+      <div ref={dialogRef} role="dialog" aria-modal={keyboardActive} aria-label={BILL_TYPE_LABELS[billType]} onKeyDown={handleDialogKeyDown} className="bg-surface-800 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col animate-slide-up border border-slate-700">
 
         {/* Header */}
-        <div className={`flex items-center justify-between px-6 py-4 border-b border-slate-700 rounded-t-2xl
+        <div className={`shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-700 rounded-t-2xl
           ${isQuotation ? 'bg-amber-900/20' : isCredit ? 'bg-rose-900/20' : ''}`}>
           <div className="flex items-center gap-2">
             {isQuotation ? <ClipboardList size={18} className="text-amber-400" /> :
@@ -615,15 +659,15 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
             <span className="text-xs font-mono" style={{ color: 'var(--text-3)' }}>{invoiceNumber}</span>
             <div className="flex items-center gap-1 text-xs" style={{ color: 'var(--text-3)' }}>
               <Keyboard size={11} />
-              <span>Ctrl+1-5 = method</span>
+              <span>{isSupermarket ? 'Ctrl+1-3' : 'Ctrl+1-4'} = method ? Tab = next</span>
             </div>
-            <button onClick={onClose} title="Cancel (ESC)">
+            <button type="button" disabled={loading} onClick={onClose} aria-label="Close payment" title="Cancel (ESC)">
               <X size={20} className="text-[var(--text-3)] hover:text-[var(--text-1)]" />
             </button>
           </div>
         </div>
 
-        <div className="p-6 space-y-4 overflow-y-auto">
+        <div className="min-h-0 flex-1 p-6 space-y-4 overflow-y-auto">
           {/* Total display */}
           <div className="rounded-xl p-4 text-center border border-slate-700" style={{ background: 'var(--bg-soft)' }}>
             <p className="text-sm mb-1" style={{ color: 'var(--text-3)' }}>
@@ -662,9 +706,32 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
               <input
                 type="text"
                 value={agentQuery}
+                role="combobox"
+                aria-label="Agent"
+                aria-autocomplete="list"
+                aria-expanded={agentSuggestOpen && agentMatches.length > 0}
+                aria-controls={agentSuggestOpen && agentMatches.length > 0 ? agentListId : undefined}
+                aria-activedescendant={agentSuggestOpen && agentMatches[activeAgent] ? `${agentListId}-${activeAgent}` : undefined}
+                onKeyDown={event => {
+                  if (event.nativeEvent.isComposing) return
+                  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && agentMatches.length) {
+                    event.preventDefault(); event.stopPropagation()
+                    const next = !agentSuggestOpen ? 0 : (activeAgent + (event.key === 'ArrowDown' ? 1 : -1) + agentMatches.length) % agentMatches.length
+                    setAgentSuggestOpen(true); setActiveAgent(next)
+                    document.getElementById(`${agentListId}-${next}`)?.scrollIntoView?.({ block: 'nearest' })
+                  } else if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey) {
+                    event.preventDefault(); event.stopPropagation()
+                    if (event.repeat) return
+                    if (agentSuggestOpen && agentMatches.length) selectAgent(agentMatches[activeAgent] || agentMatches[0])
+                    setAgentSuggestOpen(false); focusPaymentField()
+                  } else if (event.key === 'Escape' && agentSuggestOpen && agentMatches.length) {
+                    event.preventDefault(); event.stopPropagation(); setAgentSuggestOpen(false)
+                  }
+                }}
                 onChange={e => {
                   const v = e.target.value
                   setAgentQuery(v)
+                  setActiveAgent(0)
                   setAgentSuggestOpen(true)
                   // Typing after a selection (or freehand, for an agent not
                   // yet registered) clears the link — treated as free text.
@@ -688,16 +755,21 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                 </button>
               )}
               {agentSuggestOpen && agentMatches.length > 0 && (
-                <div
+                <div id={agentListId} role="listbox" aria-label="Agent suggestions"
                   className="absolute z-10 mt-1 w-full rounded-lg border shadow-lg max-h-48 overflow-y-auto"
                   style={{ background: 'var(--bg-card)', borderColor: 'var(--border)' }}
                 >
-                  {agentMatches.map(a => (
+                  {agentMatches.map((a, index) => (
                     <button
                       key={String(a.id)}
+                      id={`${agentListId}-${index}`}
+                      role="option"
+                      aria-selected={activeAgent === index}
+                      tabIndex={-1}
                       type="button"
-                      onMouseDown={() => selectAgent(a)}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-slate-700/40"
+                      onMouseDown={event => event.preventDefault()}
+                      onClick={() => { selectAgent(a); focusPaymentField() }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-700/40 ${activeAgent === index ? 'bg-slate-700/40' : ''}`}
                     >
                       <span className="font-mono text-xs font-semibold mr-2">{String(a.code)}</span>
                       <span style={{ color: 'var(--text-2)' }}>{String(a.name)}</span>
@@ -907,11 +979,18 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
           {isRetail && (
             <>
               <div>
-                <label className="label">Payment Method <span className="text-[10px] font-normal ml-1" style={{ color: 'var(--text-3)' }}>(Ctrl+1 to 5)</span></label>
+                <label className="label">Payment Method <span className="text-[10px] font-normal ml-1" style={{ color: 'var(--text-3)' }}>({isSupermarket ? 'Ctrl+1 to 3' : 'Ctrl+1 to 4'})</span></label>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                   {PAYMENT_METHODS.filter(m => !isSupermarket || m.value !== 'installment').map(m => (
-                    <button key={m.value} onClick={() => { setMethod(m.value); receivedRef.current?.select() }}
-                      className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl text-xs font-medium transition-all border-2 min-h-[68px] relative
+                    <button key={m.value} type="button" disabled={loading} aria-label={m.label} aria-pressed={method === m.value} onClick={() => chooseMethod(m.value)}
+                      onKeyDown={event => {
+                        if (!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(event.key)) return
+                        event.preventDefault(); event.stopPropagation()
+                        const buttons = Array.from(event.currentTarget.parentElement!.querySelectorAll<HTMLButtonElement>('button'))
+                        const next = (buttons.indexOf(event.currentTarget) + (['ArrowLeft','ArrowUp'].includes(event.key) ? -1 : 1) + buttons.length) % buttons.length
+                        buttons[next].focus()
+                      }}
+                      className={`flex flex-col items-center justify-center gap-1.5 p-3 rounded-xl text-xs font-medium transition-all border-2 min-h-[68px] relative focus-visible:ring-2 focus-visible:ring-brand-400
                         ${method === m.value
                           ? 'border-brand-500 bg-brand-500/10 text-brand-400'
                           : 'border-slate-700 bg-surface-900 text-slate-400 hover:border-slate-600'}`}
@@ -933,19 +1012,19 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                   </label>
                   <NumberInput
                     ref={receivedRef}
+                    aria-label="Amount received"
                     value={received}
                     onChange={e => setReceived(e.target.value)}
                     onKeyDown={e => {
                       if (e.key === 'Enter') {
                         e.preventDefault()
                         e.stopPropagation()
-                        handleConfirm()
+                        if (!e.repeat) void handleConfirm()
                       }
                     }}
                     className="input text-2xl font-bold text-center h-14"
                     min={totalAfterWallet}
                     step="0.01"
-                    autoFocus
                   />
                 </div>
               )}
@@ -955,7 +1034,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                 <div className="space-y-3">
                   <div>
                     <label className="label">Customer <span className="text-red-500">*</span></label>
-                    <select
+                    <select data-payment-primary aria-label="Installment customer"
                       className="input"
                       value={(cart.customer as Record<string, string> | null)?.id || ''}
                       onChange={e => onInstallmentCustomerChange(e.target.value)}
@@ -1028,7 +1107,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                   <input type="text" value={reference} onChange={e => setReference(e.target.value)}
                     className="input"
                     placeholder="e.g. AUTH123456"
-                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); handleConfirm() } }}
+                    onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (!e.repeat) void handleConfirm() } }}
                   />
                 </div>
               )}
@@ -1047,11 +1126,12 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
         </div>
 
         {/* Footer */}
-        <div className="px-6 pb-6 flex gap-3">
-          <button onClick={onClose} className="btn-secondary flex-1" tabIndex={0}>
+        <div className="shrink-0 px-6 pt-3 pb-6 flex gap-3">
+          <button type="button" disabled={loading} onClick={onClose} className="btn-secondary flex-1" tabIndex={0}>
             Cancel <kbd className="kbd text-[9px] ml-1">ESC</kbd>
           </button>
           <button
+            data-payment-primary
             onClick={handleConfirm}
             disabled={loading || (isCredit && !cart.customer)}
             tabIndex={0}
