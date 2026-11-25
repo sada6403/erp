@@ -1,0 +1,18 @@
+[
+  {
+    "feed": "https://updates.nfplantation.com/",
+    "version": "2.10.1",
+    "installerStatus": 200,
+    "blockmapStatus": 200,
+    "size": 103218758,
+    "sha512": "z2ibBaV9ajIBgeZSOpov8Bvj8S5z/qBiUmlhDJkiOTTlLJjk4FlIBXjRYXY7i81QpuPQxnTjW+AQSOrLXf72rw=="
+  },
+  {
+    "feed": "http://72.61.115.222/updates/",
+    "version": "2.10.1",
+    "installerStatus": 200,
+    "blockmapStatus": 200,
+    "size": 103218758,
+    "sha512": "z2ibBaV9ajIBgeZSOpov8Bvj8S5z/qBiUmlhDJkiOTTlLJjk4FlIBXjRYXY7i81QpuPQxnTjW+AQSOrLXf72rw=="
+  }
+]

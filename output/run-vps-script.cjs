@@ -1,0 +1,1 @@
+const fs=require('fs'),cp=require('child_process');const r=cp.spawnSync('ssh',['-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','root@72.61.115.222','bash','-s'],{input:fs.readFileSync(process.argv[2]),encoding:'utf8',timeout:60000});if(r.stdout)process.stdout.write(r.stdout);if(r.stderr)process.stderr.write(r.stderr);process.exit(r.status??1)
