@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Scale, X } from 'lucide-react'
 import type { Product } from '@/types'
 import { parsePosQuantity } from '@/lib/posQuantity'
@@ -36,18 +36,42 @@ export default function CartQuantityPanel({ product, initialText = '', mode, onS
   const presets = PRESETS[unit] || []
   const price = Number(product.selling_price ?? (product as { price?: number }).price ?? 0)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     setText(initialText); setError('')
-    requestAnimationFrame(() => { inputRef.current?.focus(); inputRef.current?.select() })
+    inputRef.current?.focus(); inputRef.current?.select()
+    // A parent may move focus back to search in the same tick; take it back after paint.
+    const frame = requestAnimationFrame(() => { if (document.activeElement !== inputRef.current) { inputRef.current?.focus(); inputRef.current?.select() } })
+    return () => cancelAnimationFrame(frame)
   }, [product.id, initialText])
 
   let preview: number | null = null
   try { preview = text.trim() ? parsePosQuantity(text, unit) : null } catch { preview = null }
 
   const submit = (value = text) => {
-    try { onSubmit(round(parsePosQuantity(value, unit))) }
-    catch (err) { setError((err as Error).message); inputRef.current?.focus() }
+    try {
+      // A barcode scanned while this panel is open must never become a quantity.
+      if (/^\d{8,}$/.test(value.trim())) throw new Error('That looks like a barcode. Enter the weight or quantity first.')
+      onSubmit(round(parsePosQuantity(value, unit)))
+    } catch (err) { setError((err as Error).message); setText(''); inputRef.current?.focus() }
   }
+  const submitRef = useRef(submit); submitRef.current = submit
+  const cancelRef = useRef(onCancel); cancelRef.current = onCancel
+
+  // While the panel is open every keystroke belongs to the quantity, wherever focus is.
+  useEffect(() => {
+    const capture = (e: KeyboardEvent) => {
+      if (e.isComposing || e.ctrlKey || e.metaKey) return
+      const input = inputRef.current
+      if (!input || e.target === input) return
+      if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); cancelRef.current(); return }
+      if (e.key === 'Enter') { e.preventDefault(); e.stopImmediatePropagation(); submitRef.current(); return }
+      if (e.altKey) return
+      if (e.key === 'Backspace') { e.preventDefault(); e.stopImmediatePropagation(); setText(t => t.slice(0, -1)); input.focus(); return }
+      if (e.key.length === 1) { e.preventDefault(); e.stopImmediatePropagation(); setText(t => t + e.key); setError(''); input.focus() }
+    }
+    window.addEventListener('keydown', capture, true)
+    return () => window.removeEventListener('keydown', capture, true)
+  }, [])
 
   return (
     <form
