@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import {
   Search, Eye, Printer, RefreshCw, ChevronLeft, ChevronRight,
-  FileSpreadsheet, Upload, FileDown, CheckCircle2, AlertTriangle, HelpCircle
+  FileSpreadsheet, Upload, FileDown, CheckCircle2, AlertTriangle, HelpCircle, XCircle
 } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 import Modal from '@/components/shared/Modal'
@@ -36,6 +36,12 @@ const STATUS_COLORS: Record<string, string> = {
 export default function BillsPage() {
   const { user } = useAuthStore()
   const isAdmin = Boolean((user?.role?.permissions as Record<string, boolean>)?.all)
+  // Same rule as invoices:cancel: Admin or a manager-level role.
+  const canCancel = Boolean((user?.role?.permissions as Record<string, boolean>)?.all || (user?.role?.permissions as Record<string, boolean>)?.employees)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [cancelTargets, setCancelTargets] = useState<Row[] | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
+  const [cancelling, setCancelling] = useState(false)
 
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
@@ -82,6 +88,7 @@ export default function BillsPage() {
         offset: page * PAGE_SIZE,
       })
       if (res.success) {
+        setSelected(new Set())
         setRows(res.data as Row[])
         setTotal((res.total as number) ?? (res.data as Row[]).length)
       } else {
@@ -95,6 +102,27 @@ export default function BillsPage() {
   }, [search, dateFrom, dateTo, branchId, isAdmin, page])
 
   useEffect(() => { load() }, [load])
+
+  const confirmCancel = async () => {
+    if (!cancelTargets?.length || cancelling) return
+    if (cancelReason.trim().length < 3) { toast.error('Enter a reason (at least 3 characters)'); return }
+    setCancelling(true)
+    const failed: string[] = []
+    try {
+      for (const bill of cancelTargets) {
+        try {
+          const res = await window.api.invoices.cancel(String(bill.id), cancelReason.trim())
+          if (!res.success) failed.push(`${bill.invoice_number}: ${res.error || 'Failed'}`)
+        } catch (err) { failed.push(`${bill.invoice_number}: ${(err as Error).message}`) }
+      }
+      const done = cancelTargets.length - failed.length
+      if (done) toast.success(`${done} bill(s) cancelled. Stock restored.`)
+      if (failed.length) toast.error(failed.join('\n'), { duration: 8000 })
+      setCancelTargets(null); setCancelReason('')
+      window.dispatchEvent(new Event('pos:stock-changed'))
+      await load()
+    } finally { setCancelling(false) }
+  }
 
   const quickPrint = async (id: string) => {
     setRowPrintingId(id)
@@ -279,11 +307,28 @@ export default function BillsPage() {
         </div>
       </div>
 
+      {canCancel && selected.size > 0 && (
+        <div className="px-6 py-2 flex items-center gap-3 border-b border-surface-700 bg-red-500/5">
+          <span className="text-sm">{selected.size} bill(s) selected</span>
+          <button className="btn-secondary btn-sm text-red-400" onClick={() => setCancelTargets(rows.filter(r => selected.has(String(r.id))))}>
+            <XCircle className="w-3.5 h-3.5" /> Cancel selected bills
+          </button>
+          <button className="btn-ghost btn-sm" onClick={() => setSelected(new Set())}>Clear selection</button>
+        </div>
+      )}
+
       {/* Bills Table */}
       <div className="flex-1 overflow-auto">
         <table className="w-full">
           <thead className="sticky top-0 bg-surface-900 z-10">
             <tr>
+              {canCancel && (
+                <th className="table-header px-4 py-3 w-8">
+                  <input type="checkbox" aria-label="Select all bills on this page"
+                    checked={rows.length > 0 && rows.every(r => selected.has(String(r.id)))}
+                    onChange={e => setSelected(e.target.checked ? new Set(rows.map(r => String(r.id))) : new Set())} />
+                </th>
+              )}
               {['Bill #', 'Date', 'Customer', 'Branch', 'Total', 'Payment', 'Status', ''].map(h => (
                 <th key={h} className="table-header px-4 py-3 text-left">{h}</th>
               ))}
@@ -291,10 +336,10 @@ export default function BillsPage() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={8} className="text-center py-16 text-slate-500">Loading bills...</td></tr>
+              <tr><td colSpan={canCancel ? 9 : 8} className="text-center py-16 text-slate-500">Loading bills...</td></tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="text-center py-16 text-slate-500">
+                <td colSpan={canCancel ? 9 : 8} className="text-center py-16 text-slate-500">
                   <p className="text-base font-medium text-slate-400">No bills found</p>
                   <p className="text-xs text-slate-500 mt-1">
                     Try adjusting your filters, or use "Import Past Sales" to load past bills from Excel.
@@ -307,6 +352,12 @@ export default function BillsPage() {
                 className="table-row group cursor-pointer"
                 onClick={() => setViewingId(r.id as string)}
               >
+                {canCancel && (
+                  <td className="table-cell" onClick={e => e.stopPropagation()}>
+                    <input type="checkbox" aria-label={`Select ${r.invoice_number as string}`} checked={selected.has(String(r.id))}
+                      onChange={e => setSelected(prev => { const next = new Set(prev); if (e.target.checked) next.add(String(r.id)); else next.delete(String(r.id)); return next })} />
+                  </td>
+                )}
                 <td className="table-cell font-mono text-xs text-amber-400 font-semibold">{r.invoice_number as string}</td>
                 <td className="table-cell text-xs text-slate-400 whitespace-nowrap">{new Date(r.created_at as string).toLocaleString()}</td>
                 <td className="table-cell">
@@ -340,6 +391,15 @@ export default function BillsPage() {
                     >
                       <Printer className="w-3.5 h-3.5" /> {rowPrintingId === r.id ? '…' : 'Print'}
                     </button>
+                    {canCancel && (
+                      <button
+                        onClick={e => { e.stopPropagation(); setCancelTargets([r]) }}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs transition-colors"
+                        title="Cancel this bill and restore its stock"
+                      >
+                        <XCircle className="w-3.5 h-3.5" /> Cancel
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>
@@ -375,6 +435,27 @@ export default function BillsPage() {
       )}
 
       {/* Invoice Detail Modal */}
+      {cancelTargets && (
+        <Modal title={`Cancel ${cancelTargets.length} bill(s)`} onClose={() => { if (!cancelling) { setCancelTargets(null); setCancelReason('') } }}>
+          <div className="space-y-4">
+            <p className="text-sm">These bills will be marked <strong>Cancelled</strong>. Their stock, batches, credit, coupon and wallet amounts are reversed, they are removed from sales totals, and the change syncs to the cloud. The bill numbers stay in the audit log.</p>
+            <ul className="text-sm max-h-40 overflow-auto space-y-1">
+              {cancelTargets.map(b => <li key={String(b.id)} className="flex justify-between gap-4"><span className="font-mono text-amber-400">{String(b.invoice_number)}</span><span>Rs.{Number(b.total_amount).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span></li>)}
+            </ul>
+            <label className="label">Reason
+              <input autoFocus aria-label="Cancel reason" className="input" value={cancelReason} placeholder="e.g. Test / dummy sale"
+                onChange={e => setCancelReason(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); void confirmCancel() } }} />
+            </label>
+            <div className="flex justify-end gap-2">
+              <button className="btn-ghost" disabled={cancelling} onClick={() => { setCancelTargets(null); setCancelReason('') }}>Keep bills</button>
+              <button className="btn-primary bg-red-600 hover:bg-red-700" disabled={cancelling || cancelReason.trim().length < 3} onClick={() => void confirmCancel()}>
+                {cancelling ? 'Cancelling…' : 'Cancel bills'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
       {viewingId && (
         <InvoiceDetailModal invoiceId={viewingId} onClose={() => setViewingId(null)} />
       )}
