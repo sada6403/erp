@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.11.2 - 2026-11-26 - Keyboard stock entry, supplier quotations and faster POS scanning
+
+- POS: a scanned barcode is added to the cart at once, even when the scanner sends no Enter, and never twice. Enter on an exact barcode/SKU always picks that product.
+- POS: while the loose-item quantity panel is open, every keystroke goes to the quantity; a scanned barcode is rejected instead of being added as a quantity.
+- POS: the sidebar is hidden on the billing screen for full-width billing; the menu button shows it again.
+- Bills: Admins and managers can cancel one or several bills with a reason. Stock, batches, credit, coupons and wallet are reversed, and the change is audited and synced.
+- Stock entry (supermarket): new keyboard-first workbench. Enter moves through product, quantity (12, 2 ctn, 500g), free qty, cost, supplier offer (10%, 150, 10+1), selling price, MRP, customer offer (90, 10%, -20) with dates, barcode, batch, MFD and expiry. It includes instant local search and scanner support, a stock and price comparison panel, F2-F9 and Ctrl shortcuts, a review step, F4 quick create, draft autosave and crash recovery.
+- Additional product barcodes, internal barcode generation and duplicate barcode validation. POS scanning finds additional barcodes.
+- Customer offers entered during stock entry become dated product discounts.
+- Supplier quotation and reorder: pick a supplier to see its low-stock products with stock, incoming orders, 30-day sales, last price and a recommended quantity. You can add products or new-item requests, save a request for quotation, print it or save it as a PDF, or send it on WhatsApp without any prices. Then record the prices the supplier confirms and convert the quotation into a purchase order. Products already on pending orders need a manager override.
+- Supplier order WhatsApp and email messages now use the company name from Settings.
+- A 500-line stock receipt saves in about 1 second instead of about 2.4 seconds.
+
 ## 2.11.1 - 2026-11-26 - Supermarket purchasing, batch inventory and faster loose-item billing
 
 - POS: loose items (kg, g, l, ml, m) open a quantity panel docked in the cart sidebar instead of a centre popup. Enter adds, Esc cancels, Alt+1-4 adds quick amounts (250g/500g/1kg/2kg), and the line total shows while typing. F3 or Ctrl+Enter edits the selected cart line.
