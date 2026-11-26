@@ -435,6 +435,12 @@ export default function AppLayout() {
   const { status, triggerSync } = useSyncStatus()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  // POS billing uses the full screen width; the menu button can still reveal the sidebar.
+  const routeLocation = useLocation()
+  const onPosScreen = routeLocation.pathname === '/pos' || routeLocation.pathname.startsWith('/pos/')
+  const [showSidebarOnPos, setShowSidebarOnPos] = useState(false)
+  useEffect(() => { if (!onPosScreen) setShowSidebarOnPos(false) }, [onPosScreen])
+  const sidebarHidden = onPosScreen && !showSidebarOnPos
   const [branding, setBranding] = useState<Record<string, unknown>>({})
   const [logoFailed, setLogoFailed] = useState(false)
   const [subStatus, setSubStatus] = useState<string | null>(null)
@@ -735,7 +741,7 @@ export default function AppLayout() {
         className="flex items-center gap-3 px-4 h-14 flex-shrink-0 z-30"
         style={{ background: 'var(--bg-topbar)', borderBottom: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}
       >
-        <button onClick={() => setSidebarOpen(o => !o)} className="flex items-center gap-2 flex-shrink-0">
+        <button onClick={() => { if (onPosScreen) setShowSidebarOnPos(v => !v); else setSidebarOpen(o => !o) }} className="flex items-center gap-2 flex-shrink-0" title={onPosScreen ? (sidebarHidden ? 'Show menu' : 'Hide menu') : undefined}>
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center overflow-hidden">
             {branding.company_logo_url && !logoFailed
               ? <img src={resolveImageSrc(String(branding.company_logo_url))} alt="" className="w-full h-full object-cover" onError={() => setLogoFailed(true)} />
@@ -835,6 +841,7 @@ export default function AppLayout() {
           className="flex flex-col flex-shrink-0 overflow-hidden z-20 transition-[width] duration-200"
           style={{
             width: sidebarOpen ? 208 : 64,
+            display: sidebarHidden ? 'none' : undefined,
             background: 'var(--bg-sidebar)',
             borderRight: '1px solid var(--border)',
           }}
