@@ -19,7 +19,22 @@ const FORBIDDEN = [
   'android.permission.READ_MEDIA_VIDEO',
   'android.permission.READ_EXTERNAL_STORAGE',
   'android.permission.WRITE_EXTERNAL_STORAGE',
+  'com.google.android.gms.permission.AD_ID',
 ];
+// Hardware features that must be declared required="false" (Play device filters: tablets/TV without Wi-Fi, landscape-only devices).
+const OPTIONAL_FEATURES = ['android.hardware.wifi', 'android.hardware.screen.portrait'];
+
+/** Problems with the optional-hardware features: missing, or required="true" (an absent android:required defaults to true). */
+function featureProblems(xml) {
+  const tags = (xml.match(/<uses-feature[^>]*>/g) || []).filter((t) => !/tools:node[ ]*=[ ]*["']remove["']/.test(t));
+  const out = [];
+  for (const name of OPTIONAL_FEATURES) {
+    const mine = tags.filter((t) => t.includes(`"${name}"`));
+    if (!mine.length) out.push(`${name} not declared`);
+    else if (mine.some((t) => !/android:required[ ]*=[ ]*["']false["']/.test(t))) out.push(`${name} is required=true`);
+  }
+  return out;
+}
 const PERMISSION = FORBIDDEN[0];
 
 /** The forbidden permissions the manifest declares (a tools:node="remove" declaration does not count: it deletes it from the merge). */
@@ -59,13 +74,18 @@ function main(args) {
   let bad = 0;
   for (const f of files) {
     const found = declaredForbidden(fs.readFileSync(f, 'utf8'));
+    const xml = fs.readFileSync(f, 'utf8');
+    const feat = featureProblems(xml);
     if (found.length) {
       console.error(`FAIL ${f}: declares ${found.join(', ')} (Play build must not)`);
+      bad++;
+    } else if (feat.length) {
+      console.error(`FAIL ${f}: ${feat.join('; ')} (must be uses-feature required="false")`);
       bad++;
     } else console.log(`ok   ${f}`);
   }
   return bad ? 1 : 0;
 }
 
-module.exports = { declaresInstallPermission, declaredForbidden, FORBIDDEN, PERMISSION };
+module.exports = { declaresInstallPermission, declaredForbidden, featureProblems, FORBIDDEN, OPTIONAL_FEATURES, PERMISSION };
 if (require.main === module) process.exit(main(process.argv.slice(2)));
