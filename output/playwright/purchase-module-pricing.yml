@@ -1,0 +1,224 @@
+- text: ISOLATED QA DATABASE · Production connections disabled
+- heading "Stock Purchases & Bills" [level=1]
+- paragraph: 2 purchases
+- button "Refresh":
+  - img
+  - text: Refresh
+- button "PO Template":
+  - img
+  - text: PO Template
+- button "Import PO (Excel)":
+  - img
+  - text: Import PO (Excel)
+- button "Bulk stock upload":
+  - img
+  - text: Bulk stock upload
+- button "Batch inventory & alerts"
+- button "1. Order from Supplier Create order, track progress, then receive stock and upload the supplier bill.":
+  - strong: 1. Order from Supplier
+  - text: Create order, track progress, then receive stock and upload the supplier bill.
+- button "2. Add Received Stock Directly Search products from the delivered bill and add stock immediately.":
+  - strong: 2. Add Received Stock Directly
+  - text: Search products from the delivered bill and add stock immediately.
+- button "All Purchases"
+- button "Purchase Orders"
+- button "Direct Stock"
+- button "Date-wise Stock Received"
+- button "Supplier Bills"
+- text: Purchase date from
+- textbox "Purchase date from"
+- text: To
+- textbox "To"
+- textbox "Search purchase history":
+  - /placeholder: Search purchase / bill number or supplier
+- combobox "Filter supplier":
+  - option "All suppliers" [selected]
+  - option "QA Grocery Supplier"
+- button "All"
+- button "DRAFT"
+- button "SENT"
+- button "PARTIAL"
+- button "RECEIVED"
+- button "CANCELLED"
+- table:
+  - rowgroup:
+    - row "Purchase / Bill Supplier Purchase Date Items Total Expected Status Actions":
+      - columnheader "Purchase / Bill"
+      - columnheader "Supplier"
+      - columnheader "Purchase Date"
+      - columnheader "Items"
+      - columnheader "Total"
+      - columnheader "Expected"
+      - columnheader "Status"
+      - columnheader "Actions"
+  - rowgroup:
+    - 'row "MAIN-PO-2026-0001 Direct stock Bill: QA-DIRECT-INVOICE | 1 files QA Grocery Supplier 2026-11-26 1 Rs.900 — RECEIVED View Quotation WhatsApp Email Supplier return"':
+      - 'cell "MAIN-PO-2026-0001 Direct stock Bill: QA-DIRECT-INVOICE | 1 files"'
+      - cell "QA Grocery Supplier"
+      - cell "2026-11-26"
+      - cell "1"
+      - cell "Rs.900"
+      - cell "—"
+      - cell "RECEIVED"
+      - cell "View Quotation WhatsApp Email Supplier return":
+        - button "View":
+          - img
+          - text: View
+        - button "Quotation":
+          - img
+          - text: Quotation
+        - button "WhatsApp":
+          - img
+          - text: WhatsApp
+        - button "Email":
+          - img
+          - text: Email
+        - button "Supplier return"
+    - 'row "QA-OPENING Direct stock Bill: QA-OPENING | 1 files QA Grocery Supplier 2026-11-01 1 Rs.1,000 — RECEIVED View Quotation WhatsApp Email Supplier return"':
+      - 'cell "QA-OPENING Direct stock Bill: QA-OPENING | 1 files"'
+      - cell "QA Grocery Supplier"
+      - cell "2026-11-01"
+      - cell "1"
+      - cell "Rs.1,000"
+      - cell "—"
+      - cell "RECEIVED"
+      - cell "View Quotation WhatsApp Email Supplier return":
+        - button "View":
+          - img
+          - text: View
+        - button "Quotation":
+          - img
+          - text: Quotation
+        - button "WhatsApp":
+          - img
+          - text: WhatsApp
+        - button "Email":
+          - img
+          - text: Email
+        - button "Supplier return"
+- heading "New Purchase Order / Quotation" [level=2]
+- button "Close":
+  - img
+- paragraph: "Ctrl+Enter: add item · Ctrl+S: save · Leave manufacture and expiry dates empty for non-expiring products."
+- text: Supplier * QA Grocery Supplier
+- img
+- text: Purchase Date
+- textbox "Purchase date": 2026-11-26
+- text: Supplier Bill / Invoice Number
+- textbox "Supplier invoice number"
+- text: Expected Delivery Date
+- textbox
+- text: Supplier bill (PDF / image)
+- button "Upload supplier bill"
+- paragraph: Supplier bill is optional when placing an order. Send the order by WhatsApp or email, then upload the supplier bill when receiving stock.
+- paragraph: Enter prices per selected unit. Free quantity increases stock; line discounts reduce cost. Existing batch prices stay unchanged.
+- group: Supplier contact
+- group: Notes (optional)
+- paragraph: Items (1)
+- checkbox "Only supplier's products (1)" [checked]
+- text: Only supplier's products (1)
+- button "Re-analyze":
+  - img
+  - text: Re-analyze
+- button "Add Item":
+  - img
+  - text: Add Item
+- button "New product"
+- paragraph: Product
+- paragraph: Qty
+- paragraph: Purchase Price
+- paragraph: Selling Price
+- paragraph: Total
+- paragraph
+- text: Batch Number
+- textbox "Batch Number"
+- text: Manufacture Date
+- textbox "Manufacture Date"
+- text: Expiry Date
+- textbox "Expiry Date"
+- text: Free quantity
+- spinbutton "Free quantity 1": "0"
+- text: Line discount (Rs.)
+- spinbutton "Line discount 1": "0"
+- text: MRP per entry unit (incl. tax)
+- spinbutton "MRP 1"
+- text: Entry unit
+- combobox "Entry unit 1":
+  - option "kg" [selected]
+  - option "pcs"
+  - option "g"
+  - option "ltr"
+  - option "ml"
+  - option "bag"
+  - option "carton"
+- text: Quantities and prices use this unit; inventory is stored in kg.
+- img
+- text: QA Rice (QA-RICE)
+- img
+- text: "Stock: 22"
+- textbox "Paid quantity 1": "1"
+- textbox "Purchase price 1": "75"
+- spinbutton "Selling price 1": "150"
+- paragraph: Rs.75
+- group:
+  - text: Stock & pricing · 22 kg on hand · Average cost Rs.86.3636 Previous purchase
+  - strong: Rs.100
+  - text: Latest purchase
+  - strong: Rs.75
+  - text: Stock after receipt
+  - strong: 23 kg
+  - text: New weighted average
+  - strong: Rs.85.8696
+  - text: Suggested selling price
+  - strong: Rs.103.0435 / kg
+  - text: Pricing policy
+  - combobox "Pricing policy":
+    - option "Batch price"
+    - option "Latest price"
+    - option "Weighted average + markup" [selected]
+  - text: Markup %
+  - spinbutton "Pricing markup": "20"
+  - text: Adjustment reason
+  - textbox "Pricing adjustment reason"
+  - button "Apply pricing" [disabled]
+  - table:
+    - rowgroup:
+      - row "Batch Stock Cost MRP Expiry Selling price":
+        - columnheader "Batch"
+        - columnheader "Stock"
+        - columnheader "Cost"
+        - columnheader "MRP"
+        - columnheader "Expiry"
+        - columnheader "Selling price"
+    - rowgroup:
+      - row "QA-DIRECT 12 Rs.75 Rs.180 2030-01-01 160 Save":
+        - cell "QA-DIRECT"
+        - cell "12"
+        - cell "Rs.75"
+        - cell "Rs.180"
+        - cell "2030-01-01"
+        - cell "160 Save":
+          - spinbutton "Selling price for batch QA-DIRECT": "160"
+          - button "Save" [disabled]
+      - row "QA-OLD 10 Rs.100 Rs.160 No expiry 140 Save":
+        - cell "QA-OLD"
+        - cell "10"
+        - cell "Rs.100"
+        - cell "Rs.160"
+        - cell "No expiry"
+        - cell "140 Save":
+          - spinbutton "Selling price for batch QA-OLD": "140"
+          - button "Save" [disabled]
+  - paragraph: Prices are per base unit. MRP includes tax. A sale line spanning batches uses the lowest applicable MRP ceiling.
+- text: "Total: Rs.75"
+- paragraph: Direct Supplier Notification on Order Creation
+- checkbox "📱 Send via WhatsApp (Direct chat / web)"
+- text: 📱 Send via WhatsApp (Direct chat / web)
+- checkbox "✉️ Send via Email (Branded HTML PO)"
+- text: ✉️ Send via Email (Branded HTML PO)
+- button "Print Quotation Sheet":
+  - img
+  - text: Print Quotation Sheet
+- text: Rs.75
+- button "Cancel"
+- button "Create Purchase Order"

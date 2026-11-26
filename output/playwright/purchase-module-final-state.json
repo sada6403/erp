@@ -1,0 +1,107 @@
+{
+  "stocks": [
+    {
+      "name": "QA Rice",
+      "quantity": 26
+    },
+    {
+      "name": "QA Lentils",
+      "quantity": 4
+    }
+  ],
+  "purchases": [
+    {
+      "id": "f0534369-4750-4efb-8aeb-33c0243334b1",
+      "po_number": "QA-OPENING",
+      "status": "RECEIVED",
+      "total_amount": 1000,
+      "outstanding_amount": 1000,
+      "returned_amount": 0
+    },
+    {
+      "id": "645514a7-9605-416e-ad9e-331354f2cefe",
+      "po_number": "MAIN-PO-2026-0001",
+      "status": "RECEIVED",
+      "total_amount": 900,
+      "outstanding_amount": 750,
+      "returned_amount": 150
+    },
+    {
+      "id": "bb4f30a0-ee10-4d1d-8f6c-f618b3203edd",
+      "po_number": "IMP-bb4f30a0-ee10-4d1d-8f6c-f618b3203edd",
+      "status": "RECEIVED",
+      "total_amount": 180,
+      "outstanding_amount": 180,
+      "returned_amount": 0
+    },
+    {
+      "id": "bee4fcda-2f3b-4701-ba59-6bd1107c8118",
+      "po_number": "MAIN-PO-2026-0002",
+      "status": "RECEIVED",
+      "total_amount": 560,
+      "outstanding_amount": 560,
+      "returned_amount": 0
+    }
+  ],
+  "batches": [
+    {
+      "id": "6cbb427e-d12e-4d4c-8d60-5122ebd66d31",
+      "batch_number": "QA-OLD",
+      "quantity": 10,
+      "cost_price": 100,
+      "selling_price": 140,
+      "mrp": 160,
+      "supplier_returned_quantity": 0
+    },
+    {
+      "id": "e6d31320-aba1-49ef-99cb-b28fc00c56fd",
+      "batch_number": "QA-DIRECT",
+      "quantity": 10,
+      "cost_price": 75,
+      "selling_price": 160,
+      "mrp": 180,
+      "supplier_returned_quantity": 2
+    },
+    {
+      "id": "0922ca24-34d5-4239-92cd-fe68437e016c",
+      "batch_number": "QA-IMPORT",
+      "quantity": 3,
+      "cost_price": 60,
+      "selling_price": 150,
+      "mrp": 180,
+      "supplier_returned_quantity": 0
+    },
+    {
+      "id": "f61b014b-5170-44b0-9108-90cf5486202c",
+      "batch_number": "bee4fcda-418adc35-6efb77b1",
+      "quantity": 3,
+      "cost_price": 80,
+      "selling_price": 150,
+      "mrp": 180,
+      "supplier_returned_quantity": 0
+    },
+    {
+      "id": "d77a0b75-228c-46bb-bb7f-a62b2fae2056",
+      "batch_number": "bee4fcda-b5863a0b-e3beb0dc",
+      "quantity": 4,
+      "cost_price": 80,
+      "selling_price": 120,
+      "mrp": 150,
+      "supplier_returned_quantity": 0
+    }
+  ],
+  "suppliers": [
+    {
+      "name": "QA Grocery Supplier",
+      "due_balance": 2490,
+      "credit_balance": 0
+    }
+  ],
+  "returns": [
+    {
+      "total_amount": 150
+    }
+  ],
+  "audit_count": 12,
+  "queue_count": 48
+}

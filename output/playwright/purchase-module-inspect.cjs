@@ -1,0 +1,13 @@
+const {chromium}=require('C:/Users/USER/AppData/Local/npm-cache/_npx/31e32ef8478fbf80/node_modules/playwright')
+;(async()=>{
+ const browser=await chromium.connectOverCDP('http://127.0.0.1:9349')
+ const page=browser.contexts()[0].pages().find(page=>page.url().includes('purchase-module-qa.html'))
+ if(!page)throw new Error('Isolated QA page was not found')
+ if(process.argv[2]?.startsWith('reload'))await page.reload({waitUntil:'networkidle'})
+ if(process.argv[2]?.includes('direct'))await page.getByRole('button',{name:/2\. Add Received Stock Directly/}).click()
+ await page.addStyleTag({content:'*,*::before,*::after { animation:none!important; transition:none!important; }'})
+ console.log((await page.locator('body').ariaSnapshot()).slice(0,16000))
+ await page.screenshot({path:'output/playwright/purchase-module-'+(process.argv[2]||'initial')+'.png'})
+ console.log('State:',JSON.stringify(await page.evaluate(()=>window.qa.state())))
+ process.exit(0)
+})().catch(error=>{console.error(error);process.exit(1)})

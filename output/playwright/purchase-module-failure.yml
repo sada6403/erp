@@ -1,0 +1,183 @@
+- text: ISOLATED QA DATABASE · Production connections disabled
+- heading "Stock Purchases & Bills" [level=1]
+- paragraph: 2 purchases
+- button "Refresh":
+  - img
+  - text: Refresh
+- button "PO Template":
+  - img
+  - text: PO Template
+- button "Import PO (Excel)":
+  - img
+  - text: Import PO (Excel)
+- button "Bulk stock upload":
+  - img
+  - text: Bulk stock upload
+- button "Batch inventory & alerts"
+- heading "Inventory alerts & reports" [level=2]
+- button "Close":
+  - img
+- 'button "Expired: 0"'
+- 'button "Near expiry: 0"'
+- 'button "Low stock: 0"'
+- button "Batch inventory"
+- button "Low stock"
+- button "Stock movements"
+- button "Purchase returns"
+- button "Supplier balances"
+- textbox "Inventory report search":
+  - /placeholder: Product, SKU, barcode or batch
+- combobox "Expiry status":
+  - option "All batches" [selected]
+  - option "Available"
+  - option "Near expiry"
+  - option "Expired"
+- text: Near expiry days
+- spinbutton "Near expiry days": "30"
+- paragraph: 2 displayed rows / 2 batches
+- button "Export displayed rows (CSV)"
+- table:
+  - rowgroup:
+    - row "product name sku barcode unit batch number quantity cost price selling price mrp expiry date mfg date historical cost known original quantity supplier returned quantity po number supplier invoice number supplier name expiry state":
+      - columnheader "product name"
+      - columnheader "sku"
+      - columnheader "barcode"
+      - columnheader "unit"
+      - columnheader "batch number"
+      - columnheader "quantity"
+      - columnheader "cost price"
+      - columnheader "selling price"
+      - columnheader "mrp"
+      - columnheader "expiry date"
+      - columnheader "mfg date"
+      - columnheader "historical cost known"
+      - columnheader "original quantity"
+      - columnheader "supplier returned quantity"
+      - columnheader "po number"
+      - columnheader "supplier invoice number"
+      - columnheader "supplier name"
+      - columnheader "expiry state"
+  - rowgroup:
+    - row "QA Rice QA-RICE 0001234567890 kg QA-DIRECT 10 75 160 180 2030-01-01 — 1 12 2 MAIN-PO-2026-0001 QA-DIRECT-INVOICE QA Grocery Supplier available":
+      - cell "QA Rice"
+      - cell "QA-RICE"
+      - cell "0001234567890"
+      - cell "kg"
+      - cell "QA-DIRECT"
+      - cell "10"
+      - cell "75"
+      - cell "160"
+      - cell "180"
+      - cell "2030-01-01"
+      - cell "—"
+      - cell "1"
+      - cell "12"
+      - cell "2"
+      - cell "MAIN-PO-2026-0001"
+      - cell "QA-DIRECT-INVOICE"
+      - cell "QA Grocery Supplier"
+      - cell "available"
+    - row "QA Rice QA-RICE 0001234567890 kg QA-OLD 10 100 140 160 — — 1 10 0 QA-OPENING QA-OPENING QA Grocery Supplier available":
+      - cell "QA Rice"
+      - cell "QA-RICE"
+      - cell "0001234567890"
+      - cell "kg"
+      - cell "QA-OLD"
+      - cell "10"
+      - cell "100"
+      - cell "140"
+      - cell "160"
+      - cell "—"
+      - cell "—"
+      - cell "1"
+      - cell "10"
+      - cell "0"
+      - cell "QA-OPENING"
+      - cell "QA-OPENING"
+      - cell "QA Grocery Supplier"
+      - cell "available"
+- button "Previous" [disabled]
+- text: Page 1
+- button "Next" [disabled]
+- button "1. Order from Supplier Create order, track progress, then receive stock and upload the supplier bill.":
+  - strong: 1. Order from Supplier
+  - text: Create order, track progress, then receive stock and upload the supplier bill.
+- button "2. Add Received Stock Directly Search products from the delivered bill and add stock immediately.":
+  - strong: 2. Add Received Stock Directly
+  - text: Search products from the delivered bill and add stock immediately.
+- button "All Purchases"
+- button "Purchase Orders"
+- button "Direct Stock"
+- button "Date-wise Stock Received"
+- button "Supplier Bills"
+- text: Purchase date from
+- textbox "Purchase date from"
+- text: To
+- textbox "To"
+- textbox "Search purchase history":
+  - /placeholder: Search purchase / bill number or supplier
+- combobox "Filter supplier":
+  - option "All suppliers" [selected]
+  - option "QA Grocery Supplier"
+- button "All"
+- button "DRAFT"
+- button "SENT"
+- button "PARTIAL"
+- button "RECEIVED"
+- button "CANCELLED"
+- table:
+  - rowgroup:
+    - row "Purchase / Bill Supplier Purchase Date Items Total Expected Status Actions":
+      - columnheader "Purchase / Bill"
+      - columnheader "Supplier"
+      - columnheader "Purchase Date"
+      - columnheader "Items"
+      - columnheader "Total"
+      - columnheader "Expected"
+      - columnheader "Status"
+      - columnheader "Actions"
+  - rowgroup:
+    - 'row "MAIN-PO-2026-0001 Direct stock Bill: QA-DIRECT-INVOICE | 1 files QA Grocery Supplier 2026-11-26 1 Rs.900 — RECEIVED View Quotation WhatsApp Email Supplier return"':
+      - 'cell "MAIN-PO-2026-0001 Direct stock Bill: QA-DIRECT-INVOICE | 1 files"'
+      - cell "QA Grocery Supplier"
+      - cell "2026-11-26"
+      - cell "1"
+      - cell "Rs.900"
+      - cell "—"
+      - cell "RECEIVED"
+      - cell "View Quotation WhatsApp Email Supplier return":
+        - button "View":
+          - img
+          - text: View
+        - button "Quotation":
+          - img
+          - text: Quotation
+        - button "WhatsApp":
+          - img
+          - text: WhatsApp
+        - button "Email":
+          - img
+          - text: Email
+        - button "Supplier return"
+    - 'row "QA-OPENING Direct stock Bill: QA-OPENING | 1 files QA Grocery Supplier 2026-11-01 1 Rs.1,000 — RECEIVED View Quotation WhatsApp Email Supplier return"':
+      - 'cell "QA-OPENING Direct stock Bill: QA-OPENING | 1 files"'
+      - cell "QA Grocery Supplier"
+      - cell "2026-11-01"
+      - cell "1"
+      - cell "Rs.1,000"
+      - cell "—"
+      - cell "RECEIVED"
+      - cell "View Quotation WhatsApp Email Supplier return":
+        - button "View":
+          - img
+          - text: View
+        - button "Quotation":
+          - img
+          - text: Quotation
+        - button "WhatsApp":
+          - img
+          - text: WhatsApp
+        - button "Email":
+          - img
+          - text: Email
+        - button "Supplier return"

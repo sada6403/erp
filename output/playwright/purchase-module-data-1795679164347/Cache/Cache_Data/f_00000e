@@ -1,0 +1,251 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/admin/PurchaseReturnModal.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=68fe95da"; const Fragment = __vite__cjsImport0_react_jsxDevRuntime["Fragment"]; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=68fe95da"; const useEffect = __vite__cjsImport3_react["useEffect"]; const useState = __vite__cjsImport3_react["useState"];
+import Modal from "/src/components/shared/Modal.tsx";
+import { colomboToday } from "/src/lib/datetime.ts";
+import toast from "/node_modules/.vite/deps/react-hot-toast.js?v=a17b0b5b";
+export default function PurchaseReturnModal({ purchaseId, onClose, onDone }) {
+  _s();
+  const [id] = useState(() => crypto.randomUUID()), [data, setData] = useState(), [error, setError] = useState(""), [busy, setBusy] = useState(false), [date, setDate] = useState(colomboToday()), [reason, setReason] = useState(""), [quantities, setQuantities] = useState({});
+  useEffect(() => {
+    let active = true;
+    window.api.purchases.returnContext(purchaseId).then((response) => {
+      if (!active) return;
+      if (!response.success) setError(response.error);
+      else setData(response.data);
+    }).catch((e) => {
+      if (active) setError(String(e));
+    });
+    return () => {
+      active = false;
+    };
+  }, [purchaseId]);
+  async function save() {
+    const items = Object.entries(quantities).filter(([, q]) => q !== "" && Number(q) !== 0).map(([batch_id, q]) => ({ batch_id, quantity: Number(q) }));
+    if (!items.length || reason.trim().length < 3 || !date) {
+      setError("Choose returned quantities, a date and a reason");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await window.api.purchases.returnStock({ id, purchase_id: purchaseId, date, reason, items });
+      if (!result.success) throw new Error(result.error);
+      toast.success("Supplier return saved; stock and supplier balance updated");
+      onDone();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return /* @__PURE__ */ jsxDEV(Modal, { title: `Purchase return${data ? " · " + data.purchase.po_number : ""}`, size: "xl", onClose: () => {
+    if (!busy) onClose();
+  }, footer: /* @__PURE__ */ jsxDEV(Fragment, { children: [
+    /* @__PURE__ */ jsxDEV("button", { className: "btn-secondary", disabled: busy, onClick: onClose, children: "Cancel" }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 34,
+      columnNumber: 149
+    }, this),
+    /* @__PURE__ */ jsxDEV("button", { className: "btn-primary", disabled: busy || !data, onClick: save, children: busy ? "Saving…" : "Confirm supplier return" }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 34,
+      columnNumber: 232
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+    lineNumber: 34,
+    columnNumber: 147
+  }, this), children: /* @__PURE__ */ jsxDEV("div", { className: "space-y-4", children: [
+    error && /* @__PURE__ */ jsxDEV("p", { role: "alert", className: "text-red-400", children: error }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 36,
+      columnNumber: 14
+    }, this),
+    !data && !error && /* @__PURE__ */ jsxDEV("p", { children: "Loading returnable batches…" }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 37,
+      columnNumber: 24
+    }, this),
+    /* @__PURE__ */ jsxDEV("p", { className: "text-sm", children: "Return only stock physically sent back to the supplier. The original purchase cost is used for the credit. Paid purchases create supplier credit for future purchases." }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 38,
+      columnNumber: 4
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "grid grid-cols-2 gap-3", children: [
+      /* @__PURE__ */ jsxDEV("label", { children: [
+        "Return date",
+        /* @__PURE__ */ jsxDEV("input", { "aria-label": "Return date", className: "input block", type: "date", value: date, onChange: (e) => setDate(e.target.value) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 39,
+          columnNumber: 62
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+        lineNumber: 39,
+        columnNumber: 44
+      }, this),
+      /* @__PURE__ */ jsxDEV("label", { children: [
+        "Reason",
+        /* @__PURE__ */ jsxDEV("input", { "aria-label": "Purchase return reason", className: "input block", value: reason, onChange: (e) => setReason(e.target.value) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 39,
+          columnNumber: 208
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+        lineNumber: 39,
+        columnNumber: 195
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 39,
+      columnNumber: 4
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "overflow-auto", children: /* @__PURE__ */ jsxDEV("table", { className: "w-full text-sm text-left", children: [
+      /* @__PURE__ */ jsxDEV("thead", { children: /* @__PURE__ */ jsxDEV("tr", { children: [
+        /* @__PURE__ */ jsxDEV("th", { children: "Product / Batch" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 90
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Available" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 114
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Cost / unit" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 132
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Expiry" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 152
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Return quantity" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 167
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+        lineNumber: 40,
+        columnNumber: 86
+      }, this) }, void 0, false, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+        lineNumber: 40,
+        columnNumber: 79
+      }, this),
+      /* @__PURE__ */ jsxDEV("tbody", { children: data?.batches.map((batch) => /* @__PURE__ */ jsxDEV("tr", { children: [
+        /* @__PURE__ */ jsxDEV("td", { className: "py-2", children: [
+          batch.product_name,
+          /* @__PURE__ */ jsxDEV("span", { className: "block text-xs", children: batch.batch_number }, void 0, false, {
+            fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+            lineNumber: 40,
+            columnNumber: 306
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 265
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: [
+          batch.quantity,
+          " ",
+          batch.unit
+        ] }, void 0, true, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 370
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: [
+          "Rs.",
+          batch.cost_price
+        ] }, void 0, true, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 408
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: batch.expiry_date || "No expiry" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 438
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: /* @__PURE__ */ jsxDEV("input", { "aria-label": `Return quantity ${batch.batch_number}`, className: "input w-28", type: "number", min: "0", max: batch.quantity, step: "any", value: quantities[batch.id] ?? "", onChange: (e) => setQuantities({ ...quantities, [batch.id]: e.target.value }) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 485
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+          lineNumber: 40,
+          columnNumber: 481
+        }, this)
+      ] }, batch.id, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+        lineNumber: 40,
+        columnNumber: 246
+      }, this)) }, void 0, false, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+        lineNumber: 40,
+        columnNumber: 204
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 40,
+      columnNumber: 35
+    }, this) }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 40,
+      columnNumber: 4
+    }, this),
+    data?.batches.length === 0 && /* @__PURE__ */ jsxDEV("p", { children: "No remaining batch stock is available for return." }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+      lineNumber: 41,
+      columnNumber: 35
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+    lineNumber: 35,
+    columnNumber: 3
+  }, this) }, void 0, false, {
+    fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx",
+    lineNumber: 34,
+    columnNumber: 10
+  }, this);
+}
+_s(PurchaseReturnModal, "AtS9eIuqRpBfvyhRwu3Q23EjmB8=");
+_c = PurchaseReturnModal;
+var _c;
+$RefreshReg$(_c, "PurchaseReturnModal");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchaseReturnModal.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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QUFjLEVBQUMsR0FBR0QsWUFBVyxDQUFDa0MsTUFBTS9DLEVBQUUsR0FBRXdCLEVBQUVvQixPQUFPQyxNQUFLLENBQUMsS0FBOU87QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUFnUCxLQUFwUDtBQUFBO0FBQUE7QUFBQTtBQUFBLGVBQXNQO0FBQUEsV0FBdGRFLE1BQU0vQyxJQUFmO0FBQUE7QUFBQTtBQUFBO0FBQUEsYUFBb2UsQ0FBSyxLQUFoaEI7QUFBQTtBQUFBO0FBQUE7QUFBQSxhQUFraEI7QUFBQSxTQUEzckI7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQUFtc0IsS0FBbHVCO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FBMHVCO0FBQUEsSUFDenVCRyxNQUFNMkMsUUFBUVYsV0FBUyxLQUFHLHVCQUFDLE9BQUUsaUVBQUg7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQUFvRDtBQUFBLE9BTmhGO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0FPQSxLQVJNO0FBQUE7QUFBQTtBQUFBO0FBQUEsU0FTUDtBQUNEO0FBQUNyQyxHQW5CdUJKLHFCQUFtQjtBQUFBLEtBQW5CQTtBQUFtQixJQUFBMEQ7QUFBQSxhQUFBQSxJQUFBIiwibmFtZXMiOlsidXNlRWZmZWN0IiwidXNlU3RhdGUiLCJNb2RhbCIsImNvbG9tYm9Ub2RheSIsInRvYXN0IiwiUHVyY2hhc2VSZXR1cm5Nb2RhbCIsInB1cmNoYXNlSWQiLCJvbkNsb3NlIiwib25Eb25lIiwiX3MiLCJpZCIsImNyeXB0byIsInJhbmRvbVVVSUQiLCJkYXRhIiwic2V0RGF0YSIsImVycm9yIiwic2V0RXJyb3IiLCJidXN5Iiwic2V0QnVzeSIsImRhdGUiLCJzZXREYXRlIiwicmVhc29uIiwic2V0UmVhc29uIiwicXVhbnRpdGllcyIsInNldFF1YW50aXRpZXMiLCJhY3RpdmUiLCJ3aW5kb3ciLCJhcGkiLCJwdXJjaGFzZXMiLCJyZXR1cm5Db250ZXh0IiwidGhlbiIsInJlc3BvbnNlIiwic3VjY2VzcyIsImNhdGNoIiwiZSIsIlN0cmluZyIsInNhdmUiLCJpdGVtcyIsIk9iamVjdCIsImVudHJpZXMiLCJmaWx0ZXIiLCJxIiwiTnVtYmVyIiwibWFwIiwiYmF0Y2hfaWQiLCJxdWFudGl0eSIsImxlbmd0aCIsInRyaW0iLCJyZXN1bHQiLCJyZXR1cm5TdG9jayIsInB1cmNoYXNlX2lkIiwiRXJyb3IiLCJwdXJjaGFzZSIsInBvX251bWJlciIsInRhcmdldCIsInZhbHVlIiwiYmF0Y2hlcyIsImJhdGNoIiwicHJvZHVjdF9uYW1lIiwiYmF0Y2hfbnVtYmVyIiwidW5pdCIsImNvc3RfcHJpY2UiLCJleHBpcnlfZGF0ZSIsIl9jIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIlB1cmNoYXNlUmV0dXJuTW9kYWwudHN4Il0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7dXNlRWZmZWN0LHVzZVN0YXRlfSBmcm9tICdyZWFjdCdcbmltcG9ydCBNb2RhbCBmcm9tICdAL2NvbXBvbmVudHMvc2hhcmVkL01vZGFsJ1xuaW1wb3J0IHtjb2xvbWJvVG9kYXl9IGZyb20gJ0AvbGliL2RhdGV0aW1lJ1xuaW1wb3J0IHRvYXN0IGZyb20gJ3JlYWN0LWhvdC10b2FzdCdcblxuZXhwb3J0IGRlZmF1bHQgZnVuY3Rpb24gUHVyY2hhc2VSZXR1cm5Nb2RhbCh7cHVyY2hhc2VJZCxvbkNsb3NlLG9uRG9uZX06e3B1cmNoYXNlSWQ6c3RyaW5nO29uQ2xvc2U6KCk9PnZvaWQ7b25Eb25lOigpPT52b2lkfSl7XG4gY29uc3QgW2lkXT11c2VTdGF0ZSgoKT0+Y3J5cHRvLnJhbmRvbVVVSUQoKSksW2RhdGEsc2V0RGF0YV09dXNlU3RhdGU8YW55PigpLFtlcnJvcixzZXRFcnJvcl09dXNlU3RhdGUoJycpLFtidXN5LHNldEJ1c3ldPXVzZVN0YXRlKGZhbHNlKSxbZGF0ZSxzZXREYXRlXT11c2VTdGF0ZShjb2xvbWJvVG9kYXkoKSksW3JlYXNvbixzZXRSZWFzb25dPXVzZVN0YXRlKCcnKSxbcXVhbnRpdGllcyxzZXRRdWFudGl0aWVzXT11c2VTdGF0ZTxSZWNvcmQ8c3RyaW5nLHN0cmluZz4+KHt9KVxuIHVzZUVmZmVjdCgoKT0+e2xldCBhY3RpdmU9dHJ1ZTt3aW5kb3cuYXBpLnB1cmNoYXNlcy5yZXR1cm5Db250ZXh0KHB1cmNoYXNlSWQpLnRoZW4oKHJlc3BvbnNlOmFueSk9PntpZighYWN0aXZlKXJldHVybjtpZighcmVzcG9uc2Uuc3VjY2VzcylzZXRFcnJvcihyZXNwb25zZS5lcnJvcik7ZWxzZSBzZXREYXRhKHJlc3BvbnNlLmRhdGEpfSkuY2F0Y2goKGU6dW5rbm93bik9PntpZihhY3RpdmUpc2V0RXJyb3IoU3RyaW5nKGUpKX0pO3JldHVybigpPT57YWN0aXZlPWZhbHNlfX0sW3B1cmNoYXNlSWRdKVxuIGFzeW5jIGZ1bmN0aW9uIHNhdmUoKXtcbiAgY29uc3QgaXRlbXM9T2JqZWN0LmVudHJpZXMocXVhbnRpdGllcykuZmlsdGVyKChbLHFdKT0+cSE9PScnJiZOdW1iZXIocSkhPT0wKS5tYXAoKFtiYXRjaF9pZCxxXSk9Pih7YmF0Y2hfaWQscXVhbnRpdHk6TnVtYmVyKHEpfSkpXG4gIGlmKCFpdGVtcy5sZW5ndGh8fHJlYXNvbi50cmltKCkubGVuZ3RoPDN8fCFkYXRlKXtzZXRFcnJvcignQ2hvb3NlIHJldHVybmVkIHF1YW50aXRpZXMsIGEgZGF0ZSBhbmQgYSByZWFzb24nKTtyZXR1cm59XG4gIHNldEJ1c3kodHJ1ZSlcbiAgdHJ5e2NvbnN0IHJlc3VsdD1hd2FpdCB3aW5kb3cuYXBpLnB1cmNoYXNlcy5yZXR1cm5TdG9jayh7aWQscHVyY2hhc2VfaWQ6cHVyY2hhc2VJZCxkYXRlLHJlYXNvbixpdGVtc30pO2lmKCFyZXN1bHQuc3VjY2Vzcyl0aHJvdyBuZXcgRXJyb3IocmVzdWx0LmVycm9yKTt0b2FzdC5zdWNjZXNzKCdTdXBwbGllciByZXR1cm4gc2F2ZWQ7IHN0b2NrIGFuZCBzdXBwbGllciBiYWxhbmNlIHVwZGF0ZWQnKTtvbkRvbmUoKX1jYXRjaChlKXtzZXRFcnJvcihTdHJpbmcoZSkpfWZpbmFsbHl7c2V0QnVzeShmYWxzZSl9XG4gfVxuIHJldHVybiA8TW9kYWwgdGl0bGU9e2BQdXJjaGFzZSByZXR1cm4ke2RhdGE/JyDCtyAnK2RhdGEucHVyY2hhc2UucG9fbnVtYmVyOicnfWB9IHNpemU9XCJ4bFwiIG9uQ2xvc2U9eygpPT57aWYoIWJ1c3kpb25DbG9zZSgpfX0gZm9vdGVyPXs8PjxidXR0b24gY2xhc3NOYW1lPVwiYnRuLXNlY29uZGFyeVwiIGRpc2FibGVkPXtidXN5fSBvbkNsaWNrPXtvbkNsb3NlfT5DYW5jZWw8L2J1dHRvbj48YnV0dG9uIGNsYXNzTmFtZT1cImJ0bi1wcmltYXJ5XCIgZGlzYWJsZWQ9e2J1c3l8fCFkYXRhfSBvbkNsaWNrPXtzYXZlfT57YnVzeT8nU2F2aW5n4oCmJzonQ29uZmlybSBzdXBwbGllciByZXR1cm4nfTwvYnV0dG9uPjwvPn0+XG4gIDxkaXYgY2xhc3NOYW1lPVwic3BhY2UteS00XCI+XG4gICB7ZXJyb3ImJjxwIHJvbGU9XCJhbGVydFwiIGNsYXNzTmFtZT1cInRleHQtcmVkLTQwMFwiPntlcnJvcn08L3A+fVxuICAgeyFkYXRhJiYhZXJyb3ImJjxwPkxvYWRpbmcgcmV0dXJuYWJsZSBiYXRjaGVz4oCmPC9wPn1cbiAgIDxwIGNsYXNzTmFtZT1cInRleHQtc21cIj5SZXR1cm4gb25seSBzdG9jayBwaHlzaWNhbGx5IHNlbnQgYmFjayB0byB0aGUgc3VwcGxpZXIuIFRoZSBvcmlnaW5hbCBwdXJjaGFzZSBjb3N0IGlzIHVzZWQgZm9yIHRoZSBjcmVkaXQuIFBhaWQgcHVyY2hhc2VzIGNyZWF0ZSBzdXBwbGllciBjcmVkaXQgZm9yIGZ1dHVyZSBwdXJjaGFzZXMuPC9wPlxuICAgPGRpdiBjbGFzc05hbWU9XCJncmlkIGdyaWQtY29scy0yIGdhcC0zXCI+PGxhYmVsPlJldHVybiBkYXRlPGlucHV0IGFyaWEtbGFiZWw9XCJSZXR1cm4gZGF0ZVwiIGNsYXNzTmFtZT1cImlucHV0IGJsb2NrXCIgdHlwZT1cImRhdGVcIiB2YWx1ZT17ZGF0ZX0gb25DaGFuZ2U9e2U9PnNldERhdGUoZS50YXJnZXQudmFsdWUpfS8+PC9sYWJlbD48bGFiZWw+UmVhc29uPGlucHV0IGFyaWEtbGFiZWw9XCJQdXJjaGFzZSByZXR1cm4gcmVhc29uXCIgY2xhc3NOYW1lPVwiaW5wdXQgYmxvY2tcIiB2YWx1ZT17cmVhc29ufSBvbkNoYW5nZT17ZT0+c2V0UmVhc29uKGUudGFyZ2V0LnZhbHVlKX0vPjwvbGFiZWw+PC9kaXY+XG4gICA8ZGl2IGNsYXNzTmFtZT1cIm92ZXJmbG93LWF1dG9cIj48dGFibGUgY2xhc3NOYW1lPVwidy1mdWxsIHRleHQtc20gdGV4dC1sZWZ0XCI+PHRoZWFkPjx0cj48dGg+UHJvZHVjdCAvIEJhdGNoPC90aD48dGg+QXZhaWxhYmxlPC90aD48dGg+Q29zdCAvIHVuaXQ8L3RoPjx0aD5FeHBpcnk8L3RoPjx0aD5SZXR1cm4gcXVhbnRpdHk8L3RoPjwvdHI+PC90aGVhZD48dGJvZHk+e2RhdGE/LmJhdGNoZXMubWFwKChiYXRjaDphbnkpPT48dHIga2V5PXtiYXRjaC5pZH0+PHRkIGNsYXNzTmFtZT1cInB5LTJcIj57YmF0Y2gucHJvZHVjdF9uYW1lfTxzcGFuIGNsYXNzTmFtZT1cImJsb2NrIHRleHQteHNcIj57YmF0Y2guYmF0Y2hfbnVtYmVyfTwvc3Bhbj48L3RkPjx0ZD57YmF0Y2gucXVhbnRpdHl9IHtiYXRjaC51bml0fTwvdGQ+PHRkPlJzLntiYXRjaC5jb3N0X3ByaWNlfTwvdGQ+PHRkPntiYXRjaC5leHBpcnlfZGF0ZXx8J05vIGV4cGlyeSd9PC90ZD48dGQ+PGlucHV0IGFyaWEtbGFiZWw9e2BSZXR1cm4gcXVhbnRpdHkgJHtiYXRjaC5iYXRjaF9udW1iZXJ9YH0gY2xhc3NOYW1lPVwiaW5wdXQgdy0yOFwiIHR5cGU9XCJudW1iZXJcIiBtaW49XCIwXCIgbWF4PXtiYXRjaC5xdWFudGl0eX0gc3RlcD1cImFueVwiIHZhbHVlPXtxdWFudGl0aWVzW2JhdGNoLmlkXT8/Jyd9IG9uQ2hhbmdlPXtlPT5zZXRRdWFudGl0aWVzKHsuLi5xdWFudGl0aWVzLFtiYXRjaC5pZF06ZS50YXJnZXQudmFsdWV9KX0vPjwvdGQ+PC90cj4pfTwvdGJvZHk+PC90YWJsZT48L2Rpdj5cbiAgIHtkYXRhPy5iYXRjaGVzLmxlbmd0aD09PTAmJjxwPk5vIHJlbWFpbmluZyBiYXRjaCBzdG9jayBpcyBhdmFpbGFibGUgZm9yIHJldHVybi48L3A+fVxuICA8L2Rpdj5cbiA8L01vZGFsPlxufVxuIl0sImZpbGUiOiJDOi9Vc2Vycy9VU0VSL09uZURyaXZlL0RvY3VtZW50cy9EZXNrdG9wL1BPU19FUlAvZXJwL3NyYy9jb21wb25lbnRzL2FkbWluL1B1cmNoYXNlUmV0dXJuTW9kYWwudHN4In0=

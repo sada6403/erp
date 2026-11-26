@@ -1,0 +1,511 @@
+- text: ISOLATED QA DATABASE · Production connections disabled
+- heading "Stock Purchases & Bills" [level=1]
+- paragraph: 2 purchases
+- button "Refresh":
+  - img
+  - text: Refresh
+- button "PO Template":
+  - img
+  - text: PO Template
+- button "Import PO (Excel)":
+  - img
+  - text: Import PO (Excel)
+- button "Bulk stock upload":
+  - img
+  - text: Bulk stock upload
+- button "Batch inventory & alerts"
+- heading "Bulk Import v2" [level=2]
+- button "Close":
+  - img
+- button "Import wizard"
+- button "Import history"
+- button "Admin settings"
+- text: 1. Import type
+- combobox "Import type":
+  - option "Master products"
+  - option "Opening stock (add quantities)"
+  - option "Stock-in / supplier receipt" [selected]
+  - option "Price update"
+  - option "Search keywords"
+  - option "Categories"
+  - option "Suppliers"
+  - option "Product brands"
+- button "Download sample template"
+- button "Choose XLSX / XLS / CSV / TSV"
+- paragraph: 2. Preview 20 rows — UTF-8
+- text: Sheet
+- combobox "Sheet":
+  - option "Sheet1" [selected]
+- text: Header row
+- spinbutton "Header row": "1"
+- text: Encoding
+- combobox "Encoding":
+  - option "Auto detect" [selected]
+  - option "utf-8"
+  - option "utf-8-bom"
+  - option "utf-16le"
+  - option "utf-16be"
+  - option "windows-1252"
+  - option "iso-8859-1"
+- text: File delimiter
+- combobox "File delimiter":
+  - option "Auto" [selected]
+  - option "Comma"
+  - option "Semicolon"
+  - option "Tab"
+  - option "Pipe"
+- checkbox "File has a header row" [checked]
+- text: File has a header row
+- button "Update preview and mapping suggestions"
+- table:
+  - rowgroup:
+    - row "sku unit quantity free_quantity discount_amount cost_price selling_price mrp supplier invoice_no purchase_date batch_no":
+      - columnheader "sku"
+      - columnheader "unit"
+      - columnheader "quantity"
+      - columnheader "free_quantity"
+      - columnheader "discount_amount"
+      - columnheader "cost_price"
+      - columnheader "selling_price"
+      - columnheader "mrp"
+      - columnheader "supplier"
+      - columnheader "invoice_no"
+      - columnheader "purchase_date"
+      - columnheader "batch_no"
+  - rowgroup:
+    - row "QA-RICE kg 2 1 20 100 150 180 QA Grocery Supplier QA-IMPORT-1 2026-11-26 QA-IMPORT":
+      - cell "QA-RICE"
+      - cell "kg"
+      - cell "2"
+      - cell "1"
+      - cell "20"
+      - cell "100"
+      - cell "150"
+      - cell "180"
+      - cell "QA Grocery Supplier"
+      - cell "QA-IMPORT-1"
+      - cell "2026-11-26"
+      - cell "QA-IMPORT"
+- heading "3. Column mapping" [level=3]
+- button "Cancel this staged job"
+- paragraph: Map each file column to a system field, or choose Ignore. A default can fill blank or unmapped cells.
+- table:
+  - rowgroup:
+    - row "File column + sample System field (* required)":
+      - columnheader "File column + sample"
+      - columnheader "System field (* required)"
+  - rowgroup:
+    - row "1. sku QA-RICE SKU":
+      - cell "1. sku QA-RICE":
+        - text: 1. sku
+        - paragraph: QA-RICE
+      - cell "SKU":
+        - combobox "Map column 1":
+          - option "Ignore column"
+          - option "SKU" [selected]
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "2. unit kg Unit":
+      - cell "2. unit kg":
+        - text: 2. unit
+        - paragraph: kg
+      - cell "Unit":
+        - combobox "Map column 2":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit" [selected]
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "3. quantity 2 Quantity *":
+      - cell "3. quantity 2":
+        - text: 3. quantity
+        - paragraph: "2"
+      - cell "Quantity *":
+        - combobox "Map column 3":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *" [selected]
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "4. free_quantity 1 Free quantity":
+      - cell "4. free_quantity 1":
+        - text: 4. free_quantity
+        - paragraph: "1"
+      - cell "Free quantity":
+        - combobox "Map column 4":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity" [selected]
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "5. discount_amount 20 Line discount (Rs.)":
+      - cell "5. discount_amount 20":
+        - text: 5. discount_amount
+        - paragraph: "20"
+      - cell "Line discount (Rs.)":
+        - combobox "Map column 5":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)" [selected]
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "6. cost_price 100 Cost price *":
+      - cell "6. cost_price 100":
+        - text: 6. cost_price
+        - paragraph: "100"
+      - cell "Cost price *":
+        - combobox "Map column 6":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *" [selected]
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "7. selling_price 150 Selling price":
+      - cell "7. selling_price 150":
+        - text: 7. selling_price
+        - paragraph: "150"
+      - cell "Selling price":
+        - combobox "Map column 7":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price" [selected]
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "8. mrp 180 MRP":
+      - cell "8. mrp 180":
+        - text: 8. mrp
+        - paragraph: "180"
+      - cell "MRP":
+        - combobox "Map column 8":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP" [selected]
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "9. supplier QA Grocery Supplier Supplier *":
+      - cell "9. supplier QA Grocery Supplier":
+        - text: 9. supplier
+        - paragraph: QA Grocery Supplier
+      - cell "Supplier *":
+        - combobox "Map column 9":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *" [selected]
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "10. invoice_no QA-IMPORT-1 Supplier invoice number *":
+      - cell "10. invoice_no QA-IMPORT-1":
+        - text: 10. invoice_no
+        - paragraph: QA-IMPORT-1
+      - cell "Supplier invoice number *":
+        - combobox "Map column 10":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *" [selected]
+          - option "Purchase date *"
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "11. purchase_date 2026-11-26 Purchase date *":
+      - cell "11. purchase_date 2026-11-26":
+        - text: 11. purchase_date
+        - paragraph: 2026-11-26
+      - cell "Purchase date *":
+        - combobox "Map column 11":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *" [selected]
+          - option "Batch number"
+          - option "Manufacture date"
+          - option "Expiry date"
+    - row "12. batch_no QA-IMPORT Batch number":
+      - cell "12. batch_no QA-IMPORT":
+        - text: 12. batch_no
+        - paragraph: QA-IMPORT
+      - cell "Batch number":
+        - combobox "Map column 12":
+          - option "Ignore column"
+          - option "SKU"
+          - option "Barcode"
+          - option "Product name"
+          - option "Category"
+          - option "Unit"
+          - option "Quantity *"
+          - option "Free quantity"
+          - option "Line discount (Rs.)"
+          - option "Cost price *"
+          - option "Selling price"
+          - option "MRP"
+          - option "Supplier *"
+          - option "Supplier invoice number *"
+          - option "Purchase date *"
+          - option "Batch number" [selected]
+          - option "Manufacture date"
+          - option "Expiry date"
+- group: Default values / map a master name for the entire column
+- text: Duplicates
+- combobox "Duplicates":
+  - option "error" [selected]
+  - option "skip"
+  - option "update"
+- text: Unknown category / supplier
+- combobox "Unknown category / supplier":
+  - option "Error / map using defaults" [selected]
+  - option "Auto-create (Admin)"
+  - option "Skip row"
+- text: Date format
+- combobox "Date format":
+  - option "YYYY-MM-DD" [selected]
+  - option "DD/MM/YYYY"
+  - option "MM/DD/YYYY"
+- text: Decimal separator
+- combobox "Decimal separator":
+  - option "Dot (1,234.50)" [selected]
+  - option "Comma (1.234,50)"
+- checkbox "All-or-nothing (maximum 2,000 rows); otherwise commit valid rows in chunks"
+- text: All-or-nothing (maximum 2,000 rows); otherwise commit valid rows in chunks
+- checkbox "Explicitly add quantity to existing batches and acknowledge batch date warnings (existing manufacture dates are retained). Review the dry run again before commit."
+- text: Explicitly add quantity to existing batches and acknowledge batch date warnings (existing manufacture dates are retained). Review the dry run again before commit.
+- button "4. Dry run validation"
+- textbox "Mapping template name"
+- button "Save mapping template" [disabled]
+- heading "Dry run / progress — validated" [level=3]
+- paragraph: "Target branch: Main Branch"
+- paragraph: Total 1 · Valid 1 · Warnings 0 · Errors 0 · Skipped 0 · Applied 0
+- progressbar
+- group:
+  - text: Normalized preview (first 20 rows)
+  - table:
+    - rowgroup:
+      - 'row "2 — valid {\"sku\":\"QA-RICE\",\"barcode\":\"\",\"name\":\"\",\"category\":\"\",\"unit\":\"kg\",\"quantity\":2,\"free_quantity\":1,\"discount_amount\":20,\"cost_price\":100,\"selling_price\":150,\"mrp\":180,\"supplier\":\"QA Grocery Supplier\",\"invoice_no\":\"QA-IMPORT-1\",\"purchase_date\":\"2026-11-26\",\"batch_no\":\"QA-IMPORT\",\"mfg_date\":\"\",\"expiry_date\":\"\",\"acknowledge_dates\":false,\"_aliases\":[],\"supplier_id\":\"a8c2292d-9bff-4f09-a50e-7c41ee48b32a\"}"':
+        - cell "2 — valid"
+        - 'cell "{\"sku\":\"QA-RICE\",\"barcode\":\"\",\"name\":\"\",\"category\":\"\",\"unit\":\"kg\",\"quantity\":2,\"free_quantity\":1,\"discount_amount\":20,\"cost_price\":100,\"selling_price\":150,\"mrp\":180,\"supplier\":\"QA Grocery Supplier\",\"invoice_no\":\"QA-IMPORT-1\",\"purchase_date\":\"2026-11-26\",\"batch_no\":\"QA-IMPORT\",\"mfg_date\":\"\",\"expiry_date\":\"\",\"acknowledge_dates\":false,\"_aliases\":[],\"supplier_id\":\"a8c2292d-9bff-4f09-a50e-7c41ee48b32a\"}"'
+- button "Download error / warning CSV"
+- paragraph: One supplier invoice/date per file. Upload its supplier bill before receiving stock.
+- button "Upload supplier bill PDF / image"
+- checkbox "I reviewed the normalized preview and errors. Commit valid rows only into this supplier receipt."
+- text: I reviewed the normalized preview and errors. Commit valid rows only into this supplier receipt.
+- button "5. Commit import" [disabled]
+- button "1. Order from Supplier Create order, track progress, then receive stock and upload the supplier bill.":
+  - strong: 1. Order from Supplier
+  - text: Create order, track progress, then receive stock and upload the supplier bill.
+- button "2. Add Received Stock Directly Search products from the delivered bill and add stock immediately.":
+  - strong: 2. Add Received Stock Directly
+  - text: Search products from the delivered bill and add stock immediately.
+- button "All Purchases"
+- button "Purchase Orders"
+- button "Direct Stock"
+- button "Date-wise Stock Received"
+- button "Supplier Bills"
+- text: Purchase date from
+- textbox "Purchase date from"
+- text: To
+- textbox "To"
+- textbox "Search purchase history":
+  - /placeholder: Search purchase / bill number or supplier
+- combobox "Filter supplier":
+  - option "All suppliers" [selected]
+  - option "QA Grocery Supplier"
+- button "All"
+- button "DRAFT"
+- button "SENT"
+- button "PARTIAL"
+- button "RECEIVED"
+- button "CANCELLED"
+- table:
+  - rowgroup:
+    - row "Purchase / Bill Supplier Purchase Date Items Total Expected Status Actions":
+      - columnheader "Purchase / Bill"
+      - columnheader "Supplier"
+      - columnheader "Purchase Date"
+      - columnheader "Items"
+      - columnheader "Total"
+      - columnheader "Expected"
+      - columnheader "Status"
+      - columnheader "Actions"
+  - rowgroup:
+    - 'row "MAIN-PO-2026-0001 Direct stock Bill: QA-DIRECT-INVOICE | 1 files QA Grocery Supplier 2026-11-26 1 Rs.900 — RECEIVED View Quotation WhatsApp Email Supplier return"':
+      - 'cell "MAIN-PO-2026-0001 Direct stock Bill: QA-DIRECT-INVOICE | 1 files"'
+      - cell "QA Grocery Supplier"
+      - cell "2026-11-26"
+      - cell "1"
+      - cell "Rs.900"
+      - cell "—"
+      - cell "RECEIVED"
+      - cell "View Quotation WhatsApp Email Supplier return":
+        - button "View":
+          - img
+          - text: View
+        - button "Quotation":
+          - img
+          - text: Quotation
+        - button "WhatsApp":
+          - img
+          - text: WhatsApp
+        - button "Email":
+          - img
+          - text: Email
+        - button "Supplier return"
+    - 'row "QA-OPENING Direct stock Bill: QA-OPENING | 1 files QA Grocery Supplier 2026-11-01 1 Rs.1,000 — RECEIVED View Quotation WhatsApp Email Supplier return"':
+      - 'cell "QA-OPENING Direct stock Bill: QA-OPENING | 1 files"'
+      - cell "QA Grocery Supplier"
+      - cell "2026-11-01"
+      - cell "1"
+      - cell "Rs.1,000"
+      - cell "—"
+      - cell "RECEIVED"
+      - cell "View Quotation WhatsApp Email Supplier return":
+        - button "View":
+          - img
+          - text: View
+        - button "Quotation":
+          - img
+          - text: Quotation
+        - button "WhatsApp":
+          - img
+          - text: WhatsApp
+        - button "Email":
+          - img
+          - text: Email
+        - button "Supplier return"

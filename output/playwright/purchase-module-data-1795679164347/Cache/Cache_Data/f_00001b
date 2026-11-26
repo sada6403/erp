@@ -1,0 +1,386 @@
+import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = __vite__createHotContext("/src/components/admin/PurchasePricingPanel.tsx");import __vite__cjsImport0_react_jsxDevRuntime from "/node_modules/.vite/deps/react_jsx-dev-runtime.js?v=68fe95da"; const jsxDEV = __vite__cjsImport0_react_jsxDevRuntime["jsxDEV"];
+import * as RefreshRuntime from "/@react-refresh";
+const inWebWorker = typeof WorkerGlobalScope !== "undefined" && self instanceof WorkerGlobalScope;
+let prevRefreshReg;
+let prevRefreshSig;
+if (import.meta.hot && !inWebWorker) {
+  if (!window.$RefreshReg$) {
+    throw new Error(
+      "@vitejs/plugin-react can't detect preamble. Something is wrong."
+    );
+  }
+  prevRefreshReg = window.$RefreshReg$;
+  prevRefreshSig = window.$RefreshSig$;
+  window.$RefreshReg$ = RefreshRuntime.getRefreshReg("C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx");
+  window.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+}
+var _s = $RefreshSig$();
+import __vite__cjsImport3_react from "/node_modules/.vite/deps/react.js?v=68fe95da"; const useEffect = __vite__cjsImport3_react["useEffect"]; const useState = __vite__cjsImport3_react["useState"];
+import toast from "/node_modules/.vite/deps/react-hot-toast.js?v=a17b0b5b";
+import { purchaseLine, weightedPurchaseCost } from "/electron/lib/purchaseMath.ts";
+import { stockUnitFactor } from "/electron/lib/inventoryUnits.ts";
+import { useProductsStore } from "/src/store/productsStore.ts";
+const money = (value) => value == null ? "Unknown" : `Rs.${value.toLocaleString(void 0, { maximumFractionDigits: 4 })}`;
+export default function PurchasePricingPanel({ item }) {
+  _s();
+  const [context, setContext] = useState(), [error, setError] = useState(""), [mode, setMode] = useState("batch"), [markup, setMarkup] = useState("0"), [reason, setReason] = useState(""), [busy, setBusy] = useState(false), [prices, setPrices] = useState({});
+  async function load() {
+    const response = await window.api.purchases.pricingContext(item.product_id);
+    if (!response.success) throw new Error(response.error);
+    setContext(response.data);
+    setMode(response.data.pricing_mode);
+    setMarkup(String(response.data.markup_pct));
+    setError("");
+  }
+  useEffect(() => {
+    let active = true;
+    setContext(void 0);
+    setPrices({});
+    setReason("");
+    if (window.api.purchases.pricingContext) window.api.purchases.pricingContext(item.product_id).then((response) => {
+      if (!active) return;
+      if (!response.success) {
+        setError(response.error);
+        return;
+      }
+      setContext(response.data);
+      setMode(response.data.pricing_mode);
+      setMarkup(String(response.data.markup_pct));
+      setError("");
+    }).catch((e) => {
+      if (active) setError(String(e));
+    });
+    return () => {
+      active = false;
+    };
+  }, [item.product_id]);
+  async function save(action) {
+    setBusy(true);
+    try {
+      const result = await action();
+      if (!result.success) throw new Error(result.error);
+      await load();
+      setReason("");
+      useProductsStore.getState().invalidate();
+      toast.success("Pricing saved with audit history");
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  if (!context) return error ? /* @__PURE__ */ jsxDEV("p", { role: "alert", className: "col-span-full text-xs text-red-400", children: error }, void 0, false, {
+    fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+    lineNumber: 48,
+    columnNumber: 32
+  }, this) : null;
+  let incoming = null, average = null, message = "";
+  try {
+    const factor = stockUnitFactor(item.entry_unit || context.unit, context.unit, context.packs);
+    const line = purchaseLine(item.quantity, item.unit_cost, item.free_quantity || 0, item.discount_amount || 0, factor);
+    incoming = line.quantity;
+    if (context.average_cost != null) average = weightedPurchaseCost(context.quantity, context.average_cost, line.quantity, line.unit_cost);
+  } catch (e) {
+    message = String(e);
+  }
+  return /* @__PURE__ */ jsxDEV("details", { className: "col-span-full order-3 text-xs border rounded-lg p-2", style: { borderColor: "var(--border)" }, children: [
+    /* @__PURE__ */ jsxDEV("summary", { className: "cursor-pointer font-semibold", children: [
+      "Stock & pricing · ",
+      context.quantity,
+      " ",
+      context.unit,
+      " on hand · Average cost ",
+      money(context.average_cost)
+    ] }, void 0, true, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 57,
+      columnNumber: 3
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3 py-3", children: [
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        "Previous purchase",
+        /* @__PURE__ */ jsxDEV("strong", { className: "block", children: money(context.previous_purchase_price) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 59,
+          columnNumber: 26
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 59,
+        columnNumber: 4
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        "Latest purchase",
+        /* @__PURE__ */ jsxDEV("strong", { className: "block", children: money(context.latest_purchase_price) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 59,
+          columnNumber: 127
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 59,
+        columnNumber: 107
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        "Stock after receipt",
+        /* @__PURE__ */ jsxDEV("strong", { className: "block", children: [
+          incoming == null ? "—" : context.quantity + incoming,
+          " ",
+          context.unit
+        ] }, void 0, true, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 60,
+          columnNumber: 28
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 60,
+        columnNumber: 4
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        "New weighted average",
+        /* @__PURE__ */ jsxDEV("strong", { className: "block", children: money(average) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 60,
+          columnNumber: 163
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 60,
+        columnNumber: 138
+      }, this),
+      /* @__PURE__ */ jsxDEV("div", { children: [
+        "Suggested selling price",
+        /* @__PURE__ */ jsxDEV("strong", { className: "block", children: [
+          money(average == null ? null : average * (1 + Number(markup || 0) / 100)),
+          " / ",
+          context.unit
+        ] }, void 0, true, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 61,
+          columnNumber: 32
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 61,
+        columnNumber: 4
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 58,
+      columnNumber: 3
+    }, this),
+    !context.cost_known && /* @__PURE__ */ jsxDEV("p", { className: "text-amber-400", children: "Opening stock has no known historical cost. Weighted-average selling requires cost reconciliation." }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 63,
+      columnNumber: 27
+    }, this),
+    message && /* @__PURE__ */ jsxDEV("p", { children: message }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 64,
+      columnNumber: 15
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "flex flex-wrap gap-2 py-2 items-end", children: [
+      /* @__PURE__ */ jsxDEV("label", { children: [
+        "Pricing policy",
+        /* @__PURE__ */ jsxDEV("select", { "aria-label": "Pricing policy", className: "input block", disabled: !context.can_adjust || busy, value: mode, onChange: (e) => setMode(e.target.value), children: [
+          /* @__PURE__ */ jsxDEV("option", { value: "batch", children: "Batch price" }, void 0, false, {
+            fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+            lineNumber: 66,
+            columnNumber: 179
+          }, this),
+          /* @__PURE__ */ jsxDEV("option", { value: "latest", children: "Latest price" }, void 0, false, {
+            fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+            lineNumber: 66,
+            columnNumber: 221
+          }, this),
+          /* @__PURE__ */ jsxDEV("option", { value: "weighted", children: "Weighted average + markup" }, void 0, false, {
+            fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+            lineNumber: 66,
+            columnNumber: 265
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 66,
+          columnNumber: 25
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 66,
+        columnNumber: 4
+      }, this),
+      /* @__PURE__ */ jsxDEV("label", { children: [
+        "Markup %",
+        /* @__PURE__ */ jsxDEV("input", { "aria-label": "Pricing markup", className: "input block w-24", type: "number", min: "0", max: "10000", value: markup, disabled: !context.can_adjust || busy, onChange: (e) => setMarkup(e.target.value) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 67,
+          columnNumber: 19
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 67,
+        columnNumber: 4
+      }, this),
+      /* @__PURE__ */ jsxDEV("label", { children: [
+        "Adjustment reason",
+        /* @__PURE__ */ jsxDEV("input", { "aria-label": "Pricing adjustment reason", className: "input block", value: reason, disabled: !context.can_adjust || busy, onChange: (e) => setReason(e.target.value) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 68,
+          columnNumber: 28
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 68,
+        columnNumber: 4
+      }, this),
+      /* @__PURE__ */ jsxDEV("button", { type: "button", className: "btn-secondary btn-sm", disabled: !context.can_adjust || busy || reason.trim().length < 3, onClick: () => save(() => window.api.purchases.setPricing({ product_id: item.product_id, mode, markup: Number(markup), reason })), children: "Apply pricing" }, void 0, false, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 69,
+        columnNumber: 4
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 65,
+      columnNumber: 3
+    }, this),
+    error && /* @__PURE__ */ jsxDEV("p", { role: "alert", className: "text-red-400", children: error }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 71,
+      columnNumber: 13
+    }, this),
+    /* @__PURE__ */ jsxDEV("div", { className: "max-h-48 overflow-auto", children: /* @__PURE__ */ jsxDEV("table", { className: "w-full text-left", children: [
+      /* @__PURE__ */ jsxDEV("thead", { children: /* @__PURE__ */ jsxDEV("tr", { children: [
+        /* @__PURE__ */ jsxDEV("th", { children: "Batch" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 90
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Stock" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 104
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Cost" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 118
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "MRP" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 131
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Expiry" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 143
+        }, this),
+        /* @__PURE__ */ jsxDEV("th", { children: "Selling price" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 158
+        }, this)
+      ] }, void 0, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 72,
+        columnNumber: 86
+      }, this) }, void 0, false, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 72,
+        columnNumber: 79
+      }, this),
+      /* @__PURE__ */ jsxDEV("tbody", { children: context.batches.map((batch) => /* @__PURE__ */ jsxDEV("tr", { children: [
+        /* @__PURE__ */ jsxDEV("td", { children: batch.batch_number }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 256
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: batch.quantity }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 285
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: batch.known ? money(batch.cost_price) : "Unknown" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 310
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: batch.mrp == null ? "—" : money(batch.mrp) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 370
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: batch.expiry_date || "No expiry" }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 423
+        }, this),
+        /* @__PURE__ */ jsxDEV("td", { children: /* @__PURE__ */ jsxDEV("div", { className: "flex gap-1", children: [
+          /* @__PURE__ */ jsxDEV("input", { "aria-label": `Selling price for batch ${batch.batch_number}`, className: "input w-24", type: "number", min: "0", step: "any", disabled: !context.can_adjust || busy, value: prices[batch.id] ?? batch.selling_price ?? "", onChange: (e) => setPrices({ ...prices, [batch.id]: e.target.value }) }, void 0, false, {
+            fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+            lineNumber: 72,
+            columnNumber: 498
+          }, this),
+          /* @__PURE__ */ jsxDEV("button", { type: "button", className: "btn-secondary btn-sm", disabled: !context.can_adjust || busy || prices[batch.id] == null || prices[batch.id] === "" || reason.trim().length < 3, onClick: () => save(() => window.api.purchases.adjustBatchPrice({ batch_id: batch.id, price: Number(prices[batch.id]), reason })), children: "Save" }, void 0, false, {
+            fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+            lineNumber: 72,
+            columnNumber: 788
+          }, this)
+        ] }, void 0, true, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 470
+        }, this) }, void 0, false, {
+          fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+          lineNumber: 72,
+          columnNumber: 466
+        }, this)
+      ] }, batch.id, true, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 72,
+        columnNumber: 237
+      }, this)) }, void 0, false, {
+        fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+        lineNumber: 72,
+        columnNumber: 193
+      }, this)
+    ] }, void 0, true, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 72,
+      columnNumber: 43
+    }, this) }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 72,
+      columnNumber: 3
+    }, this),
+    /* @__PURE__ */ jsxDEV("p", { className: "pt-2", style: { color: "var(--text-3)" }, children: "Prices are per base unit. Manual batch prices apply with the Batch price policy. MRP includes tax; a sale line spanning batches uses the lowest applicable MRP ceiling." }, void 0, false, {
+      fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+      lineNumber: 73,
+      columnNumber: 3
+    }, this)
+  ] }, void 0, true, {
+    fileName: "C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx",
+    lineNumber: 56,
+    columnNumber: 10
+  }, this);
+}
+_s(PurchasePricingPanel, "uTDCX6qjfGhsb+Q7Zl5Irt1Mkwo=");
+_c = PurchasePricingPanel;
+var _c;
+$RefreshReg$(_c, "PurchasePricingPanel");
+if (import.meta.hot && !inWebWorker) {
+  window.$RefreshReg$ = prevRefreshReg;
+  window.$RefreshSig$ = prevRefreshSig;
+}
+if (import.meta.hot && !inWebWorker) {
+  RefreshRuntime.__hmr_import(import.meta.url).then((currentExports) => {
+    RefreshRuntime.registerExportsForReactRefresh("C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx", currentExports);
+    import.meta.hot.accept((nextExports) => {
+      if (!nextExports) return;
+      const invalidateMessage = RefreshRuntime.validateRefreshBoundaryAndEnqueueUpdate("C:/Users/USER/OneDrive/Documents/Desktop/POS_ERP/erp/src/components/admin/PurchasePricingPanel.tsx", currentExports, nextExports);
+      if (invalidateMessage) import.meta.hot.invalidate(invalidateMessage);
+    });
+  });
+}
+
+//# sourceMappingURL=data:application/json;base64,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LEVBQUNDLFVBQVNULE1BQU1NLElBQUdJLE9BQU1uQixPQUFPeEMsT0FBT2lELE1BQU1NLEVBQUUsQ0FBQyxHQUFFM0QsT0FBTSxDQUFDLENBQUMsR0FBRyxvQkFBNVI7QUFBQTtBQUFBO0FBQUE7QUFBQSxpQkFBZ1M7QUFBQSxhQUEva0I7QUFBQTtBQUFBO0FBQUE7QUFBQSxlQUF3bEIsS0FBNWxCO0FBQUE7QUFBQTtBQUFBO0FBQUEsZUFBa21CO0FBQUEsV0FBbHpCcUQsTUFBTU0sSUFBZjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBQWcwQixDQUFLLEtBQTkyQjtBQUFBO0FBQUE7QUFBQTtBQUFBLGFBQWczQjtBQUFBLFNBQXRnQztBQUFBO0FBQUE7QUFBQTtBQUFBLFdBQThnQyxLQUF0akM7QUFBQTtBQUFBO0FBQUE7QUFBQSxXQUE4akM7QUFBQSxJQUM5akMsdUJBQUMsT0FBRSxXQUFVLFFBQU8sT0FBTyxFQUFDSyxPQUFNLGdCQUFlLEdBQUcsdUxBQXBEO0FBQUE7QUFBQTtBQUFBO0FBQUEsV0FBMk47QUFBQSxPQWpCck47QUFBQTtBQUFBO0FBQUE7QUFBQSxTQWtCUDtBQUNEO0FBQUN6RSxHQWhEdUJGLHNCQUFvQjtBQUFBLEtBQXBCQTtBQUFvQixJQUFBNEU7QUFBQSxhQUFBQSxJQUFBIiwibmFtZXMiOlsidXNlRWZmZWN0IiwidXNlU3RhdGUiLCJ0b2FzdCIsInB1cmNoYXNlTGluZSIsIndlaWdodGVkUHVyY2hhc2VDb3N0Iiwic3RvY2tVbml0RmFjdG9yIiwidXNlUHJvZHVjdHNTdG9yZSIsIm1vbmV5IiwidmFsdWUiLCJ0b0xvY2FsZVN0cmluZyIsInVuZGVmaW5lZCIsIm1heGltdW1GcmFjdGlvbkRpZ2l0cyIsIlB1cmNoYXNlUHJpY2luZ1BhbmVsIiwiaXRlbSIsIl9zIiwiY29udGV4dCIsInNldENvbnRleHQiLCJlcnJvciIsInNldEVycm9yIiwibW9kZSIsInNldE1vZGUiLCJtYXJrdXAiLCJzZXRNYXJrdXAiLCJyZWFzb24iLCJzZXRSZWFzb24iLCJidXN5Iiwic2V0QnVzeSIsInByaWNlcyIsInNldFByaWNlcyIsImxvYWQiLCJyZXNwb25zZSIsIndpbmRvdyIsImFwaSIsInB1cmNoYXNlcyIsInByaWNpbmdDb250ZXh0IiwicHJvZHVjdF9pZCIsInN1Y2Nlc3MiLCJFcnJvciIsImRhdGEiLCJwcmljaW5nX21vZGUiLCJTdHJpbmciLCJtYXJrdXBfcGN0IiwiYWN0aXZlIiwidGhlbiIsImNhdGNoIiwiZSIsInNhdmUiLCJhY3Rpb24iLCJyZXN1bHQiLCJnZXRTdGF0ZSIsImludmFsaWRhdGUiLCJpbmNvbWluZyIsImF2ZXJhZ2UiLCJtZXNzYWdlIiwiZmFjdG9yIiwiZW50cnlfdW5pdCIsInVuaXQiLCJwYWNrcyIsImxpbmUiLCJxdWFudGl0eSIsInVuaXRfY29zdCIsImZyZWVfcXVhbnRpdHkiLCJkaXNjb3VudF9hbW91bnQiLCJhdmVyYWdlX2Nvc3QiLCJib3JkZXJDb2xvciIsInByZXZpb3VzX3B1cmNoYXNlX3ByaWNlIiwibGF0ZXN0X3B1cmNoYXNlX3ByaWNlIiwiTnVtYmVyIiwiY29zdF9rbm93biIsImNhbl9hZGp1c3QiLCJ0YXJnZXQiLCJ0cmltIiwibGVuZ3RoIiwic2V0UHJpY2luZyIsImJhdGNoZXMiLCJtYXAiLCJiYXRjaCIsImJhdGNoX251bWJlciIsImtub3duIiwiY29zdF9wcmljZSIsIm1ycCIsImV4cGlyeV9kYXRlIiwiaWQiLCJzZWxsaW5nX3ByaWNlIiwiYWRqdXN0QmF0Y2hQcmljZSIsImJhdGNoX2lkIiwicHJpY2UiLCJjb2xvciIsIl9jIl0sImlnbm9yZUxpc3QiOltdLCJzb3VyY2VzIjpbIlB1cmNoYXNlUHJpY2luZ1BhbmVsLnRzeCJdLCJzb3VyY2VzQ29udGVudCI6WyJpbXBvcnQge3VzZUVmZmVjdCx1c2VTdGF0ZX0gZnJvbSAncmVhY3QnXG5pbXBvcnQgdG9hc3QgZnJvbSAncmVhY3QtaG90LXRvYXN0J1xuaW1wb3J0IHtwdXJjaGFzZUxpbmUsd2VpZ2h0ZWRQdXJjaGFzZUNvc3R9IGZyb20gJy4uLy4uLy4uL2VsZWN0cm9uL2xpYi9wdXJjaGFzZU1hdGgnXG5pbXBvcnQge3N0b2NrVW5pdEZhY3Rvcn0gZnJvbSAnLi4vLi4vLi4vZWxlY3Ryb24vbGliL2ludmVudG9yeVVuaXRzJ1xuaW1wb3J0IHt1c2VQcm9kdWN0c1N0b3JlfSBmcm9tICdAL3N0b3JlL3Byb2R1Y3RzU3RvcmUnXG5cbmNvbnN0IG1vbmV5PSh2YWx1ZTpudW1iZXJ8bnVsbHx1bmRlZmluZWQpPT52YWx1ZT09bnVsbD8nVW5rbm93bic6YFJzLiR7dmFsdWUudG9Mb2NhbGVTdHJpbmcodW5kZWZpbmVkLHttYXhpbXVtRnJhY3Rpb25EaWdpdHM6NH0pfWBcbmV4cG9ydCBkZWZhdWx0IGZ1bmN0aW9uIFB1cmNoYXNlUHJpY2luZ1BhbmVsKHtpdGVtfTp7aXRlbTp7cHJvZHVjdF9pZDpzdHJpbmc7cXVhbnRpdHk6bnVtYmVyO2ZyZWVfcXVhbnRpdHk/Om51bWJlcjtkaXNjb3VudF9hbW91bnQ/Om51bWJlcjt1bml0X2Nvc3Q6bnVtYmVyO2VudHJ5X3VuaXQ/OnN0cmluZ319KXtcbiBjb25zdCBbY29udGV4dCxzZXRDb250ZXh0XT11c2VTdGF0ZTxhbnk+KCksW2Vycm9yLHNldEVycm9yXT11c2VTdGF0ZSgnJyksW21vZGUsc2V0TW9kZV09dXNlU3RhdGUoJ2JhdGNoJyksW21hcmt1cCxzZXRNYXJrdXBdPXVzZVN0YXRlKCcwJyksW3JlYXNvbixzZXRSZWFzb25dPXVzZVN0YXRlKCcnKSxbYnVzeSxzZXRCdXN5XT11c2VTdGF0ZShmYWxzZSksW3ByaWNlcyxzZXRQcmljZXNdPXVzZVN0YXRlPFJlY29yZDxzdHJpbmcsc3RyaW5nPj4oe30pXG4gYXN5bmMgZnVuY3Rpb24gbG9hZCgpe1xuICBjb25zdCByZXNwb25zZT1hd2FpdCB3aW5kb3cuYXBpLnB1cmNoYXNlcy5wcmljaW5nQ29udGV4dChpdGVtLnByb2R1Y3RfaWQpXG4gIGlmKCFyZXNwb25zZS5zdWNjZXNzKXRocm93IG5ldyBFcnJvcihyZXNwb25zZS5lcnJvcilcbiAgc2V0Q29udGV4dChyZXNwb25zZS5kYXRhKTtzZXRNb2RlKHJlc3BvbnNlLmRhdGEucHJpY2luZ19tb2RlKTtzZXRNYXJrdXAoU3RyaW5nKHJlc3BvbnNlLmRhdGEubWFya3VwX3BjdCkpO3NldEVycm9yKCcnKVxuIH1cbiB1c2VFZmZlY3QoKCk9PntcbiAgbGV0IGFjdGl2ZT10cnVlXG4gIHNldENvbnRleHQodW5kZWZpbmVkKTtzZXRQcmljZXMoe30pO3NldFJlYXNvbignJylcbiAgaWYod2luZG93LmFwaS5wdXJjaGFzZXMucHJpY2luZ0NvbnRleHQpd2luZG93LmFwaS5wdXJjaGFzZXMucHJpY2luZ0NvbnRleHQoaXRlbS5wcm9kdWN0X2lkKS50aGVuKChyZXNwb25zZTphbnkpPT57XG4gICBpZighYWN0aXZlKXJldHVyblxuICAgaWYoIXJlc3BvbnNlLnN1Y2Nlc3Mpe3NldEVycm9yKHJlc3BvbnNlLmVycm9yKTtyZXR1cm59XG4gICBzZXRDb250ZXh0KHJlc3BvbnNlLmRhdGEpO3NldE1vZGUocmVzcG9uc2UuZGF0YS5wcmljaW5nX21vZGUpO3NldE1hcmt1cChTdHJpbmcocmVzcG9uc2UuZGF0YS5tYXJrdXBfcGN0KSk7c2V0RXJyb3IoJycpXG4gIH0pLmNhdGNoKChlOnVua25vd24pPT57aWYoYWN0aXZlKXNldEVycm9yKFN0cmluZyhlKSl9KVxuICByZXR1cm4oKT0+e2FjdGl2ZT1mYWxzZX1cbiB9LFtpdGVtLnByb2R1Y3RfaWRdKVxuIGFzeW5jIGZ1bmN0aW9uIHNhdmUoYWN0aW9uOigpPT5Qcm9taXNlPGFueT4pe1xuICBzZXRCdXN5KHRydWUpXG4gIHRyeXtjb25zdCByZXN1bHQ9YXdhaXQgYWN0aW9uKCk7aWYoIXJlc3VsdC5zdWNjZXNzKXRocm93IG5ldyBFcnJvcihyZXN1bHQuZXJyb3IpO2F3YWl0IGxvYWQoKTtzZXRSZWFzb24oJycpO3VzZVByb2R1Y3RzU3RvcmUuZ2V0U3RhdGUoKS5pbnZhbGlkYXRlKCk7dG9hc3Quc3VjY2VzcygnUHJpY2luZyBzYXZlZCB3aXRoIGF1ZGl0IGhpc3RvcnknKX1jYXRjaChlKXtzZXRFcnJvcihTdHJpbmcoZSkpfWZpbmFsbHl7c2V0QnVzeShmYWxzZSl9XG4gfVxuIGlmKCFjb250ZXh0KXJldHVybiBlcnJvcj88cCByb2xlPVwiYWxlcnRcIiBjbGFzc05hbWU9XCJjb2wtc3Bhbi1mdWxsIHRleHQteHMgdGV4dC1yZWQtNDAwXCI+e2Vycm9yfTwvcD46bnVsbFxuIGxldCBpbmNvbWluZzpudW1iZXJ8bnVsbD1udWxsLGF2ZXJhZ2U6bnVtYmVyfG51bGw9bnVsbCxtZXNzYWdlPScnXG4gdHJ5e1xuICBjb25zdCBmYWN0b3I9c3RvY2tVbml0RmFjdG9yKGl0ZW0uZW50cnlfdW5pdHx8Y29udGV4dC51bml0LGNvbnRleHQudW5pdCxjb250ZXh0LnBhY2tzKVxuICBjb25zdCBsaW5lPXB1cmNoYXNlTGluZShpdGVtLnF1YW50aXR5LGl0ZW0udW5pdF9jb3N0LGl0ZW0uZnJlZV9xdWFudGl0eXx8MCxpdGVtLmRpc2NvdW50X2Ftb3VudHx8MCxmYWN0b3IpXG4gIGluY29taW5nPWxpbmUucXVhbnRpdHlcbiAgaWYoY29udGV4dC5hdmVyYWdlX2Nvc3QhPW51bGwpYXZlcmFnZT13ZWlnaHRlZFB1cmNoYXNlQ29zdChjb250ZXh0LnF1YW50aXR5LGNvbnRleHQuYXZlcmFnZV9jb3N0LGxpbmUucXVhbnRpdHksbGluZS51bml0X2Nvc3QpXG4gfWNhdGNoKGUpe21lc3NhZ2U9U3RyaW5nKGUpfVxuIHJldHVybiA8ZGV0YWlscyBjbGFzc05hbWU9XCJjb2wtc3Bhbi1mdWxsIG9yZGVyLTMgdGV4dC14cyBib3JkZXIgcm91bmRlZC1sZyBwLTJcIiBzdHlsZT17e2JvcmRlckNvbG9yOid2YXIoLS1ib3JkZXIpJ319PlxuICA8c3VtbWFyeSBjbGFzc05hbWU9XCJjdXJzb3ItcG9pbnRlciBmb250LXNlbWlib2xkXCI+U3RvY2sgJiBwcmljaW5nIMK3IHtjb250ZXh0LnF1YW50aXR5fSB7Y29udGV4dC51bml0fSBvbiBoYW5kIMK3IEF2ZXJhZ2UgY29zdCB7bW9uZXkoY29udGV4dC5hdmVyYWdlX2Nvc3QpfTwvc3VtbWFyeT5cbiAgPGRpdiBjbGFzc05hbWU9XCJncmlkIGdyaWQtY29scy0yIG1kOmdyaWQtY29scy00IGdhcC0zIHB5LTNcIj5cbiAgIDxkaXY+UHJldmlvdXMgcHVyY2hhc2U8c3Ryb25nIGNsYXNzTmFtZT1cImJsb2NrXCI+e21vbmV5KGNvbnRleHQucHJldmlvdXNfcHVyY2hhc2VfcHJpY2UpfTwvc3Ryb25nPjwvZGl2PjxkaXY+TGF0ZXN0IHB1cmNoYXNlPHN0cm9uZyBjbGFzc05hbWU9XCJibG9ja1wiPnttb25leShjb250ZXh0LmxhdGVzdF9wdXJjaGFzZV9wcmljZSl9PC9zdHJvbmc+PC9kaXY+XG4gICA8ZGl2PlN0b2NrIGFmdGVyIHJlY2VpcHQ8c3Ryb25nIGNsYXNzTmFtZT1cImJsb2NrXCI+e2luY29taW5nPT1udWxsPyfigJQnOmNvbnRleHQucXVhbnRpdHkraW5jb21pbmd9IHtjb250ZXh0LnVuaXR9PC9zdHJvbmc+PC9kaXY+PGRpdj5OZXcgd2VpZ2h0ZWQgYXZlcmFnZTxzdHJvbmcgY2xhc3NOYW1lPVwiYmxvY2tcIj57bW9uZXkoYXZlcmFnZSl9PC9zdHJvbmc+PC9kaXY+XG4gICA8ZGl2PlN1Z2dlc3RlZCBzZWxsaW5nIHByaWNlPHN0cm9uZyBjbGFzc05hbWU9XCJibG9ja1wiPnttb25leShhdmVyYWdlPT1udWxsP251bGw6YXZlcmFnZSooMStOdW1iZXIobWFya3VwfHwwKS8xMDApKX0gLyB7Y29udGV4dC51bml0fTwvc3Ryb25nPjwvZGl2PlxuICA8L2Rpdj5cbiAgeyFjb250ZXh0LmNvc3Rfa25vd24mJjxwIGNsYXNzTmFtZT1cInRleHQtYW1iZXItNDAwXCI+T3BlbmluZyBzdG9jayBoYXMgbm8ga25vd24gaGlzdG9yaWNhbCBjb3N0LiBXZWlnaHRlZC1hdmVyYWdlIHNlbGxpbmcgcmVxdWlyZXMgY29zdCByZWNvbmNpbGlhdGlvbi48L3A+fVxuICB7bWVzc2FnZSYmPHA+e21lc3NhZ2V9PC9wPn1cbiAgPGRpdiBjbGFzc05hbWU9XCJmbGV4IGZsZXgtd3JhcCBnYXAtMiBweS0yIGl0ZW1zLWVuZFwiPlxuICAgPGxhYmVsPlByaWNpbmcgcG9saWN5PHNlbGVjdCBhcmlhLWxhYmVsPVwiUHJpY2luZyBwb2xpY3lcIiBjbGFzc05hbWU9XCJpbnB1dCBibG9ja1wiIGRpc2FibGVkPXshY29udGV4dC5jYW5fYWRqdXN0fHxidXN5fSB2YWx1ZT17bW9kZX0gb25DaGFuZ2U9e2U9PnNldE1vZGUoZS50YXJnZXQudmFsdWUpfT48b3B0aW9uIHZhbHVlPVwiYmF0Y2hcIj5CYXRjaCBwcmljZTwvb3B0aW9uPjxvcHRpb24gdmFsdWU9XCJsYXRlc3RcIj5MYXRlc3QgcHJpY2U8L29wdGlvbj48b3B0aW9uIHZhbHVlPVwid2VpZ2h0ZWRcIj5XZWlnaHRlZCBhdmVyYWdlICsgbWFya3VwPC9vcHRpb24+PC9zZWxlY3Q+PC9sYWJlbD5cbiAgIDxsYWJlbD5NYXJrdXAgJTxpbnB1dCBhcmlhLWxhYmVsPVwiUHJpY2luZyBtYXJrdXBcIiBjbGFzc05hbWU9XCJpbnB1dCBibG9jayB3LTI0XCIgdHlwZT1cIm51bWJlclwiIG1pbj1cIjBcIiBtYXg9XCIxMDAwMFwiIHZhbHVlPXttYXJrdXB9IGRpc2FibGVkPXshY29udGV4dC5jYW5fYWRqdXN0fHxidXN5fSBvbkNoYW5nZT17ZT0+c2V0TWFya3VwKGUudGFyZ2V0LnZhbHVlKX0vPjwvbGFiZWw+XG4gICA8bGFiZWw+QWRqdXN0bWVudCByZWFzb248aW5wdXQgYXJpYS1sYWJlbD1cIlByaWNpbmcgYWRqdXN0bWVudCByZWFzb25cIiBjbGFzc05hbWU9XCJpbnB1dCBibG9ja1wiIHZhbHVlPXtyZWFzb259IGRpc2FibGVkPXshY29udGV4dC5jYW5fYWRqdXN0fHxidXN5fSBvbkNoYW5nZT17ZT0+c2V0UmVhc29uKGUudGFyZ2V0LnZhbHVlKX0vPjwvbGFiZWw+XG4gICA8YnV0dG9uIHR5cGU9XCJidXR0b25cIiBjbGFzc05hbWU9XCJidG4tc2Vjb25kYXJ5IGJ0bi1zbVwiIGRpc2FibGVkPXshY29udGV4dC5jYW5fYWRqdXN0fHxidXN5fHxyZWFzb24udHJpbSgpLmxlbmd0aDwzfSBvbkNsaWNrPXsoKT0+c2F2ZSgoKT0+d2luZG93LmFwaS5wdXJjaGFzZXMuc2V0UHJpY2luZyh7cHJvZHVjdF9pZDppdGVtLnByb2R1Y3RfaWQsbW9kZSxtYXJrdXA6TnVtYmVyKG1hcmt1cCkscmVhc29ufSkpfT5BcHBseSBwcmljaW5nPC9idXR0b24+XG4gIDwvZGl2PlxuICB7ZXJyb3ImJjxwIHJvbGU9XCJhbGVydFwiIGNsYXNzTmFtZT1cInRleHQtcmVkLTQwMFwiPntlcnJvcn08L3A+fVxuICA8ZGl2IGNsYXNzTmFtZT1cIm1heC1oLTQ4IG92ZXJmbG93LWF1dG9cIj48dGFibGUgY2xhc3NOYW1lPVwidy1mdWxsIHRleHQtbGVmdFwiPjx0aGVhZD48dHI+PHRoPkJhdGNoPC90aD48dGg+U3RvY2s8L3RoPjx0aD5Db3N0PC90aD48dGg+TVJQPC90aD48dGg+RXhwaXJ5PC90aD48dGg+U2VsbGluZyBwcmljZTwvdGg+PC90cj48L3RoZWFkPjx0Ym9keT57Y29udGV4dC5iYXRjaGVzLm1hcCgoYmF0Y2g6YW55KT0+PHRyIGtleT17YmF0Y2guaWR9Pjx0ZD57YmF0Y2guYmF0Y2hfbnVtYmVyfTwvdGQ+PHRkPntiYXRjaC5xdWFudGl0eX08L3RkPjx0ZD57YmF0Y2gua25vd24/bW9uZXkoYmF0Y2guY29zdF9wcmljZSk6J1Vua25vd24nfTwvdGQ+PHRkPntiYXRjaC5tcnA9PW51bGw/J+KAlCc6bW9uZXkoYmF0Y2gubXJwKX08L3RkPjx0ZD57YmF0Y2guZXhwaXJ5X2RhdGV8fCdObyBleHBpcnknfTwvdGQ+PHRkPjxkaXYgY2xhc3NOYW1lPVwiZmxleCBnYXAtMVwiPjxpbnB1dCBhcmlhLWxhYmVsPXtgU2VsbGluZyBwcmljZSBmb3IgYmF0Y2ggJHtiYXRjaC5iYXRjaF9udW1iZXJ9YH0gY2xhc3NOYW1lPVwiaW5wdXQgdy0yNFwiIHR5cGU9XCJudW1iZXJcIiBtaW49XCIwXCIgc3RlcD1cImFueVwiIGRpc2FibGVkPXshY29udGV4dC5jYW5fYWRqdXN0fHxidXN5fSB2YWx1ZT17cHJpY2VzW2JhdGNoLmlkXT8/YmF0Y2guc2VsbGluZ19wcmljZT8/Jyd9IG9uQ2hhbmdlPXtlPT5zZXRQcmljZXMoey4uLnByaWNlcyxbYmF0Y2guaWRdOmUudGFyZ2V0LnZhbHVlfSl9Lz48YnV0dG9uIHR5cGU9XCJidXR0b25cIiBjbGFzc05hbWU9XCJidG4tc2Vjb25kYXJ5IGJ0bi1zbVwiIGRpc2FibGVkPXshY29udGV4dC5jYW5fYWRqdXN0fHxidXN5fHxwcmljZXNbYmF0Y2guaWRdPT1udWxsfHxwcmljZXNbYmF0Y2guaWRdPT09Jyd8fHJlYXNvbi50cmltKCkubGVuZ3RoPDN9IG9uQ2xpY2s9eygpPT5zYXZlKCgpPT53aW5kb3cuYXBpLnB1cmNoYXNlcy5hZGp1c3RCYXRjaFByaWNlKHtiYXRjaF9pZDpiYXRjaC5pZCxwcmljZTpOdW1iZXIocHJpY2VzW2JhdGNoLmlkXSkscmVhc29ufSkpfT5TYXZlPC9idXR0b24+PC9kaXY+PC90ZD48L3RyPil9PC90Ym9keT48L3RhYmxlPjwvZGl2PlxuICA8cCBjbGFzc05hbWU9XCJwdC0yXCIgc3R5bGU9e3tjb2xvcjondmFyKC0tdGV4dC0zKSd9fT5QcmljZXMgYXJlIHBlciBiYXNlIHVuaXQuIE1hbnVhbCBiYXRjaCBwcmljZXMgYXBwbHkgd2l0aCB0aGUgQmF0Y2ggcHJpY2UgcG9saWN5LiBNUlAgaW5jbHVkZXMgdGF4OyBhIHNhbGUgbGluZSBzcGFubmluZyBiYXRjaGVzIHVzZXMgdGhlIGxvd2VzdCBhcHBsaWNhYmxlIE1SUCBjZWlsaW5nLjwvcD5cbiA8L2RldGFpbHM+XG59XG4iXSwiZmlsZSI6IkM6L1VzZXJzL1VTRVIvT25lRHJpdmUvRG9jdW1lbnRzL0Rlc2t0b3AvUE9TX0VSUC9lcnAvc3JjL2NvbXBvbmVudHMvYWRtaW4vUHVyY2hhc2VQcmljaW5nUGFuZWwudHN4In0=

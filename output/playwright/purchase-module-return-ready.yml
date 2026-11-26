@@ -1,0 +1,124 @@
+- text: ISOLATED QA DATABASE · Production connections disabled
+- heading "Stock Purchases & Bills" [level=1]
+- paragraph: 2 purchases
+- button "Refresh":
+  - img
+  - text: Refresh
+- button "PO Template":
+  - img
+  - text: PO Template
+- button "Import PO (Excel)":
+  - img
+  - text: Import PO (Excel)
+- button "Bulk stock upload":
+  - img
+  - text: Bulk stock upload
+- button "Batch inventory & alerts"
+- heading "Purchase return · MAIN-PO-2026-0001" [level=2]
+- button "Close":
+  - img
+- paragraph: Return only stock physically sent back to the supplier. The original purchase cost is used for the credit. Paid purchases create supplier credit for future purchases.
+- text: Return date
+- textbox "Return date": 2026-11-26
+- text: Reason
+- textbox "Purchase return reason": QA packaging return
+- table:
+  - rowgroup:
+    - row "Product / Batch Available Cost / unit Expiry Return quantity":
+      - columnheader "Product / Batch"
+      - columnheader "Available"
+      - columnheader "Cost / unit"
+      - columnheader "Expiry"
+      - columnheader "Return quantity"
+  - rowgroup:
+    - row "QA Rice QA-DIRECT 12 kg Rs.75 2030-01-01":
+      - cell "QA Rice QA-DIRECT"
+      - cell "12 kg"
+      - cell "Rs.75"
+      - cell "2030-01-01"
+      - cell:
+        - spinbutton "Return quantity QA-DIRECT": "2"
+- button "Cancel"
+- button "Confirm supplier return"
+- button "1. Order from Supplier Create order, track progress, then receive stock and upload the supplier bill.":
+  - strong: 1. Order from Supplier
+  - text: Create order, track progress, then receive stock and upload the supplier bill.
+- button "2. Add Received Stock Directly Search products from the delivered bill and add stock immediately.":
+  - strong: 2. Add Received Stock Directly
+  - text: Search products from the delivered bill and add stock immediately.
+- button "All Purchases"
+- button "Purchase Orders"
+- button "Direct Stock"
+- button "Date-wise Stock Received"
+- button "Supplier Bills"
+- text: Purchase date from
+- textbox "Purchase date from"
+- text: To
+- textbox "To"
+- textbox "Search purchase history":
+  - /placeholder: Search purchase / bill number or supplier
+- combobox "Filter supplier":
+  - option "All suppliers" [selected]
+  - option "QA Grocery Supplier"
+- button "All"
+- button "DRAFT"
+- button "SENT"
+- button "PARTIAL"
+- button "RECEIVED"
+- button "CANCELLED"
+- table:
+  - rowgroup:
+    - row "Purchase / Bill Supplier Purchase Date Items Total Expected Status Actions":
+      - columnheader "Purchase / Bill"
+      - columnheader "Supplier"
+      - columnheader "Purchase Date"
+      - columnheader "Items"
+      - columnheader "Total"
+      - columnheader "Expected"
+      - columnheader "Status"
+      - columnheader "Actions"
+  - rowgroup:
+    - 'row "MAIN-PO-2026-0001 Direct stock Bill: QA-DIRECT-INVOICE | 1 files QA Grocery Supplier 2026-11-26 1 Rs.900 — RECEIVED View Quotation WhatsApp Email Supplier return"':
+      - 'cell "MAIN-PO-2026-0001 Direct stock Bill: QA-DIRECT-INVOICE | 1 files"'
+      - cell "QA Grocery Supplier"
+      - cell "2026-11-26"
+      - cell "1"
+      - cell "Rs.900"
+      - cell "—"
+      - cell "RECEIVED"
+      - cell "View Quotation WhatsApp Email Supplier return":
+        - button "View":
+          - img
+          - text: View
+        - button "Quotation":
+          - img
+          - text: Quotation
+        - button "WhatsApp":
+          - img
+          - text: WhatsApp
+        - button "Email":
+          - img
+          - text: Email
+        - button "Supplier return"
+    - 'row "QA-OPENING Direct stock Bill: QA-OPENING | 1 files QA Grocery Supplier 2026-11-01 1 Rs.1,000 — RECEIVED View Quotation WhatsApp Email Supplier return"':
+      - 'cell "QA-OPENING Direct stock Bill: QA-OPENING | 1 files"'
+      - cell "QA Grocery Supplier"
+      - cell "2026-11-01"
+      - cell "1"
+      - cell "Rs.1,000"
+      - cell "—"
+      - cell "RECEIVED"
+      - cell "View Quotation WhatsApp Email Supplier return":
+        - button "View":
+          - img
+          - text: View
+        - button "Quotation":
+          - img
+          - text: Quotation
+        - button "WhatsApp":
+          - img
+          - text: WhatsApp
+        - button "Email":
+          - img
+          - text: Email
+        - button "Supplier return"
