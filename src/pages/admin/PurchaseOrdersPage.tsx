@@ -18,6 +18,7 @@ import PurchasePricingPanel from '@/components/admin/PurchasePricingPanel'
 import PurchaseInventoryReport from '@/components/admin/PurchaseInventoryReport'
 import PurchaseReturnModal from '@/components/admin/PurchaseReturnModal'
 import StockEntryWorkbench, { type StockLine } from '@/components/admin/StockEntryWorkbench'
+import SupplierQuotationModal from '@/components/admin/SupplierQuotationModal'
 import {purchaseMoney} from '../../../electron/lib/purchaseMath'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 import { printPurchaseQuotation, type PurchaseQuotationItem } from '@/lib/purchaseQuotationPrint'
@@ -70,6 +71,7 @@ export default function PurchaseOrdersPage() {
   const [showStockImport,setShowStockImport]=useState(false)
   const [showInventoryReport,setShowInventoryReport]=useState(false)
   const [returnPurchaseId,setReturnPurchaseId]=useState('')
+  const [quotationModal,setQuotationModal]=useState<null|{id?:string;mode:'request'|'prices'}>(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{
     importedPOs?: number
@@ -260,7 +262,9 @@ export default function PurchaseOrdersPage() {
       {showStockImport&&<BulkImportWizard initialType="stock_in" onClose={()=>setShowStockImport(false)} onImported={()=>{load();useProductsStore.getState().invalidate()}}/>}
       {showInventoryReport&&<PurchaseInventoryReport onClose={()=>setShowInventoryReport(false)}/>}
       {returnPurchaseId&&<PurchaseReturnModal purchaseId={returnPurchaseId} onClose={()=>setReturnPurchaseId('')} onDone={()=>{setReturnPurchaseId('');load();useProductsStore.getState().invalidate()}}/>}
-      {supermarket && <div className="px-6 pt-4 pb-3 grid md:grid-cols-2 gap-3 border-b" style={{borderColor:'var(--border)'}}>
+      {quotationModal&&<SupplierQuotationModal quotationId={quotationModal.id} mode={quotationModal.mode} onClose={()=>setQuotationModal(null)} onDone={()=>{setQuotationModal(null);load()}}/>}
+      {supermarket && <div className="px-6 pt-4 pb-3 grid md:grid-cols-3 gap-3 border-b" style={{borderColor:'var(--border)'}}>
+        <button className="btn-secondary justify-start py-3" onClick={()=>setQuotationModal({mode:'request'})}><span className="text-left"><strong className="block">0. Supplier Quotation / Reorder</strong><span className="text-xs font-normal">Pick a supplier, review its low-stock products, send a request for quotation, then convert it to an order.</span></span></button>
         <button className="btn-secondary justify-start py-3" onClick={()=>{setEntryMode('order');setShowCreate(true)}}><span className="text-left"><strong className="block">1. Order from Supplier</strong><span className="text-xs font-normal">Create order, track progress, then receive stock and upload the supplier bill.</span></span></button>
         <button className="btn-primary justify-start py-3" onClick={()=>{setEntryMode('direct');setShowCreate(true)}}><span className="text-left"><strong className="block">2. Add Received Stock Directly</strong><span className="text-xs font-normal">Search products from the delivered bill and add stock immediately.</span></span></button>
       </div>}
@@ -355,6 +359,7 @@ export default function PurchaseOrdersPage() {
                       </button>
                     )}
                     {supermarket&&['PARTIAL','RECEIVED'].includes(String(po.status))&&<button className="btn-secondary btn-sm" onClick={()=>setReturnPurchaseId(String(po.id))}>Supplier return</button>}
+                    {supermarket&&Number(po.is_quotation)===1&&po.status==='DRAFT'&&<><button className="btn-secondary btn-sm" onClick={()=>setQuotationModal({id:String(po.id),mode:'request'})}>Edit quotation</button><button className="btn-primary btn-sm" onClick={()=>setQuotationModal({id:String(po.id),mode:'prices'})}>Record prices</button></>}
                   </div>
                 </td>
               </tr>

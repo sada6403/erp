@@ -3,10 +3,10 @@ import type Database from 'better-sqlite3'
 /** Nullable/defaulted additions only; legacy stock and invoice amounts stay unchanged. */
 export function migrateSupermarketPurchases(db:Database.Database){
  const additions:Record<string,Record<string,string>>={
-  purchase_items:{paid_quantity:'REAL',free_quantity:'REAL NOT NULL DEFAULT 0',discount_amount:'REAL NOT NULL DEFAULT 0',purchase_unit_cost:'REAL',mrp:'REAL',entry_unit:'TEXT',entry_quantity:'REAL',entry_free_quantity:'REAL',unit_factor:'REAL NOT NULL DEFAULT 1'},
+  purchase_items:{remarks:'TEXT',price_confirmed:'INTEGER NOT NULL DEFAULT 1',paid_quantity:'REAL',free_quantity:'REAL NOT NULL DEFAULT 0',discount_amount:'REAL NOT NULL DEFAULT 0',purchase_unit_cost:'REAL',mrp:'REAL',entry_unit:'TEXT',entry_quantity:'REAL',entry_free_quantity:'REAL',unit_factor:'REAL NOT NULL DEFAULT 1'},
   product_batches:{mrp:'REAL',supplier_returned_quantity:'REAL NOT NULL DEFAULT 0'},
-  products:{inventory_pricing_mode:"TEXT NOT NULL DEFAULT 'batch'",pricing_markup_pct:'REAL NOT NULL DEFAULT 0'},
-  purchase_orders:{paid_amount:'REAL NOT NULL DEFAULT 0',outstanding_amount:'REAL NOT NULL DEFAULT 0',payment_status:"TEXT NOT NULL DEFAULT 'unpaid'",returned_amount:'REAL NOT NULL DEFAULT 0',applied_supplier_credit:'REAL NOT NULL DEFAULT 0',refund_credit_amount:'REAL NOT NULL DEFAULT 0',updated_at:'TEXT'},
+  products:{max_stock_level:'REAL',inventory_pricing_mode:"TEXT NOT NULL DEFAULT 'batch'",pricing_markup_pct:'REAL NOT NULL DEFAULT 0'},
+  purchase_orders:{is_quotation:'INTEGER NOT NULL DEFAULT 0',quotation_number:'TEXT',quotation_sent_at:'TEXT',delivery_requirements:'TEXT',requested_items:'TEXT',paid_amount:'REAL NOT NULL DEFAULT 0',outstanding_amount:'REAL NOT NULL DEFAULT 0',payment_status:"TEXT NOT NULL DEFAULT 'unpaid'",returned_amount:'REAL NOT NULL DEFAULT 0',applied_supplier_credit:'REAL NOT NULL DEFAULT 0',refund_credit_amount:'REAL NOT NULL DEFAULT 0',updated_at:'TEXT'},
   suppliers:{due_balance:'REAL NOT NULL DEFAULT 0',credit_balance:'REAL NOT NULL DEFAULT 0',updated_at:'TEXT'},
  }
  for(const [table,columns] of Object.entries(additions)){

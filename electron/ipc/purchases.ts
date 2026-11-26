@@ -20,6 +20,7 @@ import { canManageProcurement, resolveMainBranchId, permissionsFor } from '../se
 import { importPOsFromExcel, downloadPOTemplate } from '../services/purchaseImportExport'
 import { createReceiptBatch, ensureLegacyOpeningLayer } from '../services/batchInventory'
 import { withStatementCache } from '../services/statementCache'
+import { assertQuotationReady, confirmQuotationPrices, quotationWhatsAppText, saveSupplierQuotation, supplierReorderPlan } from '../services/supplierQuotations'
 import { receiptQuantity, purchaseFullyReceived } from '../services/purchaseReceiving'
 import { batchDates } from '../services/batchIdentity'
 import { queueInventoryRecord } from '../services/inventoryOutbox'
@@ -78,6 +79,10 @@ function getNextPONumber(branchId: string): string {
   return `${branchCode}-PO-${year}-${String(updated.last_seq).padStart(4, '0')}`
 }
 
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] as string))
+}
+
 export async function sendSupplierOrderNotification(
   poId: string,
   options?: { openWhatsApp?: boolean; sendEmail?: boolean; sendWhatsAppApi?: boolean }
@@ -128,6 +133,7 @@ export async function sendSupplierOrderNotification(
         ? `94${phoneDigits}`
         : phoneDigits
 
+  const companyName = String(((store.get('app_settings') as Record<string, unknown>) || {}).company_name || 'Our store')
   // WhatsApp formatted text
   const itemsText = items.map((it, idx) => {
     const pName = String(it.product_name || 'Item')
@@ -139,7 +145,7 @@ export async function sendSupplierOrderNotification(
   }).join('\n\n')
 
   const waText =
-`🌱 *NEW PURCHASE ORDER — NATURAL PLANTATION ERP*
+`🌱 *NEW PURCHASE ORDER — ${companyName.toUpperCase()}*
 ────────────────────────────
 📋 *PO Number:* ${poNumber}
 🏢 *To Supplier:* ${supplierName}
@@ -153,7 +159,7 @@ ${itemsText}
 ${po.notes ? `📝 *Notes/Instructions:* ${po.notes}\n` : ''}
 Please confirm order acceptance and dispatch schedule at your earliest convenience.
 Thank you for your partnership!
-*Natural Plantation & Bio-Harvest Co.*`
+*${companyName}*`
 
   const encodedWhatsAppText = encodeURIComponent(waText)
   const whatsappAppUrl = cleanPhone ? `whatsapp://send?phone=${cleanPhone}&text=${encodedWhatsAppText}` : ''
@@ -187,7 +193,7 @@ Thank you for your partnership!
 <body>
   <div class="container">
     <div class="header">
-      <h1>🌱 Natural Plantation Co.</h1>
+      <h1>🌱 ${escapeHtml(companyName)}</h1>
       <p>Official Purchase Order: <strong>${poNumber}</strong></p>
       <span class="badge">OFFICIAL PURCHASE ORDER</span>
     </div>
@@ -233,13 +239,13 @@ Thank you for your partnership!
       <p style="font-size:13px;color:#475569;margin-top:20px;">If you have any questions regarding this order, please contact our procurement desk.</p>
     </div>
     <div class="footer">
-      Generated automatically by Natural Plantation ERP • Eco-Friendly & Automated Procurement
+      Generated automatically by ${escapeHtml(companyName)} POS
     </div>
   </div>
 </body>
 </html>`
 
-  const emailSubject = `Purchase Order ${poNumber} — Natural Plantation ERP`
+  const emailSubject = `Purchase Order ${poNumber} — ${companyName}`
   const supplierEmail = String(po.supplier_email || '').trim()
   const mailtoUrl = supplierEmail ? `mailto:${supplierEmail}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(waText)}` : ''
 
@@ -685,6 +691,62 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
   })
 
   // Update PO status (DRAFT→SENT→PARTIAL/RECEIVED/CANCELLED)
+  // ── Supplier quotation requests (RFQ) and automatic reordering ──────────
+  const managerOverride = (user: Record<string, unknown>) => {
+    const perms = ((user.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || {}
+    return Boolean(perms.all || perms.employees)
+  }
+  safeHandleModule(ipcMain, 'purchases:reorderPlan', 'purchase_orders', (_e, supplierId: string, options: { branch_id?: string; exclude_purchase_id?: string } = {}) => {
+    const { mainBranchId } = requireMainBranchProcurement()
+    return { success: true, data: supplierReorderPlan(getDb(), { supplierId: String(supplierId || ''), branchId: options.branch_id || mainBranchId, excludePurchaseId: options.exclude_purchase_id }) }
+  })
+  safeHandleModule(ipcMain, 'purchases:saveQuotation', 'purchase_orders', (_e, payload: Record<string, any>) => {
+    const { user, mainBranchId } = requireMainBranchProcurement()
+    const db = getDb()
+    const id = String(payload.id || crypto.randomUUID())
+    const existing = db.prepare('SELECT po_number FROM purchase_orders WHERE id=?').get(id) as { po_number?: string } | undefined
+    const po = saveSupplierQuotation(db, {
+      id, poNumber: existing?.po_number || getNextPONumber(mainBranchId), supplierId: String(payload.supplier_id || ''), branchId: mainBranchId, userId: String(user.id || ''),
+      lines: (payload.lines || []).map((line: Record<string, any>) => ({ product_id: String(line.product_id), quantity: Number(line.quantity), estimated_cost: Number(line.estimated_cost || 0), remarks: line.remarks ? String(line.remarks) : '', link_supplier: line.link_supplier === true, override_pending: line.override_pending === true })),
+      requestedItems: (payload.requested_items || []).map((item: Record<string, any>) => ({ name: String(item.name || '').trim(), quantity: Number(item.quantity), unit: item.unit ? String(item.unit) : undefined, remarks: item.remarks ? String(item.remarks) : undefined })).filter((item: { name: string; quantity: number }) => item.name && item.quantity > 0),
+      deliveryRequirements: payload.delivery_requirements ? String(payload.delivery_requirements) : '', expectedDate: payload.expected_date ? String(payload.expected_date) : undefined,
+      notes: payload.notes ? String(payload.notes) : undefined, canOverride: managerOverride(user),
+    })
+    logAudit(db, { userId: String(user.id), branchId: mainBranchId, action: existing ? 'UPDATE_QUOTATION' : 'CREATE_QUOTATION', tableName: 'purchase_orders', recordId: id, newValues: { lines: (payload.lines || []).length } })
+    return { success: true, data: po }
+  })
+  safeHandleModule(ipcMain, 'purchases:confirmQuotationPrices', 'purchase_orders', (_e, id: string, lines: Record<string, any>[]) => {
+    const { user, mainBranchId } = requireMainBranchProcurement()
+    const db = getDb()
+    const po = confirmQuotationPrices(db, { id: String(id), branchId: mainBranchId, lines: (lines || []).map(line => ({ product_id: String(line.product_id), quantity: Number(line.quantity), unit_cost: Number(line.unit_cost), free_quantity: Number(line.free_quantity || 0), discount_amount: Number(line.discount_amount || 0), remarks: line.remarks ? String(line.remarks) : null })) })
+    logAudit(db, { userId: String(user.id), branchId: mainBranchId, action: 'CONFIRM_QUOTATION_PRICES', tableName: 'purchase_orders', recordId: String(id), newValues: { lines: (lines || []).length } })
+    return { success: true, data: po }
+  })
+  safeHandleModule(ipcMain, 'purchases:shareQuotation', 'purchase_orders', async (_e, id: string) => {
+    const { mainBranchId } = requireMainBranchProcurement()
+    const db = getDb()
+    const po = db.prepare(`SELECT po.branch_id, s.mobile_number, s.phone FROM purchase_orders po LEFT JOIN suppliers s ON s.id=po.supplier_id WHERE po.id=?`).get(id) as Record<string, any> | undefined
+    if (!po || String(po.branch_id) !== mainBranchId) throw new Error('Quotation not found')
+    const settings = (store.get('app_settings') as Record<string, unknown>) || {}
+    const text = quotationWhatsAppText(db, String(id), String(settings.company_name || 'Our store'))
+    const raw = String(po.mobile_number || po.phone || '').trim(), digits = raw.replace(/[^0-9]/g, '')
+    const phone = raw.startsWith('00') ? digits.slice(2) : digits.length === 10 && digits.startsWith('0') ? `94${digits.slice(1)}` : digits.length === 9 && digits.startsWith('7') ? `94${digits}` : digits
+    if (!phone) throw new Error('Add the supplier mobile number to share on WhatsApp')
+    await shell.openExternal(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`)
+    db.prepare("UPDATE purchase_orders SET quotation_sent_at=datetime('now'),updated_at=datetime('now') WHERE id=?").run(id)
+    queueInventoryRecord(db, 'purchase_orders', db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string, unknown>, 'UPDATE')
+    return { success: true, data: { text } }
+  })
+  safeHandleModule(ipcMain, 'purchases:supplierHistory', 'purchase_orders', (_e, supplierId: string) => {
+    requireMainBranchProcurement()
+    const rows = getDb().prepare(`SELECT po.id, po.po_number, po.quotation_number, po.is_quotation, po.status, po.purchase_date, po.received_at, po.total_amount,
+        (SELECT COALESCE(SUM(pi.discount_amount),0) FROM purchase_items pi WHERE pi.po_id=po.id) discount_total,
+        (SELECT COALESCE(SUM(MAX(0,pi.quantity-COALESCE(pi.received_qty,0))),0) FROM purchase_items pi WHERE pi.po_id=po.id) pending_quantity,
+        (SELECT COALESCE(SUM(pi.received_qty),0) FROM purchase_items pi WHERE pi.po_id=po.id) received_quantity
+      FROM purchase_orders po WHERE po.supplier_id=? ORDER BY COALESCE(po.purchase_date, po.created_at) DESC, po.rowid DESC LIMIT 100`).all(String(supplierId || ''))
+    return { success: true, data: rows }
+  })
+
   safeHandleModule(ipcMain, 'purchases:updateStatus', 'purchase_orders', async (_e, id: string, status: string, payload: Record<string, unknown> = {}) => {
     const db = getDb()
       const { user, mainBranchId } = requireMainBranchProcurement()
@@ -697,6 +759,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       if (!allowed?.includes(status)) {
         throw new Error(`Cannot move PO from '${po.status}' to '${status}'`)
       }
+      if (status === 'SENT') assertQuotationReady(db, id)
 
       // Receiving a PO adds stock only to the main branch.
       const now = new Date().toISOString()
