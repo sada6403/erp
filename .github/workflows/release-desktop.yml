@@ -134,6 +134,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npm --prefix backend ci
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Branch Hub PostgreSQL integration tests import PGlite from branch-hub.
+          npm --prefix branch-hub ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           npx electron-builder install-app-deps
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
