@@ -67,6 +67,10 @@ export default function POSPage() {
   const [discountRules, setDiscountRules] = useState<Record<string, unknown>[]>([])
   const [appSettings, setAppSettings]     = useState<Record<string, unknown>>({})
   const searchRef = useRef<HTMLInputElement>(null)
+  // Barcode scanners type a whole code in a fast burst. Track that burst so an
+  // exact barcode match is added at once, even when the scanner sends no Enter.
+  const scanBurst = useRef({ count: 0, last: 0 })
+  const lastAutoAdd = useRef(0)
   const allowNegativeStock = Boolean(appSettings.allow_negative_stock || appSettings.business_type === 'supermarket')
 
   useEffect(() => {
@@ -306,6 +310,22 @@ export default function POSPage() {
         : `Switched to ${type.toLowerCase()} mode`
     )
   }, [cart])
+
+  // Scanner without Enter suffix: add an exact barcode match once the burst ends.
+  useEffect(() => {
+    const code = splitQuantitySearch(searchQuery).query.trim()
+    if (code.length < 6 || scanBurst.current.count < 6 || quantityProduct) return
+    const product = catalog?.lookup(code)
+    if (!product || String(product.barcode || '').trim().toLowerCase() !== code.toLowerCase()) return
+    const timer = setTimeout(() => {
+      if (performance.now() - scanBurst.current.last < 70) return
+      scanBurst.current.count = 0
+      lastAutoAdd.current = performance.now()
+      void handleScannerSubmit()
+    }, 80)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchQuery, catalog, quantityProduct])
 
   const closeQuantityPanel = useCallback(() => {
     setQuantityProduct(null)
@@ -651,6 +671,22 @@ export default function POSPage() {
                 onChange={e => setSearchQuery(e.target.value)}
                 data-pos-search="true"
                 onKeyDown={e => {
+                  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    const now = performance.now(), burst = scanBurst.current
+                    burst.count = now - burst.last < 50 ? burst.count + 1 : 1
+                    burst.last = now
+                  }
+                  if (e.key === 'Enter' && !searchQuery.trim() && performance.now() - lastAutoAdd.current < 300) {
+                    // Trailing Enter from a scanner whose code was already added.
+                    e.preventDefault(); e.stopPropagation(); return
+                  }
+                  if (e.key === 'Enter' && catalog?.lookup(splitQuantitySearch(searchQuery).query.trim())) {
+                    // Exact barcode/SKU always wins over the fuzzy result order.
+                    e.preventDefault()
+                    e.stopPropagation()
+                    void handleScannerSubmit()
+                    return
+                  }
                   if (e.key === 'Enter' && (/^CPN-/i.test(searchQuery) || /^(20|21|22|23|24|02)\d{11}$/.test(searchQuery))) {
                     e.preventDefault()
                     e.stopPropagation()
