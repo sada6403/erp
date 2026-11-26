@@ -1,4 +1,4 @@
-const aliases:Record<string,string>={pc:'pcs',piece:'pcs',pieces:'pcs',kg:'kg',kgs:'kg',kilogram:'kg',kilograms:'kg',g:'g',gm:'g',gram:'g',grams:'g',l:'ltr',litre:'ltr',litres:'ltr',liter:'ltr',liters:'ltr',ml:'ml',bag:'bag',bags:'bag',carton:'carton',cartons:'carton'}
+const aliases:Record<string,string>={pc:'pcs',piece:'pcs',pieces:'pcs',kg:'kg',kgs:'kg',kilogram:'kg',kilograms:'kg',g:'g',gm:'g',gram:'g',grams:'g',l:'ltr',litre:'ltr',litres:'ltr',liter:'ltr',liters:'ltr',ml:'ml',bag:'bag',bags:'bag',carton:'carton',cartons:'carton',ctn:'carton',box:'box',boxes:'box',packet:'packet',packets:'packet',pkt:'packet',pack:'pack',packs:'pack'}
 export function stockUnit(unit:string){const value=unit.trim().toLowerCase();return aliases[value]||value}
 /** Number of base units in one entered unit. Packs always need a product-specific factor. */
 export function stockUnitFactor(entered:string,base:string,packs:{uom_name:string;conversion_factor:number}[]=[]){

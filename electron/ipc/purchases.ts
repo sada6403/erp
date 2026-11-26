@@ -19,6 +19,7 @@ import { sendWhatsApp } from '../services/whatsappService'
 import { canManageProcurement, resolveMainBranchId, permissionsFor } from '../services/branchAccess'
 import { importPOsFromExcel, downloadPOTemplate } from '../services/purchaseImportExport'
 import { createReceiptBatch, ensureLegacyOpeningLayer } from '../services/batchInventory'
+import { withStatementCache } from '../services/statementCache'
 import { receiptQuantity, purchaseFullyReceived } from '../services/purchaseReceiving'
 import { batchDates } from '../services/batchIdentity'
 import { queueInventoryRecord } from '../services/inventoryOutbox'
@@ -708,7 +709,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       const batchRecords: Record<string, unknown>[] = []
       if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>) && ['RECEIVED','PARTIAL'].includes(status) && (!Array.isArray(payload.items)||!payload.items.some((item:Record<string,unknown>)=>Number(item.received_qty)>0))) throw new Error('Select received stock and upload a supplier bill before confirming receipt.')
       if ((status === 'RECEIVED' || status === 'PARTIAL') && payload.items) {
-        db.transaction(() => {
+        withStatementCache(db, () => db.transaction(() => {
           const seenItems=new Set<string>()
 
           for (const item of payload.items as Record<string, unknown>[]) {
@@ -809,7 +810,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             action: `PO_${status}`, tableName: 'purchase_orders', recordId: id,
             newValues: { from: po.status, to: patch.status },
           })
-        })()
+        })())
         completeStagedBills(payload.attachment_token ? String(payload.attachment_token) : undefined)
         for (const itemId of receivedItemIds) {
           const row = db.prepare('SELECT * FROM purchase_items WHERE id=?').get(itemId)

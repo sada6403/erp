@@ -17,6 +17,7 @@ import BulkImportWizard from '@/components/admin/BulkImportWizard'
 import PurchasePricingPanel from '@/components/admin/PurchasePricingPanel'
 import PurchaseInventoryReport from '@/components/admin/PurchaseInventoryReport'
 import PurchaseReturnModal from '@/components/admin/PurchaseReturnModal'
+import StockEntryWorkbench, { type StockLine } from '@/components/admin/StockEntryWorkbench'
 import {purchaseMoney} from '../../../electron/lib/purchaseMath'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 import { printPurchaseQuotation, type PurchaseQuotationItem } from '@/lib/purchaseQuotationPrint'
@@ -845,6 +846,9 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
     items: [{ product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }]
   })
   const [saving, setSaving] = useState(false)
+  // Supermarket stock entry keeps its own keyboard-first line list.
+  const [stockLines, setStockLines] = useState<StockLine[]>([])
+  const draftKey = `pos-stock-entry-draft:${mode}`
   const [newProduct, setNewProduct] = useState<{name:string;barcode:string;unit:string;cost_price:string;selling_price:string;track_expiry?:boolean}|null>(null)
   const [creatingProduct,setCreatingProduct]=useState(false)
   const createProduct=async()=>{
@@ -862,6 +866,41 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
       setForm(old=>({...old,items:old.items.some(item=>!item.product_id)?old.items.map((item,index)=>index===old.items.findIndex(i=>!i.product_id)?row:item):[...old.items,row]}))
       setNewProduct(null);useProductsStore.getState().invalidate();toast.success('Product created and linked to this supplier')
     }catch(error){toast.error(String(error))}finally{setCreatingProduct(false)}
+  }
+
+  const quickCreateProduct = async (input: { name: string; barcode: string; unit: string; cost_price: string; selling_price: string; track_expiry: boolean }) => {
+    if (!form.supplier_id) { toast.error('Select the supplier first'); return null }
+    const cost = Number(input.cost_price), price = Number(input.selling_price)
+    if (!input.name.trim()) { toast.error('Enter the product name'); return null }
+    if (!(cost > 0) || !(price > 0)) { toast.error('Enter valid purchase and selling prices'); return null }
+    const result = await window.api.products.create({ ...input, name: input.name.trim(), unit: input.unit.trim() || 'pcs', supplier_id: form.supplier_id, cost_price: cost, selling_price: price })
+    if (!result.success) { toast.error(String(result.error)); return null }
+    const product = { ...input, name: input.name.trim(), unit: input.unit.trim() || 'pcs', id: String(result.data.id), sku: String(result.data.sku || ''), supplier_id: form.supplier_id, cost_price: cost, selling_price: price, stock: 0, is_active: 1, track_expiry: input.track_expiry ? 1 : 0 }
+    setProducts(old => [...old, product]); setSupplierProducts(old => [...old, product])
+    useProductsStore.getState().invalidate()
+    toast.success('Product created and linked to this supplier')
+    return product
+  }
+
+  // Barcodes and customer offers change product master data, so they are
+  // applied only after the receipt itself has been saved.
+  const applyLineExtras = async (lines: StockLine[]) => {
+    const problems: string[] = []
+    for (const line of lines) {
+      if (line.new_barcode) {
+        const res = await window.api.products.addBarcode({ product_id: line.product_id, barcode: line.new_barcode }).catch((e: Error) => ({ success: false, error: e.message }))
+        if (!res.success) problems.push(`${line.product_name}: barcode ${line.new_barcode} - ${res.error}`)
+      }
+      if (line.customer_offer) {
+        const offer = line.customer_offer
+        const res = await window.api.discounts.create({
+          name: `Offer: ${line.product_name}`, type: offer.type, value: offer.value, scope: 'product', product_id: line.product_id,
+          valid_from: offer.from || null, valid_until: offer.to || null,
+        }).catch((e: Error) => ({ success: false, error: e.message }))
+        if (!res.success) problems.push(`${line.product_name}: customer offer - ${res.error}`)
+      }
+    }
+    if (problems.length) toast.error(`Saved, but some extras were not applied:\n${problems.join('\n')}`, { duration: 10000 })
   }
 
   const selectedSupplier = suppliers.find(s => String(s.id) === form.supplier_id)
@@ -912,6 +951,12 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
               is_low_stock: true,
               is_out_of_stock: Boolean(item.is_out_of_stock),
             }))
+          }))
+          if (supermarket && !direct) setStockLines(lowStock.map(item => {
+            const quantity = Number(item.suggested_qty || item.quantity || 1), cost = Number(item.unit_cost || 0)
+            return { key: crypto.randomUUID(), product_id: String(item.product_id), product_name: String(item.product_name || ''), sku: String(item.sku || ''), barcode: String(item.barcode || ''),
+              unit: String(item.unit || 'pcs'), entry_unit: String(item.unit || 'pcs'), factor: 1, quantity, free_quantity: 0, manual_free: 0, unit_cost: cost, discount_amount: 0,
+              shelf_price: null, shelf_mrp: null, selling_price: '', mrp: '', customer_offer: null, line_total: purchaseMoney(quantity * cost), stock_quantity: quantity, effective_unit_cost: cost }
           }))
           toast.success(`⚡ Auto-analyzed: ${lowStock.length} low-stock items loaded into quotation!`, { duration: 4000 })
         } else {
@@ -996,11 +1041,16 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
 
   const removeItem = (i: number) => setForm(f => ({ ...f, items: f.items.filter((_, n) => n !== i) }))
 
-  const totalAmount = purchaseMoney(form.items.reduce((s, i) => s + purchaseMoney(i.quantity * i.unit_cost) - (i.discount_amount||0), 0))
+  const totalAmount = supermarket
+    ? purchaseMoney(stockLines.reduce((s, line) => s + line.line_total, 0))
+    : purchaseMoney(form.items.reduce((s, i) => s + purchaseMoney(i.quantity * i.unit_cost) - (i.discount_amount||0), 0))
 
   const handlePrintQuotationSheet = async () => {
     if (!selectedSupplier) { toast.error('Select a supplier first'); return }
-    const validItems = form.items.filter(i => i.product_id)
+    const validItems = supermarket
+      ? stockLines.map(line => ({ product_id: line.product_id, product_name: line.product_name, sku: line.sku, barcode: line.barcode, unit: line.unit, entry_unit: line.entry_unit,
+          quantity: line.quantity, unit_cost: line.unit_cost, discount_amount: line.discount_amount, current_stock: undefined as number | undefined, min_stock_level: undefined as number | undefined, is_low_stock: undefined as boolean | undefined, is_out_of_stock: undefined as boolean | undefined }))
+      : form.items.filter(i => i.product_id)
     if (validItems.length === 0) { toast.error('Add at least one product to quotation'); return }
 
     const settingsRes = await window.api?.settings?.get?.().catch(() => null)
@@ -1051,12 +1101,17 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
   const save = async () => {
     if(saving||creatingProduct)return
     if (!form.supplier_id) { toast.error('Select a supplier'); return }
-    if (form.items.some(i => !i.product_id)) { toast.error('All items need a product'); return }
+    const lines = supermarket
+      ? stockLines.map(line => ({ product_id: line.product_id, quantity: line.quantity, unit_cost: line.unit_cost, free_quantity: line.free_quantity, discount_amount: line.discount_amount,
+          mrp: line.mrp, selling_price: line.selling_price, entry_unit: line.entry_unit, batch_number: line.batch_number || '', mfg_date: line.mfg_date || '', expiry_date: line.expiry_date || '' }))
+      : form.items
+    if (!lines.length) { toast.error('Add at least one product'); return }
+    if (lines.some(i => !i.product_id)) { toast.error('All items need a product'); return }
     if(supermarket && direct && !attachmentToken) {toast.error('Supplier bill upload is required. Upload a PDF or image.');return}
-    if(direct) { const missing=form.items.find(item=>item.selling_price==='' && !(Number(products.find(p=>p.id===item.product_id)?.selling_price)>0)); if(missing) { toast.error('Enter a Selling Price: this product has no common selling price yet.'); return } }
+    if(direct) { const missing=lines.find(item=>item.selling_price==='' && !(Number(products.find(p=>p.id===item.product_id)?.selling_price)>0)); if(missing) { toast.error('Enter a Selling Price: this product has no common selling price yet.'); return } }
     setSaving(true)
     try {
-      const prepared=await batchGuard.confirm(form.items);if(!prepared)return
+      const prepared=await batchGuard.confirm(lines);if(!prepared)return
       const res = await window.api.purchases.create({
         ...form,items:prepared,
         purchase_type: mode, entry_id: entryId, attachment_token: attachmentToken,
@@ -1069,6 +1124,10 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
         if (sendWhatsApp) msg += ' 📱 WhatsApp initiated.'
         if (sendEmail) msg += ' ✉️ Email notification triggered.'
         toast.success(msg)
+        if (supermarket) {
+          await applyLineExtras(stockLines)
+          try { localStorage.removeItem(draftKey) } catch { /* storage blocked */ }
+        }
         onDone()
       } else {
         toast.error(String(res.error))
@@ -1083,15 +1142,15 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
   useEffect(()=>{
     const handler=(event:KeyboardEvent)=>{
       if(event.ctrlKey&&event.key.toLowerCase()==='s'){event.preventDefault();if(!newProduct)void save()}
-      if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();if(!saving&&!newProduct)addItem()}
+      if(!supermarket&&event.ctrlKey&&event.key==='Enter'){event.preventDefault();if(!saving&&!newProduct)addItem()}
     }
     window.addEventListener('keydown',handler)
     return()=>window.removeEventListener('keydown',handler)
-  },[form,saving,newProduct,attachmentToken])
+  },[form,saving,newProduct,attachmentToken,stockLines])
 
   return (
     <Modal title={direct ? "Add Received Stock Directly" : "New Purchase Order / Quotation"} onClose={()=>{if(!saving)onClose()}} size="xl" footer={<div className="w-full flex flex-wrap justify-between items-center gap-2">
-      <div>{!direct&&<button type="button" className="btn-secondary btn-sm" onClick={handlePrintQuotationSheet} disabled={!form.supplier_id||form.items.every(i=>!i.product_id)}><Printer size={13}/>Print Quotation Sheet</button>}</div>
+      <div>{!direct&&<button type="button" className="btn-secondary btn-sm" onClick={handlePrintQuotationSheet} disabled={!form.supplier_id||(supermarket?!stockLines.length:form.items.every(i=>!i.product_id))}><Printer size={13}/>Print Quotation Sheet</button>}</div>
       <div className="flex gap-2 items-center"><span className="font-semibold mr-2">Rs.{totalAmount.toLocaleString()}</span><button className="btn-ghost" disabled={saving} onClick={onClose}>Cancel</button><button className="btn-primary" onClick={save} disabled={saving||(supermarket&&direct&&!attachmentToken)}>{saving?'Saving...':direct?'Save & Receive Stock':'Create Purchase Order'}</button></div>
     </div>}>{batchGuard.dialog}
       <p className="text-xs mb-3" style={{color:'var(--text-3)'}}>Ctrl+Enter: add item · Ctrl+S: save · {direct?'Leave manufacture and expiry dates empty for non-expiring products.':'Batch, manufacture and expiry dates are entered when the stock is received.'}</p>
@@ -1151,7 +1210,22 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
             onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes..." />
         </details>
 
-        <div>
+        {supermarket && (
+          <StockEntryWorkbench
+            products={activeProducts.length ? activeProducts : products}
+            items={stockLines}
+            onItemsChange={setStockLines}
+            direct={direct}
+            draftKey={draftKey}
+            onQuickCreate={quickCreateProduct}
+            onConfirm={() => void save()}
+            onSaveDraft={() => {
+              if (direct) { try { localStorage.setItem(draftKey, JSON.stringify({ items: stockLines, saved_at: new Date().toISOString() })); toast.success('Draft saved on this computer') } catch { toast.error('Could not save the draft') } }
+              else void save()
+            }}
+          />
+        )}
+        <div hidden={supermarket}>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div className="flex items-center gap-2">
               <p className="text-sm font-semibold">Items ({form.items.length})</p>

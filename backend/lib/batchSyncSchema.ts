@@ -21,6 +21,12 @@ export async function ensureBatchSyncSchema(client:Pick<QueryClient,'query'>){
   quantity DECIMAL(18,6) NOT NULL,unit_cost DECIMAL(18,6) NOT NULL,line_total DECIMAL(14,2) NOT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,synced_at DATETIME NULL,
   INDEX idx_purchase_return_items_parent(purchase_return_id),INDEX idx_purchase_return_items_updated(updated_at))`)
+ // Additional barcodes for one product (carton code, new pack design...).
+ await client.query(`CREATE TABLE IF NOT EXISTS product_barcodes (
+  id VARCHAR(191) PRIMARY KEY,product_id VARCHAR(191) NOT NULL,barcode VARCHAR(191) NOT NULL,
+  is_active BOOLEAN NOT NULL DEFAULT 1,created_by VARCHAR(191) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,synced_at DATETIME NULL,
+  UNIQUE KEY uq_product_barcodes_barcode(barcode),INDEX idx_product_barcodes_product(product_id),INDEX idx_product_barcodes_updated(updated_at))`)
  // Same definition as database/migrate-008-keywords.up.sql. Desktops sync shared
  // search keywords, so every tenant needs the table, not only migrated ones.
  await client.query(`CREATE TABLE IF NOT EXISTS product_search_keywords (

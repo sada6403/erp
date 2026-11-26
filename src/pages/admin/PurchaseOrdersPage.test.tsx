@@ -14,22 +14,25 @@ beforeEach(()=>{
  } as any
 })
 afterEach(cleanup)
-describe('inline purchase product creation',()=>{
- it('creates a supplier-linked product and adds it to the current purchase without navigation',async()=>{
+describe('keyboard purchase product creation',()=>{
+ it('creates a supplier-linked product with F4 and selects it in the stock entry without navigation',async()=>{
   render(<PurchaseOrdersPage/>);
   fireEvent.click(screen.getByText('1. Order from Supplier'))
   await screen.findAllByRole('option',{name:'Supplier'})
   fireEvent.change(screen.getByLabelText('Supplier'),{target:{value:'supplier'}})
-  fireEvent.click(screen.getByRole('button',{name:'New product'}))
-  fireEvent.change(screen.getByLabelText('Product name'),{target:{value:'Loose rice'}})
-  fireEvent.change(screen.getByLabelText('Barcode'),{target:{value:'0000123'}})
-  fireEvent.change(screen.getByLabelText('Base unit'),{target:{value:'kg'}})
-  fireEvent.change(screen.getByLabelText('Purchase price'),{target:{value:'100'}})
-  fireEvent.change(screen.getByLabelText('Selling price'),{target:{value:'150'}})
-  fireEvent.click(screen.getByRole('button',{name:'Create and add'}))
+  const search=screen.getByLabelText('Product / barcode')
+  fireEvent.change(search,{target:{value:'Loose rice'}})
+  fireEvent.keyDown(search,{key:'Enter'})
+  expect(await screen.findByText(/Press F4 to create it here/)).toBeInTheDocument()
+  fireEvent.keyDown(window,{key:'F4'})
+  fireEvent.change(screen.getByLabelText('New product barcode'),{target:{value:'0000123'}})
+  fireEvent.change(screen.getByLabelText('New product unit'),{target:{value:'kg'}})
+  fireEvent.change(screen.getByLabelText('New product cost_price'),{target:{value:'100'}})
+  fireEvent.change(screen.getByLabelText('New product selling_price'),{target:{value:'150'}})
+  fireEvent.keyDown(screen.getByLabelText('New product selling_price'),{key:'Enter'})
   await waitFor(()=>expect(create).toHaveBeenCalledWith(expect.objectContaining({name:'Loose rice',supplier_id:'supplier',barcode:'0000123',unit:'kg',cost_price:100,selling_price:150})))
-  await waitFor(()=>expect(screen.queryByText('Create product for this supplier')).not.toBeInTheDocument())
-  expect(screen.getByText(/Loose rice \(/)).toBeInTheDocument()
+  await waitFor(()=>expect(screen.getByLabelText('Product / barcode')).toHaveValue('Loose rice'))
+  await waitFor(()=>expect(screen.getByLabelText('Quantity')).toHaveFocus())
   expect(screen.getByText('New Purchase Order / Quotation')).toBeInTheDocument()
  })
 })

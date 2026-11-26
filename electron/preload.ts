@@ -65,6 +65,9 @@ const api = {
   // Products
   products: {
     list:       (filters?: unknown) => ipcRenderer.invoke('products:list', filters),
+    barcodeOwner: (barcode: string) => ipcRenderer.invoke('products:barcodeOwner', barcode),
+    generateBarcode: () => ipcRenderer.invoke('products:generateBarcode'),
+    addBarcode: (payload: { product_id: string; barcode: string }) => ipcRenderer.invoke('products:addBarcode', payload),
     uomListAll: ()                  => ipcRenderer.invoke('products:uom:listAll'),
     get:        (id: string)        => ipcRenderer.invoke('products:get', id),
     search:     (query: string)     => ipcRenderer.invoke('products:search', query),

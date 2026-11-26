@@ -23,5 +23,11 @@ export function migrateSupermarketPurchases(db:Database.Database){
   id TEXT PRIMARY KEY,purchase_return_id TEXT NOT NULL REFERENCES purchase_returns(id),purchase_item_id TEXT NOT NULL REFERENCES purchase_items(id),batch_id TEXT NOT NULL REFERENCES product_batches(id),
   product_id TEXT NOT NULL REFERENCES products(id),quantity REAL NOT NULL,unit_cost REAL NOT NULL,line_total REAL NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')),synced_at TEXT);
- CREATE INDEX IF NOT EXISTS idx_purchase_return_items_parent ON purchase_return_items(purchase_return_id);`)
+ CREATE INDEX IF NOT EXISTS idx_purchase_return_items_parent ON purchase_return_items(purchase_return_id);
+ CREATE TABLE IF NOT EXISTS product_barcodes(
+  id TEXT PRIMARY KEY,product_id TEXT NOT NULL REFERENCES products(id),barcode TEXT NOT NULL,
+  is_active INTEGER NOT NULL DEFAULT 1,created_by TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),updated_at TEXT NOT NULL DEFAULT (datetime('now')),synced_at TEXT);
+ CREATE UNIQUE INDEX IF NOT EXISTS uq_product_barcodes_barcode ON product_barcodes(barcode);
+ CREATE INDEX IF NOT EXISTS idx_product_barcodes_product ON product_barcodes(product_id);`)
 }

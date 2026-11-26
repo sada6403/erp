@@ -8,6 +8,7 @@ import {validatePurchaseDependencies} from './purchaseDependencies'
 
 export const ALLOWED_TABLES = new Set([
   'product_batch_identities',
+  'product_barcodes',
   'product_search_keywords',
   'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers', 'supplier_payments',
   'products', 'stocks', 'stock_movements', 'stock_transfers', 'customers',
@@ -106,6 +107,7 @@ const RELATED_KEYS: Record<string, Set<string>> = {
 // retry the child.
 const REQUIRED_SYNC_PARENTS: Record<string, ReadonlyArray<readonly [field: string, table: string]>> = {
   purchase_returns:[['purchase_id','purchase_orders'],['branch_id','branches'],['supplier_id','suppliers']],
+  product_barcodes:[['product_id','products']],
   purchase_return_items:[['purchase_return_id','purchase_returns'],['purchase_item_id','purchase_items'],['batch_id','product_batches'],['product_id','products']],
   products: [
     ['category_id', 'categories'],

@@ -22,7 +22,8 @@ export class PosCatalog {
     this.products = new Map(products.filter(p => p.is_active).map(p => [p.id, p]))
     if (aliases) this.keywords = new KeywordSearchIndex(products, aliases.keywords, aliases.context)
     this.rows = products.filter(p => p.is_active).map(product => {
-      for (const code of [product.sku, product.barcode]) {
+      const extra = String((product as { extra_barcodes?: string | null }).extra_barcodes || '').split('|')
+      for (const code of [product.sku, product.barcode, ...extra]) {
         if (code) this.exact.set(normalize(code), product)
       }
       const text = normalize(`${product.name} ${product.sku} ${product.barcode || ''}`)

@@ -6,6 +6,12 @@ import type { Product } from '@/types'
 const product = (id: string, name: string, sku = id, barcode = '') => ({ id, name, sku, barcode, is_active: true } as Product)
 
 describe('offline cashier catalog', () => {
+  it('finds a product by an additional barcode', () => {
+    const catalog = new PosCatalog([{ ...product('soap', 'Sunlight', 'TKF-002', '4791034012345'), extra_barcodes: '4791034099991|CTN-555' } as Product])
+    expect(catalog.lookup('4791034099991')?.id).toBe('soap')
+    expect(catalog.lookup('ctn-555')?.id).toBe('soap')
+    expect(catalog.lookup('4791034012345')?.id).toBe('soap')
+  })
   it('prioritizes an exact scanner match above names and preserves leading zeroes', () => {
     const catalog = new PosCatalog([product('a', '001234 biscuits'), product('b', 'Milk', 'MILK', '001234')])
     expect(catalog.lookup('001234')?.id).toBe('b')

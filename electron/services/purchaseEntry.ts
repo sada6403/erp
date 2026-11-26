@@ -9,6 +9,7 @@ import { queueInventoryRecord } from './inventoryOutbox'
 import { stockUnitFactor } from '../lib/inventoryUnits'
 import {purchaseLine,validateMrp} from '../lib/purchaseMath'
 import {applyPurchaseBalance} from './purchaseAccounting'
+import { withStatementCache } from './statementCache'
 
 export interface StockPurchaseInput {
   id: string; poNumber: string; branchId: string; userId?: string | null
@@ -30,6 +31,9 @@ export function normalizeStockPurchaseItems(db:Database.Database,lines:StockPurc
   })
 }
 export function createStockPurchase(db: Database.Database, input: StockPurchaseInput, saveBills?: (purchaseId: string) => void, persistOutbox=true) {
+  return withStatementCache(db, () => createStockPurchaseNow(db, input, saveBills, persistOutbox))
+}
+function createStockPurchaseNow(db: Database.Database, input: StockPurchaseInput, saveBills?: (purchaseId: string) => void, persistOutbox=true) {
   const items=normalizeStockPurchaseItems(db,input.items)
   if (!['order','direct'].includes(input.purchaseType)) throw new Error('Invalid purchase type')
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.purchaseDate) || Number.isNaN(Date.parse(input.purchaseDate)) || new Date(input.purchaseDate+'T00:00:00Z').toISOString().slice(0,10)!==input.purchaseDate) throw new Error('Valid purchase date is required')

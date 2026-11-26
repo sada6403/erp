@@ -24,6 +24,7 @@ import { buildFurnitureImportReview, describeFurnitureSheet, furnitureImportFing
 
 import { getSellingLayers } from '../services/batchInventory'
 import {createOpeningBatch} from '../services/openingBatch'
+import { addProductBarcode, barcodeOwner, generateInternalBarcode } from '../services/productBarcodes'
 import { KeywordSearchIndex, type SearchKeyword, type SearchMaster } from '../lib/keywordSearch'
 import { KeywordService } from '../services/keywords'
 import { keywordActor } from './keywords'
@@ -169,6 +170,10 @@ async function ensureCategoryPath(
 
 function firstImage(value: string): string | null {
   return cleanText(value.split(',')[0]) || null
+}
+
+function hasExtraBarcodes(db: ReturnType<typeof getDb>): boolean {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='product_barcodes'").get())
 }
 
 export function registerProductHandlers(ipcMain: IpcMain) {
@@ -475,7 +480,8 @@ export function registerProductHandlers(ipcMain: IpcMain) {
                c.name as category_name,
                MAX(COALESCE(s.quantity, 0) - COALESCE(s.damaged_qty, 0), 0) as stock,
                b.name as branch_name,
-               (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1) as variant_count
+               (SELECT COUNT(*) FROM product_variants pv WHERE pv.product_id = p.id AND pv.is_active = 1) as variant_count${hasExtraBarcodes(db) ? `,
+               (SELECT GROUP_CONCAT(pb.barcode, '|') FROM product_barcodes pb WHERE pb.product_id = p.id AND pb.is_active = 1) as extra_barcodes` : ''}
         FROM products p
         LEFT JOIN categories c ON c.id = p.category_id
         LEFT JOIN branches b ON b.id = p.branch_id
@@ -616,11 +622,29 @@ export function registerProductHandlers(ipcMain: IpcMain) {
                COALESCE(s.quantity, 0) as stock
         FROM products p
         ${stockJoin}
-        WHERE p.sku = ? OR p.barcode = ?
+        WHERE p.sku = ? OR p.barcode = ?${hasExtraBarcodes(db) ? ' OR p.id = (SELECT pb.product_id FROM product_barcodes pb WHERE pb.barcode = ? AND pb.is_active = 1 LIMIT 1)' : ''}
         LIMIT 1
       `
       const params: unknown[] = (!superAdmin && branchId) ? [branchId, sku, sku] : [sku, sku]
+      if (hasExtraBarcodes(db)) params.push(sku)
       return { success: true, data: withSellingLayers(db.prepare(sql).get(...params) || null) }
+  })
+
+  const canEditBarcodes = () => {
+    const perms = ((getAuthUser()?.role as Record<string, unknown>)?.permissions as Record<string, unknown>) || {}
+    return Boolean(perms.all || perms.inventory)
+  }
+  safeHandle(ipcMain, 'products:barcodeOwner', (_e, barcode: string) => ({ success: true, data: barcodeOwner(getDb(), String(barcode || '')) || null }))
+  safeHandle(ipcMain, 'products:generateBarcode', () => {
+    if (!canEditBarcodes()) throw new Error('Inventory permission required')
+    return { success: true, data: generateInternalBarcode(getDb()) }
+  })
+  safeHandle(ipcMain, 'products:addBarcode', (_e, payload: { product_id: string; barcode: string }) => {
+    if (!canEditBarcodes()) throw new Error('Inventory permission required')
+    const db = getDb()
+    const result = addProductBarcode(db, { productId: String(payload?.product_id || ''), barcode: String(payload?.barcode || ''), userId: (getAuthUser()?.id as string) || null })
+    logAudit(db, { userId: getAuthUser()?.id as string, action: 'ADD_PRODUCT_BARCODE', tableName: 'products', recordId: result.product_id, newValues: result })
+    return { success: true, data: result }
   })
 
   safeHandle(ipcMain, 'products:get', (_e, id: string) => {
