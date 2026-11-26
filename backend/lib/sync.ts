@@ -3,13 +3,15 @@ import type { QueryClient } from './db'
 import { applyKeywordSync } from './keywordSync'
 import {prepareUserIdentity} from './loginIdentity'
 import {validateSyncedBatch} from './batchValidation'
+import {validatePurchaseInvoice} from './purchaseIdentity'
+import {validatePurchaseDependencies} from './purchaseDependencies'
 
 export const ALLOWED_TABLES = new Set([
   'product_batch_identities',
   'product_search_keywords',
   'branches', 'warehouses', 'roles', 'users', 'categories', 'suppliers', 'supplier_payments',
   'products', 'stocks', 'stock_movements', 'stock_transfers', 'customers',
-  'purchase_orders', 'purchase_items',
+  'purchase_orders', 'purchase_items', 'purchase_returns', 'purchase_return_items',
   'invoices', 'invoice_items', 'payments', 'credit_ledger',
   'installments', 'installment_payments',
   'installment_plans', 'installment_schedule', 'installment_reminders',
@@ -79,6 +81,8 @@ const RELATED_KEYS: Record<string, Set<string>> = {
   installment_reminders:  new Set(['installment_id']),
   customer_order_items:   new Set(['order_id']),
   return_items:           new Set(['return_id']),
+  purchase_returns:      new Set(['purchase_id']),
+  purchase_return_items: new Set(['purchase_return_id']),
   sale_batch_allocations: new Set(['invoice_id']),
   return_batch_allocations: new Set(['return_id']),
   chit_members:           new Set(['scheme_id']),
@@ -101,6 +105,8 @@ const RELATED_KEYS: Record<string, Set<string>> = {
 // v2.7.14 desktop uses that column name to upload the exact missing parent and
 // retry the child.
 const REQUIRED_SYNC_PARENTS: Record<string, ReadonlyArray<readonly [field: string, table: string]>> = {
+  purchase_returns:[['purchase_id','purchase_orders'],['branch_id','branches'],['supplier_id','suppliers']],
+  purchase_return_items:[['purchase_return_id','purchase_returns'],['purchase_item_id','purchase_items'],['batch_id','product_batches'],['product_id','products']],
   products: [
     ['category_id', 'categories'],
     ['supplier_id', 'suppliers'],
@@ -258,6 +264,15 @@ export async function applySyncOperation(
       const { rows } = await client.query<{ acquired: number }>('SELECT GET_LOCK(?, 10) AS acquired', [lock])
       if (Number(rows[0]?.acquired) !== 1) throw new Error('Stock is busy; retry shortly')
     }
+    if(input.table==='purchase_orders'&&input.operation!=='DELETE'){
+      const existing=input.record.supplier_id?undefined:(await client.query<{supplier_id:string}>('SELECT supplier_id FROM purchase_orders WHERE id=?',[input.recordId])).rows[0]
+      const supplier=input.record.supplier_id||existing?.supplier_id
+      if(supplier){
+        lock='purchase:'+createHash('sha256').update(String(supplier)).digest('hex').slice(0,55)
+        const {rows}=await client.query<{acquired:number}>('SELECT GET_LOCK(?, 10) AS acquired',[lock])
+        if(Number(rows[0]?.acquired)!==1)throw new Error('Supplier purchase is busy; retry shortly')
+      }
+    }
     await client.query('START TRANSACTION')
     if (input.eventId) {
       const { rows } = await client.query<{ table_name: string; record_id: string }>(
@@ -302,6 +317,7 @@ async function applyOperation(
   }
 ): Promise<void> {
   assertTable(input.table)
+  if(input.operation!=='DELETE')await validatePurchaseDependencies(client,input.record)
   if(input.table==='product_search_keywords') { await applyKeywordSync(client,input);return }
   const columns = await getColumns(client, input.table)
   let operation = input.operation
@@ -310,6 +326,7 @@ async function applyOperation(
       .filter(([key]) => columns.has(key) && key !== 'sync_warehouse_key')
       .map(([key, value]) => [key, normalizeValue(value)])
   )
+  if(input.table==='purchase_orders'&&input.operation!=='DELETE'&&columns.has('supplier_invoice_number'))await validatePurchaseInvoice(client,record,String(record.id||input.recordId))
 
   if(input.table==='product_batches'&&columns.has('batch_identity_id')&&input.operation!=='DELETE')await validateSyncedBatch(client,record,String(record.id||input.recordId))
   // Older desktop builds render numeric fields through a text-backed input,

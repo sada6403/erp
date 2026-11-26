@@ -2,14 +2,18 @@ import { dialog, BrowserWindow } from 'electron'
 import path from 'path'
 import crypto from 'crypto'
 import * as XLSX from 'xlsx'
-import type Database from 'better-sqlite3'
 import { getDb } from '../database'
-import { enqueuSync } from './syncQueue'
 import { logAudit } from './auditLog'
 import { insertStockMovement } from './stockMovement'
-import { syncStockRow } from './stockSync'
 import { createCompanyStore } from './companyWorkspace'
 import { resolveMainBranchId } from './branchAccess'
+import { createReceiptBatch, ensureLegacyOpeningLayer } from './batchInventory'
+import { batchDates } from './batchIdentity'
+import { applyReceiptProductPrices } from './receiptProductPricing'
+import { queueInventoryRecord } from './inventoryOutbox'
+import {stockUnit,stockUnitFactor} from '../lib/inventoryUnits'
+import {purchaseLine,validateMrp} from '../lib/purchaseMath'
+import {applyPurchaseBalance} from './purchaseAccounting'
 
 const store = createCompanyStore()
 
@@ -29,15 +33,8 @@ export function parseQtyAndUnit(raw: unknown): { qty: number; unit?: string } {
   const str = String(raw).trim()
   if (/^no$/i.test(str)) return { qty: 0, unit: undefined }
 
-  // Handles strings like "02/00" -> qty: 2, unit: 'box'
-  if (str.includes('/')) {
-    const parts = str.split('/')
-    const num = parseFloat(parts[0])
-    return { qty: Number.isFinite(num) && num > 0 ? num : 1, unit: 'box' }
-  }
-
   // Handles strings like "70KG", "110 PCS", "10 KG", "12 PACKT", "2.5 KG", "850 G"
-  const match = str.match(/^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?/)
+  const match = str.match(/^([0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?$/)
   if (!match) return { qty: 0, unit: undefined }
   const num = parseFloat(match[1])
   let unit = match[2]?.toLowerCase()
@@ -50,16 +47,12 @@ export function parseQtyAndUnit(raw: unknown): { qty: number; unit?: string } {
   return { qty: Number.isFinite(num) && num > 0 ? num : 0, unit }
 }
 
-function parseQuantity(raw: unknown): number {
-  return parseQtyAndUnit(raw).qty
-}
-
 function parseCost(raw: unknown): number {
   if (raw === null || raw === undefined || raw === '') return 0
-  if (typeof raw === 'number') return Number.isFinite(raw) && raw >= 0 ? raw : 0
-  const clean = String(raw).replace(/[^0-9.]/g, '').trim()
-  const val = parseFloat(clean)
-  return Number.isFinite(val) && val >= 0 ? val : 0
+  if (typeof raw === 'number') return Number.isFinite(raw) && raw >= 0 ? raw : NaN
+  const clean = String(raw).replace(/,/g, '').trim()
+  const val = Number(clean)
+  return Number.isFinite(val) && val >= 0 ? val : NaN
 }
 
 function getAuthUser(): Record<string, unknown> | undefined {
@@ -133,7 +126,7 @@ export async function downloadPOTemplate(): Promise<{ success: boolean; filePath
       },
     ]
 
-    const wsPO = XLSX.utils.json_to_sheet(sampleRows)
+    const wsPO = XLSX.utils.json_to_sheet(sampleRows.map(row=>({...row,'Barcode':'','Unit':'pcs','Free Quantity':0,'Line Discount':0,'MRP':'','Batch Number':'','Manufacture Date':'','Expiry Date':''})))
     wsPO['!cols'] = [
       { wch: 18 }, // PO Number
       { wch: 14 }, // Order Date
@@ -158,6 +151,14 @@ export async function downloadPOTemplate(): Promise<{ success: boolean; filePath
       ['Quantity', 'Yes', 'Procurement quantity (e.g. 50, 110, 25.5).'],
       ['Unit Cost (Rs.)', 'Yes', 'Cost price paid per unit.'],
       ['Selling Price (Rs.)', 'Optional', 'Retail price. If provided, updates or sets the catalog selling price.'],
+      ['Barcode', 'Optional', 'Exact product barcode; keep leading zeros.'],
+      ['Unit', 'Optional', 'Quantity and all prices use this unit. kg/g and litre/ml convert automatically; bags/cartons require configured product pack sizes.'],
+      ['Batch Number', 'Optional', 'Supplier batch identifier. Existing batches require review on the purchase screen.'],
+      ['Manufacture Date', 'Optional', 'YYYY-MM-DD; leave empty for products without manufacture dates.'],
+      ['Expiry Date', 'Optional', 'YYYY-MM-DD, after manufacture date; leave empty for non-expiring products.'],
+      ['Free Quantity', 'Optional', 'Received free units; they increase stock without increasing invoice cost.'],
+      ['Line Discount', 'Optional', 'Discount amount in rupees for this entire line, not a percentage.'],
+      ['MRP', 'Optional', 'Maximum retail price per entered unit including tax. Selling price must not exceed it.'],
       ['Total Cost (Rs.)', 'Optional', 'Total amount (Quantity x Unit Cost). Calculated automatically if omitted.'],
       ['Status', 'Optional', 'RECEIVED (default, updates inventory stock) or DRAFT or SENT.'],
       ['Notes', 'Optional', 'Remarks or invoice reference from the vendor.'],
@@ -211,6 +212,10 @@ export async function importPOsFromExcel(
     const user = getAuthUser()
     const mainBranchId = options.branchId || resolveMainBranchId(db)
     const markAsReceived = options.markAsReceived !== false
+    // Persist the offline outbox in the same SQLite transaction as inventory.
+    const queueRow=(table:string,id:string,data:Record<string,unknown>)=>{
+      queueInventoryRecord(db,table,{...data,id})
+    }
 
     // Pre-load suppliers
     const suppliers = db.prepare('SELECT id, name FROM suppliers').all() as { id: string; name: string }[]
@@ -230,7 +235,7 @@ export async function importPOsFromExcel(
         VALUES (?, ?, 'Procurement Team', 1, datetime('now'), datetime('now'))
       `).run(newId, name)
       supplierMap.set(lower, newId)
-      enqueuSync('suppliers', newId, 'INSERT', { id: newId, name, is_active: 1 }).catch(() => {})
+      queueRow('suppliers',newId,db.prepare('SELECT * FROM suppliers WHERE id=?').get(newId) as Record<string,unknown>)
       return newId
     }
 
@@ -247,62 +252,57 @@ export async function importPOsFromExcel(
     const allProducts = db.prepare(`SELECT id, name, sku, barcode, cost_price, selling_price, unit FROM products`).all() as ProdRow[]
     const byName = new Map<string, ProdRow>()
     const bySku = new Map<string, ProdRow>()
-    const byNormalized = new Map<string, ProdRow>()
+    const byBarcode = new Map<string, ProdRow>()
 
     for (const p of allProducts) {
       byName.set(p.name.trim().toLowerCase(), p)
       bySku.set(p.sku.trim().toLowerCase(), p)
-      const norm = p.name.toLowerCase().replace(/[^a-z0-9]/g, '')
-      if (norm) byNormalized.set(norm, p)
+      if(p.barcode) byBarcode.set(p.barcode.trim().toLowerCase(), p)
     }
 
-    const findOrCreateProduct = (itemName: string, costPrice: number, sellingPrice: number, unitCandidate?: string): ProdRow => {
+    const findOrCreateProduct = (itemName: string, costPrice: number, sellingPrice: number, unitCandidate?: string, barcode?:string, supplierId?:string): ProdRow => {
       const trimmed = itemName.trim()
       const lower = trimmed.toLowerCase()
+      if(barcode && byBarcode.has(barcode.toLowerCase())) return byBarcode.get(barcode.toLowerCase())!
+      if (byBarcode.has(lower)) return byBarcode.get(lower)!
       if (bySku.has(lower)) return bySku.get(lower)!
-      if (byName.has(lower)) return byName.get(lower)!
-
-      const norm = lower.replace(/[^a-z0-9]/g, '')
-      if (byNormalized.has(norm)) return byNormalized.get(norm)!
-
-      // Substring search
-      for (const p of allProducts) {
-        const pNorm = p.name.toLowerCase().replace(/[^a-z0-9]/g, '')
-        if (pNorm.includes(norm) || (norm.length >= 4 && norm.includes(pNorm))) {
-          return p
-        }
+      if (byName.has(lower)) {
+        const match=byName.get(lower)!
+        if(barcode && match.barcode && barcode!==match.barcode)throw new Error(`Barcode conflicts with existing product ${trimmed}`)
+        return match
       }
 
       // Auto-create product if missing so procurement items are never dropped
+      if(!(sellingPrice>0))throw new Error(`Enter a selling price for new product ${trimmed}`)
       const newId = crypto.randomUUID()
       const skuPrefix = 'GRO'
       const skuSuffix = crypto.randomUUID().slice(0, 6).toUpperCase()
       const newSku = `${skuPrefix}-${skuSuffix}`
       const unit = unitCandidate || 'pcs'
       const cost = money(costPrice > 0 ? costPrice : 0)
-      const price = money(sellingPrice > 0 ? sellingPrice : (cost > 0 ? cost * 1.15 : 0))
+      const price = money(sellingPrice)
 
       const newProduct: ProdRow = {
         id: newId,
         name: trimmed,
         sku: newSku,
-        barcode: null,
+        barcode: barcode||null,
         cost_price: cost,
         selling_price: price,
         unit,
       }
 
       db.prepare(`
-        INSERT INTO products (id, name, sku, cost_price, selling_price, unit, is_active, created_at, updated_at)
-        VALUES (@id, @name, @sku, @cost_price, @selling_price, @unit, 1, datetime('now'), datetime('now'))
-      `).run(newProduct)
+        INSERT INTO products (id, name, sku, barcode, supplier_id, cost_price, selling_price, unit, is_active, created_at, updated_at)
+        VALUES (@id, @name, @sku, @barcode, @supplier_id, @cost_price, @selling_price, @unit, 1, datetime('now'), datetime('now'))
+      `).run({...newProduct,supplier_id:supplierId||null})
 
       allProducts.push(newProduct)
       byName.set(lower, newProduct)
       bySku.set(newSku.toLowerCase(), newProduct)
-      if (norm) byNormalized.set(norm, newProduct)
+      if(barcode)byBarcode.set(barcode.toLowerCase(),newProduct)
 
-      enqueuSync('products', newId, 'INSERT', { ...newProduct, is_active: 1 }).catch(() => {})
+      queueRow('products',newId,db.prepare('SELECT * FROM products WHERE id=?').get(newId) as Record<string,unknown>)
       return newProduct
     }
 
@@ -313,6 +313,11 @@ export async function importPOsFromExcel(
       sellingPrice: number
       lineTotal: number
       unit?: string
+      batchNumber?: string
+      expiryDate?: string
+      mfgDate?: string
+      barcode?:string
+      freeQuantity:number;discount:number;mrp:number|null
     }
 
     interface ExtractedPO {
@@ -325,6 +330,13 @@ export async function importPOsFromExcel(
 
     const extractedPOs: ExtractedPO[] = []
     const warnings: string[] = []
+    const errors: string[] = []
+    const importDate = (raw: unknown): string => {
+      if(raw === '' || raw == null) return ''
+      const value=raw instanceof Date ? `${raw.getFullYear()}-${String(raw.getMonth()+1).padStart(2,'0')}-${String(raw.getDate()).padStart(2,'0')}` : String(raw).trim()
+      batchDates({product_id:'import',mfg_date:value})
+      return value
+    }
 
     // Helper: inspect a sheet and check if it contains procurement/PO rows
     const processSheetForPO = (sheet: XLSX.WorkSheet, sheetName: string) => {
@@ -350,10 +362,18 @@ export async function importPOsFromExcel(
       const qtyColIdx = headers.findIndex(h => /in\s*procuremet|in\s*procurement|qty|quantity|count/i.test(h))
       const costColIdx = headers.findIndex(h => /unit\s*cost|rate|cost\s*price|cost/i.test(h))
       const totalColIdx = headers.findIndex(h => /total\s*cost|value/i.test(h))
-      const priceColIdx = headers.findIndex(h => /selling\s*price|new\s*price|price/i.test(h))
+      const priceColIdx = headers.findIndex(h => /selling\s*price|new\s*price|^price$/i.test(h))
       const poColIdx = headers.findIndex(h => /po\s*number|order\s*no|po\s*#/i.test(h))
       const supColIdx = headers.findIndex(h => /supplier|vendor/i.test(h))
-      const dateColIdx = headers.findIndex(h => /date/i.test(h))
+      const dateColIdx = headers.findIndex(h => /^(order|purchase)\s*date$|^date$/i.test(h))
+      const batchColIdx = headers.findIndex(h => /batch/i.test(h))
+      const expiryColIdx = headers.findIndex(h => /expiry|expiration/i.test(h))
+      const mfgColIdx = headers.findIndex(h => /manufactur|mfg/i.test(h))
+      const barcodeColIdx = headers.findIndex(h=>/^barcode$/i.test(h))
+      const unitColIdx = headers.findIndex(h=>/^unit$/i.test(h))
+      const freeColIdx=headers.findIndex(h=>/^free\s*(quantity|qty)$/i.test(h))
+      const discountColIdx=headers.findIndex(h=>/^(line\s*)?discount(\s*amount)?$/i.test(h))
+      const mrpColIdx=headers.findIndex(h=>/^mrp$/i.test(h))
 
       if (nameColIdx < 0) return
 
@@ -382,30 +402,28 @@ export async function importPOsFromExcel(
 
         let { qty, unit } = qtyColIdx >= 0 ? parseQtyAndUnit(row[qtyColIdx]) : { qty: 0, unit: undefined }
         
-        // If primary qty column was 0 or "NO", check other columns for quantities like "114 KG", "3 PCS"
-        if (qty === 0) {
-          for (let c = 0; c < row.length; c++) {
-            if (c === nameColIdx || c === costColIdx || c === totalColIdx || c === priceColIdx) continue
-            const alt = parseQtyAndUnit(row[c])
-            if (alt.qty > 0) {
-              qty = alt.qty
-              if (alt.unit && !unit) unit = alt.unit
-              break
-            }
-          }
-        }
-        if (qty <= 0) qty = 1
+        if (qty <= 0) { errors.push(`${sheetName} row ${r+1}: quantity must be greater than zero`); continue }
+        const freeQuantity=freeColIdx>=0?parseCost(row[freeColIdx]):0,discount=discountColIdx>=0?parseCost(row[discountColIdx]):0
+        const mrp=mrpColIdx>=0&&row[mrpColIdx]!==''?parseCost(row[mrpColIdx]):null
 
         let unitCost = costColIdx >= 0 ? parseCost(row[costColIdx]) : 0
         const totalCost = totalColIdx >= 0 ? parseCost(row[totalColIdx]) : 0
         if (unitCost === 0 && totalCost > 0 && qty > 0) {
-          unitCost = money(totalCost / qty)
+          unitCost = money((totalCost+discount) / qty)
         }
-        const lineTotal = totalCost > 0 ? totalCost : money(unitCost * qty)
+        const lineTotal = money(unitCost*qty-discount)
 
         const sellingPrice = priceColIdx >= 0 ? parseCost(row[priceColIdx]) : 0
+        if(!Number.isFinite(unitCost) || unitCost<=0 || !Number.isFinite(sellingPrice)) { errors.push(`${sheetName} row ${r+1}: invalid purchase or selling price`); continue }
+        try{purchaseLine(qty,unitCost,freeQuantity,discount);validateMrp(sellingPrice||null,mrp);if(totalCost>0&&Math.abs(totalCost-lineTotal)>0.01)throw new Error('Total cost must equal paid quantity × cost minus discount')}catch(error){errors.push(`${sheetName} row ${r+1}: ${(error as Error).message}`);continue}
         const poNum = poColIdx >= 0 && row[poColIdx] ? String(row[poColIdx]).trim() : defaultPoNumber
-        const rowDate = dateColIdx >= 0 && row[dateColIdx] ? String(row[dateColIdx]).trim() : defaultDate
+        let rowDate: string, expiryDate: string, mfgDate: string
+        try {
+          rowDate=importDate((dateColIdx>=0 ? row[dateColIdx] : '') || defaultDate)
+          expiryDate=importDate(expiryColIdx>=0 ? row[expiryColIdx] : '')
+          mfgDate=importDate(mfgColIdx>=0 ? row[mfgColIdx] : '')
+          batchDates({product_id:'import',expiry_date:expiryDate,mfg_date:mfgDate})
+        } catch { errors.push(`${sheetName} row ${r+1}: invalid purchase, manufacture or expiry date`); continue }
         const supplier = supColIdx >= 0 && row[supColIdx] ? String(row[supColIdx]).trim() : 'Supermarket Procurement Supplier'
 
         if (!poItemsMap.has(poNum)) {
@@ -419,7 +437,11 @@ export async function importPOsFromExcel(
           unitCost,
           sellingPrice,
           lineTotal,
-          unit: unit || 'pcs',
+          unit: unitColIdx>=0 && row[unitColIdx] ? String(row[unitColIdx]).trim().toLowerCase() : unit,
+          barcode:barcodeColIdx>=0 ? String(row[barcodeColIdx]||'').trim() : '',
+          batchNumber: batchColIdx>=0 ? String(row[batchColIdx]||'').trim() : '',
+          expiryDate, mfgDate,
+          freeQuantity,discount,mrp,
         })
       }
 
@@ -448,6 +470,7 @@ export async function importPOsFromExcel(
     }
 
     // Fallback: If no procurement sheets matched, check remaining sheets (like Sheet4 / Stock and Sales)
+    if (errors.length) return {success:false,error:`Import validation failed. No stock was changed.\n${errors.slice(0,50).join('\n')}`}
     if (extractedPOs.length === 0) {
       for (const sheetName of workbook.SheetNames) {
         const s = workbook.Sheets[sheetName]
@@ -455,12 +478,25 @@ export async function importPOsFromExcel(
       }
     }
 
+    if (errors.length) return {success:false,error:`Import validation failed. No stock was changed.\n${errors.slice(0,50).join('\n')}`}
     if (extractedPOs.length === 0) {
       return {
         success: false,
         error: 'No valid purchase orders or procurement rows found in the selected Excel file.',
       }
     }
+
+    const seenOrders=new Set<string>()
+    for(const po of extractedPOs){
+      if(seenOrders.has(po.poNumber) || db.prepare('SELECT 1 FROM purchase_orders WHERE po_number=?').get(po.poNumber)) return {success:false,error:`Purchase ${po.poNumber} already exists or is repeated in this file. No stock was changed.`}
+      seenOrders.add(po.poNumber)
+    }
+    const preview=await dialog.showMessageBox(win!,{
+      type:'question',title:'Review purchase import',buttons:['Cancel','Import purchases'],defaultId:0,cancelId:0,
+      message:`${extractedPOs.length} purchases · ${extractedPOs.reduce((n,po)=>n+po.items.length,0)} product rows`,
+      detail:`${markAsReceived?'Receive stock and create batch cost layers':'Create draft orders without changing stock'}. Missing products and suppliers will be created.\n\n`+extractedPOs.slice(0,20).map(po=>`${po.poNumber} | ${po.date} | ${po.supplierName} | ${po.items.length} rows`).join('\n'),
+    })
+    if(preview.response!==1) return {success:false,cancelled:true}
 
     // Database insertion inside transaction
     let importedPOs = 0
@@ -480,7 +516,7 @@ export async function importPOsFromExcel(
 
     const updateStockStmt = db.prepare(`
       UPDATE stocks SET quantity = quantity + ?, updated_at = datetime('now')
-      WHERE product_id = ? AND branch_id = ?
+      WHERE product_id = ? AND branch_id = ? AND warehouse_id IS NULL
     `)
     const insertStockStmt = db.prepare(`
       INSERT INTO stocks (id, product_id, branch_id, quantity, damaged_qty, updated_at)
@@ -490,12 +526,10 @@ export async function importPOsFromExcel(
     const syncOps: Array<{ table: string; id: string; op: 'INSERT'; data: Record<string, unknown> }> = []
 
     const executeTransaction = db.transaction(() => {
-      let poCounter = 100
-
       for (const po of extractedPOs) {
-        let finalPoNumber = po.poNumber
+        const finalPoNumber = po.poNumber
         if (checkPOStmt.get(finalPoNumber)) {
-          finalPoNumber = `${po.poNumber}-${++poCounter}`
+          throw new Error(`Purchase ${finalPoNumber} already exists. Import cancelled to prevent duplicate stock.`)
         }
 
         const poId = crypto.randomUUID()
@@ -509,17 +543,28 @@ export async function importPOsFromExcel(
           quantity: number
           unitCost: number
           lineTotal: number
+          source: ExtractedItem
+          normalized:ReturnType<typeof purchaseLine>
+          mrp:number|null
         }> = []
 
         for (const it of po.items) {
-          const product = findOrCreateProduct(it.itemName, it.unitCost, it.sellingPrice, it.unit)
-          const lineTotal = it.lineTotal > 0 ? it.lineTotal : money(it.unitCost * it.quantity)
+          const product = findOrCreateProduct(it.itemName, it.unitCost, it.sellingPrice, it.unit,it.barcode,supplierId)
+          const packs=it.unit && stockUnit(it.unit)!==stockUnit(product.unit) ? db.prepare('SELECT uom_name,conversion_factor FROM product_uom WHERE product_id=? AND is_base=0').all(product.id) as {uom_name:string;conversion_factor:number}[] : []
+          const factor=it.unit?stockUnitFactor(it.unit,product.unit,packs):1
+          const normalized=purchaseLine(it.quantity,it.unitCost,it.freeQuantity,it.discount,factor)
+          const lineTotal = normalized.line_total
+          const mrp=it.mrp==null?null:it.mrp/factor
+          const productTax=db.prepare('SELECT * FROM products WHERE id=?').get(product.id) as {tax_rate?:number}
+          validateMrp((it.sellingPrice?it.sellingPrice/factor:product.selling_price)*(1+Number(productTax.tax_rate||0)/100),mrp)
           poTotal += lineTotal
           validItems.push({
             product,
-            quantity: it.quantity,
-            unitCost: it.unitCost,
+            quantity: normalized.quantity,
+            unitCost: normalized.unit_cost,
             lineTotal,
+            source: {...it,sellingPrice:it.sellingPrice/factor},
+            normalized,mrp,
           })
         }
 
@@ -560,10 +605,20 @@ export async function importPOsFromExcel(
             updated_at: poDate,
           }
           insertPOItemStmt.run(itemRecord)
-          syncOps.push({ table: 'purchase_items', id: itemId, op: 'INSERT', data: itemRecord })
+          db.prepare('UPDATE purchase_items SET selling_price=?,batch_number=?,expiry_date=?,mfg_date=? WHERE id=?').run(it.source.sellingPrice||null,it.source.batchNumber||null,it.source.expiryDate||null,it.source.mfgDate||null,itemId)
+          const metadata={...it.normalized,mrp:it.mrp,entry_unit:it.source.unit||it.product.unit}
+          const columns=new Set((db.prepare('PRAGMA table_info(purchase_items)').all() as {name:string}[]).map(row=>row.name))
+          for(const field of ['paid_quantity','free_quantity','discount_amount','purchase_unit_cost','mrp','entry_unit','entry_quantity','entry_free_quantity','unit_factor'] as const)if(columns.has(field))db.prepare(`UPDATE purchase_items SET ${field}=? WHERE id=?`).run(metadata[field],itemId)
+          syncOps.push({ table: 'purchase_items', id: itemId, op: 'INSERT', data: db.prepare('SELECT * FROM purchase_items WHERE id=?').get(itemId) as Record<string,unknown> })
 
           if (markAsReceived && it.quantity > 0) {
-            const stockRow = db.prepare('SELECT id, quantity FROM stocks WHERE product_id = ? AND branch_id = ?')
+            const opening=ensureLegacyOpeningLayer(db,it.product.id,mainBranchId)
+            if(opening)queueInventoryRecord(db,'product_batches',opening)
+            applyReceiptProductPrices(db,it.product.id,it.unitCost,it.source.sellingPrice>0 ? it.source.sellingPrice : null)
+            const batch=createReceiptBatch(db,{productId:it.product.id,branchId:mainBranchId,purchaseId:poId,purchaseItemId:itemId,quantity:it.quantity,unitCost:it.unitCost,mrp:it.mrp,sellingPrice:it.source.sellingPrice>0?it.source.sellingPrice:null,purchaseDate:poDate,batchNumber:it.source.batchNumber,expiryDate:it.source.expiryDate,mfgDate:it.source.mfgDate,createdBy:(user?.id as string)||null})
+            syncOps.push({table:'product_batches',id:String(batch.id),op:'INSERT',data:batch})
+            syncOps.push({table:'products',id:it.product.id,op:'INSERT',data:db.prepare('SELECT * FROM products WHERE id=?').get(it.product.id) as Record<string,unknown>})
+            const stockRow = db.prepare('SELECT id, quantity FROM stocks WHERE product_id = ? AND branch_id = ? AND warehouse_id IS NULL')
               .get(it.product.id, mainBranchId) as { id: string; quantity: number } | undefined
             if (stockRow) {
               updateStockStmt.run(it.quantity, it.product.id, mainBranchId)
@@ -571,7 +626,7 @@ export async function importPOsFromExcel(
               insertStockStmt.run(crypto.randomUUID(), it.product.id, mainBranchId, it.quantity)
             }
 
-            insertStockMovement(db, {
+            const movement=insertStockMovement(db, {
               product_id: it.product.id,
               from_branch_id: null,
               to_branch_id: mainBranchId,
@@ -582,21 +637,25 @@ export async function importPOsFromExcel(
               created_by: (user?.id as string) || null,
             })
 
-            syncStockRow(db, it.product.id, mainBranchId).catch(() => {})
+            syncOps.push({table:'stock_movements',id:String(movement.id),op:'INSERT',data:movement})
+            const updatedStock=db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS NULL').get(it.product.id,mainBranchId) as Record<string,unknown>
+            syncOps.push({table:'stocks',id:String(updatedStock.id),op:'INSERT',data:updatedStock})
           }
           totalItems++
         }
 
         importedPOs++
         totalProcurementAmount += poTotal
+        if(markAsReceived){
+          applyPurchaseBalance(db,poId)
+          const updated=db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(poId) as Record<string,unknown>
+          syncOps.push({table:'purchase_orders',id:poId,op:'INSERT',data:updated})
+        }
       }
+      for(const op of syncOps) queueRow(op.table,op.id,op.data)
     })
 
     executeTransaction()
-
-    for (const op of syncOps) {
-      enqueuSync(op.table, op.id, op.op, op.data).catch(() => {})
-    }
 
     logAudit(db, {
       userId: (user?.id as string) || null,

@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.11.1 - 2026-11-26 - Supermarket purchasing, batch inventory and faster loose-item billing
+
+- POS: loose items (kg, g, l, ml, m) open a quantity panel docked in the cart sidebar instead of a centre popup. Enter adds, Esc cancels, Alt+1-4 adds quick amounts (250g/500g/1kg/2kg), and the line total shows while typing. F3 or Ctrl+Enter edits the selected cart line.
+- Purchases: barcode/SKU product search, create products inline linked to the supplier, free quantity, line discount, MRP, entry units with conversion, draft orders and partial receiving without duplicate stock.
+- Receiving: batch number, manufacture date and expiry date are entered per line when goods arrive. Orders no longer ask for them. Expiry-tracked products cannot be received without an expiry date.
+- Batch inventory: each receipt keeps its own cost, selling price, MRP and expiry. FEFO/FIFO allocation never sells expired batches in supermarket mode, and selling price cannot exceed MRP.
+- Pricing: previous/latest purchase price, stock after receipt, weighted average cost and suggested price are shown during entry. Pricing can be batch-wise, latest-price or weighted-average + markup. Manual price changes need a reason and are audit-logged.
+- Supplier returns, supplier due/credit balances, inventory alert reports (expired, near expiry, low stock) and stock movement history.
+- Bulk stock-in import includes supplier, free quantity, discount, MRP, batch and dates, with preview and transactional import.
+- Optional POS Testing Mode with a separate sandbox database. External services are blocked while it is active. An unreadable sandbox now shows an error instead of failing silently at startup.
+- Payment dialog: Alt+A agent, Alt+G coupon, Alt+M amount.
+- Purchase returns and new purchase/batch columns sync through additive cloud schema changes.
+
 ## 2.11.0 - 2026-11-25 - Guided checkout and branch PostgreSQL billing replica
 
 - Agent suggestions prioritize exact codes; Enter/Tab advances agent → gift coupon → payment amount without submitting a sale. Typed coupon prefixes show bounded local suggestions, with customer/date/status filtering and final validation before applying.

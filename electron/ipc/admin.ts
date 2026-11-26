@@ -15,6 +15,9 @@ import { validatePin, isAdminTypeRole } from '../services/pinPolicy'
 import { createCompanyStore, getWorkspaceDataPath } from '../services/companyWorkspace'
 import { categoryCodeFromName, titleCase } from '../lib/catalog'
 import { canManageProcurement } from '../services/branchAccess'
+import {allocateSupplierPayment} from '../services/purchaseAccounting'
+import {usesSupermarketStock} from '../services/supermarketModule'
+import {queueInventoryRecord} from '../services/inventoryOutbox'
 import { ensureLocalBranchIdentity } from '../services/branchReconcile'
 import { sendEmail } from '../services/emailService'
 import { applyPendingBranchStocks, getPendingBranchStocksSummary, dismissPendingBranchStocks } from '../services/pendingBranchStocks'
@@ -1599,6 +1602,9 @@ export function registerAdminHandlers(ipcMain: IpcMain) {
         WHERE id=? AND due_balance=?
       `).run(balanceAfter, supplierId, balanceBefore)
       if (!changed.changes) throw new Error('Supplier balance changed. Refresh and try again.')
+      if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>))allocateSupplierPayment(db,supplierId,amount)
+      queueInventoryRecord(db,'supplier_payments',db.prepare('SELECT * FROM supplier_payments WHERE id=?').get(id) as Record<string,unknown>)
+      queueInventoryRecord(db,'suppliers',db.prepare('SELECT * FROM suppliers WHERE id=?').get(supplierId) as Record<string,unknown>,'UPDATE')
       logAudit(db, {
         userId: (caller.id as string) || null,
         branchId: (caller.branch_id as string) || null,

@@ -66,6 +66,7 @@ function createTransport(cfg = getConfig()) {
 }
 
 export async function sendEmail(payload: EmailPayload): Promise<{ success: boolean; error?: string }> {
+  if(process.env.POS_TEST_MODE==='1')return {success:false,error:'Email is disabled in Testing Mode'}
   const cfg = getConfig()
   if (!cfg.enabled) return { success: false, error: 'Email is not enabled in settings' }
   if (!cfg.host)    return { success: false, error: 'SMTP host not configured' }
@@ -87,6 +88,7 @@ export async function sendEmail(payload: EmailPayload): Promise<{ success: boole
 }
 
 export async function testEmail(testTo: string, overrideConfig?: Record<string, unknown>): Promise<{ success: boolean; error?: string }> {
+  if(process.env.POS_TEST_MODE==='1')return {success:false,error:'Email is disabled in Testing Mode'}
   const cfg = getConfig(overrideConfig)
   if (!cfg.host) return { success: false, error: 'SMTP host not configured' }
   try {

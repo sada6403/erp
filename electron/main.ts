@@ -50,6 +50,8 @@ import { type ClaimReminderService, getClaimReminderService } from './services/c
 import { getWorkspaceDataPath } from './services/companyWorkspace'
 import { stopTerminalHub } from './services/branchHubRuntime'
 import { registerKeywordHandlers } from './ipc/keywords'
+import { registerTestingHandlers } from './ipc/testing'
+import { isTestingMode } from './services/testingMode'
 import { registerImportHandlers } from './ipc/imports'
 
 const isDev = process.env.NODE_ENV === 'development'
@@ -162,6 +164,14 @@ function createWindow() {
 
 async function bootstrap() {
   await app.whenReady()
+  if(isTestingMode()){
+    const {session}=require('electron') as typeof import('electron')
+    session.defaultSession.webRequest.onBeforeRequest((details,callback)=>{
+      const url=new URL(details.url)
+      const local=['file:','data:','devtools:'].includes(url.protocol)||['localhost','127.0.0.1','[::1]'].includes(url.hostname)
+      callback({cancel:!local})
+    })
+  }
 
   // Register custom protocol handler for offline image loading.
   // SECURITY: urlPath comes from a product's stored image_url (renderer
@@ -189,6 +199,7 @@ async function bootstrap() {
 
   // Register all IPC handlers
   registerAuthHandlers(ipcMain)
+  registerTestingHandlers(ipcMain)
   registerProductHandlers(ipcMain)
   registerInvoiceHandlers(ipcMain)
   registerHoldHandlers(ipcMain)
@@ -235,14 +246,14 @@ async function bootstrap() {
   startLicenseChecks()
 
   ipcMain.handle('app:getVersion', () => app.getVersion())
-  ipcMain.handle('update:check',    () => isDev ? null : autoUpdater.checkForUpdates())
-  ipcMain.handle('update:download', () => isDev ? null : autoUpdater.downloadUpdate())
-  ipcMain.handle('update:install',  () => { if (!isDev) autoUpdater.quitAndInstall(false, true) })
+  ipcMain.handle('update:check',    () => isDev || isTestingMode() ? null : autoUpdater.checkForUpdates())
+  ipcMain.handle('update:download', () => isDev || isTestingMode() ? null : autoUpdater.downloadUpdate())
+  ipcMain.handle('update:install',  () => { if (!isDev && !isTestingMode()) autoUpdater.quitAndInstall(false, true) })
 
   createWindow()
 
   // Auto-updater (production only)
-  if (!isDev) {
+  if (!isDev && !isTestingMode()) {
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
 

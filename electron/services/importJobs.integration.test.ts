@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import {ImportJobs} from './importJobs'
+import {migrateSupermarketPurchases} from './supermarketSchema'
 import {migrateImports,importsInstalled} from './importMigration'
 import {DEFAULT_IMPORT_OPTIONS,type ImportOptions} from '../lib/importRegistry'
 import type {KeywordActor} from './keywords'
@@ -26,8 +27,11 @@ beforeEach(()=>{
  CREATE TABLE purchase_attachments(id TEXT PRIMARY KEY,purchase_id TEXT REFERENCES purchase_orders(id),is_active INTEGER DEFAULT 1);
  CREATE TABLE invoice_items(id TEXT PRIMARY KEY,product_id TEXT REFERENCES products(id));
  CREATE TABLE audit_logs(id TEXT PRIMARY KEY,user_id TEXT,branch_id TEXT,action TEXT,table_name TEXT,record_id TEXT,old_values TEXT,new_values TEXT);
- CREATE TABLE sync_queue(id TEXT PRIMARY KEY,table_name TEXT,record_id TEXT,operation TEXT,payload TEXT);
+ CREATE TABLE sync_queue(id TEXT PRIMARY KEY,table_name TEXT,record_id TEXT,operation TEXT,payload TEXT,status TEXT DEFAULT 'pending',attempts INTEGER DEFAULT 0,failure_cycles INTEGER DEFAULT 0,next_retry_at TEXT,last_error TEXT);
+ CREATE TABLE sync_stock_baselines(record_id TEXT PRIMARY KEY,quantity REAL,damaged_qty REAL);
  `)
+ db.exec('CREATE TABLE product_uom(product_id TEXT,uom_name TEXT,conversion_factor REAL,is_base INTEGER)')
+ migrateSupermarketPurchases(db)
  db.exec(migration);db.exec(fs.readFileSync(path.join(process.cwd(),'database/migrations/keywords.up.sql'),'utf8'))
 })
 afterEach(()=>db.close())
@@ -39,6 +43,23 @@ function staged(instance:ImportJobs,type:string,csv:string,options:Partial<Impor
 }
 const commit=(instance:ImportJobs,job:any,bills?: (id:string)=>void)=>instance.commit(job.id,bills,job.review_token)
 describe('durable bulk import pipeline',()=>{
+ it('creates missing products and supplier/category references within one reviewed stock receipt',async()=>{
+  const s=service(),job=staged(s,'stock_in','barcode,name,category,unit,quantity,free_quantity,discount_amount,cost_price,selling_price,mrp,supplier,invoice_no,purchase_date\n000123,Tea,Groceries,pcs,10,2,100,100,150,180,New Supplier,NEW-1,2026-11-24',{unknown:'create'})
+  expect(job.error_rows).toBe(0)
+  await commit(s,job,id=>{db.prepare('INSERT INTO purchase_attachments(id,purchase_id) VALUES(?,?)').run('new-bill',id)})
+  const product=db.prepare("SELECT * FROM products WHERE barcode='000123'").get() as any
+  expect(product).toMatchObject({name:'Tea',unit:'pcs',cost_price:75,selling_price:150})
+  expect(product.supplier_id).toBeTruthy();expect(product.category_id).toBeTruthy()
+  expect(db.prepare('SELECT quantity FROM stocks').get()).toEqual({quantity:12})
+  expect(db.prepare('SELECT mrp,cost_price FROM product_batches').get()).toEqual({mrp:180,cost_price:75})
+  expect(db.prepare('SELECT due_balance FROM suppliers WHERE id=?').get(product.supplier_id)).toEqual({due_balance:900})
+ })
+ it('blocks all stock-in rows when any row has validation errors',async()=>{
+  const s=service(),job=staged(s,'stock_in','sku,quantity,cost_price,selling_price,mrp,supplier,invoice_no,purchase_date\nR,1,100,150,180,Supplier,BAD-1,2026-11-24\nR,1,100,200,150,Supplier,BAD-1,2026-11-24')
+  expect(job.error_rows).toBeGreaterThan(0)
+  await expect(commit(s,job,()=>{})).rejects.toThrow(/zero validation errors/)
+  expect(db.prepare('SELECT COUNT(*) n FROM stocks').get()).toEqual({n:0})
+ })
  it('blocks missing required mapping and stores reusable templates owned by their user',()=>{
   const s=service(),job=s.upload('products','test.csv',Buffer.from('sku,name\nA,Tea'))
   expect(()=>s.map(job.id,{sheetName:job.sheetName,headerRow:0,mapping:{sku:0},options:{}})).toThrow('required')

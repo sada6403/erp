@@ -1,4 +1,5 @@
 import fs from 'fs'
+import { isTestingMode } from './testingMode'
 import { BrowserWindow } from 'electron'
 import { TerminalHubClient, type TerminalHubConfig } from '../branchHub/client'
 import { createCompanyStore, getWorkspaceDataPath } from './companyWorkspace'
@@ -12,6 +13,7 @@ let activeConfigPath = ''
 /** Operator provisioned per-workspace file. Credentials never enter renderer,
  * cloud settings synchronization, logs or status responses. Restart to reconfigure. */
 export function getTerminalHub(): TerminalHubClient | undefined {
+  if(isTestingMode())return undefined
   const configPath = getWorkspaceDataPath('branch-hub-terminal.json')
   if (!fs.existsSync(configPath)) return undefined
   const user = createCompanyStore().get('auth_user') as { branch_id?: string } | undefined

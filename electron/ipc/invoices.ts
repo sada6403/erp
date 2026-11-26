@@ -23,6 +23,7 @@ import { notificationAllowed } from '../services/chitNotifications'
 import { isDeviceLocked } from '../services/licenseService'
 import { downloadPastSalesTemplate, importSalesFromExcel, exportBillsToExcel } from '../services/salesImportExport'
 import { reduceSaleBatchQuantity, quoteBatchPrice, allocateSaleBatches, reverseInvoiceBatchAllocations, type SaleBatchAllocation } from '../services/batchInventory'
+import {validateMrp} from '../lib/purchaseMath'
 
 const store = createCompanyStore()
 
@@ -520,7 +521,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
                 branchId,
                 quantity: qty,
                 unitSellingPrice: unitPrice * (1 - discountPct / 100) * (itemsSubtotal - itemsDiscountTotal > 0 ? 1 - globalDiscount / (itemsSubtotal - itemsDiscountTotal) : 1),
-                method: 'FIFO',
+                method: undefined,
               }))
             }
             const allowNegativeStock = !isSupermarket && Boolean(settings.allow_negative_stock)
@@ -907,7 +908,7 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
             allocations.push(...allocateSaleBatches(db, {
               invoiceId: id, invoiceItemId: item.id, productId: item.product_id,
               branchId: String(invoice.branch_id), quantity: item.quantity,
-              unitSellingPrice: (item.unit_price - item.discount_amount / item.quantity) * (netSubtotal > 0 ? 1-globalDiscount/netSubtotal : 1), method: 'FIFO',
+              unitSellingPrice: (item.unit_price - item.discount_amount / item.quantity) * (netSubtotal > 0 ? 1-globalDiscount/netSubtotal : 1), method: undefined,
             }))
           }
           const changed = db.prepare(`
@@ -1301,8 +1302,10 @@ export function registerInvoiceHandlers(ipcMain: IpcMain) {
         if (usesSupermarketStock(store.get('app_settings') as Record<string, unknown>) && invoice.bill_type !== 'QUOTATION') {
           if (db.prepare("SELECT 1 FROM returns WHERE invoice_id=? AND status!='cancelled' LIMIT 1").get(id)) throw new Error('Cancel the existing sale returns before correcting this invoice')
           const tracked = db.prepare('SELECT 1 FROM sale_batch_allocations WHERE invoice_item_id=? LIMIT 1').get(item.id)
-          if (deltaQuantity > 0) allocateSaleBatches(db, { invoiceId: id, invoiceItemId: String(item.id), productId: String(item.product_id), branchId: String(invoice.branch_id), quantity: deltaQuantity, unitSellingPrice: newPrice, method: 'FIFO' })
+          if (deltaQuantity > 0) allocateSaleBatches(db, { invoiceId: id, invoiceItemId: String(item.id), productId: String(item.product_id), branchId: String(invoice.branch_id), quantity: deltaQuantity, unitSellingPrice: newPrice, method: undefined })
           if (deltaQuantity < 0 && tracked) reduceSaleBatchQuantity(db, String(item.id), -deltaQuantity)
+          const batches=db.prepare('SELECT b.* FROM sale_batch_allocations a JOIN product_batches b ON b.id=a.batch_id WHERE a.invoice_item_id=? AND a.quantity>a.returned_quantity').all(String(item.id)) as {mrp?:number|null}[]
+          for(const batch of batches)validateMrp(newPrice*(1-discountPct/100)*(1+taxRate/100),batch.mrp)
         }
 
         db.prepare(`

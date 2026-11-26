@@ -1,6 +1,6 @@
 import { listPurchaseBills, type BillHistoryFilters } from '../services/purchaseBillHistory'
 import { applyReceiptProductPrices, repairMissingReceiptPrices } from '../services/receiptProductPricing'
-import { createStockPurchase } from '../services/purchaseEntry'
+import { createStockPurchase,replaceDraftPurchase } from '../services/purchaseEntry'
 import { stagePurchaseBills, persistStagedBills, completeStagedBills, discardStagedBills, requireSavedPurchaseBill } from '../services/purchaseBills'
 import { usesSupermarketStock } from '../services/supermarketModule'
 import { BrowserWindow, dialog, shell, type IpcMain } from 'electron'
@@ -16,9 +16,16 @@ import { insertStockMovement } from '../services/stockMovement'
 import { safeHandleModule } from './ipcHandler'
 import { sendEmail } from '../services/emailService'
 import { sendWhatsApp } from '../services/whatsappService'
-import { canManageProcurement, resolveMainBranchId } from '../services/branchAccess'
+import { canManageProcurement, resolveMainBranchId, permissionsFor } from '../services/branchAccess'
 import { importPOsFromExcel, downloadPOTemplate } from '../services/purchaseImportExport'
-import { createReceiptBatch } from '../services/batchInventory'
+import { createReceiptBatch, ensureLegacyOpeningLayer } from '../services/batchInventory'
+import { receiptQuantity, purchaseFullyReceived } from '../services/purchaseReceiving'
+import { batchDates } from '../services/batchIdentity'
+import { queueInventoryRecord } from '../services/inventoryOutbox'
+import {inventoryPricingContext,setInventoryPricing,adjustBatchSellingPrice, type InventoryPricingMode} from '../services/inventoryPricing'
+import {applyPurchaseBalance} from '../services/purchaseAccounting'
+import {returnPurchaseStock} from '../services/purchaseReturns'
+import {purchaseInventoryReport} from '../services/purchaseReports'
 
 const store = createCompanyStore()
 
@@ -306,6 +313,35 @@ Thank you for your partnership!
 }
 
 export function registerPurchaseHandlers(ipcMain: IpcMain) {
+  safeHandleModule(ipcMain,'purchases:inventoryReport','purchase_orders',(_e,filters={})=>{
+    const {mainBranchId}=requireMainBranchProcurement();return {success:true,data:purchaseInventoryReport(getDb(),mainBranchId,filters)}
+  })
+  safeHandleModule(ipcMain,'purchases:returnContext','purchase_orders',(_e,id:string)=>{
+    const {mainBranchId}=requireMainBranchProcurement();const db=getDb()
+    const purchase=db.prepare('SELECT * FROM purchase_orders WHERE id=? AND branch_id=?').get(id,mainBranchId)
+    if(!purchase)throw new Error('Purchase not found')
+    return {success:true,data:{purchase,batches:db.prepare('SELECT b.*,p.name product_name,p.unit FROM product_batches b JOIN products p ON p.id=b.product_id WHERE b.po_id=? AND b.branch_id=? AND b.quantity>0 ORDER BY p.name,b.created_at').all(id,mainBranchId)}}
+  })
+  safeHandleModule(ipcMain,'purchases:returnStock','purchase_orders',async(_e,payload:{id:string;purchase_id:string;date:string;reason:string;items:{batch_id:string;quantity:number}[]})=>{
+    const {user,mainBranchId}=requireMainBranchProcurement()
+    const data=returnPurchaseStock(getDb(),{id:payload.id,purchaseId:payload.purchase_id,branchId:mainBranchId,userId:String(user.id),date:payload.date,reason:payload.reason,items:payload.items})
+    const products=getDb().prepare('SELECT DISTINCT product_id FROM purchase_return_items WHERE purchase_return_id=?').all(payload.id) as {product_id:string}[]
+    await publishProductPrices(products.map(row=>row.product_id));return {success:true,data}
+  })
+  safeHandleModule(ipcMain,'purchases:pricingContext','purchase_orders',(_e,productId:string)=>{
+    const {user,mainBranchId}=requireMainBranchProcurement()
+    return {success:true,data:{...inventoryPricingContext(getDb(),productId,mainBranchId),can_adjust:!!(permissionsFor(user).all||permissionsFor(user).inventory_price_adjust)}}
+  })
+  safeHandleModule(ipcMain,'purchases:setPricing','purchase_orders',async(_e,payload:{product_id:string;mode:InventoryPricingMode;markup:number;reason:string})=>{
+    const {user,mainBranchId}=requireMainBranchProcurement()
+    const data=setInventoryPricing(getDb(),{productId:payload.product_id,branchId:mainBranchId,userId:String(user.id),authorized:!!(permissionsFor(user).all||permissionsFor(user).inventory_price_adjust),mode:payload.mode,markup:Number(payload.markup),reason:String(payload.reason||'')})
+    await publishProductPrices([payload.product_id]);return {success:true,data}
+  })
+  safeHandleModule(ipcMain,'purchases:adjustBatchPrice','purchase_orders',async(_e,payload:{batch_id:string;price:number;reason:string})=>{
+    const {user,mainBranchId}=requireMainBranchProcurement()
+    const data=adjustBatchSellingPrice(getDb(),{batchId:payload.batch_id,branchId:mainBranchId,userId:String(user.id),authorized:!!(permissionsFor(user).all||permissionsFor(user).inventory_price_adjust),price:Number(payload.price),reason:String(payload.reason||'')})
+    await publishProductPrices([String(data.product_id)]);return {success:true,data}
+  })
   safeHandleModule(ipcMain,'purchases:billHistory','purchase_orders',(_e,filters:BillHistoryFilters={})=>{
     const {mainBranchId}=requireMainBranchProcurement();const db=getDb()
     return {success:true,data:{rows:listPurchaseBills(db,mainBranchId,filters),uploaders:db.prepare(`SELECT DISTINCT u.id,u.name FROM purchase_attachments a JOIN purchase_orders po ON po.id=a.purchase_id JOIN users u ON u.id=a.uploaded_by WHERE po.branch_id=? AND a.is_active=1 ORDER BY u.name`).all(mainBranchId)}}
@@ -516,7 +552,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       // comment) on stockCounts:get in electron/ipc/stocks.ts — lets Receive
       // Items accept "N boxes + M pcs" for products with a configured pack unit.
       const items = db.prepare(`
-        SELECT pi.*, p.name as product_name, p.sku,
+        SELECT pi.*, p.name as product_name, p.sku, p.unit as product_unit, COALESCE(p.track_expiry,0) as track_expiry,
           pu.uom_name as pack_uom_name, pu.conversion_factor as pack_conversion_factor
         FROM purchase_items pi
         LEFT JOIN products p ON p.id = pi.product_id
@@ -546,7 +582,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             supplierId:String(payload.supplier_id||''),purchaseType:payload.purchase_type==='direct'?'direct':'order',
             purchaseDate:String(payload.purchase_date||new Date().toISOString().slice(0,10)),invoiceNumber:payload.supplier_invoice_number,
             expectedDate:payload.expected_date,notes:payload.notes,
-            items:(payload.items||[]).map((item:Record<string,unknown>)=>({product_id:String(item.product_id||''),quantity:Number(item.quantity),unit_cost:Number(item.unit_cost),selling_price:item.selling_price==null||item.selling_price===''?null:Number(item.selling_price),batch_number:item.batch_number?String(item.batch_number):null,expiry_date:item.expiry_date?String(item.expiry_date):null,mfg_date:item.mfg_date?String(item.mfg_date):null,batch_resolution:item.batch_resolution as 'add_existing'|'acknowledge',existing_batch_id:String(item.existing_batch_id||''),acknowledge_dates:item.acknowledge_dates===true})),
+            items:(payload.items||[]).map((item:Record<string,unknown>)=>({product_id:String(item.product_id||''),quantity:Number(item.quantity),unit_cost:Number(item.unit_cost),free_quantity:Number(item.free_quantity||0),discount_amount:Number(item.discount_amount||0),mrp:item.mrp==null||item.mrp===''?null:Number(item.mrp),entry_unit:item.entry_unit?String(item.entry_unit):undefined,selling_price:item.selling_price==null||item.selling_price===''?null:Number(item.selling_price),batch_number:item.batch_number?String(item.batch_number):null,expiry_date:item.expiry_date?String(item.expiry_date):null,mfg_date:item.mfg_date?String(item.mfg_date):null,batch_resolution:item.batch_resolution as 'add_existing'|'acknowledge',existing_batch_id:String(item.existing_batch_id||''),acknowledge_dates:item.acknowledge_dates===true})),
           },id=>persistStagedBills(db,id,billsToken,String(user.id)))
           logAudit(db,{userId:String(user.id),branchId:mainBranchId,action:row.status==='RECEIVED'?'DIRECT_STOCK_RECEIVED':'PO_CREATE',tableName:'purchase_orders',recordId:purchaseId,newValues:row})
           return row
@@ -673,24 +709,19 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>) && ['RECEIVED','PARTIAL'].includes(status) && (!Array.isArray(payload.items)||!payload.items.some((item:Record<string,unknown>)=>Number(item.received_qty)>0))) throw new Error('Select received stock and upload a supplier bill before confirming receipt.')
       if ((status === 'RECEIVED' || status === 'PARTIAL') && payload.items) {
         db.transaction(() => {
-          let allFullyReceived = true
+          const seenItems=new Set<string>()
 
           for (const item of payload.items as Record<string, unknown>[]) {
             const poItem = db.prepare('SELECT * FROM purchase_items WHERE id=? AND po_id=?')
               .get(String(item.id), id) as Record<string, unknown> | undefined
-            if (!poItem) continue
+            if (!poItem) throw new Error('Purchase item not found in this order')
+            if(seenItems.has(String(poItem.id)))throw new Error('Duplicate purchase item in receipt')
+            seenItems.add(String(poItem.id))
 
-            const newReceived = Number(item.received_qty) || 0
             const previouslyReceived = Number(poItem.received_qty || 0)
             // The UI sends the quantity it observed before this receipt. A
             // stale retry must not receive the same goods twice.
-            if (item.already_received !== undefined && Number(item.already_received) !== previouslyReceived) {
-              throw new Error('This purchase order was already updated. Refresh it before receiving more stock.')
-            }
-            const totalReceived = previouslyReceived + newReceived
-            if (totalReceived > Number(poItem.quantity)) {
-              throw new Error(`Received quantity exceeds ordered quantity for product`)
-            }
+            const {quantity:newReceived,total:totalReceived}=receiptQuantity(Number(poItem.quantity),previouslyReceived,item.received_qty,item.already_received,usesSupermarketStock(store.get('app_settings') as Record<string,unknown>))
 
             db.prepare(`UPDATE purchase_items SET received_qty=?, updated_at=datetime('now') WHERE id=?`)
               .run(totalReceived, poItem.id)
@@ -700,7 +731,11 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
             if (newReceived > 0) {
               const branchId = String(po.branch_id)
               const productId = String(poItem.product_id)
-              const existingStock = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=?')
+              if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>)){
+                const opening=ensureLegacyOpeningLayer(db,productId,branchId)
+                if(opening)batchRecords.push(opening)
+              }
+              const existingStock = db.prepare('SELECT id FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS NULL')
                 .get(productId, branchId) as { id: string } | undefined
               if (existingStock) {
                 db.prepare(`UPDATE stocks SET quantity=quantity+?, updated_at=datetime('now') WHERE id=?`)
@@ -727,7 +762,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
                 .get(productId) as { track_batches?: number; selling_price?: number } | undefined
               if (usesSupermarketStock(settings)) {
                 applyReceiptProductPrices(db,productId,Number(poItem.unit_cost),item.selling_price !== undefined ? (item.selling_price === '' || item.selling_price == null ? null : Number(item.selling_price)) : poItem.selling_price == null ? null : Number(poItem.selling_price))
-                if (item.purchase_date && !/^\d{4}-\d{2}-\d{2}$/.test(String(item.purchase_date))) throw new Error('Invalid purchase date')
+                if(item.purchase_date)batchDates({product_id:productId,mfg_date:String(item.purchase_date)})
                 if (!po.purchase_date && !patch.purchase_date) patch.purchase_date = String(item.purchase_date || now).slice(0,10)
                 batchRecords.push(createReceiptBatch(db, {
                   productId,
@@ -737,6 +772,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
                   quantity: newReceived,
                   unitCost: Number(poItem.unit_cost || 0),
                   sellingPrice: item.selling_price !== undefined ? (item.selling_price === '' || item.selling_price == null ? null : Number(item.selling_price)) : poItem.selling_price == null ? null : Number(poItem.selling_price),
+                  mrp:poItem.mrp==null?null:Number(poItem.mrp),
                   batchNumber: String(item.batch_number || poItem.batch_number || '').trim() || null,
                   mfgDate:String(item.mfg_date||poItem.mfg_date||'')||null,batchResolution:item.batch_resolution as 'add_existing'|'acknowledge',existingBatchId:String(item.existing_batch_id||''),acknowledgeDates:item.acknowledge_dates===true,
                   expiryDate: String(item.expiry_date || poItem.expiry_date || '').trim() || null,
@@ -747,17 +783,26 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
               receivedProductIds.push(productId)
             }
 
-            if (totalReceived < Number(poItem.quantity)) allFullyReceived = false
           }
 
           persistStagedBills(db,id,payload.attachment_token ? String(payload.attachment_token) : undefined,String(user.id))
           if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>)) requireSavedPurchaseBill(db,id)
           // Auto-promote PARTIAL to RECEIVED if everything is now received
-          if (status === 'PARTIAL' && allFullyReceived) patch.status = 'RECEIVED'
-          if (status === 'RECEIVED') patch.received_at = now
+          patch.status=purchaseFullyReceived(db,id)?'RECEIVED':'PARTIAL'
+          if (patch.status === 'RECEIVED') patch.received_at = now
 
           db.prepare(`UPDATE purchase_orders SET status=?, purchase_date=COALESCE(purchase_date,?), received_at=COALESCE(?,received_at), updated_at=datetime('now') WHERE id=?`)
             .run(patch.status, patch.purchase_date || null, patch.status === 'RECEIVED' ? now : null, id)
+          if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>))applyPurchaseBalance(db,id)
+
+          queueInventoryRecord(db,'purchase_orders',db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string,unknown>,'UPDATE')
+          for(const itemId of receivedItemIds)queueInventoryRecord(db,'purchase_items',db.prepare('SELECT * FROM purchase_items WHERE id=?').get(itemId) as Record<string,unknown>,'UPDATE')
+          for(const productId of new Set(receivedProductIds)){
+            queueInventoryRecord(db,'products',{...(db.prepare('SELECT * FROM products WHERE id=?').get(productId) as Record<string,unknown>),_purchase_ids:[id]},'UPDATE')
+            queueInventoryRecord(db,'stocks',{...(db.prepare('SELECT * FROM stocks WHERE product_id=? AND branch_id=? AND warehouse_id IS NULL').get(productId,String(po.branch_id)) as Record<string,unknown>),_purchase_ids:[id]},'UPDATE')
+          }
+          for(const movement of movementRecords)queueInventoryRecord(db,'stock_movements',{...movement,_purchase_ids:[id]})
+          for(const batch of batchRecords)queueInventoryRecord(db,'product_batches',{...batch,_purchase_ids:[id]})
 
           logAudit(db, {
             userId: user?.id as string, branchId: po.branch_id as string,
@@ -786,8 +831,11 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
         if (status === 'CANCELLED') patch.cancelled_at = now
 
         const fields = Object.keys(patch).map(k => `${k}=@${k}`).join(',')
-        db.prepare(`UPDATE purchase_orders SET ${fields}, updated_at=datetime('now') WHERE id=@id`)
-          .run({ id, ...patch })
+        db.transaction(()=>{
+          db.prepare(`UPDATE purchase_orders SET ${fields}, updated_at=datetime('now') WHERE id=@id`).run({ id, ...patch })
+          if(status==='CANCELLED'&&usesSupermarketStock(store.get('app_settings') as Record<string,unknown>))applyPurchaseBalance(db,id,true,true)
+          queueInventoryRecord(db,'purchase_orders',db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string,unknown>,'UPDATE')
+        })()
 
         logAudit(db, {
           userId: user?.id as string, branchId: po.branch_id as string,
@@ -809,7 +857,7 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
         }
       }
 
-      return { success: true }
+      return { success: true,data:{id,status:patch.status} }
   })
 
   // Update draft PO (add/remove/edit items before sending)
@@ -820,6 +868,14 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
       if (!po) throw new Error('Purchase order not found')
       if (String(po.branch_id) !== mainBranchId) throw new Error('Only main-branch purchase orders can be managed here')
       if (po.status !== 'DRAFT') throw new Error('Only DRAFT purchase orders can be edited')
+      if(usesSupermarketStock(store.get('app_settings') as Record<string,unknown>)){
+        const data=db.transaction(()=>{
+          const updated=replaceDraftPurchase(db,id,mainBranchId,payload)
+          logAudit(db,{userId:String(user.id),branchId:mainBranchId,action:'PO_UPDATE',tableName:'purchase_orders',recordId:id,oldValues:po,newValues:updated})
+          return updated
+        })()
+        return {success:true,data}
+      }
 
       if (payload.items) {
         for (const item of payload.items as Record<string, unknown>[]) {
@@ -903,20 +959,21 @@ export function registerPurchaseHandlers(ipcMain: IpcMain) {
     const po = db.prepare('SELECT * FROM purchase_orders WHERE id=? AND branch_id=?').get(id, mainBranchId) as Record<string, unknown> | undefined
     if (!po) throw new Error('Purchase order not found')
     const invoiceNumber = String(payload.supplier_invoice_number || '').trim() || null
-    const paid = Math.round(Math.max(0, Number(payload.paid_amount || 0)) * 100) / 100
+    const rawPaid=Number(payload.paid_amount||0)
+    if(!Number.isFinite(rawPaid)||rawPaid<0)throw new Error('Paid amount must be a valid non-negative amount')
+    const paid = Math.round(rawPaid * 100) / 100
+    for(const date of [payload.purchase_date,payload.invoice_date])if(date)batchDates({product_id:'invoice',mfg_date:String(date)})
     const total = Number(po.total_amount || po.total || 0)
     if (paid > total) throw new Error('Paid amount cannot exceed the purchase total')
-    const outstanding = Math.round(Math.max(0, total - paid) * 100) / 100
-    const status = outstanding <= 0 ? 'paid' : paid > 0 ? 'partial' : 'unpaid'
-    const oldOutstanding = Number(po.outstanding_amount || 0)
     try {
       db.transaction(() => {
         db.prepare(`UPDATE purchase_orders SET supplier_invoice_number=?, purchase_date=?, invoice_date=?,
-          payment_status=?, paid_amount=?, outstanding_amount=?, updated_at=datetime('now') WHERE id=?`)
-          .run(invoiceNumber, payload.purchase_date || null, payload.invoice_date || null, status, paid, outstanding, id)
-        db.prepare('UPDATE suppliers SET due_balance=MAX(0,due_balance+?), updated_at=datetime(\'now\') WHERE id=?')
-          .run(outstanding - oldOutstanding, po.supplier_id)
-        logAudit(db, { userId: user.id as string, branchId: mainBranchId, action: 'PURCHASE_INVOICE_UPDATE', tableName: 'purchase_orders', recordId: id, oldValues: po, newValues: { invoiceNumber, paid, outstanding, status } })
+          paid_amount=?, updated_at=datetime('now') WHERE id=?`)
+          .run(invoiceNumber, payload.purchase_date || null, payload.invoice_date || null, paid, id)
+        applyPurchaseBalance(db,id,true,true)
+        queueInventoryRecord(db,'purchase_orders',db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) as Record<string,unknown>,'UPDATE')
+        queueInventoryRecord(db,'suppliers',db.prepare('SELECT * FROM suppliers WHERE id=?').get(po.supplier_id) as Record<string,unknown>,'UPDATE')
+        logAudit(db, { userId: user.id as string, branchId: mainBranchId, action: 'PURCHASE_INVOICE_UPDATE', tableName: 'purchase_orders', recordId: id, oldValues: po, newValues: db.prepare('SELECT * FROM purchase_orders WHERE id=?').get(id) })
       })()
     } catch (error) {
       if (/UNIQUE constraint/i.test(String(error))) throw new Error('This supplier invoice number is already registered')

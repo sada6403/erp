@@ -2,6 +2,11 @@ import { contextBridge, ipcRenderer } from 'electron'
 
 // Expose typed IPC bridge to the renderer process
 const api = {
+  testing: {
+    status:()=>ipcRenderer.invoke('testing:status'),
+    change:(action:'enable'|'reset'|'disable'|'clear_existing')=>ipcRenderer.invoke('testing:change',action),
+    restart:()=>ipcRenderer.invoke('testing:restart'),
+  },
   imports: {
     status: (id?:string) => ipcRenderer.invoke('imports:status',id),
     configure: (input:unknown) => ipcRenderer.invoke('imports:configure',input),
@@ -531,6 +536,12 @@ const api = {
 
   // Purchase Orders
   purchases: {
+    inventoryReport: (filters?:unknown) => ipcRenderer.invoke('purchases:inventoryReport',filters),
+    returnContext: (id:string) => ipcRenderer.invoke('purchases:returnContext',id),
+    returnStock: (payload:unknown) => ipcRenderer.invoke('purchases:returnStock',payload),
+    pricingContext: (productId:string) => ipcRenderer.invoke('purchases:pricingContext',productId),
+    setPricing: (payload:unknown) => ipcRenderer.invoke('purchases:setPricing',payload),
+    adjustBatchPrice: (payload:unknown) => ipcRenderer.invoke('purchases:adjustBatchPrice',payload),
     supplierLowStock: (supplierId: string, branchId?: string) => ipcRenderer.invoke('purchases:supplierLowStock', supplierId, branchId),
     billHistory: (filters?: unknown) => ipcRenderer.invoke('purchases:billHistory',filters),
     refreshProductPrices: (id: string) => ipcRenderer.invoke('purchases:refreshProductPrices',id),

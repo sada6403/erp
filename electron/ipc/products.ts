@@ -709,12 +709,14 @@ export function registerProductHandlers(ipcMain: IpcMain) {
           discount_pct: Number(rest.discount_pct) || 0,
           min_stock_level: Number(rest.min_stock_level) || 0,
           product_type: productType,
+            track_expiry:rest.track_expiry===true||rest.track_expiry===1?1:0,
+            track_batches:rest.track_batches===true||rest.track_batches===1||rest.track_expiry===true||rest.track_expiry===1?1:0,
         }
         db.prepare(`
           INSERT INTO products (id, branch_id, category_id, supplier_id, sku, barcode, name, description,
-            image_url, unit, cost_price, selling_price, tax_rate, discount_pct, min_stock_level, product_type)
+              image_url, unit, cost_price, selling_price, tax_rate, discount_pct, min_stock_level, product_type,track_expiry,track_batches)
           VALUES (@id, @branch_id, @category_id, @supplier_id, @sku, @barcode, @name, @description,
-            @image_url, @unit, @cost_price, @selling_price, @tax_rate, @discount_pct, @min_stock_level, @product_type)
+              @image_url, @unit, @cost_price, @selling_price, @tax_rate, @discount_pct, @min_stock_level, @product_type,@track_expiry,@track_batches)
         `).run(productRow)
         if(opening_batch){
           if(productType!=='simple')throw new Error('Use individual stock entries for variant batches')
@@ -765,14 +767,14 @@ export function registerProductHandlers(ipcMain: IpcMain) {
         }
       })()
 
-      await enqueuSync('products', id, 'INSERT', { ...rest, id, branch_id, sku, barcode:rawBarcode||null, product_type: productType })
+      await enqueuSync('products', id, 'INSERT', db.prepare('SELECT * FROM products WHERE id=?').get(id) as Record<string,unknown>)
       if (Array.isArray(variants) && variants.length > 0) await enqueueProductVariantRows(id)
       // the aggregate stock row of a variant product is written locally above; without this push other devices and the cloud never get it
       if (Array.isArray(variants) && variants.length > 0) await syncStockRow(db, id, targetBranch)
       if (!isAdmin && edit_request_id) {
         await enqueuSync('edit_requests', edit_request_id, 'UPDATE', { id: edit_request_id, status: 'consumed' })
       }
-      return { success: true, data: { id } }
+      return { success: true, data: { id, sku } }
   })
 
   // Branch Managers must submit an edit request and have it approved by a

@@ -1,4 +1,5 @@
 import {ensureBatchSyncSchema} from './batchSyncSchema'
+import {ensureInventoryPrecision} from './inventoryPrecision'
 import { timingSafeEqual } from 'crypto'
 import type { NextRequest } from 'next/server'
 import { pool, tenantPool } from './db'
@@ -807,6 +808,23 @@ async function runTenantCompatibility(dbSchema: string) {
      )`,
     `ALTER TABLE purchase_orders ADD COLUMN purchase_type VARCHAR(16) NOT NULL DEFAULT 'order'`,
     `ALTER TABLE purchase_items ADD COLUMN selling_price DECIMAL(14,2) NULL`,
+    `ALTER TABLE purchase_items ADD COLUMN paid_quantity DECIMAL(18,6) NULL`,
+    `ALTER TABLE purchase_items ADD COLUMN free_quantity DECIMAL(18,6) NOT NULL DEFAULT 0`,
+    `ALTER TABLE purchase_items ADD COLUMN discount_amount DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE purchase_items ADD COLUMN purchase_unit_cost DECIMAL(18,6) NULL`,
+    `ALTER TABLE purchase_items ADD COLUMN mrp DECIMAL(18,6) NULL`,
+    `ALTER TABLE purchase_items ADD COLUMN entry_unit VARCHAR(50) NULL`,
+    `ALTER TABLE purchase_items ADD COLUMN entry_quantity DECIMAL(18,6) NULL`,
+    `ALTER TABLE purchase_items ADD COLUMN entry_free_quantity DECIMAL(18,6) NULL`,
+    `ALTER TABLE purchase_items ADD COLUMN unit_factor DECIMAL(18,6) NOT NULL DEFAULT 1`,
+    `ALTER TABLE product_batches ADD COLUMN mrp DECIMAL(18,6) NULL`,
+    `ALTER TABLE products ADD COLUMN inventory_pricing_mode VARCHAR(20) NOT NULL DEFAULT 'batch'`,
+    `ALTER TABLE products ADD COLUMN pricing_markup_pct DECIMAL(12,4) NOT NULL DEFAULT 0`,
+    `ALTER TABLE product_batches ADD COLUMN supplier_returned_quantity DECIMAL(18,6) NOT NULL DEFAULT 0`,
+    `ALTER TABLE suppliers ADD COLUMN credit_balance DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE purchase_orders ADD COLUMN returned_amount DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE purchase_orders ADD COLUMN applied_supplier_credit DECIMAL(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE purchase_orders ADD COLUMN refund_credit_amount DECIMAL(14,2) NOT NULL DEFAULT 0`,
     `ALTER TABLE purchase_orders ADD COLUMN supplier_invoice_number VARCHAR(255) NULL`,
     `ALTER TABLE purchase_orders ADD COLUMN purchase_date DATE NULL`,
     `ALTER TABLE purchase_orders ADD COLUMN invoice_date DATE NULL`,
@@ -1567,6 +1585,7 @@ async function runTenantCompatibility(dbSchema: string) {
     }
   }
 
+  await ensureInventoryPrecision(tp)
   await ensureSyncSchema(tp)
   const syncConnection = await tp.connect()
   try {

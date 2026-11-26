@@ -1,11 +1,20 @@
 import {claimBatch,inspectBatch,type BatchInput} from './batchIdentity'
 import type Database from 'better-sqlite3'
 import { randomUUID } from 'crypto'
+import {validateMrp} from '../lib/purchaseMath'
+import {inventoryPricingContext} from './inventoryPricing'
 
 const QTY_SCALE = 1_000_000
 const qty = (value: number) => Math.round((Number(value) || 0) * QTY_SCALE) / QTY_SCALE
 
 export type AllocationMethod = 'FIFO' | 'FEFO'
+
+function saleBatchOrder(db:Database.Database,productId:string,branchId:string,method?:AllocationMethod){
+  const useExpiry=method==='FEFO' || (!method && Boolean(db.prepare('SELECT 1 FROM product_batches WHERE product_id=? AND branch_id=? AND quantity>0 AND expiry_date IS NOT NULL LIMIT 1').get(productId,branchId)))
+  return useExpiry
+    ? `CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END, date(expiry_date), COALESCE(date(purchase_date), date(created_at)), created_at, id`
+    : `CASE WHEN historical_cost_known=0 THEN 0 ELSE 1 END, COALESCE(date(purchase_date), date(created_at)), created_at, id`
+}
 
 export interface SaleBatchAllocation {
   id: string
@@ -26,13 +35,14 @@ interface BatchRow {
   quantity: number
   cost_price: number
   historical_cost_known: number
+  mrp?:number|null
 }
 
 function updateBatchStatus(db: Database.Database, batchId: string) {
   db.prepare(`UPDATE product_batches SET status = CASE
     WHEN quantity <= 0 THEN 'sold_out'
     WHEN sold_quantity > 0 THEN 'partially_sold'
-    WHEN expiry_date IS NOT NULL AND date(expiry_date) < date('now') THEN 'expired'
+    WHEN expiry_date IS NOT NULL AND date(expiry_date) < date('now','+5 hours','+30 minutes') THEN 'expired'
     ELSE 'available' END, updated_at=datetime('now') WHERE id=?`).run(batchId)
 }
 
@@ -61,6 +71,7 @@ export function ensureLegacyOpeningLayer(db: Database.Database, productId: strin
     const identity=claimBatch(db,{...input,batch_resolution:existing?'add_existing':undefined,existing_batch_id:existing?.id,acknowledge_dates:true},openingId)
     db.prepare('UPDATE product_batches SET batch_identity_id=?,batch_entry_mode=? WHERE id=?').run(identity.id,existing?'add_existing':'new',openingId)
   }
+  return db.prepare('SELECT * FROM product_batches WHERE id=?').get(openingId) as Record<string,unknown>
 }
 
 export function allocateSaleBatches(db: Database.Database, input: {
@@ -76,18 +87,23 @@ export function allocateSaleBatches(db: Database.Database, input: {
   if (!Number.isFinite(remaining) || remaining <= 0) throw new Error('Sale quantity must be greater than zero')
   ensureLegacyOpeningLayer(db, input.productId, input.branchId)
 
-  const order = input.method === 'FEFO'
-    ? `CASE WHEN expiry_date IS NULL THEN 1 ELSE 0 END, date(expiry_date), COALESCE(date(purchase_date), date(created_at)), created_at, id`
-    : `CASE WHEN historical_cost_known=0 THEN 0 ELSE 1 END, COALESCE(date(purchase_date), date(created_at)), created_at, id`
-  const batches = db.prepare(`SELECT id, quantity, cost_price, historical_cost_known
+  const order = saleBatchOrder(db,input.productId,input.branchId,input.method)
+  const batches = db.prepare(`SELECT *
     FROM product_batches
     WHERE product_id=? AND branch_id=? AND quantity > 0
-      AND (expiry_date IS NULL OR date(expiry_date) >= date('now'))
+      AND (expiry_date IS NULL OR date(expiry_date) >= date('now','+5 hours','+30 minutes'))
     ORDER BY ${order}`).all(input.productId, input.branchId) as BatchRow[]
 
   const available = qty(batches.reduce((sum, batch) => sum + Number(batch.quantity), 0))
-  if (available + (1 / QTY_SCALE) < remaining) {
+  if (Math.round(available*QTY_SCALE) < Math.round(remaining*QTY_SCALE)) {
     throw new Error(`Insufficient batch stock (available: ${available})`)
+  }
+  const product=db.prepare('SELECT * FROM products WHERE id=?').get(input.productId) as {tax_rate?:number}|undefined
+  let checkQuantity=remaining
+  for(const batch of batches){
+    if(checkQuantity<=0)break
+    validateMrp(input.unitSellingPrice*(1+Number(product?.tax_rate||0)/100),batch.mrp)
+    checkQuantity=qty(checkQuantity-Math.min(checkQuantity,batch.quantity))
   }
 
   const allocations: SaleBatchAllocation[] = []
@@ -197,6 +213,7 @@ export function createReceiptBatch(db: Database.Database, input: {
   quantity: number
   unitCost: number
   sellingPrice?: number | null
+  mrp?:number|null
   batchNumber?: string | null
   expiryDate?: string | null
   purchaseDate: string
@@ -204,6 +221,10 @@ export function createReceiptBatch(db: Database.Database, input: {
   mfgDate?:string|null;batchResolution?:BatchInput['batch_resolution'];existingBatchId?:string;acknowledgeDates?:boolean
 }): Record<string, unknown> {
   return db.transaction(()=>{
+  const product=db.prepare('SELECT * FROM products WHERE id=?').get(input.productId) as {selling_price?:number;tax_rate?:number;track_expiry?:number}|undefined
+  if(product?.track_expiry&&!input.expiryDate)throw new Error('Expiry date is required when receiving this product')
+  const price=input.sellingPrice??product?.selling_price
+  validateMrp(price==null?null:price*(1+Number(product?.tax_rate||0)/100),input.mrp)
   if (input.sellingPrice != null && (!Number.isFinite(input.sellingPrice) || input.sellingPrice < 0)) throw new Error('Selling price must be a valid non-negative amount')
   const received = qty(input.quantity)
   if (!Number.isFinite(received) || received <= 0) throw new Error('Received batch quantity must be greater than zero')
@@ -215,7 +236,7 @@ export function createReceiptBatch(db: Database.Database, input: {
     id: randomUUID(), product_id: input.productId, branch_id: input.branchId,
     batch_number: identity.no,
     expiry_date: input.expiryDate || null, quantity: received, cost_price: input.unitCost,
-    selling_price: input.sellingPrice ?? null, po_id: input.purchaseId,
+    selling_price: input.sellingPrice ?? null,mrp:input.mrp??null, po_id: input.purchaseId,
     purchase_item_id: input.purchaseItemId, purchase_date: input.purchaseDate,
     original_quantity: received, sold_quantity: 0, returned_quantity: 0, damaged_quantity: 0,
     historical_cost_known: 1, status: 'available', created_by: input.createdBy || null,
@@ -229,22 +250,34 @@ export function createReceiptBatch(db: Database.Database, input: {
 
 export function getSellingLayers(db: Database.Database, productId: string, branchId: string) {
   db.transaction(() => ensureLegacyOpeningLayer(db, productId, branchId))()
-  return db.prepare(`SELECT quantity, selling_price FROM product_batches
+  const product=db.prepare('SELECT * FROM products WHERE id=?').get(productId) as {sale_as_latest_price?:number;selling_price?:number;inventory_pricing_mode?:string;pricing_markup_pct?:number;tax_rate?:number}|undefined
+  const layers=db.prepare(`SELECT * FROM product_batches
     WHERE product_id=? AND branch_id=? AND quantity>0
-    AND (expiry_date IS NULL OR date(expiry_date)>=date('now'))
-    ORDER BY CASE WHEN historical_cost_known=0 THEN 0 ELSE 1 END, COALESCE(date(purchase_date),date(created_at)),created_at,id`)
-    .all(productId, branchId) as { quantity: number; selling_price: number | null }[]
+    AND (expiry_date IS NULL OR date(expiry_date)>=date('now','+5 hours','+30 minutes'))
+    ORDER BY ${saleBatchOrder(db,productId,branchId)}`)
+    .all(productId, branchId) as { quantity: number; selling_price: number | null;mrp?:number|null }[]
+  let common:number|undefined
+  if(product?.inventory_pricing_mode==='weighted'){
+    const context=inventoryPricingContext(db,productId,branchId)
+    if(context.average_cost==null)throw new Error('Weighted-average selling requires known historical costs')
+    common=Math.round(context.average_cost*(1+Number(product.pricing_markup_pct||0)/100)*100)/100
+  }else if(product?.inventory_pricing_mode==='latest'||Number(product?.sale_as_latest_price)===1)common=Number(product?.selling_price||0)
+  return layers.map(layer=>{
+    const ceiling=layer.mrp==null?null:Number(layer.mrp)/(1+Number(product?.tax_rate||0)/100)
+    return {quantity:layer.quantity,mrp:layer.mrp??null,price_ceiling:ceiling,selling_price:ceiling==null?(common??layer.selling_price):Math.min(common??layer.selling_price??Number(product?.selling_price||0),Math.floor(ceiling*100)/100)}
+  })
 }
 
 export function quoteBatchPrice(db: Database.Database, productId: string, branchId: string, quantity: number, commonPrice: number): number {
-  let remaining = quantity, total = 0
+  let remaining = quantity, total = 0,ceiling=Infinity
   for (const layer of getSellingLayers(db, productId, branchId)) {
     const take = Math.min(remaining, layer.quantity)
+    if(take>0&&layer.price_ceiling!=null)ceiling=Math.min(ceiling,layer.price_ceiling)
     total += take * (layer.selling_price ?? commonPrice)
     remaining -= take
     if (remaining <= 0) break
   }
-  return quantity > 0 ? Math.round((total + remaining * commonPrice) / quantity * 100) / 100 : commonPrice
+  return quantity > 0 ? Math.min(Math.round((total + remaining * commonPrice) / quantity * 100) / 100,Math.floor(ceiling*100)/100) : commonPrice
 }
 
 /** Quantity reductions restore the newest consumed layer without changing its cost. */

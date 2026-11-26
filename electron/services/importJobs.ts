@@ -126,6 +126,7 @@ export class ImportJobs {
   if(!running.has(this.db))running.set(this.db,new Set())
   if(running.get(this.db)!.has(id))throw new Error('Import is already running')
   if(options.allOrNothing&&job.error_rows)throw new Error('All-or-nothing commit requires zero validation errors')
+  if(job.type==='stock_in'&&job.error_rows)throw new Error('A supplier receipt requires zero validation errors; correct every error before committing')
   const dedupe=createHash('sha256').update([job.type,job.branch_id,job.file_hash,job.sheet_name].join('|')).digest('hex')
   const previous=this.db.prepare('SELECT id FROM import_jobs WHERE dedupe_key=? AND id!=?').get(dedupe,id) as {id:string}|undefined
   if(previous)throw new Error(`This file/sheet/type was already committed or started (${previous.id}); resume that job instead`)
@@ -144,6 +145,7 @@ export class ImportJobs {
    // Validate live dependencies and flags again, never trust renderer/stored row edits.
    const live=validateImportRow(this.db,job.type,data,{...options,duplicate:'update',splitNames:false,decimal:'.',dateFormat:'YYYY-MM-DD'},{branchId:job.branch_id,userId:actor.userId,terminalId:actor.terminalId,admin:Boolean(actor.permissions.all),keywordsEnabled:this.config.keywordsEnabled,uniqueCodes:this.config.uniqueCodes,format:'xlsx'})
    const failures=live.issues.filter(issue=>issue.severity==='error');if(failures.length)throw new Error(`Row ${row.row_number}: ${failures.map(issue=>issue.message).join('; ')}`)
+   if(job.type==='stock_in'&&!target&&live.target)throw new Error(`Row ${row.row_number}: product was created after validation; review this import again`)
    for(const field of ['category_id','supplier_id'])if(data[field]&&data[field]!==live.data[field])throw new Error(`Row ${row.row_number}: referenced master changed after validation`)
    return {data,target}
   }
@@ -159,11 +161,8 @@ export class ImportJobs {
       if(states.every(status=>status==='applied'))return
       if(states.some(status=>status!=='valid'))throw new Error('Receipt staging changed; inspect this job before retrying')
       if(!saveBills)throw new Error('Upload the supplier bill before committing stock-in')
-      const checked=chunk.map(check),data=checked.map(row=>({...row.data,product_id:row.target!.id}))
-      const first=data[0],supplier=this.db.prepare('SELECT id FROM suppliers WHERE LOWER(TRIM(name))=LOWER(?) AND is_active=1').get(first.supplier) as {id:string}|undefined
-      if(!supplier)throw new Error('Create or map the supplier before importing its invoice')
-      for(const row of data)row.supplier_id=supplier.id
-      const effects=writeImportReceipt(this.db,data,actor,id,saveBills);effects.queue(this.config.uniqueCodes)
+      const checked=chunk.map(check),data=checked.map(row=>({...row.data,product_id:row.target?.id}))
+      const effects=writeImportReceipt(this.db,data,actor,id,saveBills,options.unknown==='create');effects.queue(this.config.uniqueCodes)
       for(const row of chunk)this.db.prepare("UPDATE import_job_rows SET status='applied',effects_json=? WHERE id=?").run(row===chunk[0]?JSON.stringify([...effects.effects.values()]):'[]',row.id)
      } else for(const row of chunk) {
       const state=this.db.prepare('SELECT status FROM import_job_rows WHERE id=?').get(row.id) as {status:string}
@@ -227,7 +226,7 @@ export class ImportJobs {
     else if(effect.table==='stocks')writer.put(effect.table,effect.id,{quantity:0,damaged_qty:0})
     else if(effect.table==='product_batches')writer.put(effect.table,effect.id,{quantity:0,original_quantity:0,status:'sold_out'})
     else if(effect.table==='stock_movements')writer.put(effect.table,effect.id,{status:'VOID'})
-    else if(effect.table==='purchase_orders')writer.put(effect.table,effect.id,{status:'CANCELLED'})
+    else if(effect.table==='purchase_orders')writer.put(effect.table,effect.id,{status:'CANCELLED',outstanding_amount:0,applied_supplier_credit:0,refund_credit_amount:0})
     else if(effect.table==='purchase_items')writer.put(effect.table,effect.id,{received_qty:0})
     else if(effect.table!=='purchase_attachments')writer.put(effect.table,effect.id,{is_active:0,...(effect.table==='product_search_keywords'?{version:versions.get(effect.id)}:{})})
    }

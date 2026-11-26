@@ -37,7 +37,8 @@ export default function ProductSearchSelect({
     const q = query.toLowerCase()
     return (
       String(p.name).toLowerCase().includes(q) ||
-      String(p.sku || '').toLowerCase().includes(q)
+      String(p.sku || '').toLowerCase().includes(q) ||
+      String(p.barcode || '').toLowerCase().includes(q)
     )
   })
 
@@ -135,7 +136,7 @@ export default function ProductSearchSelect({
             <input
               autoFocus
               type="text"
-              placeholder="Search product or SKU..."
+              placeholder="Search name, barcode or SKU..."
               className="bg-transparent text-sm outline-none w-full"
               style={{ color: 'var(--text-1)' }}
               value={query}

@@ -1,4 +1,5 @@
 import { canonicalCloudBaseUrl } from '../lib/cloudEndpoint'
+import { requireLiveNetwork } from './testingMode'
 import fs from 'fs'
 import { net } from 'electron'
 
@@ -324,6 +325,7 @@ export class CloudApi {
   }
 
   private async requestBinary(path: string): Promise<{ contentType: string; bytes: Buffer }> {
+    requireLiveNetwork()
     const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
     const response = await fetchFn(`${this.baseUrl}${path}`, {
       signal: AbortSignal.timeout(30_000),
@@ -334,6 +336,7 @@ export class CloudApi {
   }
 
   private async request<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
+    requireLiveNetwork()
     const fetchFn = (typeof net !== 'undefined' && typeof net.fetch === 'function') ? net.fetch : fetch
     const response = await fetchFn(`${this.baseUrl}${path}`, {
       ...init,

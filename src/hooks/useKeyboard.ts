@@ -44,7 +44,7 @@ export function useKeyboard(bindings: KeyBinding[], enabled = true) {
 export const POS_SHORTCUTS = [
   { key: 'F1', label: 'New Invoice' },
   { key: 'F2', label: 'Search' },
-  { key: 'F3', label: 'Last quantity' },
+  { key: 'F3', label: 'Edit quantity' },
   { key: 'F4', label: 'Hold' },
   { key: 'F5', label: 'Resume' },
   { key: 'F6', label: 'Discount' },

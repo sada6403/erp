@@ -93,6 +93,7 @@ function parseCustomHeaders(raw: string): Record<string, string> {
 }
 
 export async function sendSms(payload: SmsPayload): Promise<{ success: boolean; error?: string; response?: string }> {
+  if(process.env.POS_TEST_MODE==='1')return {success:false,error:'SMS is disabled in Testing Mode'}
   const cfg = getConfig()
   if (!cfg.enabled)  return { success: false, error: 'SMS is not enabled in settings' }
   if (!cfg.baseUrl)  return { success: false, error: 'SMS API URL not configured' }

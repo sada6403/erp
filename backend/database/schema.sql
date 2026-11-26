@@ -38,3 +38,6 @@ ALTER TABLE installments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE installment_payments DISABLE ROW LEVEL SECURITY;
 ALTER TABLE deliveries DISABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs DISABLE ROW LEVEL SECURITY;
+
+-- Purchase, batch, return and decimal-quantity compatibility for PostgreSQL installs.
+\ir supermarket-inventory.sql

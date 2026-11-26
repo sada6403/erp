@@ -94,6 +94,7 @@ async function sendViaTwilio(cfg: ReturnType<typeof getConfig>, to: string, mess
 }
 
 export async function sendWhatsApp(payload: WhatsAppPayload): Promise<{ success: boolean; error?: string }> {
+  if(process.env.POS_TEST_MODE==='1')return {success:false,error:'WhatsApp is disabled in Testing Mode'}
   const cfg = getConfig()
   if (!cfg.enabled) return { success: false, error: 'WhatsApp is not enabled in settings' }
 

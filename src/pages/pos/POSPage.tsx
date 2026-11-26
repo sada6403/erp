@@ -4,15 +4,17 @@ import { useAuthStore } from '@/store/authStore'
 import { useKeyboard, POS_SHORTCUTS } from '@/hooks/useKeyboard'
 import type { Product, Customer } from '@/types'
 import type { BillType } from '@/store/cartStore'
-import { measuredUnits, parsePosQuantity, splitQuantitySearch } from '@/lib/posQuantity'
+import { measuredUnits, splitQuantitySearch } from '@/lib/posQuantity'
 import { usePosCatalog } from '@/hooks/usePosCatalog'
 import KeywordManager from '@/components/pos/KeywordManager'
 import ProductSearch from '@/components/pos/ProductSearch'
 import ProductGrid from '@/components/pos/ProductGrid'
 import Cart from '@/components/pos/Cart'
+import CartQuantityPanel from '@/components/pos/CartQuantityPanel'
 import PaymentModal from '@/components/pos/PaymentModal'
 import CustomerSearchModal from '@/components/pos/CustomerSearchModal'
 import HeldInvoicesModal from '@/components/pos/HeldInvoicesModal'
+import PosTestingTools from '@/components/pos/PosTestingTools'
 import BranchHubStatus from '@/components/pos/BranchHubStatus'
 import HoldNumberModal from '@/components/pos/HoldNumberModal'
 import {
@@ -305,10 +307,27 @@ export default function POSPage() {
     )
   }, [cart])
 
+  const closeQuantityPanel = useCallback(() => {
+    setQuantityProduct(null)
+    setEditQuantityKey(null)
+    requestAnimationFrame(() => searchRef.current?.focus())
+  }, [])
+
+  // F3 / Ctrl+Enter: edit the selected cart line (falls back to the last line)
+  const editFocusedQuantity = useCallback(() => {
+    const idx = cartFocusedIdx >= 0 && cartFocusedIdx < cart.items.length ? cartFocusedIdx : cart.items.length - 1
+    const item = cart.items[idx]
+    if (!item) return
+    setEditQuantityKey(item.variant_id || item.product.id)
+    setQuantityProduct(item.product)
+    setQuantityText(String(item.quantity))
+  }, [cart.items, cartFocusedIdx])
+
   useKeyboard([
     { key: 'F1',  handler: newInvoice },
     { key: 'F2',  handler: focusSearch },
-    { key: 'F3', handler: () => { const item = cart.items[cart.items.length - 1]; if (item) { setEditQuantityKey(item.variant_id || item.product.id); setQuantityProduct(item.product); setQuantityText(String(item.quantity)) } } },
+    { key: 'F3', handler: editFocusedQuantity },
+    { key: 'Enter', ctrl: true, handler: editFocusedQuantity },
     { key: 'F4',  handler: holdInvoice },
     { key: 'F5',  handler: () => setShowHeld(true) },
     { key: 'F6',  handler: openDiscount },
@@ -336,105 +355,190 @@ export default function POSPage() {
     { key: 'p', ctrl: true, handler: openPayment },
   ], !showPayment && !showHeld && !showHoldNumber && !showCustomer && !showHelp && !quantityProduct && !showKeywords)
 
-  const handleProductSelect = useCallback((product: Product, customQty?: number) => {    if (customQty === undefined && measuredUnits.has(product.unit?.toLowerCase())) {
+  const handleProductSelect = useCallback((product: Product, customQty?: number) => {
+    if (customQty === undefined && measuredUnits.has(product.unit?.toLowerCase())) {
       setEditQuantityKey(null)
       setQuantityProduct(product)
       setQuantityText('')
       return
     }
 
-    const isOutOfStock = !product.stock || product.stock <= 0
-    if (isOutOfStock && cart.billType !== 'QUOTATION' && !allowNegativeStock) {
-      toast.error('Out of stock')
-      return
-    }
-    const qty = customQty && customQty > 0 ? customQty : 1
-    cart.addItem(product, qty, resolveAutoDiscountPct(product))
-    // Auto-focus the newly added item (it will be last)
-    setCartFocusedIdx(cart.items.length) // items hasn't updated yet, so this = new last index
-    if (isOutOfStock && allowNegativeStock) {
-      toast.success(`${product.name} added (${qty} qty)`, { duration: 900, position: 'bottom-right' })
-    } else {
-      toast.success(`${product.name} added`, { duration: 900, position: 'bottom-right' })
-    }
-  }, [cart, resolveAutoDiscountPct, allowNegativeStock])
-
-  const handleScannerSubmit = async () => {
+    const isOutOfStock = !product.stock || product.stock <= 0
+
+    if (isOutOfStock && cart.billType !== 'QUOTATION' && !allowNegativeStock) {
+
+      toast.error('Out of stock')
+
+      return
+
+    }
+
+    const qty = customQty && customQty > 0 ? customQty : 1
+
+    cart.addItem(product, qty, resolveAutoDiscountPct(product))
+
+    // Auto-focus the newly added item (it will be last)
+
+    setCartFocusedIdx(cart.items.length) // items hasn't updated yet, so this = new last index
+
+    if (isOutOfStock && allowNegativeStock) {
+
+      toast.success(`${product.name} added (${qty} qty)`, { duration: 900, position: 'bottom-right' })
+
+    } else {
+
+      toast.success(`${product.name} added`, { duration: 900, position: 'bottom-right' })
+
+    }
+
+  }, [cart, resolveAutoDiscountPct, allowNegativeStock])
+
+
+
+  const handleScannerSubmit = async () => {
+
     const { query: rawCode, quantity: requestedQuantity } = splitQuantitySearch(searchQuery)
     const code = rawCode.trim()
 
-    if (!code) return
-    try {
-      // 1. Direct SKU / Barcode search
+    if (!code) return
+
+    try {
+
+      // 1. Direct SKU / Barcode search
+
       const found = catalog?.lookup(code)
       const res = { success: Boolean(found), data: found }
 
-      if (res.success && res.data) {
-        const product = res.data as Product
-        const isOutOfStock = !product.stock || product.stock <= 0
-        if (isOutOfStock && cart.billType !== 'QUOTATION' && !allowNegativeStock) {
-          setSearchQuery('')
-          searchRef.current?.focus()
-          toast.error('Out of stock in this branch. Check other branches below.')
-          return
-        }
+      if (res.success && res.data) {
+
+        const product = res.data as Product
+
+        const isOutOfStock = !product.stock || product.stock <= 0
+
+        if (isOutOfStock && cart.billType !== 'QUOTATION' && !allowNegativeStock) {
+
+          setSearchQuery('')
+
+          searchRef.current?.focus()
+
+          toast.error('Out of stock in this branch. Check other branches below.')
+
+          return
+
+        }
+
         handleProductSelect(product, requestedQuantity)
 
-        setSearchQuery('')
-        searchRef.current?.focus()
-        return
-      }
-
-      // 2. Weighing Scale Barcode (EAN-13 format: 20/21/22/23/24 + 5-digit code + 5-digit weight/price + checksum)
-      const scaleEnabled = appSettings.weighing_scale_barcode !== false
-      if (scaleEnabled && /^(20|21|22|23|24|02)\d{11}$/.test(code)) {
-        const itemCode = code.slice(2, 7) // 5 digit code
-        const weightValue = parseInt(code.slice(7, 12), 10)
-        const scaleQty = weightValue > 0 ? weightValue / 1000 : 1 // grams to kg
-
-        let scaleProductRes = await window.api.products.searchSku(itemCode)
-        if (!scaleProductRes.success || !scaleProductRes.data) {
-          scaleProductRes = await window.api.products.searchSku(code.slice(0, 7))
-        }
-        if (!scaleProductRes.success || !scaleProductRes.data) {
-          scaleProductRes = await window.api.products.searchSku(itemCode.replace(/^0+/, ''))
-        }
-
-        if (scaleProductRes.success && scaleProductRes.data) {
-          const product = scaleProductRes.data as Product
-          handleProductSelect(product, scaleQty)
-          setSearchQuery('')
-          searchRef.current?.focus()
-          return
-        }
-      }
-
-      // 3. Gift coupon scanned at the POS
-      if (/^CPN-/i.test(code)) {
-        const cres = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> } }
-        if (cres.success && cres.data?.coupon) {
-          setCouponPeek({ ...cres.data.coupon, __valid: cres.data.valid, __reason: cres.data.reason || null })
-          setSearchQuery('')
-          searchRef.current?.focus()
-          return
-        }
-        setSearchQuery('')
-        searchRef.current?.focus()
-        toast.error('Coupon not found')
-        return
-      }
-
-      // 4. Barcode not found -> Clear buffer immediately to avoid concatenating with subsequent scans!
-      setSearchQuery('')
-      searchRef.current?.focus()
-      toast.error(`Barcode not found: ${code}`)
-    } catch (err) {
-      setSearchQuery('')
-      searchRef.current?.focus()
-      toast.error((err as Error).message || 'Failed to look up barcode')
-    }
-  }
-
+        setSearchQuery('')
+
+        searchRef.current?.focus()
+
+        return
+
+      }
+
+
+
+      // 2. Weighing Scale Barcode (EAN-13 format: 20/21/22/23/24 + 5-digit code + 5-digit weight/price + checksum)
+
+      const scaleEnabled = appSettings.weighing_scale_barcode !== false
+
+      if (scaleEnabled && /^(20|21|22|23|24|02)\d{11}$/.test(code)) {
+
+        const itemCode = code.slice(2, 7) // 5 digit code
+
+        const weightValue = parseInt(code.slice(7, 12), 10)
+
+        const scaleQty = weightValue > 0 ? weightValue / 1000 : 1 // grams to kg
+
+
+
+        let scaleProductRes = await window.api.products.searchSku(itemCode)
+
+        if (!scaleProductRes.success || !scaleProductRes.data) {
+
+          scaleProductRes = await window.api.products.searchSku(code.slice(0, 7))
+
+        }
+
+        if (!scaleProductRes.success || !scaleProductRes.data) {
+
+          scaleProductRes = await window.api.products.searchSku(itemCode.replace(/^0+/, ''))
+
+        }
+
+
+
+        if (scaleProductRes.success && scaleProductRes.data) {
+
+          const product = scaleProductRes.data as Product
+
+          handleProductSelect(product, scaleQty)
+
+          setSearchQuery('')
+
+          searchRef.current?.focus()
+
+          return
+
+        }
+
+      }
+
+
+
+      // 3. Gift coupon scanned at the POS
+
+      if (/^CPN-/i.test(code)) {
+
+        const cres = await window.api.coupons.validate(code) as { success: boolean; data?: { valid: boolean; reason?: string; coupon?: Record<string, unknown> } }
+
+        if (cres.success && cres.data?.coupon) {
+
+          setCouponPeek({ ...cres.data.coupon, __valid: cres.data.valid, __reason: cres.data.reason || null })
+
+          setSearchQuery('')
+
+          searchRef.current?.focus()
+
+          return
+
+        }
+
+        setSearchQuery('')
+
+        searchRef.current?.focus()
+
+        toast.error('Coupon not found')
+
+        return
+
+      }
+
+
+
+      // 4. Barcode not found -> Clear buffer immediately to avoid concatenating with subsequent scans!
+
+      setSearchQuery('')
+
+      searchRef.current?.focus()
+
+      toast.error(`Barcode not found: ${code}`)
+
+    } catch (err) {
+
+      setSearchQuery('')
+
+      searchRef.current?.focus()
+
+      toast.error((err as Error).message || 'Failed to look up barcode')
+
+    }
+
+  }
+
+
+
 
   const handleCustomerSelect = (customer: Customer) => {
     cart.setCustomer(customer)
@@ -449,29 +553,7 @@ export default function POSPage() {
     <div className="pos-shell pos-cashier absolute inset-0 flex flex-col overflow-hidden">
       {window.api.keywords && <div className="px-3 text-right"><button className="text-xs underline" onClick={()=>setShowKeywords(true)}>Search keywords</button></div>}
       {showKeywords && <KeywordManager onClose={()=>setShowKeywords(false)} />}
-      {quantityProduct && (
-        <div className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/70" role="dialog" aria-modal="true" aria-label="Product quantity">
-          <form className="bg-surface-800 rounded-xl p-6 space-y-4" onSubmit={e => {
-            e.preventDefault()
-            try {
-              const qty = parsePosQuantity(quantityText, quantityProduct.unit)
-              if (editQuantityKey) cart.updateQty(editQuantityKey, qty)
-              else handleProductSelect(quantityProduct, qty)
-              setQuantityProduct(null)
-              setSearchQuery('')
-              requestAnimationFrame(() => searchRef.current?.focus())
-            } catch (err) { toast.error((err as Error).message) }
-          }}>
-            <label htmlFor="pos-measured-quantity">{quantityProduct.name} - Quantity ({quantityProduct.unit})</label>
-            <input id="pos-measured-quantity" className="input" autoFocus inputMode="decimal" value={quantityText}
-              placeholder={`Quantity in ${quantityProduct.unit}; e.g. 500g`}
-              onChange={e => setQuantityText(e.target.value)} onKeyDown={e => {
-                if (e.key === 'Escape') { e.preventDefault(); setQuantityProduct(null); requestAnimationFrame(() => searchRef.current?.focus()) }
-              }} />
-            <button type="submit" className="btn-primary">Add (Enter)</button>
-          </form>
-        </div>
-      )}
+      <PosTestingTools />
       <BranchHubStatus />
       {/* Toolbar */}
       <div className="pos-toolbar flex items-center gap-2 px-3 py-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
@@ -637,6 +719,20 @@ export default function POSPage() {
               </button>
             )}
           </div>
+          {quantityProduct && (
+            <CartQuantityPanel
+              product={quantityProduct}
+              initialText={quantityText}
+              mode={editQuantityKey ? 'edit' : 'add'}
+              onCancel={closeQuantityPanel}
+              onSubmit={qty => {
+                if (editQuantityKey) cart.updateQty(editQuantityKey, qty)
+                else handleProductSelect(quantityProduct, qty)
+                setSearchQuery('')
+                closeQuantityPanel()
+              }}
+            />
+          )}
           <Cart focusedIdx={cartFocusedIdx} onFocusIdx={setCartFocusedIdx}
             discountPlans={discountRules.filter(r => r.scope === 'all' && r.is_active)} />
         </div>

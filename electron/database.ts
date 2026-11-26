@@ -8,6 +8,7 @@ import { createCompanyStore, getActiveWorkspaceDir } from './services/companyWor
 import { initPendingBranchStocksTable } from './services/pendingBranchStocks'
 import { migrateRelease210 } from './services/releaseMigration'
 import { initializeBillingOutbox } from './branchHub/billing'
+import { migrateSupermarketPurchases } from './services/supermarketSchema'
 
 let db: Database.Database
 
@@ -2193,6 +2194,7 @@ function runMigrations(): void {
   for (const [column, definition] of batchLedgerColumns) {
     if (!hasColumn('product_batches', column)) db.exec(`ALTER TABLE product_batches ADD COLUMN ${column} ${definition}`)
   }
+  migrateSupermarketPurchases(db)
   db.exec(`
     UPDATE product_batches
     SET original_quantity = CASE WHEN original_quantity <= 0 THEN quantity ELSE original_quantity END,

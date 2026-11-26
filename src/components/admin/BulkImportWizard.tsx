@@ -1,10 +1,10 @@
 import {useEffect,useState} from 'react'
 import Modal from '@/components/shared/Modal'
-import {importType,validateImportMapping,DEFAULT_IMPORT_OPTIONS,type ImportOptions} from '../../../electron/lib/importRegistry'
+import {importType,validateImportMapping,DEFAULT_IMPORT_OPTIONS,type ImportOptions,type ImportType} from '../../../electron/lib/importRegistry'
 import toast from 'react-hot-toast'
-interface Props {onClose:()=>void;onImported?:()=>void}
-export default function BulkImportWizard({onClose,onImported}:Props) {
- const [config,setConfig]=useState<any>(),[type,setType]=useState('products'),[job,setJob]=useState<any>(),[review,setReview]=useState<any>()
+interface Props {onClose:()=>void;onImported?:()=>void;initialType?:ImportType}
+export default function BulkImportWizard({onClose,onImported,initialType='products'}:Props) {
+ const [config,setConfig]=useState<any>(),[type,setType]=useState<string>(initialType),[job,setJob]=useState<any>(),[review,setReview]=useState<any>()
  const [options,setOptions]=useState<ImportOptions>({...DEFAULT_IMPORT_OPTIONS}),[mapping,setMapping]=useState<Record<string,number>>({}),[sheet,setSheet]=useState(''),[header,setHeader]=useState(0)
  const [templates,setTemplates]=useState<any[]>([]),[history,setHistory]=useState<any[]>([]),[templateName,setTemplateName]=useState(''),[bills,setBills]=useState<any>(),[approved,setApproved]=useState(false),[selectedTemplate,setSelectedTemplate]=useState('')
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[tab,setTab]=useState<'wizard'|'history'|'settings'>('wizard')
@@ -84,7 +84,7 @@ export default function BulkImportWizard({onClose,onImported}:Props) {
      {review.rows?.length>0&&<div className="max-h-52 overflow-auto"><table className="w-full text-xs"><thead><tr><th>Row</th><th>Field</th><th>Issue</th></tr></thead><tbody>{review.rows.flatMap((row:any)=>row.issues.map((issue:any,i:number)=><tr key={`${row.row_number}-${i}`}><td>{row.row_number}</td><td>{issue.field}</td><td className={issue.severity==='error'?'text-red-400':'text-amber-400'}>{issue.message}</td></tr>))}</tbody></table></div>}
      <button className="btn-secondary" disabled={busy} onClick={()=>void run(async()=>{await result(api.export({type,jobId:review.id}))})}>Download error / warning CSV</button>
      {type==='stock_in'&&['validated','failed'].includes(review.status)&&<div><p>One supplier invoice/date per file. Upload its supplier bill before receiving stock.</p><button className="btn-secondary" onClick={()=>void run(async()=>setBills(await result(api.selectBills())))}>Upload supplier bill PDF / image</button>{bills&&<span className="text-sm ml-2">{bills.files.map((file:any)=>file.original_name).join(', ')}</span>}</div>}
-     {['validated','failed','partial'].includes(review.status)&&<><label className="block"><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)}/> I reviewed the normalized preview and errors. Commit valid rows only{type==='stock_in'?' into this supplier receipt':''}.</label><button className="btn-primary" disabled={busy||!approved||!review.review_token||!review.valid_rows||Boolean(watch)||type==='stock_in'&&!bills||options.allOrNothing&&review.error_rows>0} onClick={()=>void run(async()=>{await result(api.commit(review.id,review.review_token,bills?.token));setWatch(review.id)})}>5. {review.applied_rows?'Resume unapplied rows':'Commit import'}</button></>}
+     {['validated','failed','partial'].includes(review.status)&&<><label className="block"><input type="checkbox" checked={approved} onChange={e=>setApproved(e.target.checked)}/> {type==='stock_in'?'I reviewed every row. Receive the complete supplier invoice only when all rows are valid.':'I reviewed the normalized preview and errors. Commit valid rows only.'}</label><button className="btn-primary" disabled={busy||!approved||!review.review_token||!review.valid_rows||Boolean(watch)||type==='stock_in'&&(!bills||review.error_rows>0)||options.allOrNothing&&review.error_rows>0} onClick={()=>void run(async()=>{await result(api.commit(review.id,review.review_token,bills?.token));setWatch(review.id)})}>5. {review.applied_rows?'Resume unapplied rows':'Commit import'}</button></>}
      {review.status==='completed'&&<p>6. Completed. The original file/sheet/type cannot be applied twice. Open Import history for rollback checks.</p>}
     </div>}
    </>}

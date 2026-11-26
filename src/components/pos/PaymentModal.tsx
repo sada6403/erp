@@ -53,6 +53,8 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const [agentName, setAgentName]         = useState('')
   const [agentId, setAgentId]             = useState('')
   const [agentQuery, setAgentQuery]       = useState('')
+  const agentRef = useRef<HTMLInputElement>(null)
+  const checkoutOpened = useRef(false)
   const [agentSuggestOpen, setAgentSuggestOpen] = useState(false)
   const [agents, setAgents]               = useState<Record<string, unknown>[]>([])
   const [validUntil, setValidUntil]     = useState(cart.validUntil)
@@ -224,7 +226,14 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
   const isCredit    = billType === 'CREDIT'
   const isRetail    = billType === 'RETAIL'
 
-  useEffect(() => { if (keyboardActive) focusPaymentField() }, [method, done, keyboardActive, focusPaymentField])
+  useEffect(() => {
+    if (!keyboardActive) return
+    if (!done && !checkoutOpened.current && agentRef.current) {
+      checkoutOpened.current = true
+      agentRef.current.focus()
+      agentRef.current.scrollIntoView?.({ block: 'nearest' })
+    } else focusPaymentField()
+  }, [method, done, keyboardActive, focusPaymentField])
 
   // Loyalty discount computed from redeemPoints
   const loyaltyCfg          = loyaltyBalance?.config
@@ -551,6 +560,9 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
 
   // Keyboard shortcuts
   useKeyboard([
+    { key: 'a', alt: true, handler: () => { if (!done && !loading) agentRef.current?.focus() } },
+    { key: 'g', alt: true, handler: () => { if (!done && !loading) focusCouponOrPayment() } },
+    { key: 'm', alt: true, handler: () => { if (!done && !loading) focusPaymentField() } },
     { key: 'Escape', handler: () => { if (!loading && !confirmingRef.current) { if (done) onSuccess(); else onClose() } } },
     { key: 'F2', handler: () => { if (!done && !loading) window.dispatchEvent(new Event('pos:open-customer')) } },
     { key: 'F9', handler: () => { if (!done) { chooseMethod('cash') } } },
@@ -739,6 +751,7 @@ export default function PaymentModal({ invoiceNumber, billType, onClose, onSucce
                 value={agentQuery}
                 role="combobox"
                 aria-label="Agent"
+                ref={agentRef}
                 aria-autocomplete="list"
                 aria-expanded={agentSuggestOpen && agentMatches.length > 0}
                 aria-controls={agentSuggestOpen && agentMatches.length > 0 ? agentListId : undefined}

@@ -64,16 +64,38 @@ export function writeImportRow(db:Database.Database,type:string,data:Record<stri
  }
  return effects
 }
-export function writeImportReceipt(db:Database.Database,rows:Record<string,any>[],actor:KeywordActor,jobId:string,saveBills:(id:string)=>void) {
+export function writeImportReceipt(db:Database.Database,rows:Record<string,any>[],actor:KeywordActor,jobId:string,saveBills:(id:string)=>void,allowCreate=false) {
  const effects=new ImportEffects(db),first=rows[0]
+ effects.dependOnPurchase(jobId)
+ const reference=(table:'suppliers'|'categories',name:string)=>{
+  const existing=db.prepare(`SELECT id FROM ${table} WHERE LOWER(TRIM(name))=LOWER(?) AND is_active=1`).get(name) as {id:string}|undefined
+  if(existing)return existing.id
+  if(!allowCreate||!actor.permissions.all)throw new Error(`Unknown ${table}: create or map this master first`)
+  const id=randomUUID();effects.put(table,id,{name,is_active:1});return id
+ }
+ const supplierId=reference('suppliers',first.supplier)
+ const created=new Map<string,string>()
+ for(const row of rows){
+  row.supplier_id=supplierId
+  if(!row.product_id){
+   if(created.has(row.sku)){row.product_id=created.get(row.sku);continue}
+   if(!allowCreate||!actor.permissions.all||!row._create_product)throw new Error('Create or map the product before importing this invoice')
+   if(db.prepare('SELECT 1 FROM products WHERE sku=? OR (barcode IS NOT NULL AND barcode=?)').get(row.sku,row.barcode||''))throw new Error('Product identity changed since validation; review this import again')
+   const id=randomUUID()
+   effects.put('products',id,{sku:row.sku,barcode:row.barcode||null,name:row.name,unit:row.unit||'pcs',supplier_id:supplierId,category_id:row.category?reference('categories',row.category):null,cost_price:row.cost_price,selling_price:row.selling_price,is_active:1,branch_id:null,track_batches:1,track_expiry:row.expiry_date?1:0})
+   row.product_id=id;created.set(row.sku,id)
+  }
+ }
  const products=[...new Set(rows.map(row=>row.product_id))]
  const placeholders=products.map(()=>'?').join(',')
  const reads:Record<string,()=>Record<string,any>[]>={}
+ reads.suppliers=()=>db.prepare('SELECT * FROM suppliers WHERE id=?').all(supplierId) as Record<string,any>[]
  for(const table of ['products','stocks','product_batches'])reads[table]=()=>db.prepare(`SELECT * FROM ${table} WHERE ${table==='products'?'id':'product_id'} IN (${placeholders})`).all(...products) as any[]
  reads.purchase_orders=()=>db.prepare('SELECT * FROM purchase_orders WHERE id=?').all(jobId) as any[]
  reads.purchase_items=()=>db.prepare('SELECT * FROM purchase_items WHERE po_id=?').all(jobId) as any[]
  reads.purchase_attachments=()=>db.prepare('SELECT * FROM purchase_attachments WHERE purchase_id=?').all(jobId) as any[]
  reads.stock_movements=()=>db.prepare('SELECT * FROM stock_movements WHERE reference_order_id=?').all(jobId) as any[]
- effects.observe(reads,()=>createStockPurchase(db,{id:jobId,poNumber:`IMP-${jobId}`,branchId:actor.branchId,userId:actor.userId,supplierId:first.supplier_id,purchaseType:'direct',purchaseDate:first.purchase_date,invoiceNumber:first.invoice_no,notes:`Stock-in import ${jobId}`,items:rows.map(row=>({...row,product_id:row.product_id,quantity:row.quantity,unit_cost:row.cost_price,selling_price:row.selling_price,batch_number:row.batch_no,expiry_date:row.expiry_date}))},saveBills))
+ // ImportEffects captures and queues the complete receipt within its owning transaction.
+ effects.observe(reads,()=>createStockPurchase(db,{id:jobId,poNumber:`IMP-${jobId}`,branchId:actor.branchId,userId:actor.userId,supplierId:first.supplier_id,purchaseType:'direct',purchaseDate:first.purchase_date,invoiceNumber:first.invoice_no,notes:`Stock-in import ${jobId}`,items:rows.map(row=>({...row,product_id:row.product_id,quantity:row.quantity,unit_cost:row.cost_price,free_quantity:row.free_quantity??0,discount_amount:row.discount_amount??0,mrp:row.mrp??null,entry_unit:row.unit||undefined,selling_price:row.selling_price,batch_number:row.batch_no,expiry_date:row.expiry_date}))},saveBills,false))
  return effects
 }

@@ -6,6 +6,8 @@ export const stableImportRow=(row:Record<string,any>|null)=>row?JSON.stringify(O
 export class ImportEffects {
  readonly effects=new Map<string,ImportEffect>()
  private queued=new Map<string,string>()
+ private purchaseIds=new Set<string>()
+ dependOnPurchase(id:string){this.purchaseIds.add(id)}
  constructor(readonly db:Database.Database){}
  row(table:string,id:string){if(!TABLES.has(table))throw new Error('Unsupported import write target');return this.db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(id) as Record<string,any>|undefined}
  capture(table:string,id:string,before:Record<string,any>|null){const key=table+':'+id;const previous=this.effects.get(key),after=this.row(table,id)||null;this.effects.set(key,{table,id,before:previous?previous.before:before,after,...(table==='stocks'&&after?{movementGuard:this.movementGuard(after.product_id)}:{})})}
@@ -39,7 +41,8 @@ export class ImportEffects {
    if(this.queued.get(key)===version)continue
    if(effect.table==='product_search_keywords'&&!['global','branch'].includes(effect.after.scope_type))continue
    const row=effect.table==='stocks'&&effect.before?{...effect.after,_base_stock:{quantity:effect.before.quantity,damaged_qty:effect.before.damaged_qty}}:effect.table==='product_search_keywords'?{...effect.after,_enforce_unique_codes:uniqueCodes}:effect.after
-   this.db.prepare('INSERT INTO sync_queue(id,table_name,record_id,operation,payload) VALUES (?,?,?,?,?)').run(randomUUID(),effect.table,effect.id,effect.before?'UPDATE':'INSERT',JSON.stringify(row))
+   const payload=this.purchaseIds.size&&['products','stocks','product_batches','stock_movements'].includes(effect.table)?{...row,_purchase_ids:[...this.purchaseIds]}:row
+   this.db.prepare('INSERT INTO sync_queue(id,table_name,record_id,operation,payload) VALUES (?,?,?,?,?)').run(randomUUID(),effect.table,effect.id,effect.before?'UPDATE':'INSERT',JSON.stringify(payload))
    this.queued.set(key,version)
   }
  }

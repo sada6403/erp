@@ -22,9 +22,9 @@ beforeEach(()=>{
 afterEach(()=>{cleanup();useCartStore.getState().clear()})
 function show(keyboardActive=true){return render(<MemoryRouter><PaymentModal invoiceNumber="INV-TEST" billType="RETAIL" onClose={close} onSuccess={success} keyboardActive={keyboardActive}/></MemoryRouter>)}
 describe('payment keyboard checkout',()=>{
- it('opens at the selected amount and contains Tab/Shift+Tab within the dialog',async()=>{
+ it('opens at Agent and contains Tab/Shift+Tab within the dialog',async()=>{
   show();const user=userEvent.setup();const amount=screen.getByRole('textbox',{name:'Amount received'})
-  expect(amount).toHaveFocus();expect(amount).toHaveValue('2325')
+  expect(screen.getByRole('combobox',{name:'Agent'})).toHaveFocus();expect(amount).toHaveValue('2325')
   const first=screen.getByRole('button',{name:'Close payment'});first.focus();await user.tab({shift:true})
   expect(screen.getByRole('button',{name:/Confirm Payment/})).toHaveFocus();await user.tab();expect(first).toHaveFocus()
  })
@@ -84,7 +84,7 @@ describe('payment keyboard checkout',()=>{
   window.removeEventListener('pos:open-customer',opened)
  })
  it('focuses New Invoice after payment and activates it once with Enter',async()=>{
-  create.mockResolvedValue({success:true,data:{id:'invoice',invoice_number:'INV-SAVED'}});show();const user=userEvent.setup();await user.keyboard('{Enter}')
+  create.mockResolvedValue({success:true,data:{id:'invoice',invoice_number:'INV-SAVED'}});show();const user=userEvent.setup();await user.keyboard('{Enter}{Enter}{Enter}')
   const next=await screen.findByRole('button',{name:/New Invoice/});expect(next).toHaveFocus();await user.keyboard('{Enter}');expect(success).toHaveBeenCalledTimes(1);expect(create).toHaveBeenCalledTimes(1)
  })
 

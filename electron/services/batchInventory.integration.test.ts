@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import {migrateSupermarketPurchases} from './supermarketSchema'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { reduceSaleBatchQuantity, quoteBatchPrice, allocateSaleBatches, cancelReturnedSaleBatches, createReceiptBatch, restoreReturnedSaleBatches, reverseInvoiceBatchAllocations } from './batchInventory'
 
@@ -46,6 +47,7 @@ describe('supermarket batch inventory ledger', () => {
       INSERT INTO returns VALUES ('ret'); INSERT INTO return_items VALUES ('ret-item');
       INSERT INTO stocks VALUES ('stock','rice','branch',NULL,15,0);
     `)
+    migrateSupermarketPurchases(db)
   })
   afterEach(() => db.close())
 
@@ -63,6 +65,22 @@ describe('supermarket batch inventory ledger', () => {
     const remaining = db.prepare('SELECT SUM(quantity) quantity, SUM(quantity * cost_price) cost, SUM(quantity * COALESCE(selling_price,0)) sales FROM product_batches').get() as { quantity: number; cost: number; sales: number }
     expect(remaining).toEqual({ quantity: 8, cost: 1600, sales: 2000 })
     expect(remaining.sales - remaining.cost).toBe(400)
+  })
+
+  it('uses FEFO automatically for dated products and quotes the same layers it sells',()=>{
+    createReceiptBatch(db,{productId:'rice',branchId:'branch',purchaseId:'po1',purchaseItemId:'pi1',quantity:5,unitCost:100,sellingPrice:150,purchaseDate:'2026-11-01',expiryDate:'2031-01-01'})
+    createReceiptBatch(db,{productId:'rice',branchId:'branch',purchaseId:'po2',purchaseItemId:'pi2',quantity:10,unitCost:200,sellingPrice:250,purchaseDate:'2026-11-02',expiryDate:'2030-01-01'})
+    expect(quoteBatchPrice(db,'rice','branch',7,300)).toBe(250)
+    const allocated=db.transaction(()=>allocateSaleBatches(db,{invoiceId:'inv',invoiceItemId:'item',productId:'rice',branchId:'branch',quantity:7,unitSellingPrice:250}))()
+    expect(allocated.map(row=>[row.quantity,row.unit_cost])).toEqual([[7,200]])
+  })
+
+  it('honours the existing latest-price setting without rewriting old batch prices',()=>{
+    db.exec('ALTER TABLE products ADD COLUMN sale_as_latest_price INTEGER DEFAULT 0; ALTER TABLE products ADD COLUMN selling_price REAL DEFAULT 0')
+    createReceiptBatch(db,{productId:'rice',branchId:'branch',purchaseId:'po1',purchaseItemId:'pi1',quantity:5,unitCost:100,sellingPrice:150,purchaseDate:'2026-11-01'})
+    db.prepare('UPDATE products SET sale_as_latest_price=1,selling_price=250 WHERE id=?').run('rice')
+    expect(quoteBatchPrice(db,'rice','branch',3,250)).toBe(250)
+    expect(db.prepare('SELECT selling_price,cost_price FROM product_batches').get()).toEqual({selling_price:150,cost_price:100})
   })
 
   it('rejects overselling and reverses the exact original cost layers', () => {

@@ -13,6 +13,11 @@ import CreatableSearchSelect from '@/components/shared/CreatableSearchSelect'
 import { useProductsStore } from '@/store/productsStore'
 import PurchaseBillPicker from '@/components/shared/PurchaseBillPicker'
 import NumberInput from '@/components/shared/NumberInput'
+import BulkImportWizard from '@/components/admin/BulkImportWizard'
+import PurchasePricingPanel from '@/components/admin/PurchasePricingPanel'
+import PurchaseInventoryReport from '@/components/admin/PurchaseInventoryReport'
+import PurchaseReturnModal from '@/components/admin/PurchaseReturnModal'
+import {purchaseMoney} from '../../../electron/lib/purchaseMath'
 import { toBaseQty, splitQty, formatQtyWithUom, type PackUom } from '@/lib/uom'
 import { printPurchaseQuotation, type PurchaseQuotationItem } from '@/lib/purchaseQuotationPrint'
 import toast from 'react-hot-toast'
@@ -61,6 +66,9 @@ export default function PurchaseOrdersPage() {
 
   // PO Excel Import & Template state
   const [showImportModal, setShowImportModal] = useState(false)
+  const [showStockImport,setShowStockImport]=useState(false)
+  const [showInventoryReport,setShowInventoryReport]=useState(false)
+  const [returnPurchaseId,setReturnPurchaseId]=useState('')
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{
     importedPOs?: number
@@ -136,13 +144,13 @@ export default function PurchaseOrdersPage() {
     }
   }
 
-  const updateStatus = async (po: PO, status: string, extra?: unknown) => {
+  const updateStatus = async (po: PO, status: string, extra?: unknown,refreshDetail=true) => {
     try {
       const res = await window.api.purchases.updateStatus(String(po.id), status, extra)
       if (res.success) {
-        toast.success(`PO ${po.po_number} → ${status}`)
+        toast.success(`PO ${po.po_number} → ${res.data?.status||status}`)
         load()
-        if (viewPO?.id === po.id) loadDetail(String(po.id))
+        if (refreshDetail&&viewPO?.id === po.id) await loadDetail(String(po.id))
         useProductsStore.getState().invalidate()
         return true
       } else {
@@ -229,7 +237,7 @@ export default function PurchaseOrdersPage() {
         title={supermarket ? "Stock Purchases & Bills" : "Purchase Orders"}
         subtitle={historyView === 'bills' ? `${billRows.length} uploaded supplier bills` : historyView === 'receipts' ? `${receipts.length} stock receipts` : `${pos.length} ${supermarket ? 'purchases' : 'purchase orders'}`}
         actions={
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             <button className="btn-ghost btn-sm gap-1.5" onClick={load} disabled={loading}>
               <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> Refresh
             </button>
@@ -239,6 +247,8 @@ export default function PurchaseOrdersPage() {
             <button className="btn-secondary btn-sm gap-1.5" onClick={() => setShowImportModal(true)}>
               <Upload size={14} /> Import PO (Excel)
             </button>
+            {supermarket&&<button className="btn-secondary btn-sm gap-1.5" onClick={()=>setShowStockImport(true)}><FileSpreadsheet size={14}/>Bulk stock upload</button>}
+            {supermarket&&<button className="btn-secondary btn-sm" onClick={()=>setShowInventoryReport(true)}>Batch inventory & alerts</button>}
             {!supermarket && <button className="btn-primary btn-sm gap-1.5" onClick={() => {setEntryMode('order');setShowCreate(true)}}>
               <Plus size={14} /> New PO
             </button>}
@@ -246,6 +256,9 @@ export default function PurchaseOrdersPage() {
         }
       />
 
+      {showStockImport&&<BulkImportWizard initialType="stock_in" onClose={()=>setShowStockImport(false)} onImported={()=>{load();useProductsStore.getState().invalidate()}}/>}
+      {showInventoryReport&&<PurchaseInventoryReport onClose={()=>setShowInventoryReport(false)}/>}
+      {returnPurchaseId&&<PurchaseReturnModal purchaseId={returnPurchaseId} onClose={()=>setReturnPurchaseId('')} onDone={()=>{setReturnPurchaseId('');load();useProductsStore.getState().invalidate()}}/>}
       {supermarket && <div className="px-6 pt-4 pb-3 grid md:grid-cols-2 gap-3 border-b" style={{borderColor:'var(--border)'}}>
         <button className="btn-secondary justify-start py-3" onClick={()=>{setEntryMode('order');setShowCreate(true)}}><span className="text-left"><strong className="block">1. Order from Supplier</strong><span className="text-xs font-normal">Create order, track progress, then receive stock and upload the supplier bill.</span></span></button>
         <button className="btn-primary justify-start py-3" onClick={()=>{setEntryMode('direct');setShowCreate(true)}}><span className="text-left"><strong className="block">2. Add Received Stock Directly</strong><span className="text-xs font-normal">Search products from the delivered bill and add stock immediately.</span></span></button>
@@ -340,6 +353,7 @@ export default function PurchaseOrdersPage() {
                         <XCircle size={12} /> Cancel
                       </button>
                     )}
+                    {supermarket&&['PARTIAL','RECEIVED'].includes(String(po.status))&&<button className="btn-secondary btn-sm" onClick={()=>setReturnPurchaseId(String(po.id))}>Supplier return</button>}
                   </div>
                 </td>
               </tr>
@@ -500,7 +514,7 @@ export default function PurchaseOrdersPage() {
           onDone={async (items, attachmentToken) => {
             const isFullReceive = items.every((i: Record<string, unknown>) =>
               Number(i.received_qty) === Number(i.ordered_qty) - Number(i.already_received))
-            const ok = await updateStatus(viewPO, isFullReceive ? 'RECEIVED' : 'PARTIAL', { items, attachment_token: attachmentToken })
+            const ok = await updateStatus(viewPO, isFullReceive ? 'RECEIVED' : 'PARTIAL', { items, attachment_token: attachmentToken },false)
             if(ok) { setShowReceive(false); setViewPO(null) }
             return Boolean(ok)
           }}
@@ -689,6 +703,8 @@ function ReceivePOModal({ po, onClose, onDone }:
     if(saving) return
     if(supermarket && !attachmentToken && !((po.attachments as PO[]|undefined)?.length)) {toast.error('Upload a supplier bill before receiving stock.');return}
     if (!purchaseDate) { toast.error('Purchase date is required'); return }
+    const missingExpiry=(po.items||[]).find((item:POItem)=>Number(item.track_expiry)===1&&(qtys[String(item.id)]||0)>0&&!(batchValues[String(item.id)]?.expiry_date||item.expiry_date))
+    if(missingExpiry){toast.error(`Enter the expiry date for ${String(missingExpiry.product_name||'this product')}`);return}
     const items = (po.items || []).map((item: POItem) => ({
       ...item,...batchValues[String(item.id)],
       id: item.id,
@@ -703,11 +719,11 @@ function ReceivePOModal({ po, onClose, onDone }:
   }
 
   return (
-    <Modal title={`Receive Items — ${po.po_number}`} onClose={onClose}>
+    <Modal title={`Receive Items — ${po.po_number}`} onClose={onClose} size="xl">
       {batchGuard.dialog}
-      <div className="space-y-2">{(po.items||[]).map(item=><div key={String(item.id)}><p className="text-sm">{String(item.product_name||'Product')}</p><BatchFields value={{...item,...batchValues[String(item.id)]}} onChange={(key,value)=>setBatchValues(old=>({...old,[String(item.id)]:{...old[String(item.id)],[key]:value}}))}/></div>)}</div>
       <div className="space-y-4">
         <label hidden={!supermarket} className="label">Purchase date<input type="date" className="input" value={purchaseDate} onChange={e => setPurchaseDate(e.target.value)} /></label>
+        <p className="text-xs text-slate-400">Enter batch number, manufacture date and expiry date from the delivered goods. They are not needed when placing the order. Leave them blank for non-expiring products.</p>
         <p hidden={!supermarket} className="text-xs text-slate-400">Leave selling price blank to use the product's common price. Enter a price to apply it to this purchase batch.</p>
         {supermarket && <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} required existingCount={(po.attachments as PO[]|undefined)?.length||0} />}
         <table className="w-full text-sm">
@@ -715,7 +731,7 @@ function ReceivePOModal({ po, onClose, onDone }:
             <th className="text-left py-2 text-slate-400 font-normal">Product</th>
             <th className="text-right py-2 text-slate-400 font-normal">Ordered</th>
             <th className="text-right py-2 text-slate-400 font-normal">Already Received</th>
-            <th className="text-right py-2 text-slate-400 font-normal">Receiving Now</th><th hidden={!supermarket} className="text-right py-2 text-slate-400 font-normal">Selling Price</th>
+            <th className="text-right py-2 text-slate-400 font-normal">Receiving Now</th><th hidden={!supermarket} className="text-right py-2 text-slate-400 font-normal">Selling Price</th><th className="text-left py-2 pl-3 text-slate-400 font-normal">Batch · MFD · Expiry</th>
           </tr></thead>
           <tbody>
             {(po.items || []).map((item: POItem) => {
@@ -755,6 +771,7 @@ function ReceivePOModal({ po, onClose, onDone }:
                       </div>
                     ) : (
                       <NumberInput
+                        aria-label={`Receive quantity ${String(item.product_name||item.product_id)}`}
                         min={0}
                         max={remaining}
                         value={current}
@@ -765,6 +782,7 @@ function ReceivePOModal({ po, onClose, onDone }:
                     )}
                   </td>
                   <td hidden={!supermarket}><input aria-label="Batch selling price" className="input w-24" type="number" min="0" step="0.01" placeholder="Common" value={prices[String(item.id)] ?? (item.selling_price == null ? '' : String(item.selling_price))} onChange={e => setPrices(p => ({ ...p, [String(item.id)]: e.target.value }))} /></td>
+                  <td className="py-2 pl-3 min-w-[360px]">{remaining>0?<div>{Number(item.track_expiry)===1&&<span className="text-[10px] text-amber-400">Expiry required</span>}<BatchFields value={{...item,...batchValues[String(item.id)]}} onChange={(key,value)=>setBatchValues(old=>({...old,[String(item.id)]:{...old[String(item.id)],[key]:value}}))}/></div>:<span className="text-xs text-slate-500">Fully received</span>}</td>
                 </tr>
               )
             })}
@@ -806,6 +824,8 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
       quantity: number
       unit_cost: number
       selling_price: string
+      entry_unit?:string
+      free_quantity?:number;discount_amount?:number;mrp?:string
       batch_number?:string;mfg_date?:string;expiry_date?:string
       current_stock?: number
       min_stock_level?: number
@@ -825,6 +845,24 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
     items: [{ product_id: '', quantity: 1, unit_cost: 0, selling_price: '' }]
   })
   const [saving, setSaving] = useState(false)
+  const [newProduct, setNewProduct] = useState<{name:string;barcode:string;unit:string;cost_price:string;selling_price:string;track_expiry?:boolean}|null>(null)
+  const [creatingProduct,setCreatingProduct]=useState(false)
+  const createProduct=async()=>{
+    if(!newProduct || creatingProduct) return
+    if(!form.supplier_id || !newProduct.name.trim()) {toast.error('Select a supplier and enter a product name');return}
+    const cost=Number(newProduct.cost_price),price=Number(newProduct.selling_price)
+    if(!Number.isFinite(cost)||cost<=0||!Number.isFinite(price)||price<=0){toast.error('Enter valid purchase and selling prices');return}
+    setCreatingProduct(true)
+    try {
+      const result=await window.api.products.create({...newProduct,name:newProduct.name.trim(),supplier_id:form.supplier_id,cost_price:cost,selling_price:price})
+      if(!result.success){toast.error(String(result.error));return}
+      const product={...newProduct,id:String(result.data.id),sku:String(result.data.sku||''),supplier_id:form.supplier_id,cost_price:cost,selling_price:price,stock:0,is_active:1}
+      setProducts(old=>[...old,product]);setSupplierProducts(old=>[...old,product])
+      const row={product_id:product.id,quantity:1,unit_cost:cost,selling_price:String(price),unit:product.unit,current_stock:0,product_name:product.name}
+      setForm(old=>({...old,items:old.items.some(item=>!item.product_id)?old.items.map((item,index)=>index===old.items.findIndex(i=>!i.product_id)?row:item):[...old.items,row]}))
+      setNewProduct(null);useProductsStore.getState().invalidate();toast.success('Product created and linked to this supplier')
+    }catch(error){toast.error(String(error))}finally{setCreatingProduct(false)}
+  }
 
   const selectedSupplier = suppliers.find(s => String(s.id) === form.supplier_id)
 
@@ -932,6 +970,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
             sku: String(prod?.sku || ''),
             barcode: String(prod?.barcode || ''),
             unit: String(prod?.unit || 'pcs'),
+            entry_unit: undefined,
             unit_cost: Number(prod?.cost_price || 0),
             selling_price: prod?.selling_price != null ? String(prod.selling_price) : '',
             current_stock: curStock,
@@ -957,7 +996,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
 
   const removeItem = (i: number) => setForm(f => ({ ...f, items: f.items.filter((_, n) => n !== i) }))
 
-  const totalAmount = form.items.reduce((s, i) => s + i.quantity * i.unit_cost, 0)
+  const totalAmount = purchaseMoney(form.items.reduce((s, i) => s + purchaseMoney(i.quantity * i.unit_cost) - (i.discount_amount||0), 0))
 
   const handlePrintQuotationSheet = async () => {
     if (!selectedSupplier) { toast.error('Select a supplier first'); return }
@@ -974,10 +1013,10 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
         product_name: item.product_name || String(prod?.name || 'Product'),
         sku: item.sku || String(prod?.sku || ''),
         barcode: item.barcode || String(prod?.barcode || ''),
-        unit: item.unit || String(prod?.unit || 'pcs'),
+        unit: item.entry_unit || item.unit || String(prod?.unit || 'pcs'),
         quantity: Number(item.quantity),
         unit_cost: Number(item.unit_cost),
-        line_total: Number(item.quantity) * Number(item.unit_cost),
+        line_total: purchaseMoney(Number(item.quantity) * Number(item.unit_cost))-(item.discount_amount||0),
         current_stock: item.current_stock,
         min_stock_level: item.min_stock_level,
         is_low_stock: item.is_low_stock,
@@ -1010,6 +1049,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
   }
 
   const save = async () => {
+    if(saving||creatingProduct)return
     if (!form.supplier_id) { toast.error('Select a supplier'); return }
     if (form.items.some(i => !i.product_id)) { toast.error('All items need a product'); return }
     if(supermarket && direct && !attachmentToken) {toast.error('Supplier bill upload is required. Upload a PDF or image.');return}
@@ -1040,10 +1080,23 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
     }
   }
 
+  useEffect(()=>{
+    const handler=(event:KeyboardEvent)=>{
+      if(event.ctrlKey&&event.key.toLowerCase()==='s'){event.preventDefault();if(!newProduct)void save()}
+      if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();if(!saving&&!newProduct)addItem()}
+    }
+    window.addEventListener('keydown',handler)
+    return()=>window.removeEventListener('keydown',handler)
+  },[form,saving,newProduct,attachmentToken])
+
   return (
-    <Modal title={direct ? "Add Received Stock Directly" : "New Purchase Order / Quotation"} onClose={()=>{if(!saving)onClose()}} size="lg">{batchGuard.dialog}
-      <div className="space-y-4 max-h-[70vh] overflow-y-auto pr-1">
-        <div className="grid grid-cols-2 gap-3">
+    <Modal title={direct ? "Add Received Stock Directly" : "New Purchase Order / Quotation"} onClose={()=>{if(!saving)onClose()}} size="xl" footer={<div className="w-full flex flex-wrap justify-between items-center gap-2">
+      <div>{!direct&&<button type="button" className="btn-secondary btn-sm" onClick={handlePrintQuotationSheet} disabled={!form.supplier_id||form.items.every(i=>!i.product_id)}><Printer size={13}/>Print Quotation Sheet</button>}</div>
+      <div className="flex gap-2 items-center"><span className="font-semibold mr-2">Rs.{totalAmount.toLocaleString()}</span><button className="btn-ghost" disabled={saving} onClick={onClose}>Cancel</button><button className="btn-primary" onClick={save} disabled={saving||(supermarket&&direct&&!attachmentToken)}>{saving?'Saving...':direct?'Save & Receive Stock':'Create Purchase Order'}</button></div>
+    </div>}>{batchGuard.dialog}
+      <p className="text-xs mb-3" style={{color:'var(--text-3)'}}>Ctrl+Enter: add item · Ctrl+S: save · {direct?'Leave manufacture and expiry dates empty for non-expiring products.':'Batch, manufacture and expiry dates are entered when the stock is received.'}</p>
+      <div className="space-y-3">
+        <div className={supermarket?`grid grid-cols-1 sm:grid-cols-2 ${direct?'lg:grid-cols-3':'lg:grid-cols-4'} gap-3`:'grid grid-cols-2 gap-3'}>
           <div>
             <label className="label">Supplier *</label>
             <CreatableSearchSelect
@@ -1062,6 +1115,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
               }}
             />
           </div>
+          {supermarket&&<><label className="label">{direct?'Stock Received Date':'Purchase Date'}<input aria-label="Purchase date" type="date" className="input" value={form.purchase_date} onChange={e=>setForm(f=>({...f,purchase_date:e.target.value}))}/></label><label className="label">Supplier Bill / Invoice Number<input aria-label="Supplier invoice number" className="input" value={form.supplier_invoice_number} onChange={e=>setForm(f=>({...f,supplier_invoice_number:e.target.value}))}/></label></>}
           <div hidden={direct}>
             <label className="label">{direct ? 'Delivery reference (optional)' : 'Expected Delivery Date'}</label>
             <input type="date" className="input" value={form.expected_date}
@@ -1069,15 +1123,13 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
           </div>
         </div>
 
-        {supermarket && <div className="grid grid-cols-2 gap-3"><label className="label">{direct?'Stock Received Date':'Purchase Date'}<input aria-label="Purchase date" type="date" className="input" value={form.purchase_date} onChange={e=>setForm(f=>({...f,purchase_date:e.target.value}))} /></label><label className="label">Supplier Bill / Invoice Number<input aria-label="Supplier invoice number" className="input" value={form.supplier_invoice_number} onChange={e=>setForm(f=>({...f,supplier_invoice_number:e.target.value}))} /></label></div>}
         {supermarket && <>
-          <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} required={direct} />
+          <PurchaseBillPicker onChange={setAttachmentToken} disabled={saving} required={direct} compact />
           {!direct && <p className="text-sm" style={{color:'var(--text-3)'}}>Supplier bill is optional when placing an order. Send the order by WhatsApp or email, then upload the supplier bill when receiving stock.</p>}
         </>}
-        {supermarket && <p className="text-xs" style={{color:'var(--text-3)'}}>Purchase Price = what you pay the supplier. Selling Price = what the customer pays. Leave Selling Price as Common only if this product already has a selling price. Receiving stock updates the product prices; older batch costs stay unchanged.</p>}
-        {direct && <p className="text-sm" style={{color:'var(--text-3)'}}>Search each product on the supplier bill, enter delivered quantity and purchase price, then save to update stock immediately.</p>}
+        {supermarket && <p className="text-xs" style={{color:'var(--text-3)'}}>Enter prices per selected unit. Free quantity increases stock; line discounts reduce cost. Existing batch prices stay unchanged.</p>}
         {selectedSupplier && (
-          <div className="bg-surface-800/80 border border-slate-700/70 rounded-lg p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
+          <details className="text-xs"><summary className="cursor-pointer">Supplier contact</summary><div className="bg-surface-800/80 border border-slate-700/70 rounded-lg p-2.5 text-xs flex flex-wrap items-center justify-between gap-2">
             <div>
               <span className="text-slate-400">Supplier: </span>
               <span className="font-semibold text-white">{String(selectedSupplier.business_name || selectedSupplier.name)}</span>
@@ -1091,14 +1143,13 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
                 ✉️ {String(selectedSupplier.email || 'No Email')}
               </span>
             </div>
-          </div>
+          </div></details>
         )}
 
-        <div>
-          <label className="label">Notes</label>
+        <details><summary className="text-xs cursor-pointer">Notes (optional)</summary>
           <textarea className="input resize-none h-16 text-sm" value={form.notes}
             onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Optional notes..." />
-        </div>
+        </details>
 
         <div>
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
@@ -1144,9 +1195,22 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
               <button type="button" className="btn-ghost btn-sm gap-1" onClick={addItem}>
                 <Plus size={12}/>Add Item
               </button>
+              <button type="button" className="btn-secondary btn-sm" disabled={!form.supplier_id} onClick={()=>setNewProduct({name:'',barcode:'',unit:'pcs',cost_price:'',selling_price:''})}>New product</button>
             </div>
           </div>
 
+          {newProduct && <div className="rounded-lg border p-3 mb-4 space-y-3" style={{borderColor:'var(--border)'}}>
+            <p className="text-sm font-semibold">Create product for this supplier</p>
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+              <label className="text-xs">Product name<input autoFocus className="input mt-1" value={newProduct.name} onChange={e=>setNewProduct({...newProduct,name:e.target.value})}/></label>
+              <label className="text-xs">Barcode<input className="input mt-1" value={newProduct.barcode} onChange={e=>setNewProduct({...newProduct,barcode:e.target.value})}/></label>
+              <label className="text-xs">Base unit<select aria-label="Base unit" className="input mt-1" value={newProduct.unit} onChange={e=>setNewProduct({...newProduct,unit:e.target.value})}>{['pcs','kg','g','ltr','ml','bag','carton'].map(unit=><option key={unit}>{unit}</option>)}</select></label>
+              <label className="text-xs">Purchase price<input className="input mt-1" type="number" min="0.01" step="any" value={newProduct.cost_price} onChange={e=>setNewProduct({...newProduct,cost_price:e.target.value})}/></label>
+              <label className="text-xs">Selling price<input className="input mt-1" type="number" min="0.01" step="any" value={newProduct.selling_price} onChange={e=>setNewProduct({...newProduct,selling_price:e.target.value})}/></label>
+            </div>
+            <div className="flex gap-2"><button type="button" disabled={creatingProduct} className="btn-primary btn-sm" onClick={createProduct}>{creatingProduct?'Creating…':'Create and add'}</button><button type="button" disabled={creatingProduct} className="btn-ghost btn-sm" onClick={()=>setNewProduct(null)}>Cancel</button></div>
+            <label className="flex gap-2 text-xs"><input type="checkbox" checked={!!newProduct.track_expiry} onChange={e=>setNewProduct({...newProduct,track_expiry:e.target.checked})}/>Require an expiry date when receiving this product</label>
+          </div>}
           {/* Column headers */}
           <div className="grid gap-2 mb-1 px-1" style={{ gridTemplateColumns: supermarket ? 'minmax(170px,1fr) 65px 90px 95px 80px 20px' : '1fr 72px 110px 80px 20px' }}>
             {(supermarket ? ['Product','Qty','Purchase Price','Selling Price','Total',''] : ['Product', 'Qty', 'Unit Cost', 'Total', '']).map((h, i) => (
@@ -1158,7 +1222,13 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
             {form.items.map((item, idx) => (
               <div key={idx} className="grid gap-2 items-center rounded-lg px-1 py-1.5"
                 style={{ gridTemplateColumns: supermarket ? 'minmax(170px,1fr) 65px 90px 95px 80px 20px' : '1fr 72px 110px 80px 20px', background: 'var(--bg-soft)', minWidth: 0 }}>
-                <div className="col-span-full"><BatchFields value={item} onChange={(key,value)=>setItem(idx,key,value)}/></div>
+                {direct&&<div className="col-span-full order-1"><BatchFields value={item} onChange={(key,value)=>setItem(idx,key,value)}/></div>}
+                {supermarket&&<div className="col-span-full order-2 grid grid-cols-3 gap-2">
+                  <label className="text-xs">Free quantity<input aria-label={`Free quantity ${idx+1}`} className="input" type="number" min="0" step="any" value={item.free_quantity??0} onChange={e=>setItem(idx,'free_quantity',Number(e.target.value))}/></label>
+                  <label className="text-xs">Line discount (Rs.)<input aria-label={`Line discount ${idx+1}`} className="input" type="number" min="0" step="0.01" value={item.discount_amount??0} onChange={e=>setItem(idx,'discount_amount',Number(e.target.value))}/></label>
+                  <label className="text-xs">MRP per entry unit (incl. tax)<input aria-label={`MRP ${idx+1}`} className="input" type="number" min="0.01" step="any" value={item.mrp??''} onChange={e=>setItem(idx,'mrp',e.target.value)}/></label>
+                </div>}
+                {supermarket&&<label className="col-span-full order-2 text-xs flex gap-3 items-center">Entry unit<select aria-label={`Entry unit ${idx+1}`} className="input w-32" value={item.entry_unit||item.unit||'pcs'} onChange={e=>{setItem(idx,'entry_unit',e.target.value);setItem(idx,'quantity',1);setItem(idx,'free_quantity',0);setItem(idx,'discount_amount',0);setItem(idx,'mrp','');setItem(idx,'unit_cost',0);setItem(idx,'selling_price','')}}>{Array.from(new Set([item.unit||'pcs','pcs','kg','g','ltr','ml','bag','carton'])).map(unit=><option key={unit}>{unit}</option>)}</select><span style={{color:'var(--text-3)'}}>Quantities and prices use this unit; inventory is stored in {item.unit||'the product base unit'}.</span></label>}
                 <div className="min-w-0">
                   <ProductSearchSelect
                     products={activeProducts}
@@ -1178,13 +1248,15 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
                   )}
                 </div>
                 <NumberInput
+                  aria-label={`Paid quantity ${idx+1}`}
                   min={0.000001}
                   step="any"
                   className="input text-sm py-1.5 text-center"
                   value={item.quantity}
-                  onChange={e => setItem(idx, 'quantity', parseFloat(e.target.value) || 1)}
+                  onChange={e => setItem(idx, 'quantity', Number(e.target.value))}
                 />
                 <NumberInput
+                  aria-label={`Purchase price ${idx+1}`}
                   min={0}
                   className="input text-sm py-1.5"
                   value={item.unit_cost}
@@ -1192,7 +1264,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
                 />
                 {supermarket && <input aria-label={`Selling price ${idx+1}`} type="number" min="0" step="0.01" className="input text-sm" placeholder="Common" value={item.selling_price} onChange={e=>setItem(idx,'selling_price',e.target.value)} />}
                 <p className="text-sm font-semibold text-right pr-1">
-                  Rs.{(item.quantity * item.unit_cost).toLocaleString()}
+                  Rs.{(purchaseMoney(item.quantity * item.unit_cost)-(item.discount_amount||0)).toLocaleString()}
                 </p>
                 <div className="flex justify-center">
                   {form.items.length > 1 && (
@@ -1201,6 +1273,7 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
                     </button>
                   )}
                 </div>
+                {supermarket&&item.product_id&&<PurchasePricingPanel item={item}/>}
               </div>
             ))}
           </div>
@@ -1238,27 +1311,6 @@ function CreatePOModal({ onClose, onDone, mode='order' }: { onClose: () => void;
           </div>
         </div>
 
-        <div className="flex justify-between items-center gap-3 pt-2 border-t border-slate-700">
-          <div>
-            {!direct && (
-              <button
-                type="button"
-                className="btn-secondary btn-sm gap-1.5 text-sky-400 hover:text-sky-300"
-                onClick={handlePrintQuotationSheet}
-                disabled={!form.supplier_id || form.items.every(i => !i.product_id)}
-                title="Print / Save Supplier Quotation sheet"
-              >
-                <Printer size={13} /> Print Quotation Sheet
-              </button>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <button className="btn-ghost" onClick={onClose}>Cancel</button>
-            <button className="btn-primary gap-1" onClick={save} disabled={saving || (supermarket && direct && !attachmentToken)}>
-              {saving ? 'Saving...' : direct ? 'Save & Receive Stock' : 'Create Purchase Order'}
-            </button>
-          </div>
-        </div>
       </div>
     </Modal>
   )
