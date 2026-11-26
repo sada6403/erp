@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.11.3 - 2026-11-26 - Barcode search fix
+
+- Product search lists a product while its barcode is being typed. With search keywords enabled, digits used to match only a complete SKU or barcode, so a partly typed barcode showed nothing. From 4 digits, any part of a barcode, SKU or additional barcode now matches; 1-3 digit quick codes stay exact.
+- Additional barcodes are also found by partial search when search keywords are off.
+
 ## 2.11.2 - 2026-11-26 - Keyboard stock entry, supplier quotations and faster POS scanning
 
 - POS: a scanned barcode is added to the cart at once, even when the scanner sends no Enter, and never twice. Enter on an exact barcode/SKU always picks that product.
