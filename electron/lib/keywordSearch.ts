@@ -6,7 +6,8 @@ export interface SearchKeyword {
   is_active: number | boolean; review_status: string
 }
 export interface KeywordSearchContext { userId: string; terminalId: string; branchId: string }
-export interface SearchMaster { id: string; name: string; sku: string; barcode?: string; is_active?: number | boolean }
+export interface SearchMaster { id: string; name: string; sku: string; barcode?: string; extra_barcodes?: string | null; is_active?: number | boolean }
+const codesOf = (product: SearchMaster) => [product.sku, product.barcode, ...String(product.extra_barcodes || '').split('|')].filter(Boolean).map(code => normalizeKeyword(String(code)))
 export interface KeywordMatch { productId: string; matchedBy?: string; scope?: string; strength: number }
 const priority: Record<string,number> = { user:4, terminal:3, branch:2, global:1 }
 const grams = (value: string) => new Set(Array.from({ length: Math.max(0,value.length-2) },(_,i)=>value.slice(i,i+3)))
@@ -67,9 +68,11 @@ export class KeywordSearchIndex {
       if(numeric && keyword.keyword_type!=='code')continue
       offer({productId:keyword.product_id,matchedBy:keyword.keyword,scope:keyword.scope_type,strength},strength*100+(priority[keyword.scope_type]||0)*10)
     }
-    const fallback=numeric ? best.size ? [] : this.masters.filter(product=>[product.sku,product.barcode].some(code=>code&&normalizeKeyword(code)===q)) : masterFallback
+    // Digits are a barcode/SKU. From 4 digits, match any part of a code (also additional barcodes) so a partly typed barcode still lists the product.
+    // Short numbers (quick codes such as 1 or 12) stay exact.
+    const fallback=numeric ? best.size ? [] : this.masters.filter(product=>codesOf(product).some(code=>q.length>=4 ? code.includes(q) : code===q)) : masterFallback
     for(const product of fallback) {
-      const texts=[product.name,product.sku,product.barcode||''].map(normalizeKeyword)
+      const texts=[normalizeKeyword(product.name),...codesOf(product)]
       const strength=texts.includes(q)?4:texts.some(value=>value.split(' ').some(word=>word.startsWith(q)))?3:texts.some(value=>value.includes(q))?2:1
       offer({productId:product.id,strength},strength*100)
     }

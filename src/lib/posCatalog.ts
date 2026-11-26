@@ -26,7 +26,7 @@ export class PosCatalog {
       for (const code of [product.sku, product.barcode, ...extra]) {
         if (code) this.exact.set(normalize(code), product)
       }
-      const text = normalize(`${product.name} ${product.sku} ${product.barcode || ''}`)
+      const text = normalize(`${product.name} ${product.sku} ${product.barcode || ''} ${extra.join(' ')}`)
       return { product, text, words: text.split(/\s+/), grams: grams(text) }
     })
     this.rows.forEach((row, index) => {

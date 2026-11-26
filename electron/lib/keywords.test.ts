@@ -13,6 +13,14 @@ describe('multilingual keyword search',()=>{
     expect(index.search('1').map(row=>row.productId)).toEqual(['rice'])
     expect(index.search('11').map(row=>row.productId)).toEqual(['tea'])
   })
+  it('lists products from a partly typed or additional barcode once 4+ digits are typed',()=>{
+    const masters=[{id:'gin',name:'Ginger biscuit',sku:'TKF-1',barcode:'4791034070263',is_active:1},{id:'mel',name:'Melko',sku:'TKF-2',barcode:'4792029000029',extra_barcodes:'4792029000999',is_active:1}]
+    const index=new KeywordSearchIndex(masters,[],context)
+    expect(index.search('4791034070263',30,masters).map(row=>row.productId)).toEqual(['gin'])
+    expect(index.search('479103',30,masters).map(row=>row.productId)).toEqual(['gin'])
+    expect(index.search('4792029000999',30,masters).map(row=>row.productId)).toEqual(['mel'])
+    expect(index.search('479',30,masters)).toEqual([])
+  })
   it('isolates users and terminals, hides drafts, ranks scope and deduplicates products',()=>{
     const index=new KeywordSearchIndex(products,[alias('a','rice','arisi'),alias('b','milk','arisi','user',{user_id:'u'}),alias('c','tea','arisi','user',{user_id:'other'}),alias('d','rice','arisi','terminal',{terminal_id:'t'}),alias('e','tea','arisi','terminal',{terminal_id:'other'}),alias('f','tea','arisi','branch',{branch_id:'other'}),alias('g','tea','arisi','global',{review_status:'pending'})],context)
     expect(index.search('arisi').map(row=>row.productId)).toEqual(['milk','rice'])

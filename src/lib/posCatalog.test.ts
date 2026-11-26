@@ -11,6 +11,7 @@ describe('offline cashier catalog', () => {
     expect(catalog.lookup('4791034099991')?.id).toBe('soap')
     expect(catalog.lookup('ctn-555')?.id).toBe('soap')
     expect(catalog.lookup('4791034012345')?.id).toBe('soap')
+    expect(catalog.search('479103409')[0]?.id).toBe('soap')
   })
   it('prioritizes an exact scanner match above names and preserves leading zeroes', () => {
     const catalog = new PosCatalog([product('a', '001234 biscuits'), product('b', 'Milk', 'MILK', '001234')])
