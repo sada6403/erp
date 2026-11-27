@@ -617,3 +617,31 @@ html.dark .pos-cashier .kbd {
 :is([class~="hover:border-brand-500/50"]):hover { border-color: rgb(var(--brand-rgb) / 0.50) !important; }
 :is([class~="hover:border-blue-400/40"]):hover { border-color: rgb(var(--brand-rgb) / 0.40) !important; }
 :is([class~="focus:border-brand-500"]):focus { border-color: var(--brand-primary) !important; }
+
+/* Cashier workspace: keep actions and totals visible on laptop displays. */
+.pos-cashier .pos-cart-pane { width: 49%; min-width: 390px; }
+.pos-cashier .pos-toolbar { overflow: visible; }
+.pos-cashier .pos-utility-row > [role="status"] { border: 0; padding: 0; flex-wrap: wrap; gap: 0.75rem; }
+.pos-cashier .pos-utility-row > button { width: auto; }
+.pos-cashier .shortcut-hint { flex-wrap: wrap; gap: 0.35rem 0.9rem; padding: 0.4rem 0.75rem; overflow: visible; }
+.pos-cashier .pos-cart-total { flex-shrink: 0; padding-top: 0.5rem; padding-bottom: 0.5rem; }
+.pos-cashier .pos-cart-item { padding: 0.65rem; }
+.pos-cashier .pos-cart-item:focus-visible,
+.pos-cashier button:focus-visible,
+.pos-cashier input:focus-visible,
+.pos-cashier select:focus-visible { outline: 2px solid var(--brand-primary); outline-offset: 2px; }
+.pos-cashier .pos-catalog > div > .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.pos-cashier .pos-product-media { aspect-ratio: 1.65; margin-bottom: 0.5rem; }
+.pos-cashier .pos-categorybar { padding-top: 0.35rem; padding-bottom: 0.35rem; }
+@media (max-width: 1100px) {
+  .pos-cashier .pos-cart-pane { width: 53%; min-width: 350px; }
+  .pos-cashier .pos-catalog > div > .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .pos-cashier .pos-toolbar { gap: 0.3rem; }
+  .pos-cashier .pos-toolbar button { padding-left: 0.5rem; padding-right: 0.5rem; }
+}
+@media (max-width: 720px) {
+  .pos-cashier { overflow-y: auto; }
+  .pos-cashier .pos-workspace { flex-direction: column; overflow: visible; flex: none; }
+  .pos-cashier .pos-main-pane { min-height: 240px; max-height: 40dvh; flex: none; }
+  .pos-cashier .pos-cart-pane { width: 100%; min-width: 0; min-height: 360px; max-height: 70dvh; }
+}

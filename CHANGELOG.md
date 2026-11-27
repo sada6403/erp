@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.11.6 - 2026-11-27 - Use saved barcodes for placeholder SKUs
+
+- Products: saving an imported product with a barcode now replaces a `NO-SKU-` or `PENDING-` placeholder with that barcode as its SKU. Genuine custom SKUs remain unchanged and duplicate/inactive SKU reservations are still checked.
+
+## 2.11.5 - 2026-11-27 - Remove stray zero on product cards
+
+- POS: products with no variants no longer display a stray `0` beside the SKU. Prices and stock quantities are unchanged.
+
+## 2.11.4 - 2026-11-27 - Keyboard billing and same-bill extra items
+
+- POS: wider cart, visible quantity/discount/payment actions, wrapping toolbar and keyboard hints. Tab reaches quantity, price and discount fields; Enter returns from quantity to product search. Ctrl+Up/Down selects cart rows; F3 edits quantity.
+- POS: Ctrl+B finds a saved bill by its number or last digits. Open it and use Ctrl+P to reprint from the billing screen.
+- POS: Add items opens an extra-items cart for a completed, paid retail bill. F12 collects the extra payment and saves/prints the same bill number while preserving original lines and payments. Cash, card and bank transfer are supported; locked bills, online-order bills and bills with active returns are protected.
+- Extra-item writes validate prices, discounts and stock, update stock batches and agent commissions, and record an audit entry. Concurrent changes and duplicate retries are rejected.
+
 ## 2.11.3 - 2026-11-26 - Barcode search fix
 
 - Product search lists a product while its barcode is being typed. With search keywords enabled, digits used to match only a complete SKU or barcode, so a partly typed barcode showed nothing. From 4 digits, any part of a barcode, SKU or additional barcode now matches; 1-3 digit quick codes stay exact.

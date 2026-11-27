@@ -24,6 +24,7 @@ import { isDeviceLocked } from '../services/licenseService'
 import { downloadPastSalesTemplate, importSalesFromExcel, exportBillsToExcel } from '../services/salesImportExport'
 import { reduceSaleBatchQuantity, quoteBatchPrice, allocateSaleBatches, reverseInvoiceBatchAllocations, type SaleBatchAllocation } from '../services/batchInventory'
 import {validateMrp} from '../lib/purchaseMath'
+import { appendInvoiceItems } from '../services/appendInvoiceItems'
 
 const store = createCompanyStore()
 
@@ -185,6 +186,14 @@ const lineTaxRate = (item: Record<string, unknown>, real: { tax_rate: number }, 
 interface AppOrderSource { id: string; orderNumber: string }
 
 export function registerInvoiceHandlers(ipcMain: IpcMain) {
+  safeHandle(ipcMain, 'invoices:appendItems', async (_e, id: string, payload) => {
+    if (isDeviceLocked()) return { success: false, error: 'Device is locked' }
+    const db = getDb()
+    const appended = appendInvoiceItems(db, getAuthUser(), (store.get('app_settings') as Record<string, unknown>) || {}, id, payload)
+    for (const entry of appended.sync) await enqueuSync(entry.table, entry.id, entry.op, entry.row)
+    for (const productId of appended.stockProducts) await syncStockRow(db, productId, appended.result.branch_id)
+    return { success: true, data: appended.result }
+  })
   // Get next bill number preview
   safeHandle(ipcMain, 'invoices:nextNumber', (_e, billType: BillType = 'RETAIL') => {
     const user = getAuthUser()

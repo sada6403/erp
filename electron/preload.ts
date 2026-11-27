@@ -102,6 +102,7 @@ const api = {
 
   // Invoices
   invoices: {
+    appendItems:        (id: string, payload: unknown)            => ipcRenderer.invoke('invoices:appendItems', id, payload),
     list:               (filters?: unknown)                       => ipcRenderer.invoke('invoices:list', filters),
     get:                (id: string)                              => ipcRenderer.invoke('invoices:get', id),
     create:             (payload: unknown)                        => ipcRenderer.invoke('invoices:create', payload),

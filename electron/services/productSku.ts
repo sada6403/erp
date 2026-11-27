@@ -1,7 +1,10 @@
 import type Database from 'better-sqlite3'
 
 export function resolveProductSku(db:Database.Database,id:string,sku:unknown,barcode:unknown):string{
- const entered=String(sku||'').trim(),scanned=String(barcode||'').trim()
+ const rawSku=String(sku||'').trim(),scanned=String(barcode||'').trim()
+ // Imported placeholders are not deliberate product codes. Once a barcode
+ // is supplied, promote it to SKU while preserving genuine custom SKUs.
+ const entered=scanned&&/^(NO-SKU-|PENDING-)/i.test(rawSku)?'':rawSku
  const generated=!entered&&!scanned
  let candidate=entered||scanned||`NO-SKU-${id.slice(0,8).toUpperCase()}`
  const conflict=(value:string)=>db.prepare('SELECT id,name,is_active FROM products WHERE LOWER(TRIM(sku))=LOWER(?) AND id<>? LIMIT 1').get(value,id) as {id:string;name:string;is_active:number}|undefined

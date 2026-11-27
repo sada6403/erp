@@ -17,6 +17,9 @@ import HeldInvoicesModal from '@/components/pos/HeldInvoicesModal'
 import PosTestingTools from '@/components/pos/PosTestingTools'
 import BranchHubStatus from '@/components/pos/BranchHubStatus'
 import HoldNumberModal from '@/components/pos/HoldNumberModal'
+import BillRecallPanel, { printSavedBill } from '@/components/pos/BillRecallPanel'
+import AppendBillCheckout from '@/components/pos/AppendBillCheckout'
+import type { InvoiceDetail } from '@/lib/invoicePrint'
 import {
   ShoppingCart, Search, User, Pause, CreditCard, Plus, FileText,
   Receipt, ClipboardList, BadgeDollarSign, Star, RotateCcw, Keyboard, Trash2
@@ -61,7 +64,9 @@ export default function POSPage() {
   const [showHeld, setShowHeld]         = useState(false)
   const [showHoldNumber, setShowHoldNumber] = useState(false)
   const [showHelp, setShowHelp]         = useState(false)
-  const [invoiceNumber, setInvoiceNumber] = useState<string>('')
+  const [nextInvoiceNumber, setInvoiceNumber] = useState<string>('')
+  const [appendBill, setAppendBill] = useState<InvoiceDetail | null>(null)
+  const invoiceNumber = appendBill?.invoice_number || nextInvoiceNumber
   const [categories, setCategories]     = useState<{ id: string; name: string }[]>([])
   const [cartFocusedIdx, setCartFocusedIdx] = useState(-1)
   const [discountRules, setDiscountRules] = useState<Record<string, unknown>[]>([])
@@ -86,11 +91,12 @@ export default function POSPage() {
   // Global: any printable key typed while NOT in an input → redirect to search
   useEffect(() => {
     const captureKey = (e: KeyboardEvent) => {
-      if (showPayment || showCustomer || showHeld || showHoldNumber || showHelp || quantityProduct) return
+      if (showPayment || showCustomer || showHeld || showHoldNumber || showHelp || quantityProduct || showKeywords || couponPeek) return
       const target = e.target as HTMLElement
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)) return
       if (e.key.length !== 1) return          // skip arrows, F-keys, ESC, etc.
       if (e.ctrlKey || e.metaKey || e.altKey) return
+      if (['+', '=', '-', ' '].includes(e.key) || target.closest('button, [role="button"]')) return
       // Prevent browser from double-inserting the character into the newly focused input
       e.preventDefault()
       // Append (not replace) so fast typing outside the input doesn't drop earlier chars
@@ -99,7 +105,7 @@ export default function POSPage() {
     }
     window.addEventListener('keydown', captureKey)
     return () => window.removeEventListener('keydown', captureKey)
-  }, [showPayment, showCustomer, showHeld, showHoldNumber, showHelp, quantityProduct])
+  }, [showPayment, showCustomer, showHeld, showHoldNumber, showHelp, quantityProduct, showKeywords, couponPeek])
 
   // Let child modals (e.g. the installment payment step) open the customer picker
   useEffect(() => {
@@ -176,6 +182,7 @@ export default function POSPage() {
   }, [discountRules, user])
 
   const newInvoice = useCallback(() => {
+    setAppendBill(null)
     cart.clear()
     setCartFocusedIdx(-1)
     loadInvoiceNumber(cart.billType)
@@ -214,9 +221,10 @@ export default function POSPage() {
   }, [cart])
 
   const holdInvoice = useCallback(() => {
+    if (appendBill) { toast.error('Finish the extra items or start a new invoice first'); return }
     if (!cart.items.length) { toast.error('Cart is empty'); return }
     setShowHoldNumber(true)
-  }, [cart.items.length])
+  }, [cart.items.length, appendBill])
 
   const focusSearch = useCallback(() => {
     searchRef.current?.focus()
@@ -253,9 +261,9 @@ export default function POSPage() {
     })
     // Scroll cart item into view
     setTimeout(() => {
-      document.querySelector(`[data-cart-idx="${
+      document.querySelector<HTMLElement>(`[data-cart-idx="${
         Math.max(0, Math.min(cart.items.length - 1, (cartFocusedIdx >= 0 ? cartFocusedIdx : cart.items.length - 1) + dir))
-      }"]`)?.scrollIntoView({ block: 'nearest' })
+      }"]`)?.focus()
     }, 30)
   }, [cart.items.length, cartFocusedIdx])
 
@@ -294,6 +302,7 @@ export default function POSPage() {
   }, [])
 
   const handleBillTypeChange = useCallback((type: BillType) => {
+    if (appendBill) { toast.error('Extra items keep the original retail bill type'); return }
     if (type === cart.billType) return
     // The cart carries over as-is — same items/qty/discounts/customer, only
     // the document type (and its numbering/prefix, handled by the
@@ -309,7 +318,7 @@ export default function POSPage() {
         ? `Switched to ${type.toLowerCase()} mode — ${cart.items.length} item(s) carried over`
         : `Switched to ${type.toLowerCase()} mode`
     )
-  }, [cart])
+  }, [cart, appendBill])
 
   // Scanner without Enter suffix: add an exact barcode match once the burst ends.
   useEffect(() => {
@@ -352,6 +361,8 @@ export default function POSPage() {
     { key: 'F5',  handler: () => setShowHeld(true) },
     { key: 'F6',  handler: openDiscount },
     { key: 'F7',  handler: focusProducts },
+    { key: 'b', ctrl: true, handler: () => { const input = document.getElementById('pos-bill-number') as HTMLInputElement; input?.focus(); input?.select() } },
+    { key: 'F11', handler: () => setShowCustomer(true) },
     { key: 'F8',  handler: openPayment },
     { key: 'F9', handler: openPayment },
     { key: 'F10', handler: () => { if (cart.items.length) { setPaymentInitialMethod('card'); setShowPayment(true) } } },
@@ -367,13 +378,14 @@ export default function POSPage() {
     { key: 'Escape', handler: () => { setSearchQuery(''); focusSearch() } },
     // Qty
     { key: '+', handler: () => changeItemQty(1) },
+    { key: '+', shift: true, handler: () => changeItemQty(1) },
     { key: '=', handler: () => changeItemQty(1) },
     { key: '-', handler: () => changeItemQty(-1) },
     { key: 'Delete', handler: removeSelectedItem },
     { key: 't', alt: true, handler: toggleTheme },
     { key: 's', ctrl: true, handler: openPayment },
-    { key: 'p', ctrl: true, handler: openPayment },
-  ], !showPayment && !showHeld && !showHoldNumber && !showCustomer && !showHelp && !quantityProduct && !showKeywords)
+    { key: 'p', ctrl: true, handler: () => { if (appendBill) void printSavedBill(appendBill.id).catch(e => toast.error(e.message)); else window.dispatchEvent(new Event('pos:reprint-bill')) } },
+  ], !showPayment && !showHeld && !showHoldNumber && !showCustomer && !showHelp && !quantityProduct && !showKeywords && !couponPeek)
 
   const handleProductSelect = useCallback((product: Product, customQty?: number) => {
     if (customQty === undefined && measuredUnits.has(product.unit?.toLowerCase())) {
@@ -399,7 +411,8 @@ export default function POSPage() {
 
     // Auto-focus the newly added item (it will be last)
 
-    setCartFocusedIdx(cart.items.length) // items hasn't updated yet, so this = new last index
+    const updated = useCartStore.getState().items
+    setCartFocusedIdx(updated.findIndex(i => (product.variant_id ? i.variant_id === product.variant_id : !i.variant_id && i.product.id === product.id)))
 
     if (isOutOfStock && allowNegativeStock) {
 
@@ -571,12 +584,14 @@ export default function POSPage() {
 
   return (
     <div className="pos-shell pos-cashier absolute inset-0 flex flex-col overflow-hidden">
-      {window.api.keywords && <div className="px-3 text-right"><button className="text-xs underline" onClick={()=>setShowKeywords(true)}>Search keywords</button></div>}
-      {showKeywords && <KeywordManager onClose={()=>setShowKeywords(false)} />}
+      <div className="pos-utility-row flex items-center gap-3 px-3 py-1 shrink-0 flex-wrap">
       <PosTestingTools />
       <BranchHubStatus />
+      {window.api.keywords && <button className="text-xs underline ml-auto" onClick={()=>setShowKeywords(true)}>Search keywords</button>}
+      </div>
+      {showKeywords && <KeywordManager onClose={()=>setShowKeywords(false)} />}
       {/* Toolbar */}
-      <div className="pos-toolbar flex items-center gap-2 px-3 py-2 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+      <fieldset disabled={showPayment && Boolean(appendBill)} className="pos-toolbar flex flex-wrap items-center gap-2 px-3 py-2 shrink-0 min-w-0">
         {/* Bill type selector */}
         <div className="pos-segment flex items-center gap-1 p-1 rounded-lg border shrink-0">
           {BILL_TYPES.map(bt => (
@@ -603,14 +618,14 @@ export default function POSPage() {
         {/* Customer button */}
         <button
           onClick={() => setShowCustomer(true)}
-          title="Select customer"
+          title="Select customer (F11)"
           className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors border ${
             cart.billType === 'CREDIT' && !cart.customer
               ? 'bg-rose-950/50 border-rose-700 text-rose-200 hover:bg-rose-900/70'
               : 'pos-chip hover:bg-[var(--pos-hover)]'
           }`}
         >
-          <User size={14} className={cart.billType === 'CREDIT' ? 'text-rose-400' : 'text-brand-400'} />
+          <User size={14} className={cart.billType === 'CREDIT' ? 'text-rose-400' : 'text-brand-400'} /><kbd className="kbd">F11</kbd>
           <span className="max-w-32 truncate whitespace-nowrap">
             {cart.customer?.name || (cart.billType === 'CREDIT' ? 'Select Customer' : 'Walk-in')}
           </span>
@@ -656,11 +671,19 @@ export default function POSPage() {
           {meta.action}
           <kbd className="kbd ml-1 hidden xl:inline">F12</kbd>
         </button>
-      </div>
+      </fieldset>
 
-      <div className="flex flex-1 overflow-hidden">
+      {!showPayment && <BillRecallPanel disabled={cart.items.length > 0 || Boolean(appendBill)} onAppend={bill => {
+        if (useCartStore.getState().items.length) { toast.error('Finish or hold the current cart first'); return }
+        cart.clear(); setAppendBill(bill); setSearchQuery(''); focusSearch()
+      }} />}
+      {appendBill && <div className="px-3 py-2 bg-brand-500/10 border-b border-brand-500/30 flex flex-wrap items-center gap-3 text-sm shrink-0">
+        <strong>Adding to {appendBill.invoice_number}</strong><span>Already paid Rs.{Number(appendBill.paid_amount).toLocaleString()}</span><span>Cart below: extra items only</span>
+        {!showPayment && <button className="btn-secondary btn-sm ml-auto" onClick={newInvoice}>Exit / New bill · F1</button>}
+      </div>}
+      <div className="pos-workspace flex flex-1 min-h-0 overflow-hidden">
         {/* Left: Search + Product area */}
-        <div className="pos-main-pane flex flex-col flex-1 overflow-hidden">
+        <div className="pos-main-pane flex flex-col flex-1 min-w-0 overflow-hidden" {...(showPayment && appendBill ? { inert: '' } : {})} style={showPayment && appendBill ? { pointerEvents: 'none', opacity: 0.5 } : undefined}>
           <div className="pos-searchbar p-3">
             <div className="relative">
               <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
@@ -730,7 +753,7 @@ export default function POSPage() {
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto p-4">
+          <div className="pos-catalog flex-1 min-h-0 overflow-y-auto p-3">
             {searchQuery ? (
               <ProductSearch query={splitQuantitySearch(searchQuery).query} catalog={catalog} error={catalogError} onSelect={product => { handleProductSelect(product, splitQuantitySearch(searchQuery).quantity); setSearchQuery(''); searchRef.current?.focus() }} />
             ) : (
@@ -740,7 +763,7 @@ export default function POSPage() {
         </div>
 
         {/* Right: Cart */}
-        <div className="pos-cart-pane w-[420px] max-w-[42vw] min-w-[360px] flex-shrink-0 flex flex-col">
+        <div className="pos-cart-pane flex-shrink-0 flex flex-col min-h-0">
           <div className="pos-cart-head flex items-center gap-2 px-4 py-3">
             <ShoppingCart size={16} className={meta.accent} />
             <span className="font-semibold text-sm">{meta.label} Cart</span>
@@ -769,8 +792,14 @@ export default function POSPage() {
               }}
             />
           )}
-          <Cart focusedIdx={cartFocusedIdx} onFocusIdx={setCartFocusedIdx}
+          {showPayment && appendBill ? <AppendBillCheckout bill={appendBill} onClose={() => { setShowPayment(false); focusSearch() }} onSuccess={() => { setShowPayment(false); newInvoice() }} /> : <>
+          <div className="flex items-center gap-2 px-3 py-2 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
+            <button className="btn-secondary btn-sm" disabled={!cart.items.length} onClick={editFocusedQuantity}>Quantity <kbd className="kbd">F3</kbd></button>
+            <button className="btn-secondary btn-sm" disabled={!cart.items.length} onClick={openDiscount}>Discount <kbd className="kbd">F6</kbd></button>
+          </div>
+          <Cart focusedIdx={cartFocusedIdx} onFocusIdx={setCartFocusedIdx} onPay={openPayment}
             discountPlans={discountRules.filter(r => r.scope === 'all' && r.is_active)} />
+          </>}
         </div>
       </div>
 
@@ -794,7 +823,7 @@ export default function POSPage() {
       </div>
 
       {/* Modals */}
-      {showPayment && (
+      {showPayment && !appendBill && (
         <PaymentModal
           keyboardActive={!showCustomer}
           invoiceNumber={invoiceNumber}

@@ -1,7 +1,7 @@
 import { useCartStore } from '@/store/cartStore'
 import { useAuthStore } from '@/store/authStore'
 import { ShoppingCart, Trash2, Plus, Minus, Tag, ChevronDown, AlertTriangle } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import toast from 'react-hot-toast'
 import NumberInput from '@/components/shared/NumberInput'
 
@@ -25,13 +25,15 @@ interface Props {
   focusedIdx?: number
   onFocusIdx?: (idx: number) => void
   discountPlans?: Record<string, unknown>[]
+  onPay?: () => void
 }
 
-export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }: Props) {
+export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [], onPay }: Props) {
   const cart = useCartStore()
   const { user } = useAuthStore()
   const [showDiscount, setShowDiscount] = useState(false)
   const [selectedPlanId, setSelectedPlanId] = useState('')
+  const discountRef = useRef<HTMLInputElement>(null)
 
   const plans = discountPlans as unknown as DiscountPlan[]
 
@@ -50,10 +52,14 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
   const activeFocusedIdx = focusedIdx >= 0 && focusedIdx < cart.items.length ? focusedIdx : cart.items.length - 1
 
   useEffect(() => {
-    const handler = () => setShowDiscount(true)
+    const handler = () => { setShowDiscount(true); requestAnimationFrame(() => { discountRef.current?.focus(); discountRef.current?.select() }) }
     window.addEventListener('pos:openDiscount', handler)
     return () => window.removeEventListener('pos:openDiscount', handler)
   }, [])
+
+  useEffect(() => {
+    document.querySelector(`[data-cart-idx="${activeFocusedIdx}"]`)?.scrollIntoView?.({ block: 'nearest' })
+  }, [activeFocusedIdx, cart.items.length])
 
   const handleItemDiscount = (itemKey: string, pct: number) => {
     const item = cart.items.find(i => (i.variant_id ? i.variant_id === itemKey : i.product.id === itemKey))
@@ -107,7 +113,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
   }
 
   return (
-    <div className="flex flex-col flex-1 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       {/* Cart nav hint */}
       {cart.items.length > 1 && (
         <div className="px-3 pt-1.5 pb-0 flex items-center gap-2 text-xs" style={{ color: 'var(--text-3)' }}>
@@ -125,6 +131,14 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
             <div
               key={itemKey}
               data-cart-idx={idx}
+              tabIndex={0}
+              aria-label={`${item.product.name}, quantity ${item.quantity}. Enter to edit quantity`}
+              onFocus={() => onFocusIdx?.(idx)}
+              onKeyDown={e => {
+                if (e.target !== e.currentTarget || e.ctrlKey || e.altKey || e.metaKey) return
+                if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); const input = e.currentTarget.querySelector<HTMLInputElement>('[data-cart-quantity]'); input?.focus(); input?.select() }
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const next = Math.max(0, Math.min(cart.items.length - 1, idx + (e.key === 'ArrowDown' ? 1 : -1))); document.querySelector<HTMLElement>(`[data-cart-idx="${next}"]`)?.focus() }
+              }}
               onClick={() => onFocusIdx?.(idx)}
               className={`pos-cart-item rounded-lg p-3 border transition-all cursor-pointer
                 ${discountExceedsLimit ? 'border-amber-600/60' : ''}
@@ -171,13 +185,16 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   </button>
                   <NumberInput
                     value={item.quantity}
-                    onChange={e => cart.updateQty(itemKey, parseFloat(e.target.value) || 0)}
+                    data-cart-quantity="true"
+                    aria-label={`Quantity for ${item.product.name}`}
+                    onChange={e => { const qty = Number(e.target.value); if (Number.isFinite(qty) && qty > 0) cart.updateQty(itemKey, qty) }}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); document.querySelector<HTMLInputElement>('[data-pos-search]')?.focus() } }}
                     onClick={e => e.stopPropagation()}
                     className="w-14 text-center bg-transparent text-sm font-bold border-0 outline-none"
                     style={{ color: 'var(--text-1)' }}
                     min="0.001"
                     step="any"
-                    tabIndex={-1}
+                    tabIndex={0}
                   />
                   <button
                     onClick={e => { e.stopPropagation(); cart.updateQty(itemKey, item.quantity + 1) }}
@@ -202,7 +219,8 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                       className="w-20 bg-transparent text-xs border-0 outline-none"
                       style={{ color: 'var(--text-3)' }}
                       title="Edit price"
-                      tabIndex={-1}
+                      aria-label={`Price for ${item.product.name}`}
+                      tabIndex={0}
                     />
                   ) : (
                     <p className="text-xs" style={{ color: 'var(--text-3)' }}>{item.unit_price.toLocaleString()}</p>
@@ -230,7 +248,8 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
                   }`}
                   placeholder="Disc %"
                   min="0" max="100"
-                  tabIndex={-1}
+                  aria-label={`Discount percent for ${item.product.name}`}
+                  tabIndex={0}
                 />
                 <span className="text-xs" style={{ color: 'var(--text-3)' }}>%</span>
                 {item.discount_pct > 0 && (
@@ -263,7 +282,7 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
             className="flex items-center gap-1.5 text-xs font-semibold px-3 py-2 w-full text-[var(--text-1)]"
             tabIndex={0}
           >
-            <Tag size={12} /> Discounts <kbd className="kbd text-xs ml-1">F9</kbd>
+            <Tag size={12} /> Discounts <kbd className="kbd text-xs ml-1">F6</kbd>
             <ChevronDown size={12} className={`ml-auto transition-transform ${showDiscount ? 'rotate-180' : ''}`} />
           </button>
           {showDiscount && (
@@ -285,6 +304,8 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
               )}
               <div className="flex items-center gap-2">
                 <NumberInput
+                  ref={discountRef}
+                  aria-label="Whole bill discount percent"
                   value={cart.globalDiscount}
                   onChange={e => { setSelectedPlanId(''); handleGlobalDiscount(parseFloat(e.target.value) || 0) }}
                   className="input py-1.5 text-sm w-24"
@@ -329,13 +350,11 @@ export default function Cart({ focusedIdx = -1, onFocusIdx, discountPlans = [] }
           value={cart.notes}
           onChange={e => cart.setNotes(e.target.value)}
           placeholder="Invoice notes... (optional)"
-          className="input text-xs resize-none h-14"
+          className="input text-xs resize-none h-8"
           tabIndex={0}
         />
 
-        <div className="text-center text-xs" style={{ color: 'var(--text-3)' }}>
-          <kbd className="kbd">F12</kbd> to open payment
-        </div>
+        <button className="btn-primary w-full justify-between" onClick={onPay} disabled={!onPay}><span>Payment / Print</span><kbd className="kbd">F12</kbd></button>
       </div>
     </div>
   )

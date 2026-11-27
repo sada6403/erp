@@ -361,12 +361,13 @@ export default function ProductGrid({ categoryId, onSelect }: Props) {
   }, [load])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const cols = Math.floor((gridRef.current?.offsetWidth || 700) / 180)
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    const cols = Math.max(1, gridRef.current ? getComputedStyle(gridRef.current).gridTemplateColumns.split(' ').length : 1)
     if (e.key === 'ArrowRight') { e.preventDefault(); setFocused(f => Math.min(f+1, products.length-1)) }
     if (e.key === 'ArrowLeft')  { e.preventDefault(); setFocused(f => Math.max(f-1, 0)) }
     if (e.key === 'ArrowDown')  { e.preventDefault(); setFocused(f => Math.min(f+cols, products.length-1)) }
     if (e.key === 'ArrowUp')    { e.preventDefault(); setFocused(f => Math.max(f-cols, 0)) }
-    if (e.key === 'Enter' && products[focused]) { e.preventDefault(); onSelect(products[focused]) }
+    if (e.key === 'Enter' && products[focused]) { e.preventDefault(); gridRef.current?.querySelectorAll<HTMLElement>('.pos-product-card')[focused]?.click() }
   }, [products, focused, onSelect])
 
   if (loading) return (
@@ -461,7 +462,7 @@ function ProductCard({ product, pack, isFocused, onFocus, onSelect, onCheckBranc
       <p className="text-sm font-semibold leading-tight line-clamp-2 mb-1 min-h-10" style={{ color: 'var(--text-1)' }}>{product.name}</p>
       <div className="flex items-center justify-between gap-1">
         <p className="text-xs font-mono" style={{ color: 'var(--text-3)' }}>{product.sku}</p>
-        {(product.product_type === 'variable' || (product.variant_count && product.variant_count > 0)) && (
+        {(product.product_type === 'variable' || Number(product.variant_count) > 0) && (
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
             ⚡ Variants
           </span>
