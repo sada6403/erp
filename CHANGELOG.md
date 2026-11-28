@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.7 - 2026-11-28 - Device activation fix (above local test builds)
+
+- Same contents as 2.11.4 (2.11.3 + HTTPS device activation). It is numbered above locally built 2.11.5/2.11.6 test installers, so those PCs also receive the activation fix through auto-update. Features that existed only in those local test builds are not part of this release.
+
 ## 2.11.4 - 2026-11-28 - Device activation fix
 
 - Device activation and first-run setup use the HTTPS cloud API (posadmin.nfplantation.com). They used the retired direct HTTP :4001 endpoint, which is now closed, so new devices showed "Unable to reach the activation server". A saved legacy URL is moved to HTTPS automatically. Sync and license refresh already used HTTPS.

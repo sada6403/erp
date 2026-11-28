@@ -1,6 +1,6 @@
 {
   "name": "pos-erp",
-  "version": "2.11.4",
+  "version": "2.11.7",
   "description": "Enterprise Multi Branch Offline-First POS ERP for Furniture & Electronics",
   "main": "dist-electron/bootstrap.js",
   "author": "Enterprise POS ERP",
