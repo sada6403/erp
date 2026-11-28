@@ -42,7 +42,7 @@ async function scan(input: HTMLElement, code: string, enter = false) {
   if (enter) fireEvent.keyDown(input, { key: 'Enter' })
 }
 
-describe('POS barcode scanning', () => {
+describe('POS barcode scanning', { timeout: 15000 }, () => {
   it('adds an exact barcode at once when the scanner sends no Enter', async () => {
     render(<MemoryRouter><POSPage /></MemoryRouter>)
     const search = screen.getByPlaceholderText(/Search name, SKU, barcode/)

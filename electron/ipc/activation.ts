@@ -16,6 +16,7 @@ import { reconcileLocalMainBranch } from '../services/branchReconcile'
 import { reconcileLocalDefaultRoles } from '../services/roleReconcile'
 import { wipeLocalTransactionalData } from './admin'
 import { CloudApi } from '../services/cloudApi'
+import { canonicalCloudBaseUrl } from '../lib/cloudEndpoint'
 
 const store = createCompanyStore()
 
@@ -74,10 +75,11 @@ export function verifySupportPasscode(input: string): boolean {
 }
 
 function normalizeApiUrl(url: string): string {
-  return url.trim().replace(/\/+$/, '') ||
+  // The direct HTTP :4001 endpoint is closed; activation must use the HTTPS API like sync does.
+  return canonicalCloudBaseUrl(url.trim().replace(/\/+$/, '') ||
     process.env.VITE_CLOUD_API_URL?.trim().replace(/\/+$/, '') ||
     process.env.CLOUD_API_URL?.trim().replace(/\/+$/, '') ||
-    'http://72.61.115.222:4001'
+    'https://posadmin.nfplantation.com')
 }
 
 function htmlSummary(text: string): string {

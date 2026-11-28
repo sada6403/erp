@@ -29,7 +29,7 @@ type VerifyResponse = VerifyResult & { success?: boolean; error?: string }
 
 // Built-in production server — devices activate with only the Company Key.
 // Changing it requires the hidden support unlock (5 taps + support passcode).
-const BUILT_IN_API_URL = 'http://72.61.115.222:4001'
+const BUILT_IN_API_URL = 'https://posadmin.nfplantation.com'
 
 const DEFAULT_API_URL =
   (import.meta.env.VITE_CLOUD_API_URL as string | undefined)?.trim().replace(/\/+$/, '') ||

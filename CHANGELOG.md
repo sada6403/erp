@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.11.4 - 2026-11-28 - Device activation fix
+
+- Device activation and first-run setup use the HTTPS cloud API (posadmin.nfplantation.com). They used the retired direct HTTP :4001 endpoint, which is now closed, so new devices showed "Unable to reach the activation server". A saved legacy URL is moved to HTTPS automatically. Sync and license refresh already used HTTPS.
+
 ## 2.11.3 - 2026-11-26 - Barcode search fix
 
 - Product search lists a product while its barcode is being typed. With search keywords enabled, digits used to match only a complete SKU or barcode, so a partly typed barcode showed nothing. From 4 digits, any part of a barcode, SKU or additional barcode now matches; 1-3 digit quick codes stay exact.

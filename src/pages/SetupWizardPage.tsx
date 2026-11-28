@@ -8,7 +8,7 @@ type View = 'contact' | 'configure' | 'connecting' | 'syncing' | 'done' | 'no_us
 
 const DEFAULT_CLOUD_API_URL = (
   import.meta.env.VITE_CLOUD_API_URL?.trim().replace(/\/+$/, '') ||
-  'http://72.61.115.222:4001'
+  'https://posadmin.nfplantation.com'
 )
 const MASKED_SECRET = '********'
 
